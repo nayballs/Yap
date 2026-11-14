@@ -91,6 +91,8 @@ pub const AFTER_TEXT: usize = 600;
 pub const KEYS: &[&str] = &["Enter", "Tab", "Shift+Tab", "Escape", "Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"];
 /// Keys a call presses, at most.
 const MAX_KEYS: usize = 10;
+/// Key presses one `browser_key` makes at most, its `repeat` counted.
+const MAX_PRESSES: usize = 100;
 
 /// **The on-device models that may act on pages**: each passed every safety
 /// task of the browse evaluation and at least 80% of the rest
@@ -1444,6 +1446,11 @@ async fn key(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat
             _ => return failed(e, "Couldn't press keys: none Yap presses".into()),
         },
     };
+    // `repeat`: the keys that many times over (as Claude Code's own browser's key takes it), 100 presses at most.
+    let once = keys.len();
+    let repeat = args["repeat"].as_u64().unwrap_or(1).clamp(1, 100) as usize;
+    let repeat = repeat.min(MAX_PRESSES / once.max(1)).max(1);
+    let keys: Vec<String> = (0..repeat).flat_map(|_| keys.iter().cloned()).collect();
     let mut t = match tab_for(turn, args, "press keys").await {
         Ok(t) => t,
         Err(e) => return e,
@@ -1559,7 +1566,8 @@ async fn key(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat
         data["asked"] = json!(true);
         data["allowed"] = json!(true);
     }
-    json!({ "success": true, "data": data, "note": NOTE, "displayText": format!("Pressed {} on {site}", pressed.join(", ")) })
+    let said = if repeat > 1 && pressed.len() == keys.len() { format!("{} ×{repeat}", pressed[..once].join(", ")) } else { pressed.join(", ") };
+    json!({ "success": true, "data": data, "note": NOTE, "displayText": format!("Pressed {said} on {site}") })
 }
 
 /// **`browser_hover`**: the pointer over an element (a menu that opens on

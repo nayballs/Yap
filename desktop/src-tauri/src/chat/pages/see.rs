@@ -45,7 +45,7 @@ pub const MAX_SHOTS: usize = 12;
 /// The longest `browser_wait` waits (seconds).
 pub const WAIT_MAX: f64 = 10.0;
 /// Matches `browser_find` lists, at most.
-pub const FIND_MAX: usize = 15;
+pub const FIND_MAX: usize = 20;
 /// A zoom smaller than this on its long side (pixels) is enlarged.
 const ENLARGE_UNDER: u32 = 900;
 /// How much finer a zoom draws the page where that can't be seen.
@@ -67,6 +67,9 @@ pub struct View {
     pub h: i64,
     pub max: i64,
     pub dpr: f64,
+    /// The most it scrolls sideways (0: no wider than the view).
+    #[serde(rename = "mx")]
+    pub max_x: i64,
 }
 
 /// [`View`] and the headings in view now (the page's words).
@@ -301,7 +304,8 @@ fn matches_up_to(query: &str, snap: &super::act::rules::Snapshot, blocks: &[Bloc
     let mut seen: Vec<u32> = Vec::new();
     let mut out: Vec<String> = Vec::new();
     for e in &snap.elements {
-        let words = fold(&format!("{} {} {} {} {}", e.name, e.label, e.placeholder, if e.masked { "" } else { &e.value }, e.href));
+        // (Its role too, as Claude Code's own browser's find matches "role / name / text": "button", "heading Harbour".)
+        let words = fold(&format!("{} {} {} {} {} {}", e.role, e.name, e.label, e.placeholder, if e.masked { "" } else { &e.value }, e.href));
         if words.contains(&q) && !seen.contains(&e.r) {
             seen.push(e.r);
             let mut line = format!("[{}] {} \"{}\"", e.r, if e.role.is_empty() { "element" } else { &e.role }, super::act::rules::name_of(e).replace('"', "'"));
@@ -311,7 +315,7 @@ fn matches_up_to(query: &str, snap: &super::act::rules::Snapshot, blocks: &[Bloc
             out.push(line);
         }
     }
-    let mut found: Vec<&Block> = blocks.iter().filter(|b| !seen.contains(&b.r) && fold(&b.text).contains(&q)).collect();
+    let mut found: Vec<&Block> = blocks.iter().filter(|b| !seen.contains(&b.r) && (fold(&b.text).contains(&q) || fold(&format!("{} {}", b.kind(), b.text)).contains(&q))).collect();
     // The most specific first: headings, then the shortest.
     found.sort_by_key(|b| (!b.heading(), b.text.chars().count()));
     for b in found {
@@ -328,6 +332,42 @@ fn matches_up_to(query: &str, snap: &super::act::rules::Snapshot, blocks: &[Bloc
     out
 }
 
+/// **A role a page's node has that no control or block of text does**, from
+/// the start of a `browser_find` query ("table", "figure Harbour", "images"):
+/// the role and the words after it. `None` for words, or a control's or a
+/// text block's role (those are matched already). Pure.
+pub fn node_role(query: &str) -> Option<(&'static str, String)> {
+    let q = query.trim();
+    let (first, rest) = q.split_once(char::is_whitespace).unwrap_or((q, ""));
+    let role = match first.to_ascii_lowercase().as_str() {
+        "table" | "tables" | "grid" => "table",
+        "row" | "rows" => "row",
+        "figure" | "figures" => "figure",
+        "img" | "image" | "images" | "picture" | "pictures" => "img",
+        "region" | "regions" | "section" | "sections" => "region",
+        "list" | "lists" => "list",
+        "navigation" | "nav" => "navigation",
+        "banner" => "banner",
+        "main" => "main",
+        "contentinfo" | "footer" => "contentinfo",
+        "complementary" | "aside" | "sidebar" => "complementary",
+        "form" | "forms" => "form",
+        "dialog" | "dialogs" | "modal" => "dialog",
+        "article" | "articles" => "article",
+        "group" => "group",
+        "tablist" => "tablist",
+        "tabpanel" => "tabpanel",
+        "menu" | "menubar" => "menu",
+        "listbox" => "listbox",
+        "alert" | "status" => "alert",
+        "video" | "videos" => "video",
+        "iframe" | "frame" => "iframe",
+        "code" => "code",
+        _ => return None,
+    };
+    Some((role, rest.trim().to_string()))
+}
+
 /// A direction as models send it: down, up, top, bottom. Pure.
 pub fn direction(v: &Value) -> Option<&'static str> {
     match v.as_str().map(|s| s.trim().to_ascii_lowercase()).as_deref() {
@@ -335,6 +375,8 @@ pub fn direction(v: &Value) -> Option<&'static str> {
         Some("up" | "back" | "previous") => Some("up"),
         Some("top" | "start" | "home") => Some("top"),
         Some("bottom" | "end") => Some("bottom"),
+        Some("left") => Some("left"),
+        Some("right") => Some("right"),
         _ => None,
     }
 }
@@ -488,16 +530,25 @@ pub fn enlarge(rgba: &[u8], w: u32, h: u32, k: f64) -> (Vec<u8>, u32, u32) {
 /// top or end. Pure.
 fn place(v: &View) -> Value {
     // (A pixel short of the end, from rounding a fractional scroll, is the end.)
-    json!({ "y": v.y, "h": v.h, "max": v.max, "at_top": v.y <= 0, "at_end": v.y + 1 >= v.max })
+    let mut out = json!({ "y": v.y, "h": v.h, "max": v.max, "at_top": v.y <= 0, "at_end": v.y + 1 >= v.max });
+    // Wider than its view: where it is sideways and how far it goes (14 Nov 2026, Yap Lab: Opus scrolled
+    // right at the right edge and nothing said so).
+    if v.x != 0 || v.max_x > 0 {
+        out["x"] = json!(v.x);
+        out["max_x"] = json!(v.max_x);
+        out["at_left"] = json!(v.x <= 0);
+        out["at_right"] = json!(v.x + 1 >= v.max_x);
+    }
+    out
 }
 
-/// **`browser_scroll`**: down or up a screen (or `amount` screens), to the
-/// top or the bottom.
+/// **`browser_scroll`**: down or up a screen (or `amount` screens), left or
+/// right, to the top or the bottom.
 pub async fn scroll(turn: &mut crate::web::Turn, args: &Value) -> Value {
     // (`to`: an older call's word for it.)
     let dir = if args["direction"].is_null() && !args["to"].is_null() { &args["to"] } else { &args["direction"] };
     let Some(to) = direction(dir) else {
-        return failed("direction is down, up, top or bottom.".into(), "Couldn't scroll: no direction".into());
+        return failed("direction is down, up, left, right, top or bottom.".into(), "Couldn't scroll: no direction".into());
     };
     let amount = number_of(&args["amount"]).unwrap_or(1.0).clamp(0.1, 10.0);
     let t = match tab_for(turn, args, "scroll").await {
@@ -518,16 +569,24 @@ pub async fn scroll(turn: &mut crate::web::Turn, args: &Value) -> Value {
             Ok(p) => p,
             Err(e) => return e,
         };
-        let screen = 700.0 * amount;
+        // What's under the pointer that scrolls, before, so the answer says what moved (14 Nov 2026, Yap Lab:
+        // Opus's wheel over a part already at its end said "Scrolled" and nothing had).
+        let aim = backend::act(&t.key, "wheelAim", &json!({ "x": cx, "y": cy })).await.ok();
+        let aimed = aim.is_some();
+        // A screen is the part's own width or height (the view's, else): sideways too, so no column goes by
+        // unseen (Opus again: a table jumped 556 px in a 459 px view).
+        let size = |k: &str, or: f64| aim.as_ref().and_then(|a| a[k].as_f64()).filter(|v| *v > 50.0).unwrap_or(or) * 0.85 * amount;
         let (dx, dy) = match to {
-            "up" => (0.0, -screen),
+            "up" => (0.0, -size("h", 800.0)),
+            "left" => (-size("w", 800.0), 0.0),
+            "right" => (size("w", 800.0), 0.0),
             "top" => (0.0, -100_000.0),
             "bottom" => (0.0, 100_000.0),
-            _ => (0.0, screen),
+            _ => (0.0, size("h", 800.0)),
         };
         let calls = [
             ("Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": cx, "y": cy })),
-            ("Input.dispatchMouseEvent", json!({ "type": "mouseWheel", "x": cx, "y": cy, "deltaX": dx, "deltaY": dy })),
+            ("Input.dispatchMouseEvent", json!({ "type": "mouseWheel", "x": cx, "y": cy, "deltaX": dx.round(), "deltaY": dy.round() })),
         ];
         if let Err(e) = backend::input(&t.key, &calls).await {
             return failed(e.clone(), format!("Couldn't scroll: {}", crate::web::short(&e)));
@@ -536,19 +595,61 @@ pub async fn scroll(turn: &mut crate::web::Turn, args: &Value) -> Value {
             Ok(v) => v,
             Err(e) => return failed(e.clone(), format!("Couldn't scroll: {}", crate::web::short(&e))),
         };
+        // (A wheel's scroll glides: a moment more before it's called nothing.)
+        let mut moved = json!({ "moved": true });
+        if aimed {
+            for wait in [0u64, 200, 300] {
+                tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                match backend::act(&t.key, "wheeled", &json!({})).await {
+                    Ok(m) if m["moved"] == true => {
+                        moved = m;
+                        break;
+                    }
+                    Ok(m) => moved = m,
+                    Err(_) => break,
+                }
+            }
+        }
         turn.mark_seen();
         let site = crate::web::site_of(&t.url);
-        tracing::info!(tab = t.tab, "Chat: a page beside the chat scrolled at a point");
+        tracing::info!(tab = t.tab, moved = moved["moved"] == true, "Chat: a page beside the chat scrolled at a point");
+        let mut data = json!({ "tab": t.tab, "at": [x, y], "scroll": place(&v.scroll), "in_view": v.in_view });
+        if moved["moved"] == false {
+            data["moved"] = json!(false);
+            return json!({
+                "success": true,
+                "data": data,
+                "note": format!("Nothing moved: nothing under that point scrolls further {}. browser_screenshot shows what's there.", if matches!(to, "left" | "right") { format!("to the {to}") } else { to.to_string() }),
+                "displayText": format!("Didn't scroll {to} at that point on {site}: nothing there goes further"),
+            });
+        }
+        let part = moved["part"].as_str().unwrap_or("the page").to_string();
+        data["moved"] = json!(part);
+        if let Some(r) = moved["ref"].as_u64() {
+            data["ref"] = json!(r);
+        }
+        // Where that part is now and how far it goes (Opus: "doesn't say how far that part moved or
+        // whether it hit its edge").
+        if let Some(p) = moved["pos"].as_object() {
+            let n = |k: &str| p.get(k).and_then(Value::as_i64).unwrap_or(0);
+            // (The way it scrolled only: a sideways answer's vertical `max: 0` read as its limit, Opus said.)
+            data["part_scroll"] = if matches!(to, "left" | "right") {
+                json!({ "x": n("x"), "max_x": n("max_x"), "at_left": n("x") <= 0, "at_right": n("x") + 1 >= n("max_x") })
+            } else {
+                json!({ "y": n("y"), "max": n("max"), "at_top": n("y") <= 0, "at_end": n("y") + 1 >= n("max") })
+            };
+        }
         return json!({
             "success": true,
-            "data": { "tab": t.tab, "at": [x, y], "scroll": place(&v.scroll), "in_view": v.in_view },
-            "note": "Scrolled under the pointer there (a part that scrolls by itself, or the page): browser_screenshot looks at it now.",
+            "data": data,
+            "note": format!("Scrolled {part} under the pointer: browser_screenshot looks at it now."),
             "displayText": format!("Scrolled {to} at a point on {site}"),
         });
     }
-    if let Err(e) = backend::act(&t.key, "scroll", &json!({ "to": to, "amount": amount })).await {
-        return failed(e.clone(), format!("Couldn't scroll: {}", crate::web::short(&e)));
-    }
+    let moved = match backend::act(&t.key, "scroll", &json!({ "to": to, "amount": amount })).await {
+        Ok(v) => v["moved"] != false,
+        Err(e) => return failed(e.clone(), format!("Couldn't scroll: {}", crate::web::short(&e))),
+    };
     // Where it is once it has stopped (8 Nov 2026: a smooth-scrolling page
     // was told from where it began — "top" said y 28244, "bottom" at_end
     // false).
@@ -559,10 +660,27 @@ pub async fn scroll(turn: &mut crate::web::Turn, args: &Value) -> Value {
     // The headings in view are the page's words.
     turn.mark_seen();
     let site = crate::web::site_of(&t.url);
+    // Nothing moved (already at that end): said so, not "Scrolled" (14 Nov 2026, Yap Lab).
+    if !moved {
+        let end = match to {
+            "up" | "top" => "the top",
+            "left" => "its left edge",
+            "right" => "its right edge",
+            _ => "the bottom",
+        };
+        return json!({
+            "success": true,
+            "data": { "tab": t.tab, "scroll": place(&v.scroll), "in_view": v.in_view, "moved": false },
+            "note": format!("Nothing moved: the page is already at {end}. A part that scrolls by itself scrolls with x, y over it."),
+            "displayText": format!("Didn't scroll {to} on {site}: it's already at {end}"),
+        });
+    }
     let display = match to {
         "top" => format!("Scrolled to the top of {site}"),
         "bottom" => format!("Scrolled to the bottom of {site}"),
         "up" => format!("Scrolled up {site}"),
+        "left" => format!("Scrolled left on {site}"),
+        "right" => format!("Scrolled right on {site}"),
         _ => format!("Scrolled down {site}"),
     };
     tracing::info!(tab = t.tab, y = v.scroll.y, "Chat: a page beside the chat scrolled");
@@ -686,10 +804,26 @@ pub async fn find(turn: &mut crate::web::Turn, args: &Value) -> Value {
         Ok(b) => b,
         Err(e) => return failed(e.clone(), format!("Couldn't search {site}: {}", crate::web::short(&e))),
     };
+    // A role neither a control nor a block of text has (a table, a figure, a region, a list…): the page's
+    // nodes of that role too, as Claude Code's own browser's find matches any (14 Nov 2026, Yap Lab: Opus's
+    // find "table" matched the word, never the table).
+    let role_lines = match node_role(&query) {
+        Some((role, words)) => match backend::act(&t.key, "tree", &json!({ "role": role, "words": words, "limit": FIND_MAX + 1 })).await {
+            Ok(v) => v["text"].as_str().unwrap_or("").lines().map(str::to_string).filter(|l| !l.is_empty()).collect::<Vec<_>>(),
+            Err(_) => Vec::new(),
+        },
+        None => Vec::new(),
+    };
     turn.mark_seen();
     super::act::remember_links(&mut turn.pages.links, &snap);
     // More than it lists: said so (14 Nov 2026, Yap Lab — Opus: "Yap's results also stop at a fixed number without saying so").
-    let mut found = matches_up_to(&query, &snap, &blocks, FIND_MAX + 1);
+    let mut found = role_lines;
+    for line in matches_up_to(&query, &snap, &blocks, FIND_MAX + 1) {
+        let r = line.split(']').next().unwrap_or("");
+        if !found.iter().any(|f| f.split(']').next() == Some(r)) {
+            found.push(line);
+        }
+    }
     let more = found.len() > FIND_MAX;
     found.truncate(FIND_MAX);
     tracing::info!(tab = t.tab, found = found.len(), more, "Chat: words looked for on a page beside the chat");
@@ -1044,6 +1178,29 @@ mod tests {
         assert_eq!(found, ["[2] link \"Harbour map\" → emberwiki.example/wiki/Harbour", "[40] heading \"Harbourmaster\"", "[41] text \"The harbourmaster sells the boat ticket.\""]);
         assert_eq!(matches("search", &snap, &blocks), ["[1] searchbox \"Search Emberwiki\""]);
         assert!(matches("nothing here", &snap, &blocks).is_empty());
+        // By its role too, as Claude Code's own browser's find (14 Nov 2026): "link", "heading Harbour".
+        assert_eq!(matches("link", &snap, &blocks), ["[2] link \"Harbour map\" → emberwiki.example/wiki/Harbour"]);
+        assert_eq!(matches("heading harbour", &snap, &blocks), ["[40] heading \"Harbourmaster\""]);
+        assert_eq!(matches("textbox", &snap, &blocks), ["[3] textbox \"Password\""]);
+    }
+
+    #[test]
+    fn find_takes_a_role_no_control_or_text_has() {
+        assert_eq!(node_role("table"), Some(("table", String::new())));
+        assert_eq!(node_role("Figures of the harbour"), Some(("figure", "of the harbour".into())));
+        assert_eq!(node_role("tablist"), Some(("tablist", String::new())));
+        // Words, a control's role or a text block's: matched as ever.
+        for q in ["button", "heading Harbour", "Ferry tables", "high water"] {
+            assert_eq!(node_role(q), None, "{q}");
+        }
+    }
+
+    #[test]
+    fn a_scroll_goes_sideways_too() {
+        for (said, to) in [("left", "left"), ("right", "right"), ("down", "down"), ("end", "bottom")] {
+            assert_eq!(direction(&json!(said)), Some(to), "{said}");
+        }
+        assert_eq!(direction(&json!("diagonal")), None);
     }
 
     #[test]
@@ -1120,7 +1277,7 @@ mod tests {
         // The panel's 460 px view shot, then laid out 1280 px wide: the same
         // pixels are another layout — refused, said why.
         let f = Frame { key: "page:https://docs.example.com".into(), w: 460, h: 800, css_w: 460.0, css_h: 800.0, y: 0 };
-        let view = |w: i64, h: i64, y: i64| View { x: 0, y, w, h, max: 2000, dpr: 1.0 };
+        let view = |w: i64, h: i64, y: i64| View { x: 0, y, w, h, max: 2000, dpr: 1.0, max_x: 0 };
         assert_eq!(f.moved(&view(460, 800, 0), "click"), None);
         let (why, chip) = f.moved(&view(1280, 800, 0), "click").unwrap();
         assert!(why.contains("laid out 1280×800 px now, 460×800 then") && why.ends_with("then click."), "{why}");

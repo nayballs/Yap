@@ -214,6 +214,52 @@ pub async fn section(turn: &mut crate::web::Turn, tab: &OpenTab, r: u32, offset:
     json!({ "success": true, "data": data, "note": note, "displayText": format!("Read {what} on {shown} beside the chat") })
 }
 
+/// **`browser_read { mode: "tree" }`**: the page's structure, as Claude
+/// Code's own browser's `read_page` gives it (14 Nov 2026, the last of what
+/// set the two browsers apart): an accessibility tree, a line a node with
+/// its role, name, state and ref, indented, at most `depth` deep (15 by
+/// default); `filter` "interactive": the links, buttons and fields alone;
+/// `ref`: one element's inside. [`super::read_max`] of it from `offset`,
+/// `next` where to go on. Web content.
+pub async fn tree(turn: &mut crate::web::Turn, tab: &OpenTab, within: Option<u32>, depth: Option<u64>, interactive: bool, offset: usize) -> Value {
+    let shown = crate::web::short_url(&tab.url);
+    let max = super::read_max(turn);
+    let depth = depth.unwrap_or(15).clamp(1, 40);
+    let filter = if interactive { "interactive" } else { "all" };
+    let got = match backend::act(&tab.key, "tree", &json!({ "within": within, "depth": depth, "filter": filter, "offset": offset, "max": max })).await {
+        Ok(v) => v,
+        Err(e) => return failed(e.clone(), format!("Couldn't read {shown}: {}", crate::web::short(&e))),
+    };
+    if got["r"] != "ok" {
+        let r = within.unwrap_or(0);
+        return failed(format!("There's no element [{r}] on the page now: browser_find (or browser_read mode \"elements\") gives its ref again."), format!("Didn't read [{r}] on {shown}: it isn't there"));
+    }
+    let text = got["text"].as_str().unwrap_or("").to_string();
+    let more = got["more"].as_bool().unwrap_or(false);
+    // (Cut at a line's end, never inside one — 14 Nov 2026, Yap Lab: Opus found the last line's ref cut off.)
+    let end = got["end"].as_u64().map(|e| e as usize).filter(|e| *e > offset).unwrap_or(offset + max);
+    let already = known_source(turn, &tab.url);
+    let n = turn.read_open(&tab.title, &tab.url, "");
+    turn.mark_seen();
+    let note = format!("{} Each node's [ref] reads (browser_read ref), scrolls to and acts as everywhere.", web_note(n, tab, already));
+    let mut data = json!({ "tab": tab.tab, "n": n, "url": tab.url, "tree": text, "more": more });
+    if offset > 0 {
+        data["offset"] = json!(offset);
+    }
+    if more {
+        let mut next = json!({ "mode": "tree", "offset": end, "depth": depth });
+        if interactive {
+            next["filter"] = json!("interactive");
+        }
+        if let Some(r) = within {
+            next["ref"] = json!(r);
+        }
+        data["next"] = next;
+    }
+    tracing::info!(tab = tab.tab, chars = text.chars().count(), more, "Chat: the page's structure beside the chat read");
+    json!({ "success": true, "data": data, "note": note, "displayText": format!("Read the structure of {shown} beside the chat") })
+}
+
 /// **A heading's section with nothing under it showing** (its words are
 /// the heading's alone): folded, most likely — a click opens it. Pure.
 pub fn folded(heading: &str, text: &str) -> bool {

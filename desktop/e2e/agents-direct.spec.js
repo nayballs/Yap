@@ -308,6 +308,12 @@ const DEV_TOOLS = [
   ...call(11, 'browser_screenshot', {}),
   ...call(12, 'browser_scroll', { direction: 'down', x: 60, y: 60 }),
   ...call(13, 'browser_hover', { x: 60, y: 40 }),
+  // The page's structure as a tree (its controls alone too), a find by role, a scroll sideways.
+  ...call(14, 'browser_read', { mode: 'tree' }),
+  ...call(15, 'browser_read', { mode: 'tree', filter: 'interactive' }),
+  ...call(16, 'browser_find', { query: 'tab' }),
+  ...call(17, 'browser_scroll', { direction: 'right' }),
+  ...call(18, 'browser_find', { query: 'tablist' }),
   said('d99', [{ type: 'text', text: DEVVED }], 'end_turn'),
   result(DEVVED, 0.01),
   { _wait_user: true },
@@ -1003,8 +1009,22 @@ test('its session has Claude Code’s developer tools: the console, the network 
   expect(of('browser_view', 1)).toContain("the panel's own size, the system's colours");
   // Real keystrokes, a combination among them; the scroll and the hover at a point done.
   expect(of('browser_read')).toContain('Keys: Ctrl+a x');
-  expect(dumps.filter((d) => ['browser_key', 'browser_scroll', 'browser_hover'].includes(d.tool)).map((d) => [d.tool, d.isError])).toEqual([['browser_key', false], ['browser_scroll', false], ['browser_hover', false]]);
-  expect(of('browser_scroll')).toContain('Scrolled down at a point');
+  expect(dumps.filter((d) => ['browser_key', 'browser_scroll', 'browser_hover'].includes(d.tool)).map((d) => [d.tool, d.isError])).toEqual([['browser_key', false], ['browser_scroll', false], ['browser_hover', false], ['browser_scroll', false]]);
+  // (The guide is shorter than the view: the wheel there moved nothing, and says so.)
+  expect(of('browser_scroll')).toContain("Didn't scroll down at that point on wiki.example.com: nothing there goes further");
+  // The tree: landmarks, the tabs with their state, headings by level, every node's ref; the folded rows not there.
+  const tree = of('browser_read', 1);
+  for (const want of ['- tablist', '- tab \\"Healing\\" (selected) [', '- heading (level 2) \\"Build Order\\"', '- button \\"Buy the full guide\\" [', '- paragraph \\"Keys: Ctrl+a x\\"']) expect(tree).toContain(want);
+  expect(tree).not.toContain('Moss Shield');
+  const controls = of('browser_read', 2);
+  expect(controls).toContain('- tab \\"Damage\\"');
+  expect(controls).not.toContain('heading');
+  expect(of('browser_find')).toContain('tab \\"Damage\\"');
+  expect(of('browser_scroll', 1)).toContain('Scrolled right on');
+  expect(of('browser_scroll', 1)).toMatch(/"x":\s*[1-9]/);
+  // How far it goes sideways, and a role neither a control nor a block of text has: found by it.
+  expect(of('browser_scroll', 1)).toMatch(/"max_x":\s*[1-9]/);
+  expect(of('browser_find', 1)).toMatch(/\[\d+\] tablist/);
   const log = (await yap.invoke('agent_get', { id: agent.id })).log;
   expect(log.some((e) => e.step === "Reading the page's console beside the chat")).toBe(true);
   await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
