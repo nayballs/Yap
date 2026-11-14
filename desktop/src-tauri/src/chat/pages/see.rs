@@ -674,7 +674,7 @@ async fn take(turn: &mut crate::web::Turn, t: &crate::chat::pages::view::OpenTab
     if super::search_page(&t.url) {
         return Err(failed("That's a search engine's results page: Yap doesn't take shots of those (the user reads it).".into(), format!("Didn't {doing} {shown}: a search engine's results")));
     }
-    if turn.pages.shots >= MAX_SHOTS {
+    if !turn.pages.uncapped && turn.pages.shots >= MAX_SHOTS {
         return Err(failed(format!("You've taken {MAX_SHOTS} shots this turn: answer the user now."), format!("Didn't {doing} {shown}: {MAX_SHOTS} shots a turn")));
     }
     // Once it has stopped scrolling: never a frame mid-scroll.

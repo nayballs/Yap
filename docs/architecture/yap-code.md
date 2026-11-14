@@ -442,8 +442,10 @@ workspace, word for word, and no model of Chat's is asked.
   - **How**: each turn opens a browser turn on its run (`run.begin_turn`,
     `runner::beside_context` / `beside_web`) before Claude Code can call
     it — the person's message and their earlier ones (an address they gave
-    opens), the chat's earlier sources, the per-turn caps — as a plan
-    chat's turn does (`chat/turn/plan.rs`). The runner tells it as Claude
+    opens), the chat's earlier sources — as a plan chat's turn does
+    (`chat/turn/plan.rs`), **with none of Chat's per-turn counts** (14 Nov
+    2026, `web::Turn::uncapped`: no cap on shots, new tabs, picture looks or
+    pictures shown; before, twelve shots a turn stopped it). The runner tells it as Claude
     Code begins a call to Yap's tools or a web read of its own (its
     stream's `content_block_start`: `Follow::began`, the safety rule's
     order), and the pages its own `WebSearch` and `WebFetch` found

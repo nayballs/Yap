@@ -295,7 +295,10 @@ fn web_side(t: &Asked<'_>, conv: &crate::chat::chats::Conversation, fitted: &Fit
     }
     let earlier: Vec<&str> = fitted.history.iter().filter(|(r, _)| r == "user").map(|(_, t)| t.as_str()).collect();
     let settings = crate::web::Settings::for_chat(&t.cfg, &t.ep.provider, &t.ep.model, &t.ep.base_url, &t.ep.api_key);
-    let mut turn = crate::web::Turn::new(settings, crate::web::Endpoints::current(), &t.text, &earlier).with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())));
+    // (A Claude Code session: none of Chat's per-turn counts, `web::Turn::uncapped`.)
+    let mut turn = crate::web::Turn::new(settings, crate::web::Endpoints::current(), &t.text, &earlier)
+        .with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())))
+        .uncapped();
     // A picture file on this PC (pictures/local.rs): the chat's own.
     turn.pictures.local = crate::chat::pictures::local::Context::of_chat(conv, &t.text);
     Some(turn)

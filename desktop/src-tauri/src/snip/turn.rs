@@ -245,7 +245,7 @@ pub fn history_budget(provider: &str, on_this_pc: bool, current: usize) -> usize
     if on_this_pc {
         return 0;
     }
-    super::images::per_request(provider).saturating_sub(current).min(3)
+    super::images::per_request(provider, on_this_pc).saturating_sub(current).min(3)
 }
 
 /// The history's user messages (`messages`, as `chats::history_messages` or
@@ -336,13 +336,17 @@ pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage]
 }
 
 /// What `chat::commands::chat_send` needs before a turn with screenshots: the
-/// stored images (ids checked, at most the provider's per-request cap) and
-/// their copies fitted for `provider`.
+/// stored images (ids checked) and their copies fitted for `provider`. More
+/// than it takes in one message: refused, saying so — they go back in the
+/// box (before 14 Nov 2026 the extra ones were left out without a word).
 pub async fn prepare(ids: &[String], provider: &str, base_url: &str) -> Result<TurnImages, String> {
     let here = crate::ai::ai_model::runs_here(provider, base_url);
     let fit = super::images::fit_for(provider, here);
-    let per = super::images::per_request(provider);
-    let ids: Vec<String> = ids.iter().filter(|id| super::images::is_id(id)).take(per).cloned().collect();
+    let per = super::images::per_request(provider, here);
+    let ids: Vec<String> = ids.iter().filter(|id| super::images::is_id(id)).cloned().collect();
+    if ids.len() > per {
+        return Err(super::images::too_many_line(provider, here, per, ids.len()));
+    }
     // Each smaller when there are several, so all of them fit one request.
     let cap = fit.cap_for(ids.len());
     let provider_owned = provider.to_string();

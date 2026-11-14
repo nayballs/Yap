@@ -227,9 +227,11 @@ mod tests {
         // box keeps them when it switches).
         w.land(Some(9), vec![img("d")]);
         assert_eq!((w.conversation_id, ids(&w)), (Some(9), vec!["a", "b", "c", "d"]));
-        // Four at most: the newest kept.
-        w.add(vec![img("e")]);
-        assert_eq!(ids(&w), ["b", "c", "d", "e"]);
+        // As many as a message carries ([`MAX`]): past it, the newest kept.
+        let more: Vec<String> = (0..MAX).map(|i| format!("m{i}")).collect();
+        w.add(more.iter().map(|m| img(m)).collect());
+        assert_eq!(ids(&w).len(), MAX);
+        assert_eq!((ids(&w)[0], ids(&w)[MAX - 1]), ("m0", more[MAX - 1].as_str()), "the oldest four gone");
         // Into a new chat from a conversation: afresh.
         w.land(None, vec![img("f")]);
         assert_eq!((w.conversation_id, ids(&w)), (None, vec!["f"]));

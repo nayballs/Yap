@@ -42,8 +42,22 @@ pub const ORPHAN_SECS: u64 = 24 * 60 * 60;
 /// A copy for a model bigger than this is made smaller (a provider may
 /// take less: [`fit_for`]).
 pub const MAX_SEND_BYTES: usize = 4 * 1024 * 1024;
-/// Images per request, at most (Groq: 3).
-pub const MAX_PER_REQUEST: usize = 4;
+/// **Screenshots one message carries, at most** (14 Nov 2026; the
+/// maintainer: "it should be as many as the user wants"; before, 4): as
+/// many as Claude takes in one request on its smallest window — 100 for a
+/// 200k-token model, 600 above (Anthropic's vision docs); OpenAI takes
+/// 1,500. The box, a snip's Shift run and a paste or drop all hold this
+/// many; a model that takes fewer says so when it's sent ([`per_request`],
+/// `turn::prepare`), never dropping one without a word. Each picture is
+/// made smaller as there are more, so they all fit one request
+/// ([`Fit::cap_for`]).
+pub const MAX_PER_REQUEST: usize = 100;
+/// …a model on this PC: its context is small (each picture a few hundred
+/// tokens or more), so fewer.
+pub const ON_THIS_PC_PER_REQUEST: usize = 4;
+
+// As many as Claude takes on its smallest window, checked as the code builds.
+const _: () = assert!(MAX_PER_REQUEST >= 100);
 /// The retention choices, in days (0 = forever).
 pub const KEEP_CHOICES: [u32; 4] = [7, 30, 90, 0];
 /// The default: 30 days.
@@ -342,13 +356,30 @@ impl Fit {
 }
 
 /// How many images one request may carry for a provider (Groq's
-/// `qwen/qwen3.8-27b` takes 3). Pure.
-pub fn per_request(provider: &str) -> usize {
+/// `qwen/qwen3.8-27b` takes 3; a model on this PC, [`ON_THIS_PC_PER_REQUEST`]).
+/// Pure.
+pub fn per_request(provider: &str, on_this_pc: bool) -> usize {
     if provider == "groq" {
         3
+    } else if on_this_pc {
+        ON_THIS_PC_PER_REQUEST
     } else {
         MAX_PER_REQUEST
     }
+}
+
+/// **More screenshots than the model takes in one message** (`n` of them,
+/// it takes `per`): what the person is told — they stay in the box. Pure.
+pub fn too_many_line(provider: &str, on_this_pc: bool, per: usize, n: usize) -> String {
+    let who = if provider == "groq" {
+        "Groq's model"
+    } else if on_this_pc {
+        "The model on this PC"
+    } else {
+        "This model"
+    };
+    let more = n.saturating_sub(per);
+    format!("{who} takes {per} screenshots a message, and this one has {n}. Remove {more}, or choose another model.")
 }
 
 /// The size an image is sent at: its own if it fits, else scaled so its
@@ -556,7 +587,10 @@ mod tests {
         assert_eq!(long_edge("openrouter", false), 2048);
         assert_eq!(long_edge("custom", true), 1024);
         assert_eq!(long_edge("ondevice", true), 1024);
-        assert_eq!((per_request("groq"), per_request("anthropic")), (3, 4));
+        assert_eq!((per_request("groq", false), per_request("anthropic", false), per_request("claude-plan", false)), (3, MAX_PER_REQUEST, MAX_PER_REQUEST));
+        assert_eq!(per_request("anthropic", true), ON_THIS_PC_PER_REQUEST, "a model on this PC: fewer");
+        assert_eq!(too_many_line("groq", false, 3, 5), "Groq's model takes 3 screenshots a message, and this one has 5. Remove 2, or choose another model.");
+        assert!(too_many_line("custom", true, 4, 6).starts_with("The model on this PC takes 4"));
         // Never upscaled; the long side to the limit, the other in proportion.
         assert_eq!(fit(800, 600, 2048), (800, 600));
         assert_eq!(fit(3840, 2160, 2048), (2048, 1152));

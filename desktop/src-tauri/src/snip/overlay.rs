@@ -1684,7 +1684,7 @@ mod tests {
         // The last one allowed ends it, Shift or not.
         let mut s = select();
         for i in 0..MAX_KEPT - 1 {
-            let x = 20 + i as i32 * 60;
+            let x = 20 + (i % 10) as i32 * 60;
             assert_eq!(drag(&mut s, (x, 20), (x + 50, 70), true), Step::Kept, "shot {}", i + 1);
         }
         assert_eq!(shots(drag(&mut s, (20, 300), (120, 400), true)).0.len(), MAX_KEPT);

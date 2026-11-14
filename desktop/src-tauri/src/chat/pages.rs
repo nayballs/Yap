@@ -556,6 +556,9 @@ pub struct TurnPages {
     pub offers: Vec<BrowserOffer>,
     /// Shots and zooms taken this turn (`see::MAX_SHOTS`).
     pub shots: usize,
+    /// **A Claude Code session's turn** (14 Nov 2026, `web::Turn::uncapped`):
+    /// none of the per-turn counts — the shots, the new tabs — apply.
+    pub uncapped: bool,
     /// The links on the pages read or searched this turn (each one's
     /// address and words, `act::Link`): `browser_navigate` may open them.
     pub links: Vec<act::Link>,
@@ -962,7 +965,7 @@ async fn open(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
     if turn.pages.shown.iter().any(|p| crate::web::normal_url(&p.url) == key) {
         return ok(String::new());
     }
-    if turn.pages.shown.len() >= MAX_PAGES {
+    if !turn.pages.uncapped && turn.pages.shown.len() >= MAX_PAGES {
         return failed(format!("You've opened {MAX_PAGES} pages in new tabs this turn: use the tabs open, or answer the user now."), format!("Didn't bring up {shown}: {MAX_PAGES} pages a turn"));
     }
     // A link that would buy, pay, unsubscribe, confirm…: the person's first
