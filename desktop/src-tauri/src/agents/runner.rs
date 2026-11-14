@@ -848,16 +848,22 @@ fn closing(read_only: bool, direct: bool) -> &'static str {
 /// the maintainer: "claude-code doesn't have browser tools? It should have
 /// shouldn't it?" — as Claude Code's own app has its browser pane): the
 /// pages beside the chat and the web's pictures with the web on ("Look
-/// things up on the web", `web`), else picture files by a path — as a plan
-/// Code chat's session has them (`chat/turn/plan.rs` `session_eyes`). Never
-/// the screen, nor acting on a page (clicks and typing: Chat's browser
-/// stays at open, read and look). Pure but for the model's image reading.
-fn direct_eyes(web: bool, model: &str) -> claude_live::eyes::Eyes {
+/// things up on the web"), else picture files by a path — and the screen
+/// look with "Let Yap's AI see your screen" on (the maintainer, the same
+/// day: "Chat-code should be able to see the screen, if asked"), the plan
+/// being a cloud model: refused, and the alert asking once, until "…with
+/// cloud models too" is on (`see_screen::execute`); never in a meeting or a
+/// call. As a plan Code chat's session has them (`chat/turn/plan.rs`
+/// `session_eyes`). Never acting on a page (clicks and typing: Chat's
+/// browser stays at open, read and look). Pure but for the model's image
+/// reading.
+fn direct_eyes(cfg: &crate::config::YapConfig, model: &str) -> claude_live::eyes::Eyes {
     use crate::chat::pictures::Gate;
     let provider = crate::ai::claude_plan::PROVIDER;
-    let pictures = Gate::for_model(web, provider, model);
+    let pictures = Gate::for_model(cfg.web_search, provider, model);
     let files = if pictures == Gate::Off { Gate::for_model(true, provider, model) } else { Gate::Off };
-    claude_live::eyes::Eyes { screen: Gate::Off, pictures, act: false, files }
+    let screen = crate::chat::see_screen::gate(cfg, true, provider, model);
+    claude_live::eyes::Eyes { screen, pictures, act: false, files }
 }
 
 /// **Its browser turn's context**: the person's message this turn, their
@@ -1111,8 +1117,8 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         // An agent Chat sent works with the person's own tools, never Yap's
         // screen or pages, nor Yap's connectors (its own Claude Code setup
         // has the person's). A Code chat's own session has Yap's browser
-        // beside the chat (14 Nov 2026): the pages, never the screen.
-        eyes: if direct { direct_eyes(cfg.web_search, &agent.model) } else { Default::default() },
+        // beside the chat and the screen look (14 Nov 2026), never acting.
+        eyes: if direct { direct_eyes(&cfg, &agent.model) } else { Default::default() },
         connectors: None,
         // A Code chat's own session (the person's message went straight to
         // it) reads Yap's meetings, notes, tasks and calendar on request, as
@@ -1127,7 +1133,7 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     // 2026): this turn's calls belong to it — the person's message and their
     // earlier ones (the pages it may open), the chat — and what they show
     // goes to the chat's panel (`yap-agent-shown`), its answer keeping it.
-    let eyes = if direct { direct_eyes(cfg.web_search, &agent.model) } else { Default::default() };
+    let eyes = if direct { direct_eyes(&cfg, &agent.model) } else { Default::default() };
     let mut beside = (direct && eyes.any()).then(|| {
         let ctx = beside_context(&agent, n, eyes);
         let web = beside_web(&cfg, &agent, &ctx);
@@ -3001,13 +3007,16 @@ mod tests {
         assert!(!said.contains(SUMMARY_LINE));
         // Its first line: the chat thinking, for the person's own message; an agent sent out starts Claude Code.
         assert_eq!((start_line(true), start_line(false)), ("Thinking", "Starting Claude Code"));
-        // Its browser beside the chat (a Code chat's own session): the pages with the web on, else picture files.
+        // Its browser beside the chat (a Code chat's own session): the pages with the web on, else picture
+        // files; the screen with "Let Yap's AI see your screen" on; never acting.
         use crate::chat::pictures::Gate;
-        let on = direct_eyes(true, "claude-haiku-5-5");
-        assert_eq!((on.screen, on.act, on.files), (Gate::Off, false, Gate::Off), "never the screen nor acting");
+        let cfg = |web_search: bool, assistant_screen: bool| crate::config::YapConfig { web_search, assistant_screen, ..Default::default() };
+        let on = direct_eyes(&cfg(true, true), "claude-haiku-5-5");
+        assert_eq!((on.act, on.files), (false, Gate::Off), "never acting");
         assert_ne!(on.pictures, Gate::Off);
-        let off = direct_eyes(false, "claude-haiku-5-5");
-        assert_eq!(off.pictures, Gate::Off);
+        assert_ne!(on.screen, Gate::Off);
+        let off = direct_eyes(&cfg(false, false), "claude-haiku-5-5");
+        assert_eq!((off.pictures, off.screen), (Gate::Off, Gate::Off));
         assert_ne!(off.files, Gate::Off);
         // The pages its own searches found, numbered as found, each once, http(s) only.
         let mut found = Vec::new();

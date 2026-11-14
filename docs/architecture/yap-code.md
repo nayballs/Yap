@@ -424,11 +424,21 @@ workspace, word for word, and no model of Chat's is asked.
     `browser_screenshot`, `browser_zoom`, `browser_tabs`, `browser_wait`,
     `browser_batch`, `find_pictures`, `look_at_picture`, `show_picture`,
     `share_files`); with the web off, picture files by a path only — as a
-    plan Code chat's session has them. **Never the screen, nor acting on a
-    page** (no clicks or typing: Chat's browser stays at open, read and
-    look, 1 Nov), whatever a spec asks (`claude_live/server.rs` holds an
-    agent's run to it); never an agent Chat sent out. In `--allowedTools`:
-    nothing asks, in any Mode.
+    plan Code chat's session has them. **The screen look** too (the same
+    day, the maintainer: "Chat-code should be able to see the screen, if
+    asked"): `look_at_screen` with "Let Yap's AI see your screen" on —
+    every monitor, Yap's own windows left out, the page beside the chat as
+    its own picture; the plan being a cloud model, refused (the session
+    told, the alert asking once) until "…with cloud models too" is on;
+    never in a meeting or a call (`see_screen::execute`, `eyes::refused`).
+    What it took shows with the person's message in the screenshot frame
+    and is kept with it (`chats::add_question_images`, never on an agent's
+    report line; `chatState` reads the chat again on its `screen` event),
+    and its line says "Looked at your screen" with the shots at its end.
+    **Never acting on a page** (no clicks or typing: Chat's browser stays at
+    open, read and look, 1 Nov), whatever a spec asks
+    (`claude_live/server.rs` holds an agent's run to it); never an agent
+    Chat sent out. In `--allowedTools`: nothing asks, in any Mode.
   - **How**: each turn opens a browser turn on its run (`run.begin_turn`,
     `runner::beside_context` / `beside_web`) before Claude Code can call
     it — the person's message and their earlier ones (an address they gave
@@ -453,8 +463,8 @@ workspace, word for word, and no model of Chat's is asked.
     names a site or an app ("bring up <address>", "open Spotify") goes to
     its session like any other, as in Claude Code's own app — before, Yap
     opened the page or app itself and the session was never told.
-- **Not in a direct Code chat**: the screen and connectors. Yap's memory
-  stays out of every Code chat by the 7 Nov decision. Documents beside the
+- **Not in a direct Code chat**: connectors. Yap's memory stays out of
+  every Code chat by the 7 Nov decision. Documents beside the
   chat aren't on the Claude plan's path at all.
 - **Tests**: `agents-direct.spec.js` (the first message, the next on
   `--resume`, a message mid-work, a message with a screenshot — the first,
@@ -462,8 +472,9 @@ workspace, word for word, and no model of Chat's is asked.
   loud with the chat in view, just chatting (the words as they are, the
   thread the message and the answer, nothing said but the answer), its
   session reading Yap's own data, opening a page in Yap's browser beside
-  the chat (the panel on it, the answer keeping it), ■ Stop and Esc, the
-  switch off). The e2e base config has
+  the chat (the panel on it, the answer keeping it), looking at the screen
+  (fake monitors: the shots with the message and to Claude Code), ■ Stop
+  and Esc, the switch off). The e2e base config has
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 

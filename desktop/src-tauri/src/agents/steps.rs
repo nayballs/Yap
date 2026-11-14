@@ -157,7 +157,7 @@ pub fn of_tool(name: &str, input: &Value, folder: &Path) -> Seen {
 /// thread's web mark: `core/agents.js` `stepKind`), a search its own
 /// words. `None`: not one of the browser's. Pure.
 pub fn browser_line(tool: &str, input: &Value) -> Option<String> {
-    use crate::chat::{pages, pictures, shares};
+    use crate::chat::{pages, pictures, see_screen, shares};
     let text = |k: &str| input[k].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
     let beside = |doing: &str| format!("{doing} beside the chat");
     Some(match tool {
@@ -187,6 +187,7 @@ pub fn browser_line(tool: &str, input: &Value) -> Option<String> {
         pictures::LOOK => beside("Looking at a picture"),
         pictures::SHOW => beside("Showing a picture"),
         shares::NAME => "Sharing files in the chat".to_string(),
+        see_screen::LOOK => "Looking at your screen".to_string(),
         _ => return None,
     })
 }
@@ -305,6 +306,7 @@ mod tests {
         assert_eq!(of_tool("mcp__yap__browser_tabs", &json!({ "action": "new" }), &f).step, "Opening a tab beside the chat");
         assert_eq!(of_tool("mcp__yap__show_picture", &json!({}), &f).step, "Showing a picture beside the chat");
         assert_eq!(of_tool("mcp__yap__share_files", &json!({}), &f).step, "Sharing files in the chat");
+        assert_eq!(of_tool("mcp__yap__look_at_screen", &json!({}), &f).step, "Looking at your screen");
         // Its other tools: as any server's.
         assert_eq!(of_tool("mcp__yap__list_tasks", &json!({}), &f).step, "Using yap · list tasks");
         assert_eq!(of_tool("Frobnicate", &json!({}), &f).step, "Using Frobnicate");

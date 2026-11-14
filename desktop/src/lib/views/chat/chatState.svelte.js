@@ -1032,7 +1032,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   /**
    * **What a Code chat's own Claude showed beside the chat** (`yap-agent-shown`,
    * agents/runner.rs: Yap's browser in its session, 14 Nov 2026): a page it
-   * opened, a picture it showed — the panel opens on it, as on a plan chat's.
+   * opened, a picture it showed — the panel opens on it, as on a plan chat's;
+   * the screen it looked at — kept with the person's message (chats.rs
+   * `add_question_images`), read again so its screenshot frame shows.
    * Its answer keeps them (`pages`, `pictures`), so they come back with the
    * chat. Another conversation's: nothing here (its answer has them).
    */
@@ -1041,6 +1043,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const ev = p.event;
     if (ev?.kind === 'page' && (ev.page?.url || ev.page?.tabKey)) doc.showPage(ev.page);
     else if (ev?.kind === 'picture' && ev.picture?.id) doc.showPicture(ev.picture);
+    else if (ev?.kind === 'screen') reloadActive();
   }
 
   function followAssistantStream(p) {
