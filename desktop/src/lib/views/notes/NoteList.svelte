@@ -199,7 +199,7 @@
         { label: 'Export…', icon: 'download', onselect: () => notes.exportNote(n.id) },
         // Its earlier versions (notes/versions.rs).
         historyItem(notes, n.id, itemEls[n.id]),
-        // A meeting kept on disk (meetings/meeting_audio.rs): on the speech model in use now.
+        // A meeting kept on disk (meetings/audio.rs): on the speech model in use now.
         // Not one imported from a transcript file: there's no audio.
         ...(n.noteType === 'meeting' && !isImported(n)
           ? [
@@ -217,7 +217,7 @@
                 disabled: !!cantFindSpeakers(n, recording),
                 onselect: () => findSpeakers(n.id),
               },
-              // Its kept audio, where you pick (meetings/meeting_audio/export.rs).
+              // Its kept audio, where you pick (meetings/audio/export.rs).
               {
                 label: 'Export audio…',
                 icon: 'audio',

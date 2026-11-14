@@ -2,7 +2,7 @@
   // A meeting note's transcription job, over its transcript in the meeting
   // notepad and the Notes view alike (meetingAudio.svelte.js `jobState`):
   // - running: "Improving the transcript · 40%" (the refine after a
-  //   meeting, meetings/meeting_refine.rs), "Transcribing again with Parakeet V3 ·
+  //   meeting, meetings/refine.rs), "Transcribing again with Parakeet V3 ·
   //   40%"…, with Cancel (the transcript stays as it was);
   // - a refine done on a meeting with a summary: "Transcript improved ·
   //   Update summary" (the summary written again from the improved lines,

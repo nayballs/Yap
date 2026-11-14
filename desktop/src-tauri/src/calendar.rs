@@ -432,7 +432,7 @@ struct CardView {
     kind: CardKind,
     /// Shown as the main window's toast (the person is looking at it).
     /// Otherwise it's on the Yap bar or a Windows notification, and the
-    /// window doesn't repeat it (one place: `notice.rs`).
+    /// window doesn't repeat it (one place: `notices/policy.rs`).
     in_app: bool,
     key: String,
     title: String,
@@ -512,7 +512,7 @@ fn snapshot_of(s: &Runtime, notes: &HashMap<String, u64>, now: i64, briefs: bool
             after_meeting: !connected
                 && !s.store.nudge.dismissed
                 && !s.store.nudge.shown_after_meeting
-                && !crate::notices::notice::tips_off(),
+                && !crate::notices::policy::tips_off(),
         },
         max_connections: vault::SLOTS,
         briefs,
@@ -1463,7 +1463,7 @@ fn show_note(app: &AppHandle, note_id: u64, title: &str) {
 /// Take notes on `key` (and join it first, `join`): its note, recording.
 fn start_event(app: &AppHandle, key: &str, join: bool) -> Result<u64, String> {
     let event = event_by_key(key)?;
-    if let Some(recording) = crate::meetings::meeting::recording_note() {
+    if let Some(recording) = crate::meetings::recorder::recording_note() {
         if crate::notes::find_by_event(key) == Some(recording) {
             if join {
                 join_link(app, &event)?;
@@ -1499,20 +1499,20 @@ async fn switch_to_event(app: &AppHandle, key: &str, join: bool) -> Result<u64, 
     if join {
         join_link(app, &event)?;
     }
-    if let Some(current) = crate::meetings::meeting::recording_note() {
+    if let Some(current) = crate::meetings::recorder::recording_note() {
         if crate::notes::find_by_event(key) == Some(current) {
             return Ok(current);
         }
         tracing::info!(note_id = current, "calendar: switching notes to the next meeting");
-        crate::meetings::meeting_end::end(app, Some("calendar"))?;
+        crate::meetings::end::end(app, Some("calendar"))?;
         // The recorder transcribes its last chunk before it lets go.
         for _ in 0..240 {
-            if crate::meetings::meeting::recording_note().is_none() {
+            if crate::meetings::recorder::recording_note().is_none() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
-        if crate::meetings::meeting::recording_note().is_some() {
+        if crate::meetings::recorder::recording_note().is_some() {
             return Err("The last meeting's notes are still finishing. Try again in a moment.".into());
         }
     }
@@ -1725,7 +1725,7 @@ pub fn on_call_started(app_id: &str) -> bool {
     if lock_started().is_none() {
         return false;
     }
-    let Some(recording) = crate::meetings::meeting::recording_note() else { return false };
+    let Some(recording) = crate::meetings::recorder::recording_note() else { return false };
     let recording_key = crate::notes::get(recording).and_then(|n| n.event).map(|e| e.key);
     let code = call_code(app_id);
     let mut s = lock();
@@ -1865,7 +1865,7 @@ where
 /// nothing in the next 7 days). Takes the notes store's and the recorder's
 /// locks, then the calendar's: never under one of them.
 fn tray_next(now: i64) -> Option<TrayNext> {
-    let recording = crate::meetings::meeting::recording_note();
+    let recording = crate::meetings::recorder::recording_note();
     let recording_key = recording.and_then(crate::notes::event_of).map(|e| e.key);
     let event = {
         let s = lock_started()?;
@@ -1925,7 +1925,7 @@ pub fn on_tray_next(app: &AppHandle) {
 /// to come).
 fn open_event_note(app: &AppHandle, key: &str) -> Result<(), String> {
     let event = event_by_key(key)?;
-    let recording = crate::meetings::meeting::recording_note().filter(|r| crate::notes::find_by_event(key) == Some(*r));
+    let recording = crate::meetings::recorder::recording_note().filter(|r| crate::notes::find_by_event(key) == Some(*r));
     let note_id = match recording {
         Some(id) => id,
         None => {
@@ -2001,11 +2001,11 @@ pub fn calendar_day() -> Value {
 
 // ---- the reminder card ------------------------------------------------------------------------
 
-/// The main window: (on screen, focused) — `notice::window_view` (a test
+/// The main window: (on screen, focused) — `notices::policy::window_view` (a test
 /// run says for itself whether the person is looking at it). Never with a
 /// lock held.
 fn window_view(app: &AppHandle) -> (bool, bool) {
-    crate::notices::notice::window_view(app)
+    crate::notices::policy::window_view(app)
 }
 
 /// What a card is waiting for, after a turn of [`tick_card`].
@@ -2027,7 +2027,7 @@ enum CardChange {
 fn tick_card(app: &AppHandle) {
     let now = now_secs();
     let lead = reminder_lead(&crate::config::load().meeting_reminder);
-    let recording = crate::meetings::meeting::recording_note();
+    let recording = crate::meetings::recorder::recording_note();
     let recording_key = recording.and_then(crate::notes::get).and_then(|n| n.event).map(|e| e.key);
     let focused = window_view(app).1;
     let change = {
@@ -2123,7 +2123,7 @@ fn tick_card(app: &AppHandle) {
 }
 
 /// **The one place a calendar card goes on screen** — one place at a time
-/// (`notice.rs`): the main window's in-app toast while the person is
+/// (`notices/policy.rs`): the main window's in-app toast while the person is
 /// looking at it (the snapshot's `inApp`, `calendar.svelte.js`), else the
 /// **Yap bar** (`bar::show_card`, a "Meeting detected"-style call card),
 /// else — the bar off or hidden for an hour — a Windows notification, as
@@ -2440,13 +2440,13 @@ fn brief_meeting(e: &Event) -> brief::Meeting {
 /// Where a brief's "In short" comes from: the meeting's own model (the Note
 /// Formatting scope, else cleanup's), or why there's none.
 enum BriefAi {
-    Model(crate::meetings::meeting_summary::Endpoint),
+    Model(crate::meetings::summary::Endpoint),
     Plain(&'static str),
 }
 
 impl BriefAi {
     fn of(cfg: &crate::config::YapConfig) -> BriefAi {
-        match crate::meetings::meeting_summary::resolve_endpoint(cfg) {
+        match crate::meetings::summary::resolve_endpoint(cfg) {
             // A brief never starts a stopped on-device model.
             Ok(ep) if ep.provider == crate::ai::local_llm::PROVIDER_ONDEVICE && !crate::ai::local_llm::is_running() => {
                 BriefAi::Plain("The on-device model isn't running, so this is the plain brief.")
@@ -2576,7 +2576,7 @@ fn prepare_brief(app: &AppHandle, key: &str, force: bool) -> Result<brief::Brief
 async fn write_brief(
     app: AppHandle,
     facts: brief::Facts,
-    ep: crate::meetings::meeting_summary::Endpoint,
+    ep: crate::meetings::summary::Endpoint,
     fingerprint: String,
     epoch: u64,
 ) {
@@ -2844,7 +2844,7 @@ pub async fn calendar_brief_open(app: AppHandle, key: String, n: usize) -> Resul
 pub fn calendar_meeting_notes(query: Option<String>) -> Vec<Value> {
     let words: Vec<String> = query.unwrap_or_default().to_lowercase().split_whitespace().map(str::to_string).collect();
     let now = now_secs().max(0) as u64;
-    let recording = crate::meetings::meeting::recording_note();
+    let recording = crate::meetings::recorder::recording_note();
     let mut out: Vec<(u64, Value)> = crate::notes::all()
         .into_iter()
         .filter(|n| n.note_type == "meeting" || n.event.is_some())

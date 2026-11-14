@@ -156,7 +156,7 @@ pub fn export_markdown(note: &crate::notes::Note) -> String {
                 continue;
             }
             if seg.failed {
-                let at = |ms: Option<u64>| crate::meetings::meeting_summary::clock(ms.unwrap_or(0) / 1000);
+                let at = |ms: Option<u64>| crate::meetings::summary::clock(ms.unwrap_or(0) / 1000);
                 out.push_str(&format!("_Couldn't transcribe {}–{}._\n\n", at(seg.start_ms), at(seg.end_ms)));
                 continue;
             }
@@ -310,9 +310,9 @@ fn folders_changed(app: &AppHandle, change: &crate::notes::FolderChange) {
 #[tauri::command]
 pub fn note_delete(app: AppHandle, id: u64) -> Result<(), String> {
     use tauri::Emitter;
-    crate::meetings::meeting::delete_note(id)?;
+    crate::meetings::recorder::delete_note(id)?;
     let _ = app.emit("yap-notes-changed", ());
-    let _ = app.emit(crate::meetings::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
+    let _ = app.emit(crate::meetings::end::EVENT_DELETED, serde_json::json!({ "id": id }));
     crate::meetings::notepad::on_note_deleted(&app, id);
     // Gone from memory; until notes.json is saved it would come back.
     Ok(crate::notes::saved()?)
@@ -335,7 +335,7 @@ pub fn note_delete(app: AppHandle, id: u64) -> Result<(), String> {
 ///
 /// A summary the person edited is written over only with `replace` (the
 /// window asked them first); else the run stops before the model with
-/// `note_edits::SUMMARY_KEPT`. Ticked tasks stay ticked either way.
+/// `edits::SUMMARY_KEPT`. Ticked tasks stay ticked either way.
 #[tauri::command]
 pub async fn note_enhance(
     app: AppHandle,
@@ -347,10 +347,10 @@ pub async fn note_enhance(
 }
 
 /// The body of [`note_enhance`], with `step` told where it is, for the
-/// notepad's "Step 2 of 3" (`meeting_end.rs` runs the action plan this way):
+/// notepad's "Step 2 of 3" (`meetings/end.rs` runs the action plan this way):
 /// 1 reading the meeting (catching up on its digests), 2 writing, 3 checking
 /// owners and deadlines and saving. `replace`: the person said a summary
-/// they edited may go (`note_edits::write_summary`).
+/// they edited may go (`edits::write_summary`).
 pub(crate) async fn run_enhance(
     app: &AppHandle,
     id: u64,
@@ -363,16 +363,16 @@ pub(crate) async fn run_enhance(
     // Which note this is (`notes::still_the_note`): deleted meanwhile, its id
     // given to a new note, the run never reads or writes that one.
     let created = note.created_ts;
-    crate::notes::note_edits::keeps_summary(&note, replace)?;
+    crate::notes::edits::keeps_summary(&note, replace)?;
     // When this run read the note: an edit to the summary after it wins.
     let read_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    let heard_to = crate::notes::note_edits::newest_talk(&note);
+    let heard_to = crate::notes::edits::newest_talk(&note);
     let hash = crate::notes::content_hash(&note.content);
     let cfg = config::load();
-    let ep = crate::meetings::meeting_summary::resolve_endpoint(&cfg)?;
+    let ep = crate::meetings::summary::resolve_endpoint(&cfg)?;
     // The on-device model is busy from the digests to the final call.
     let _sidecar = crate::ai::local_llm::hold(&ep.base_url);
 
@@ -395,14 +395,14 @@ pub(crate) async fn run_enhance(
     // checked against (the meeting without the language line).
     let (content, source, attendees, digest_actions) = if is_meeting {
         // A bigger on-device context reads more of the meeting raw.
-        let budget = crate::meetings::meeting_summary::FinalBudget::for_endpoint(&ep);
-        let note = crate::meetings::meeting_summary::prepare_final(app, id, &ep, budget).await?;
+        let budget = crate::meetings::summary::FinalBudget::for_endpoint(&ep);
+        let note = crate::meetings::summary::prepare_final(app, id, &ep, budget).await?;
         if note.created_ts != created {
             return Err("Note not found".to_string());
         }
-        // In the language the meeting was held in (meeting_summary/language.rs).
-        let lang = crate::meetings::meeting_summary::language::of_note(&note);
-        let (asked, input) = crate::meetings::meeting_summary::final_request(&note, budget, &lang, action_plan);
+        // In the language the meeting was held in (meetings/summary/language.rs).
+        let lang = crate::meetings::summary::language::of_note(&note);
+        let (asked, input) = crate::meetings::summary::final_request(&note, budget, &lang, action_plan);
         // The owner checks know the speaker map's names too.
         (asked, input.text, crate::speakers::known_people(&note), input.digest_actions)
     } else if note.participants.is_empty() {
@@ -433,7 +433,7 @@ pub(crate) async fn run_enhance(
     .await?;
     step(3);
     if action_plan {
-        enhanced = crate::meetings::meeting_summary::postcheck_action_plan(
+        enhanced = crate::meetings::summary::postcheck_action_plan(
             &enhanced,
             &attendees,
             &source,
@@ -450,7 +450,7 @@ pub(crate) async fn run_enhance(
         return Err("Note not found".to_string());
     }
     crate::notes::versions::by(how, || {
-        crate::notes::note_edits::write_summary(id, &enhanced, &hash, read_ms, heard_to, replace)
+        crate::notes::edits::write_summary(id, &enhanced, &hash, read_ms, heard_to, replace)
     })?;
     // Written, but not on disk (a full disk, the file held): said by the
     // caller ("Couldn't save your note: …", with Try again), never as if it
@@ -555,7 +555,7 @@ pub(crate) fn note_prompt(
         // A bigger on-device context reads more of it raw (×1–4).
         let budget = ASK_TRANSCRIPT_TOKENS * crate::ai::local_llm::context::budget_factor_for(provider, base_url);
         context.push('\n');
-        context.push_str(&crate::meetings::meeting_summary::ask_context(note, budget));
+        context.push_str(&crate::meetings::summary::ask_context(note, budget));
     }
     if !note.enhanced_content.trim().is_empty() {
         context.push_str(&format!("\nEnhanced notes:\n{}\n", note.enhanced_content.trim()));

@@ -26,7 +26,7 @@ use tauri::AppHandle;
 use super::voiceprint::{centroid, Printer, Span};
 use super::voices::{self, Line, Split, Voice};
 use super::{resolve, Alike, Note, SplitOffer, SEPARATED_PREFIX, THEM};
-use crate::meetings::meeting_audio::{self, Meta};
+use crate::meetings::audio::{self, Meta};
 
 /// A voice's lines looked at, at most (the longest): enough to tell, and
 /// a long meeting's flags stay a few seconds of work.
@@ -171,7 +171,7 @@ pub fn refresh(app: &AppHandle, note_id: u64) {
     }
     let Some(printer) = Printer::for_note(note_id) else { return };
     let started = std::time::Instant::now();
-    let metas = meeting_audio::recordings(note_id);
+    let metas = audio::recordings(note_id);
     let lines = prints(&note, &metas, &printer);
     let (pairs, splits) = find(&note, &lines);
     let changed = crate::notes::modify(note_id, |n| {

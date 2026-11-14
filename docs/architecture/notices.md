@@ -4,16 +4,16 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
-- **`notices/notice.rs`** — **Yap's notice policy** (Wispr Flow's rules, by
+- **`notices/policy.rs`** — **Yap's notice policy** (Wispr Flow's rules, by
   behaviour), the one place that decides how loud a notice may be; the page
   runs the same rules (`ui/noticePolicy.js`). **One place**
   (`place_for`/`place`): the main window's toast while it's focused, else
   the Yap bar, else a Windows notification, else the window if it's on
   screen — used by alerts, coaching, learn, call prompts, calendar cards,
   the length warning and meeting notices — among them, since 2026-10-24,
-  "Yap couldn't transcribe part of this meeting" (`meetings/meeting.rs`, once per
+  "Yap couldn't transcribe part of this meeting" (`meetings/recorder.rs`, once per
   meeting, with Open note), and since 2026-10-25 **"Your summary is
-  ready"** (`meetings/meeting_end.rs`: only when `yap_in_front` says no Yap
+  ready"** (`meetings/end.rs`: only when `yap_in_front` says no Yap
   window — the main window or the notepad — has the focus; then the Yap
   bar's card, else a Windows notification, with Open note) — (`window_view`: test runs say for
   themselves whether the window counts as focused, `e2e_focus`). **Focused
@@ -48,7 +48,7 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   is closed, so its microphone can't hear you", `dictation/lid.rs`, once per
   closing there, the same words not twice in 10 min), meetingRecovery ("Yap
   closed during a meeting", held while dictating or recording, waiting as
-  long as it takes; `meetings/meeting_audio.rs`), and the Voice Assistant's
+  long as it takes; `meetings/audio.rs`), and the Voice Assistant's
   answer `assistant` (never held, never stale) — > Info — micOffer ("Contoso
   H2 connected · Use it for dictation?", `dictation/mics/offer.rs`, which
   rate-limits it itself and never asks during a dictation), micSwitched
@@ -110,14 +110,14 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   tips" still mutes every tip), and each shown at most `cap` times a day
   (suggestions 3, milestones 2, feature tips 3, news 1; counted in memory,
   a restart starts the day afresh). Through the one policy: a module about
-  to show one asks **`notice::place_tip(app, kind)`** — its place, or
+  to show one asks **`notices::policy::place_tip(app, kind)`** — its place, or
   Nowhere when its kind is off or used up today, counted when it goes
   somewhere (coaching, mic tips, feature tips, word milestones, learn, the
   snippet offer, the language nudge) — and the page asks `notice_allow` for its own
   ("Updated to …"). Counted only if it shows (2026-10-30): one that
   doesn't after all gives its count back (`kinds::give_back`) — its
   window's event failed or the bar couldn't take the card (each caller's
-  `notice::tip_shown`), or the bar took the card and never showed it
+  `notices::policy::tip_shown`), or the bar took the card and never showed it
   (`bar.rs`: dropped for its cooldown, replaced while it still waited, or
   dropped unseen). A card of a capped kind only ever comes through
   `place_tip`. Unit test `kinds::tests`, e2e `feature-tips.spec.js`. Questions, alerts and notices have no kind and are
@@ -143,7 +143,7 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   microphones' "Contoso H2 disconnected" (kind `micLost`) and "Using
   Contoso H2 for dictation" (kind `micSwitched`), with **Microphones** /
   **Change** → Settings → Dictation → Microphone (`OPEN_MIC_ORDER`,
-  `dictation/mics.rs`); `meetings/meeting_audio.rs`'s
+  `dictation/mics.rs`); `meetings/audio.rs`'s
   "Yap closed during a meeting" at the next start, with **Transcribe it**
   — `recoverMeetings`), a settings
   file Yap couldn't read ("Your settings were reset" / "Some of your
@@ -153,7 +153,7 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   disk is full. Yap is keeping it in memory and will try again with the next
   change.", kind `saveFailed`, once until a save of that store works, with
   **Try again** → `saving::retry_soon`: "Saved", or "Still couldn't save…";
-  `shell/saving.rs`): in one place (`notice::place`) — a
+  `shell/saving.rs`): in one place (`notices::policy::place`) — a
   toast in the main window while it's focused (`yap-alert` →
   `lib/notices/alerts.js`, kind `alert`), else a Yap bar card, else a Windows
   notification, else the window on screen; the same alert again within its
@@ -184,7 +184,7 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   card's buttons), notices/alert.rs under the alert's kind; each keeps its live
   toast so the buttons work from the notification center. `post` goes
   through the notice policy: the same notification again within its kind's
-  cooldown isn't posted, and it skips the banner (`notice::native_quietly`)
+  cooldown isn't posted, and it skips the banner (`notices::policy::native_quietly`)
   while a dictation records or `SHQueryUserNotificationState` says busy,
   unless it's an alert or a question. `allowed()` = not portable, not a test
   run.

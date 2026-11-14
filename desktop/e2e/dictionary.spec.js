@@ -39,7 +39,7 @@ const test = base.extend({
     {
       name: 'dictionary',
       config: { dictionary: DICT },
-      // How often each word's been used (dict_usage.rs): "Most used".
+      // How often each word's been used (dictionary/usage.rs): "Most used".
       data: {
         'dictionary_usage.json': {
           json: { uses: 30, lastUsed: NOW - 50 },

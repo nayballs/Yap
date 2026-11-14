@@ -8,7 +8,7 @@
 //
 // Meeting notes: Record / Pause / Resume in the chip row, "End meeting &
 // summarise" in the bottom bar; the built-in Action Plan is then written by
-// Rust (meetings/meeting_end.rs), whichever window is open, and shown here as it goes
+// Rust (meetings/end.rs), whichever window is open, and shown here as it goes
 // (docs/meetings.md). The meeting notepad (notepad/Notepad.svelte) shows the
 // same note: edits sync both ways.
 //
@@ -74,7 +74,7 @@ export function createNotesState() {
   // ---- Meeting recorder (OpenWhispr meetingRecordingStore port) ----
   // meeting = { recording, noteId, elapsedSecs } from the backend; segments
   // stream in live via yap-meeting-segment and land on note.transcript, and
-  // the rolling AI digests (meetings/meeting_summary.rs) via yap-meeting-digest.
+  // the rolling AI digests (meetings/summary.rs) via yap-meeting-digest.
   let meeting = $state({ recording: false });
   let elapsed = $state(0);
   let elapsedTimer = null;
@@ -98,7 +98,7 @@ export function createNotesState() {
   // the user scrolled up to read.
   let logEl = $state(null);
   let followLog = true;
-  // "You" chunks that were the call coming through the speakers (meetings/meeting.rs
+  // "You" chunks that were the call coming through the speakers (meetings/recorder.rs
   // echo check): kept, hidden unless asked for.
   let showEcho = $state(false);
   const shownTranscript = $derived((selected?.transcript || []).filter((s) => showEcho || !s.echo));
@@ -108,7 +108,7 @@ export function createNotesState() {
   });
   // The menu on a speaker's name: `{ key, voice, lines, start }`.
   let speakerMenu = $state(null);
-  // The line whose words are being fixed: `{ i, text }` (notes/note_edits.rs).
+  // The line whose words are being fixed: `{ i, text }` (notes/edits.rs).
   let editingLine = $state(null);
   // The transcript's lines, by index (focus, menus, a line opened from Tasks).
   let lineEls = $state({});
@@ -182,7 +182,7 @@ export function createNotesState() {
 
   // Write the action plan (again): the "Action plan" button, the Action
   // Plan action on a meeting note, and "New since this summary · Update".
-  // Rust runs it (meetings/meeting_end.rs), so the meeting notepad shows its
+  // Rust runs it (meetings/end.rs), so the meeting notepad shows its
   // progress too. A summary the person edited goes only when they say so.
   async function summariseMeeting(returnFocus = null) {
     if (!selected) return;
@@ -270,7 +270,7 @@ export function createNotesState() {
     }
   }
 
-  // The action plan Rust writes (meetings/meeting_end.rs): bring it in when done.
+  // The action plan Rust writes (meetings/end.rs): bring it in when done.
   async function onSummary(s) {
     if (!s) return;
     if (s.state !== 'running') refreshList();
@@ -477,7 +477,7 @@ export function createNotesState() {
     return true;
   }
 
-  // The open note's audio kept on disk (meetings/meeting_audio.rs): ▶ on its lines,
+  // The open note's audio kept on disk (meetings/audio.rs): ▶ on its lines,
   // what a crash left of it; kept current from `yap-meeting-audio`.
   let audioFor = null;
   $effect(() => {
@@ -769,7 +769,7 @@ export function createNotesState() {
     return !!s?.stale;
   });
 
-  // ---- the summary, edited in place (notes/note_edits.rs) ----
+  // ---- the summary, edited in place (notes/edits.rs) ----
   let summaryEditing = $state(false);
   let summaryDraft = $state('');
   let summaryEl = $state(null);
@@ -850,7 +850,7 @@ export function createNotesState() {
     }
     flushSave();
     finishSummaryEdit();
-    // A summary the person edited goes only when they say so (notes/note_edits.rs).
+    // A summary the person edited goes only when they say so (notes/edits.rs).
     if (selected.summaryEditedMs && selected.enhancedContent?.trim()) {
       askReplaceSummary({ run: () => runActionNow(action, true), returnFocus });
       return;

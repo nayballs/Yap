@@ -1,7 +1,7 @@
 //! Small AI helpers for a meeting, all on the meeting's own model (the Note
-//! Formatting scope, else the cleanup model; `meeting_summary::
+//! Formatting scope, else the cleanup model; `summary::
 //! resolve_endpoint`), all bounded to fit an 8k local model, and all
-//! stepping aside for dictation (`meeting_summary::chat_beside_dictation`):
+//! stepping aside for dictation (`summary::chat_beside_dictation`):
 //!
 //! - **"What did I miss?"** ([`meeting_catch_up`], the notepad's mini chat):
 //!   what was said since the person last looked at the transcript. The
@@ -19,14 +19,14 @@
 //!   when there's too little to go on. And, since 2026-10-29 (Wispr Flow's
 //!   Notetaker chips), **Make me sound smart** while it records: one or two
 //!   things worth saying now, each built on a cited passage of the latest
-//!   talk (`meeting_summary::chips`).
+//!   talk (`summary::chips`).
 //! - **A Skill on the meeting** ([`meeting_skill`]): `/decisions`, `/risks`,
 //!   the person's own (`chat/skills.rs`), typed in the meeting's Ask box:
 //!   the Skill's instructions under fixed guardrails, the meeting as
 //!   numbered passages, the answer citing them.
 //! - **"Make notes longer"** ([`meeting_longer`], after the meeting): Yap's
 //!   summary written again in more detail from the meeting, every task kept;
-//!   the window's Undo puts the one before back (`note_edits::put_back`).
+//!   the window's Undo puts the one before back (`notes::edits::put_back`).
 //! - **The AI meeting title** ([`maybe_title`]): once there's enough talk
 //!   (150 words, or the first digest) a made-up title like "Teams call · 5
 //!   Oct, 14:30", or none, becomes a short one from what the meeting is about
@@ -40,7 +40,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use crate::meetings::meeting_summary as summary;
+use crate::meetings::summary as summary;
 
 /// The answer when nothing was said since the person last looked.
 pub const NOTHING_NEW: &str = "Nothing new since you last looked.";
@@ -50,7 +50,7 @@ pub const NOTHING_NEW: &str = "Nothing new since you last looked.";
 pub const TITLE_WORDS: usize = 150;
 /// …or when it ends, if it has at least this many (fewer: "Started by
 /// mistake?" asks first).
-pub const TITLE_END_WORDS: usize = crate::meetings::meeting_end::MISTAKE_WORDS;
+pub const TITLE_END_WORDS: usize = crate::meetings::end::MISTAKE_WORDS;
 /// A failed title is tried again after this long…
 const TITLE_RETRY_MS: u64 = 2 * 60 * 1000;
 /// …at most this many times per meeting (per run of Yap).
@@ -473,8 +473,8 @@ pub fn skill_messages(skill: &crate::chat::skills::Skill, meeting: &str, words: 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Longer {
-    pub state: crate::notes::note_edits::SummaryState,
-    pub previous: crate::notes::note_edits::SummaryBefore,
+    pub state: crate::notes::edits::SummaryState,
+    pub previous: crate::notes::edits::SummaryBefore,
 }
 
 /// **"Make notes longer"** (after a meeting): Yap's summary written again in
@@ -482,7 +482,7 @@ pub struct Longer {
 /// and the meeting as the action plan reads it, `chips::longer_request`),
 /// every task kept — an action plan's reply goes through its checks, which
 /// put back a task the model dropped and keep owners and deadlines to what
-/// was said — and stored through `note_edits::write_summary` (so never over
+/// was said — and stored through `notes::edits::write_summary` (so never over
 /// the person's edited summary unless `replace`: the window asked). One
 /// that came back no longer than before isn't stored. The summary before is
 /// returned for Undo. (When note version history lands, the summary before
@@ -494,17 +494,17 @@ pub async fn meeting_longer(app: AppHandle, note_id: u64, replace: Option<bool>,
     if note.enhanced_content.trim().is_empty() {
         return Err("There's no summary to make longer yet.".to_string());
     }
-    if crate::meetings::meeting::recording_note() == Some(note_id) {
+    if crate::meetings::recorder::recording_note() == Some(note_id) {
         return Err("Make notes longer works once the meeting has ended.".to_string());
     }
-    if crate::meetings::meeting_end::summary_running_for(note_id) {
+    if crate::meetings::end::summary_running_for(note_id) {
         return Err("Yap is still writing this summary. Try again when it's done.".to_string());
     }
-    crate::notes::note_edits::keeps_summary(&note, replace)?;
-    let previous = crate::notes::note_edits::SummaryBefore::of(&note);
+    crate::notes::edits::keeps_summary(&note, replace)?;
+    let previous = crate::notes::edits::SummaryBefore::of(&note);
     let created = note.created_ts;
     let read_ms = now_ms();
-    let heard_to = crate::notes::note_edits::newest_talk(&note);
+    let heard_to = crate::notes::edits::newest_talk(&note);
     let hash = crate::notes::content_hash(&note.content);
     let cfg = crate::config::load();
     let ep = summary::resolve_endpoint(&cfg)?;
@@ -532,21 +532,21 @@ pub async fn meeting_longer(app: AppHandle, note_id: u64, replace: Option<bool>,
     store_longer(note_id, &longer, &hash, read_ms, heard_to, replace)?;
     crate::notes::saved()?;
     tracing::info!(note_id, before = previous.enhanced_content.len(), after = longer.len(), "Make notes longer: written");
-    crate::notes::note_edits::summary_changed(&app, note_id, origin.as_deref().unwrap_or(""));
-    let state = crate::notes::get(note_id).map(|n| crate::notes::note_edits::state_of(&n)).ok_or("Note not found")?;
+    crate::notes::edits::summary_changed(&app, note_id, origin.as_deref().unwrap_or(""));
+    let state = crate::notes::get(note_id).map(|n| crate::notes::edits::state_of(&n)).ok_or("Note not found")?;
     Ok(Longer { state, previous })
 }
 
 /// What "Make notes longer" is called in a note's version history.
 const LONGER: &str = "Make notes longer";
 
-/// "Make notes longer"'s summary stored (`note_edits::write_summary`) as a
+/// "Make notes longer"'s summary stored (`notes::edits::write_summary`) as a
 /// version of its own, marked as the Action it is (`versions.rs`): never
 /// "Changed", never folded into an edit made just before.
 fn store_longer(note_id: u64, longer: &str, hash: &str, read_ms: u64, heard_to: u64, replace: bool) -> Result<(), String> {
     use crate::notes::versions::{by, kind, How};
     by(How::named(kind::ACTION, LONGER), || {
-        crate::notes::note_edits::write_summary(note_id, longer, hash, read_ms, heard_to, replace)
+        crate::notes::edits::write_summary(note_id, longer, hash, read_ms, heard_to, replace)
     })
 }
 
@@ -571,7 +571,7 @@ mod tests {
     fn make_notes_longer_is_a_version_of_its_own() {
         use crate::notes::versions::{by, kind, list, How};
         let id = crate::notes::create("Supplier call", "", "meeting", "Meetings").id;
-        by(How::new(kind::SUMMARY), || crate::notes::note_edits::write_summary(id, "## Action plan\n- [ ] Send the quote", "h", 1_000, 0, false)).unwrap();
+        by(How::new(kind::SUMMARY), || crate::notes::edits::write_summary(id, "## Action plan\n- [ ] Send the quote", "h", 1_000, 0, false)).unwrap();
         crate::notes::modify(id, |n| {
             n.enhanced_content.push_str("\n- [ ] Book the room");
             Ok(((), true))

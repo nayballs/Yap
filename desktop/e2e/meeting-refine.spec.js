@@ -1,5 +1,5 @@
-// A meeting's transcript you can trust (meetings/meeting.rs "Failed chunks",
-// meetings/meeting_refine.rs, the recorder's slot), end to end:
+// A meeting's transcript you can trust (meetings/recorder.rs "Failed chunks",
+// meetings/refine.rs, the recorder's slot), end to end:
 // - a chunk that fails to transcribe is a marker, never silence ("Couldn't
 //   transcribe 0:00–0:15 · Try again"), the person is told once, and Try
 //   again puts that stretch's lines in its place;

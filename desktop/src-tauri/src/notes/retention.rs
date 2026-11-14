@@ -5,8 +5,8 @@
 //! touched), the summary and its ticks, the attendees, the calendar event
 //! and its tasks stay. What goes is what was heard: the lines, the rolling
 //! digests written from them, the stop marks and the voices' map — and the
-//! meeting's kept audio with them (`meeting_audio::drop_audio`; the audio's
-//! own days, Settings → Meetings, can only be shorter: `meeting_audio::
+//! meeting's kept audio with them (`meetings::audio::drop_audio`; the audio's
+//! own days, Settings → Meetings, can only be shorter: `meetings::audio::
 //! keep_ms` takes the smaller). The note says when (`transcript_deleted_ts`)
 //! and its Transcript tab says why.
 //!
@@ -70,9 +70,9 @@ pub fn strip(note: &mut Note, now: u64) {
 /// The notes nothing may touch now: the one recording, and those being
 /// transcribed or summarised.
 fn busy(notes: &[Note]) -> Vec<u64> {
-    let mut out: Vec<u64> = crate::meetings::meeting::recording_note().into_iter().collect();
+    let mut out: Vec<u64> = crate::meetings::recorder::recording_note().into_iter().collect();
     out.extend(notes.iter().map(|n| n.id).filter(|&id| {
-        crate::meetings::meeting_audio::running_job(id).is_some() || crate::meetings::meeting_end::summary_running_for(id)
+        crate::meetings::audio::running_job(id).is_some() || crate::meetings::end::summary_running_for(id)
     }));
     out
 }
@@ -96,14 +96,14 @@ pub fn sweep(app: Option<&AppHandle>) -> usize {
         let stripped = crate::notes::modify_quietly(id, |n| {
             let still = !n.transcript.is_empty()
                 && meeting_time(n) < now.saturating_sub(days as u64 * DAY)
-                && crate::meetings::meeting::recording_note() != Some(n.id);
+                && crate::meetings::recorder::recording_note() != Some(n.id);
             if still {
                 strip(n, now);
             }
             Ok((still, still))
         });
         if stripped == Ok(true) {
-            crate::meetings::meeting_audio::drop_audio(id);
+            crate::meetings::audio::drop_audio(id);
             // The summary's earlier versions too (notes/versions.rs): Yap's
             // writing from what was said, like the digests. My thoughts' stay.
             crate::notes::versions::drop_summaries(id);
@@ -119,7 +119,7 @@ pub fn sweep(app: Option<&AppHandle>) -> usize {
     tracing::info!(meetings = done.len(), days, "Transcript retention: old meeting transcripts deleted");
     if let Some(app) = app {
         for id in &done {
-            crate::meetings::meeting_audio::changed(app, *id);
+            crate::meetings::audio::changed(app, *id);
         }
         let _ = app.emit("yap-notes-changed", ());
     }

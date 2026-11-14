@@ -507,8 +507,8 @@ pub fn check_digest(mut d: ParsedDigest, attendees: &[String], source: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meetings::meeting_summary::tests::{digest, talk};
-    use crate::meetings::meeting_summary::FINAL_TAIL_TOKENS;
+    use crate::meetings::summary::tests::{digest, talk};
+    use crate::meetings::summary::FINAL_TAIL_TOKENS;
 
     #[test]
     fn live_waits_for_a_full_window() {

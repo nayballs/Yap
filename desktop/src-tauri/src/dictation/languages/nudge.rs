@@ -29,11 +29,11 @@
 //!   `<data>/language_nudges.json`, not config.json (Settings auto-saves its
 //!   whole copy of the config).
 //! - **Never during a dictation**: it waits on its own thread until no
-//!   dictation records or transcribes (`notice::moment`, the settle time
+//!   dictation records or transcribes (`notices::policy::moment`, the settle time
 //!   after one included) — up to [`WAIT_MS`], then it's dropped — and the
 //!   notice policy holds it too (kind [`CARD`]: a tip-like suggestion, held
 //!   while dictating, dropped unseen after a minute).
-//! - **One place** (`notice::place`): a toast in the main window while
+//! - **One place** (`notices::policy::place`): a toast in the main window while
 //!   it's focused (`yap-language-nudge`, `lib/notices/languageNudge.js`),
 //!   else a card on the Yap bar; nowhere else, never a Windows
 //!   notification. **Add** puts the language in My languages
@@ -66,7 +66,7 @@ pub const NOT_NOW_LIMIT: u32 = 2;
 const WAIT_MS: u64 = 60_000;
 /// The main window's event.
 const EVENT: &str = "yap-language-nudge";
-/// The bar card's id (its rule in `notice.rs`) and the "added" card's.
+/// The bar card's id (its rule in `notices/policy.rs`) and the "added" card's.
 pub const CARD: &str = "language-nudge";
 const CARD_ADDED: &str = "language-added";
 /// How long the card stays up (then it's left unanswered).
@@ -373,7 +373,7 @@ fn later(app: &AppHandle, offer_: Offer) {
     let _ = std::thread::Builder::new().name("language-nudge".into()).spawn(move || {
         // Never over a dictation (the one that heard it is still pasting).
         let waited = std::time::Instant::now();
-        while crate::notices::notice::moment().dictating {
+        while crate::notices::policy::moment().dictating {
             if waited.elapsed() > Duration::from_millis(WAIT_MS) {
                 tracing::debug!("Language nudge: a dictation went on too long; dropped");
                 return;
@@ -390,12 +390,12 @@ fn later(app: &AppHandle, offer_: Offer) {
 /// Make `offer`: a toast in the main window while it's on screen, else a
 /// Yap bar card. `true` if shown.
 pub fn offer(app: &AppHandle, offer: Offer) -> bool {
-    let place = crate::notices::notice::place_tip(app, "language-nudge");
-    if place == crate::notices::notice::Place::Nowhere {
+    let place = crate::notices::policy::place_tip(app, "language-nudge");
+    if place == crate::notices::policy::Place::Nowhere {
         tracing::debug!("Language nudge: nowhere to show it");
         return false;
     }
-    let in_window = place == crate::notices::notice::Place::Window;
+    let in_window = place == crate::notices::policy::Place::Window;
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
     let Offer { code, kind, title, body, add, never } = offer;
     let code = code.as_str();
@@ -429,7 +429,7 @@ pub fn offer(app: &AppHandle, offer: Offer) -> bool {
         )
     };
     // Not shown after all: the day's count back.
-    let shown = crate::notices::notice::tip_shown(CARD, place, shown);
+    let shown = crate::notices::policy::tip_shown(CARD, place, shown);
     if shown {
         tracing::info!(language = %code, in_window, ?kind, "Language nudge: offered");
         let now = now_ms();

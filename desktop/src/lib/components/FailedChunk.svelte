@@ -1,6 +1,6 @@
 <script>
   // A stretch of a meeting the speech model couldn't transcribe (a `failed`
-  // segment, meetings/meeting.rs "Failed chunks"), in the meeting notepad and the
+  // segment, meetings/recorder.rs "Failed chunks"), in the meeting notepad and the
   // Notes view alike: "Couldn't transcribe 0:42–1:12 · Try again" — that
   // stretch transcribed again from the meeting's audio on disk
   // (`meeting_retry_chunk`), its lines in its place.

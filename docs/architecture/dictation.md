@@ -92,7 +92,7 @@ the model (the 4B mostly; the 1.5B hardly — docs/model-evals.md). The dictiona
 **Whisper models** get the correct spellings as the decoder's `initial_prompt`
 (ASR biasing, threaded through `SttEngine::transcribe` at every call site —
 dictation/partials/upload/meeting — the words used most lately first,
-`dict_usage::ranked`; plus an OpenWhispr-ported prompt-echo guard
+`dictionary::usage::ranked`; plus an OpenWhispr-ported prompt-echo guard
 in `dictation/stt.rs`), **ONNX models** get **`dictionary/fuzzy.rs`** — Levenshtein + Soundex 1–3-word
 n-gram correction ("jaison"→"JSON", "Chat G P T"→"ChatGPT"; threshold 0.18,
 ≥3-char terms), gated by `config.dictionary_fuzzy` (default on, "Catch
@@ -101,8 +101,8 @@ near-misses" toggle in the Dictionary view) with a **per-entry ≈ opt-out**
 `json → JSON` eating the name "Jason"). See `docs/fuzzy-dictionary.md`. The
 exact + fuzzy correction is ONE function, `pipeline::apply_corrections(text,
 &cfg)`, run the same way on a dictation, on every meeting segment (both sides,
-before `meeting::ingest`) and on an Upload's whole text; the dictionary words
-in its result count as used (`dict_usage::record`). **Snippets** (an entry
+before `meetings::recorder::ingest`) and on an Upload's whole text; the dictionary words
+in its result count as used (`dictionary::usage::record`). **Snippets** (an entry
 with `snippet: true`: a spoken phrase → text, may span lines;
 `config::apply_snippets`) are dictation-only: whole phrase, any case and
 punctuation, longest first in one pass, a phrase said alone becomes exactly
@@ -246,7 +246,7 @@ to **Run again** from Home.
   recording: `start_recording` (plain dictation, the edit hotkey, Commands by
   name, the assistant shortcut) calls `dictation_began()` and the stop/cancel `dictation_ended()`, one
   atomic (`DICTATION`: dictations started << 1 | recording) that
-  `meetings/meeting.rs` reads lock-free in its mic callback (`dictation_state()`) to
+  `meetings/recorder.rs` reads lock-free in its mic callback (`dictation_state()`) to
   keep dictations out of a meeting's "You" side. `PREROLL_SAMPLES` is shared
   with it (the meeting blanks a dictation's pre-roll too). **Commands** (two
   different things share no name any more, 2026-10-18: *Commands* type for
@@ -575,7 +575,7 @@ to **Run again** from Home.
   within 10 min of another, the tap and long-hold ones none
   once double-tap has been used; counts in `<data>/hints.json` (not config.json:
   Settings' auto-saved copy would write old counts back). Surface (one
-  place, `notice::place`): a Tip toast in the main window while it's focused
+  place, `notices::policy::place`): a Tip toast in the main window while it's focused
   (`yap-hint`), else a Yap bar card (icon `tip`; it waits out a dictation
   and is dropped if it can't show within 10 s), else the window's
   toast if it's on screen; neither → nothing shown, nothing counted (never a
@@ -586,7 +586,7 @@ to **Run again** from Home.
   card's `hotkey` field). Not for the edit hotkey. hints.json also keeps the
   feature tips' and the bar's first-use pointers' counts (`tips.rs`,
   `bar/pointer.rs`: `record` / `update_record`, one lock), and a hint goes
-  through `notice::place_tip` ("hint": Feature tips' switch and daily cap,
+  through `notices::policy::place_tip` ("hint": Feature tips' switch and daily cap,
   `notices/kinds.rs`).
 - **`dictation/tips.rs`** — **feature tips** (2026-10-29; Wispr Flow's
   "self-correction caught", "listed", "email formatted", by behaviour): the
@@ -604,7 +604,7 @@ to **Run again** from Home.
   `ORDER` not shown before, never within 10 minutes of another. After a
   paste that landed (`after_dictation`, a thread of its own: it waits out
   the dictation; none offered, nor counted, while a meeting records), through
-  `notice::place_tip` ("featureTip"): the main
+  `notices::policy::place_tip` ("featureTip"): the main
   window's toast (`yap-feature-tip` → `lib/notices/featureTips.js`, chip
   Tip; a snippet's or the dictionary's with Open Dictionary) or a Yap bar
   card, never a Windows notification; counted when shown, in hints.json's
@@ -1105,10 +1105,10 @@ to **Run again** from Home.
   My languages, after a dictation of at least 2 s, "Tell me when I speak a
   language I didn't pick" on (`language_nudge`, default on) → "You spoke
   French · Add it to My languages?" (Add French / Not now / Don't ask about
-  French) in one place (`notice::place`: the main window's toast,
+  French) in one place (`notices::policy::place`: the main window's toast,
   `lib/notices/languageNudge.js`, else a Yap bar card `language-nudge`;
   never a Windows notification), on its own thread once no dictation runs
-  (`notice::moment`, up to a minute; the policy holds the card too); at most
+  (`notices::policy::moment`, up to a minute; the policy holds the card too); at most
   one per 10 minutes, Not now twice or Don't ask → never again for that
   language (`<data>/language_nudges.json`); Add → `shell::settings::
   change_config` (saved, applied, every window told). **Models that don't
@@ -1297,9 +1297,9 @@ to **Run again** from Home.
   callbacks only nudge a channel (nothing may wait in them); a burst of
   notifications settles (400 ms), then `refresh()`. **`offer.rs`**: an
   arrival waits 800 ms (Windows may make it its default), then until no
-  dictation is going on (`notice::moment`, the settle after one included;
+  dictation is going on (`notices::policy::moment`, the settle after one included;
   dropped if it's gone again or after 10 min), then **Ask** → "Contoso H2
-  connected · Use it for dictation?" in one place (`notice::place`, never a
+  connected · Use it for dictation?" in one place (`notices::policy::place`, never a
   Windows notification): the main window's toast (`yap-mic-offer` →
   `lib/notices/micOffer.js`, kind `info`) or a Yap bar card (`micOffer`),
   **Use it** (`put_first`: first in the order, off "Not now") / **Not now**
@@ -1343,7 +1343,7 @@ to **Run again** from Home.
   and the overlay's short "No sound from <device> — is it muted?"). Only exact
   zeros count (a quiet room is never all zeros). Unit-tested over simulated
   callback chunks. Before it blames the mic, the pipeline asks Windows' privacy
-  switches (`dictation/mic_privacy.rs`). Meetings have their own quiet-side watch (`meetings/meeting.rs`).
+  switches (`dictation/mic_privacy.rs`). Meetings have their own quiet-side watch (`meetings/recorder.rs`).
 - **`dictation/mic_privacy.rs`** — Windows' microphone privacy switches, read only (never
   written): HKLM `…\CapabilityAccessManager\ConsentStore\microphone` `Value`
   ("Microphone access", the device), HKCU's ("Let apps access your
@@ -1387,8 +1387,8 @@ to **Run again** from Home.
   first in Microphones") or "Move closer… or somewhere quieter". Title "Yap
   didn't hear you clearly". **Rarely** (`eligible`, pure): one mic tip a
   day, each kind at most 3 times and not twice in a week (`mic_tips.json`);
-  shown once the dictation is done (`notice::moment`, within a minute), in
-  one place (`notice::place`: the main window's toast, `yap-mic-tip` →
+  shown once the dictation is done (`notices::policy::moment`, within a minute), in
+  one place (`notices::policy::place`: the main window's toast, `yap-mic-tip` →
   `lib/notices/micTips.js`, kind `tip`; else a Yap bar card `micTip`,
   never a Windows notification); "Show tips" off, none; while a meeting
   records, none offered or counted; notice kind `micTip` is a tip held over
@@ -1708,9 +1708,9 @@ to **Run again** from Home.
   records nothing plays but a dictation's start and stop, which always
   have (`meeting_allows`; the rule spoken replies follow, `tts::
   meeting_quiet`); meeting notes' own start sound plays to its end before
-  `meeting::start` opens the loopback (`meeting_started`, a quarter of a
+  `meetings::recorder::start` opens the loopback (`meeting_started`, a quarter of a
   second), their stop sound once the capture has closed its streams
-  (`meeting_stopped`, `meeting::capturing`). `open_output` (the configured
+  (`meeting_stopped`, `meetings::recorder::capturing`). `open_output` (the configured
   output device, found by its name as `mics::device_name` gives it, else
   the default) is shared with `voice/tts.rs`: rodio on the device's own
   format and Windows' default period (`open_device`; rodio 0.22's builder
@@ -1862,7 +1862,7 @@ to **Run again** from Home.
   ones' words and seconds, words per app (exe names), the words AI cleanup
   changed (`word_diff.rs`: `core/wordDiff.js`'s twin, the larger of the
   words out and in for each change) and the dictionary's fixes
-  (`dict_usage::fixed_in`: a dictionary word written its way that was
+  (`dictionary::usage::fixed_in`: a dictionary word written its way that was
   heard otherwise). `dictated` counts every dictation delivered — pasted
   or not, into Chat or the quick note — **whether or not history keeps
   it**, and a failed or cancelled one when Run again / Transcribe gets its

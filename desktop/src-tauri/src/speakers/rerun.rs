@@ -1,5 +1,5 @@
 //! **Find speakers** (beta): the speaker engine run again over a past
-//! meeting's call side, from its audio on disk (`meeting_audio.rs`) — a
+//! meeting's call side, from its audio on disk (`meetings/audio.rs`) — a
 //! meeting recorded with "Tell speakers apart" off, the lines "Transcribe
 //! again" made (it runs by itself after that when the switch is on), or
 //! labels to redo.
@@ -34,7 +34,7 @@ use super::diarize::{self, Piece, Segment};
 use super::voiceprint::{Printer, Span};
 use super::voices::{self, OldVoice, Overlap, Voice};
 use super::{resolve, split_line, Turn, NEAR_MS, SEPARATED_PREFIX, THEM, YOU};
-use crate::meetings::meeting_audio::{self, Kind, Meta, SideJob};
+use crate::meetings::audio::{self, Kind, Meta, SideJob};
 use crate::notes::{Note, TranscriptSegment};
 
 /// Silence between two recordings in the one stream.
@@ -56,12 +56,12 @@ fn engine_ready(note_id: u64) -> bool {
 pub fn start(app: &AppHandle, note_id: u64) -> Result<(), String> {
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
     if crate::notes::is_imported(&note) {
-        return Err(meeting_audio::IMPORTED.to_string());
+        return Err(audio::IMPORTED.to_string());
     }
-    if crate::meetings::meeting::recording_note() == Some(note_id) {
+    if crate::meetings::recorder::recording_note() == Some(note_id) {
         return Err("Stop the recording first".to_string());
     }
-    if crate::meetings::meeting::is_recording() {
+    if crate::meetings::recorder::is_recording() {
         return Err("Yap is recording a meeting: try again when it ends".to_string());
     }
     if !note.transcript.iter().any(|s| s.source == THEM && s.is_talk() && s.start_ms.is_some()) {
@@ -70,7 +70,7 @@ pub fn start(app: &AppHandle, note_id: u64) -> Result<(), String> {
     if !engine_ready(note_id) {
         return Err("Download the speaker model first (Settings → Speech-to-Text)".to_string());
     }
-    let metas: Vec<Meta> = meeting_audio::recordings(note_id).into_iter().filter(|m| m.ended_ms.is_some()).collect();
+    let metas: Vec<Meta> = audio::recordings(note_id).into_iter().filter(|m| m.ended_ms.is_some()).collect();
     if metas.is_empty() {
         return Err("This meeting's audio isn't kept any more".to_string());
     }
@@ -78,7 +78,7 @@ pub fn start(app: &AppHandle, note_id: u64) -> Result<(), String> {
         .or_else(|| diarize::registry::find(diarize::DEFAULT_MODEL))
         .map(|m| m.name)
         .unwrap_or("the speaker engine");
-    meeting_audio::start_side_job(app, note_id, Kind::Speakers, name, move |app, job| run(app, note_id, &metas, job))
+    audio::start_side_job(app, note_id, Kind::Speakers, name, move |app, job| run(app, note_id, &metas, job))
 }
 
 /// After "Transcribe again" made new lines: their speakers from the engine
@@ -100,13 +100,13 @@ fn run(app: &AppHandle, note_id: u64, metas: &[Meta], job: &SideJob) -> Result<(
         None => run_engine(note_id, metas, job)?,
     };
     if job.cancelled() {
-        return Err(meeting_audio::CANCELLED.to_string());
+        return Err(audio::CANCELLED.to_string());
     }
     // Resumed while the engine ran: the recording numbers its own voices
     // from the note as it started, and counts its lines from there, so
     // labels put on under it would give two people one number and its
     // voices to the earlier lines. Nothing changes; it can run again after.
-    if crate::meetings::meeting::recording_note() == Some(note_id) {
+    if crate::meetings::recorder::recording_note() == Some(note_id) {
         return Err("The meeting is recording again. Find speakers once it ends.".to_string());
     }
     (job.progress)(RUN_SHARE as u8);
@@ -124,7 +124,7 @@ fn run_engine(note_id: u64, metas: &[Meta], job: &SideJob) -> Result<Vec<Vec<Seg
     let mut feed = Feed { note_id, metas, at: 0, reader: None, read: 0, gap: false, lens: Vec::new() };
     let progress = |sent: u64| (job.progress)((sent * RUN_SHARE / total.max(1)).min(RUN_SHARE - 1) as u8);
     let cancelled = || job.cancelled();
-    let segments = diarize::run_saved(|| feed.next(), &progress, &cancelled, meeting_audio::CANCELLED)?;
+    let segments = diarize::run_saved(|| feed.next(), &progress, &cancelled, audio::CANCELLED)?;
     let lens = feed.lens.clone();
     Ok(split_by_recording(&segments, &lens, GAP_SAMPLES as u64))
 }
@@ -134,7 +134,7 @@ struct Feed<'a> {
     note_id: u64,
     metas: &'a [Meta],
     at: usize,
-    reader: Option<crate::meetings::meeting_audio::flac::Reader>,
+    reader: Option<crate::meetings::audio::flac::Reader>,
     read: u64,
     gap: bool,
     /// Each recording's length as read (samples).
@@ -150,7 +150,7 @@ impl Feed<'_> {
             }
             let meta = self.metas.get(self.at)?;
             if self.reader.is_none() {
-                match meeting_audio::open_side(self.note_id, meta.recording, "them") {
+                match audio::open_side(self.note_id, meta.recording, "them") {
                     Ok(r) => self.reader = Some(r),
                     Err(e) => {
                         tracing::warn!(note_id = self.note_id, "Find speakers: a recording's call side can't be read ({e})");
@@ -195,7 +195,7 @@ pub fn split_by_recording(segments: &[Segment], lens: &[u64], gap: u64) -> Vec<V
     out
 }
 
-/// Which of `metas` a line dated `ts` is in (as `meeting_audio::clip`
+/// Which of `metas` a line dated `ts` is in (as `meetings::audio::clip`
 /// finds it): the latest that started by then and hadn't ended a second
 /// before.
 pub fn recording_of(metas: &[Meta], ts: u64) -> Option<usize> {
@@ -524,7 +524,7 @@ impl Staged {
         const STEPS: u64 = 20;
         for step in 0..STEPS {
             if job.cancelled() {
-                return Err(meeting_audio::CANCELLED.to_string());
+                return Err(audio::CANCELLED.to_string());
             }
             (job.progress)((step * RUN_SHARE / STEPS) as u8);
             std::thread::sleep(std::time::Duration::from_millis(self.pace_ms / STEPS));

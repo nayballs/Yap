@@ -227,7 +227,7 @@ only while the dictation's window still has the focus. Before snippets, so
 "my address, press enter" still gives exactly the address. Test mode presses
 nothing (`text_injector::press_submit`).
 
-**Ranked Whisper vocabulary** (`dictionary/dict_usage.rs`). The prompt is capped at ~600
+**Ranked Whisper vocabulary** (`dictionary/usage.rs`). The prompt is capped at ~600
 chars, so with a long dictionary the order decides which words Whisper hears
 about. `<data>/dictionary_usage.json` keeps `{uses, lastUsed}` per word
 (lowercased `to`), outside config.json (Settings auto-saves its whole config

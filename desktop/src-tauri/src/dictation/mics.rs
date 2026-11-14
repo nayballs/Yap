@@ -17,7 +17,7 @@
 //!   dictation; the one it records from gone → the dictation ends,
 //!   `pipeline/unplugged.rs`), to Settings (`yap-mics-changed`), to a
 //!   meeting recording (it reads [`generation`]: its mic gone → the next one,
-//!   `meeting.rs`), and, for a microphone that just arrived, to the offer
+//!   `meetings/recorder.rs`), and, for a microphone that just arrived, to the offer
 //!   (`offer.rs`: "<mic> connected · Use it for dictation?", or "Using <mic>
 //!   for dictation" when the order puts it to use).
 //!

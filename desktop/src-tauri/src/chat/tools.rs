@@ -882,7 +882,7 @@ mod tests {
     /// knowledge marked in a document: about 60 tokens more).
     #[test]
     fn the_web_tools_stay_light() {
-        let est = crate::meetings::meeting_summary::estimate_tokens;
+        let est = crate::meetings::summary::estimate_tokens;
         let (s, t) = (est(&WEB_TOOL_INSTRUCTIONS.join(" ")), est(&web_definitions().to_string()));
         println!("the web adds: instructions {s} + tools {t} = {} tokens", s + t);
         assert!(s + t <= 520, "{} tokens", s + t);
@@ -906,7 +906,7 @@ mod tests {
     /// `--nocapture` prints it.
     #[test]
     fn a_tool_step_stays_light() {
-        let est = crate::meetings::meeting_summary::estimate_tokens;
+        let est = crate::meetings::summary::estimate_tokens;
         let system = format!(
             "You are a helpful assistant. Answer concisely.\n\nYou have access to tools. {} {}",
             TOOL_INSTRUCTIONS.join(" "),
@@ -967,7 +967,7 @@ mod tests {
         assert!(!instructions.contains("rewrite_section"));
         // The simple set's prompt is as it was.
         assert_eq!(tool_instructions(ToolSet::Simple), TOOL_INSTRUCTIONS.join(" "));
-        let est = crate::meetings::meeting_summary::estimate_tokens;
+        let est = crate::meetings::summary::estimate_tokens;
         let system = format!("You are a helpful assistant. Answer concisely.\n\nYou have access to tools. {} {}", instructions, APP_TOOL_INSTRUCTIONS.join(" "));
         let mut tools = defs;
         tools.as_array_mut().unwrap().extend(app_definitions().as_array().unwrap().iter().cloned());

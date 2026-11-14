@@ -34,7 +34,7 @@ const meetingNotes = (yap) => (yap.readJson('notes.json')?.notes ?? []).filter((
 const EXCLUDED = 17;
 /**
  * A silent test recording's end: so few words that Yap asks "Started by
- * mistake?" instead of writing a summary (meetings/meeting_end.rs).
+ * mistake?" instead of writing a summary (meetings/end.rs).
  */
 const SUMMARY_STEP = /Nothing to summarise yet|Started by mistake\?/;
 

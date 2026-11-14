@@ -256,7 +256,7 @@ pub fn page_text(html: &str, url: &str) -> (String, String) {
 /// line or a space; `(part, next offset if there's more)`. Pure.
 pub fn page_part(text: &str, offset: usize, budget: usize) -> (String, Option<usize>) {
     let rest: String = text.chars().skip(offset).collect();
-    if crate::meetings::meeting_summary::estimate_tokens(&rest) <= budget {
+    if crate::meetings::summary::estimate_tokens(&rest) <= budget {
         return (rest, None);
     }
     let mut end = 0;
@@ -728,7 +728,7 @@ mod tests {
         let text: String = (0..3_000).map(|i| format!("Line {i} of the page.\n")).collect();
         let (first, next) = page_part(&text, 0, 500);
         let next = next.unwrap();
-        assert!(crate::meetings::meeting_summary::estimate_tokens(&first) <= 500);
+        assert!(crate::meetings::summary::estimate_tokens(&first) <= 500);
         assert!(text.starts_with(&first));
         let (second, _) = page_part(&text, next, 500);
         assert!(second.trim_start().starts_with("Line "), "{second}");

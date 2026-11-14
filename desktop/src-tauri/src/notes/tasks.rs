@@ -1,7 +1,7 @@
 //! Tasks: the checkboxes in a note's summary — the action plan's
 //! "- [ ] task (due: …)" lines under a "### Owner" heading
 //! (`llm::ACTION_PLAN_DEFAULT_FRAGMENT`, checked by
-//! `meeting_summary::postcheck_action_plan`), "- [ ] Dave: task" lines (the
+//! `meetings::summary::postcheck_action_plan`), "- [ ] Dave: task" lines (the
 //! Action Items action), and any other "- [ ]" a summary has.
 //!
 //! - **Ticked in place**: the summary's markdown is the one store — "- [x]"
@@ -634,7 +634,7 @@ pub fn tasks_set(app: tauri::AppHandle, items: Vec<TaskRef>, done: bool, origin:
     }
     tracing::info!(tasks = n, notes = changed.len(), done, "Tasks ticked");
     for id in &changed {
-        crate::notes::note_edits::summary_changed(&app, *id, origin.as_deref().unwrap_or(""));
+        crate::notes::edits::summary_changed(&app, *id, origin.as_deref().unwrap_or(""));
     }
     tasks_changed(&app, &touched(&items));
     super::task_store::saved()?;
@@ -675,7 +675,7 @@ pub fn note_task_set(
         Ok((md, changed))
     })?;
     tracing::info!(note_id, line, done, "Task ticked");
-    crate::notes::note_edits::summary_changed(&app, note_id, origin.as_deref().unwrap_or(""));
+    crate::notes::edits::summary_changed(&app, note_id, origin.as_deref().unwrap_or(""));
     Ok(md)
 }
 

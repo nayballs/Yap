@@ -446,16 +446,16 @@ pub fn init(app: &AppHandle) {
     });
 }
 
-/// A recording into `note_id` started (`meeting::start`, before its first
+/// A recording into `note_id` started (`meetings::recorder::start`, before its first
 /// line): its lines are the ones from here on, labelled from diarization
 /// session `session`'s timelines (`None`: the switch is off, or no model).
 pub fn begin(note_id: u64, session: Option<u64>) {
     let Some(note) = crate::notes::get(note_id) else {
         return;
     };
-    // Its audio on disk (`meeting_audio::Recorder` started first): the
+    // Its audio on disk (`meetings::audio::Recorder` started first): the
     // newest of the note's recordings.
-    let on_disk = crate::meetings::meeting_audio::recordings(note_id);
+    let on_disk = crate::meetings::audio::recordings(note_id);
     let rec = Recording {
         note_id,
         session,
@@ -475,7 +475,7 @@ pub fn begin(note_id: u64, session: Option<u64>) {
     super::call_ui::begin(note_id, session, base);
 }
 
-/// Lines of the recording into `note_id` arrived (`meeting::ingest`, after
+/// Lines of the recording into `note_id` arrived (`meetings::recorder::ingest`, after
 /// the windows got them): those the latest labels already cover get their
 /// voices now, not at the next update.
 pub fn after_ingest(app: &AppHandle, note_id: u64) {
@@ -513,7 +513,7 @@ fn naming_due(note_id: u64) -> bool {
 
 const NAMING_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// The recording into `note_id` ended (`meeting.rs`, after its engine
+/// The recording into `note_id` ended (`meetings/recorder.rs`, after its engine
 /// finished, before it says it stopped). Final labels came: nothing to do.
 /// An engine that never sent them (it didn't finish in time): label as far
 /// as its labels went, and say so.
@@ -739,7 +739,7 @@ fn try_matching(
         found.tried = tried;
         return found;
     };
-    let metas = crate::meetings::meeting_audio::recordings(note_id);
+    let metas = crate::meetings::audio::recordings(note_id);
     let mut taken: Vec<(u32, String)> = Vec::new();
     for Todo { v, spans, ms, could_be } in todo {
         let mut cands: Vec<voices::Voice<String>> = Vec::new();

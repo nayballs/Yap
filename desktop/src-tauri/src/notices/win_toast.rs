@@ -5,7 +5,7 @@
 //! Every toast goes out under Yap's app identifier, with Yap's logo, in one
 //! "yap" group under a caller-chosen tag: posting the same tag again replaces
 //! the earlier toast, and [`remove`] takes it out of the notification center.
-//! [`post`] goes through Yap's notice policy (`notice.rs`): no repeats within
+//! [`post`] goes through Yap's notice policy (`policy.rs`): no repeats within
 //! a kind's cooldown, no banner while a dictation records.
 //! Clicks come back through the toast's Activated event while Yap runs, so a
 //! caller keeps the [`ToastNotification`] that [`post`] returns alive for as
@@ -95,7 +95,7 @@ pub fn build(tag: &str, xml: &str, quiet: bool) -> Result<ToastNotification, Str
 /// Post `xml` as Yap's toast `tag` (replacing an earlier one with that tag).
 /// `on_activated` gets the clicked button's `arguments` — the toast's
 /// `launch` value for a click on its body. Returns the live toast.
-/// Yap's notice policy (`notice.rs`) applies: the same notification again
+/// Yap's notice policy (`policy.rs`) applies: the same notification again
 /// within its kind's cooldown isn't posted, and while a dictation records
 /// it skips the banner (straight into the notification center) unless it's
 /// a question waiting for an answer.
@@ -106,10 +106,10 @@ pub fn post(
     data: Option<&NotificationData>,
     on_activated: fn(&AppHandle, &str),
 ) -> Result<ToastNotification, String> {
-    if !crate::notices::notice::admit(&format!("native:{tag}"), tag, xml) {
+    if !crate::notices::policy::admit(&format!("native:{tag}"), tag, xml) {
         return Err("the same notification was posted a moment ago".into());
     }
-    let toast = build(tag, xml, crate::notices::notice::native_quietly(tag))?;
+    let toast = build(tag, xml, crate::notices::policy::native_quietly(tag))?;
     if let Some(data) = data {
         toast.SetData(data).map_err(err)?;
     }

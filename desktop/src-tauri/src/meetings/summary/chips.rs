@@ -52,7 +52,7 @@ const LONGER_SUMMARY_TOKENS: usize = 1_200;
 /// …and writes at most this much (local models only).
 pub const LONGER_REPLY_TOKENS: u32 = 1_800;
 /// Fewer words of talk than this (and nothing else) is too little to go on.
-const MIN_WORDS: usize = crate::meetings::meeting_end::MISTAKE_WORDS;
+const MIN_WORDS: usize = crate::meetings::end::MISTAKE_WORDS;
 
 /// A citation as answers write it: "[2]", "[1, 3]", "[1–3]".
 static CITE_ANY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\d{1,2}(?:\s*[,–-]\s*\d{1,2})*\]").expect("static regex"));
@@ -253,7 +253,7 @@ pub const SKILL_BUDGET: SkillBudget = SkillBudget { summary: SKILL_SUMMARY_TOKEN
 /// person typed (≤ 300) and the transcript ([`talk_for`], ≤ 1,800).
 /// `request`: the Skill's instructions and the person's words with it (what
 /// the transcript's passages are picked by when it's long; the request
-/// itself goes after this: `meeting_assist::skill_messages`). `None`:
+/// itself goes after this: `assist::skill_messages`). `None`:
 /// nothing in the meeting yet.
 pub fn skill_input(note: &Note, request: &str) -> Option<Cited> {
     skill_input_within(note, request, SKILL_BUDGET)

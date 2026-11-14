@@ -202,8 +202,8 @@ minutes. A chat turn costs a passage or two (the question's, then with its
 answer).
 
 **Never in a dictation's way**: a pass waits while a dictation or a meeting
-recording runs (`meeting_summary::wait_idle`), and a batch under way is
-dropped the moment one starts (`meeting_summary::unless_busy`: the
+recording runs (`meetings::summary::wait_idle`), and a batch under way is
+dropped the moment one starts (`meetings::summary::unless_busy`: the
 connection closes) and read again after. Batches of 16 on the card, 4 on
 the processor (a few seconds at most). Passages already read are kept, so
 a pass cut off loses nothing.

@@ -14,7 +14,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   pill outline 14 px above the work area; **hover** opens it into 🎤 Dictate (`toggle_recording`, tooltip
   "Dictate · F9"), ◉ Meeting notes (`meeting_guard::start_or_stop`, as the
   meeting shortcut: the live call, else a new meeting note; while recording,
-  `meeting_end::end`), 🔊 Read aloud (`read-aloud`: the selection in the app
+  `meetings::end::end`), 🔊 Read aloud (`read-aloud`: the selection in the app
   you're in, read aloud — the bar never takes the focus, so it's still
   selected there; ■ `read-stop` while reading; its tooltip names the Read
   aloud shortcut, `Status.readHotkey`), ✂ Snip to Chat (`snip`: drag a box
@@ -66,7 +66,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   own states only (`dictation.svelte.js` clears it on any other);
   **meeting** = a 69×30 recording pill at half opacity (5 bars, the stop
   circle; hovered, full opacity and the timer; body → `notepad::open`, ■ →
-  `meeting_end::end`). **Click-through except over what
+  `meetings::end::end`). **Click-through except over what
   it draws**: the page reports its interactive rects (`data-region` →
   `bar_regions`, CSS px) and a poller (`GetCursorPos` every 250 ms, 30 ms
   while the cursor is near) hit-tests them (`overlay::region_at`, per-monitor
@@ -95,9 +95,9 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   `bar_card_action`): Yap's notices while the main window isn't focused,
   instead of a Windows notification — `false` when the bar is off or hidden
   for an hour, and the caller posts the notification as before. **One card
-  at a time** (`notices/notice.rs`): every card asked for goes into `cards` with
+  at a time** (`notices/policy.rs`): every card asked for goes into `cards` with
   when it came (`queued`); `repick` (on every change, dictation state,
-  meeting state and poller tick) puts the one `notice::pick` chooses on
+  meeting state and poller tick) puts the one `notices::policy::pick` chooses on
   screen (`front`: a question before an alert before a notice before a tip,
   then the one up, then the oldest; a card the pointer is on stays), holds
   tips and notices while a dictation runs, drops ones that waited too long
@@ -120,7 +120,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   "answer"; Esc stops its voice; only while the answer isn't in view in
   Chat — the main window in front, or on screen beside the app in front
   showing that conversation, `assistant::answer_in_view` on
-  `notice::window_seen`, since 30 Oct 2026). The bar also follows `yap-assistant`
+  `notices::policy::window_seen`, since 30 Oct 2026). The bar also follows `yap-assistant`
   (`State.assistant`, in `Status.assistant`): the window shows while a
   question is asked, answered or read aloud, bar on or off, and ■ on the
   capsule is `bar_action "assistant-stop"`. **The reading card**
@@ -168,7 +168,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   dictation (`dictated`, called by `deliver`; any dictation already in the
   history counts, read once). `status` → `Status.firstUse` (`{idle,
   recording, hold}` or null; none with "Show tips" or Feature tips off,
-  nor while the first-run setup is on screen — `notice::onboarding_up`, the
+  nor while the first-run setup is on screen — `notices::policy::onboarding_up`, the
   bar told again as it shows and goes —, as tips wait it out);
   the page calls `bar_pointer_shown {kind}` as it shows one, counted in
   hints.json's `pointers` (`coaching::update_record`). Test mode shows none
@@ -265,7 +265,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   It's a `data-region` ("dictation") whenever it has a button to offer, so
   the click-through bar takes clicks on it, never focused). **Cards** sit 26 px above the pill whatever it
   shows (positioned from the dock's height, gliding 0.16 s when it grows),
-  one at a time (`notices/notice.rs` picks it; the rest wait in `bar.waiting`); it
+  one at a time (`notices/policy.rs` picks it; the rest wait in `bar.waiting`); it
   fades in and out in 0.12 s and has Wispr's 4 px hit strip on the pill's
   side. **The reading card** (`bar/ReadingCard.svelte` + `bar/reading.svelte.js`,
   `yap-read` / `yap-read-word` / `read_aloud_state`) sits nearest the pill

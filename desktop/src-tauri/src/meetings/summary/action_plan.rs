@@ -547,9 +547,9 @@ pub fn postcheck_action_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meetings::meeting_summary::digest::{next_window, Plan};
-    use crate::meetings::meeting_summary::{fits_single_pass, FINAL_INPUT_TOKENS, SINGLE_PASS_TOKENS};
-    use crate::meetings::meeting_summary::tests::{digest, note_with, talk};
+    use crate::meetings::summary::digest::{next_window, Plan};
+    use crate::meetings::summary::{fits_single_pass, FINAL_INPUT_TOKENS, SINGLE_PASS_TOKENS};
+    use crate::meetings::summary::tests::{digest, note_with, talk};
 
     #[test]
     fn final_input_stays_in_budget_for_any_length() {
@@ -707,7 +707,7 @@ mod tests {
 
     #[test]
     fn a_french_meeting_is_asked_for_french_notes_with_english_headings() {
-        use crate::meetings::meeting_summary::language::{for_note, plan_line, How};
+        use crate::meetings::summary::language::{for_note, plan_line, How};
         let note = french_meeting();
         let lang = for_note(&note, &["en".to_string()]);
         assert_eq!((lang.code.as_str(), lang.how), ("fr", How::Heard));
@@ -768,7 +768,7 @@ mod tests {
 
     #[test]
     fn other_languages_words_for_you_everyone_and_nobody() {
-        use crate::meetings::meeting_summary::digest::resolve_owner;
+        use crate::meetings::summary::digest::resolve_owner;
         let known = vec!["Alice".to_string()];
         assert_eq!(resolve_owner("Moi", &known, "moi je fais ça"), "You");
         assert_eq!(resolve_owner("Tout le monde", &known, "tout le monde"), "Everyone");

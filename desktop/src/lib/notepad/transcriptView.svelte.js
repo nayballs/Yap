@@ -23,7 +23,7 @@ export class TranscriptView {
   /** The menu on a speaker's name (a group's: its lines) or on one line's
    *  person button: `{ key, voice, lines, start }` (SpeakerMenu.svelte). */
   speakerMenu = $state(null);
-  /** The line whose words are being fixed: `{ i, text }` (notes/note_edits.rs). */
+  /** The line whose words are being fixed: `{ i, text }` (notes/edits.rs). */
   editingLine = $state(null);
   /** The line just copied (its ✓), and the whole transcript's. */
   copiedLine = $state(null);

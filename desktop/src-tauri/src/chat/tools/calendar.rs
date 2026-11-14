@@ -1304,7 +1304,7 @@ mod tests {
 
     #[test]
     fn the_tool_stays_light() {
-        let est = crate::meetings::meeting_summary::estimate_tokens;
+        let est = crate::meetings::summary::estimate_tokens;
         let t = est(&definitions().to_string()) + est(&CALENDAR_TOOL_INSTRUCTIONS.join(" "));
         println!("the calendar tool adds {t} tokens");
         assert!(t <= 260, "{t} tokens");

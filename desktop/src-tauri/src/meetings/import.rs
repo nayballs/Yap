@@ -4,7 +4,7 @@
 //! names and times, its date, a title (the AI's, from the start of the
 //! meeting, unless the file names the meeting), a folder (Meetings, or a
 //! recurring series' folder rule), then the usual action-plan job and its
-//! summary in the meeting's language (`meeting_end::start_summary`).
+//! summary in the meeting's language (`end::start_summary`).
 //!
 //! **Formats** (each its own reader): WebVTT from Microsoft Teams (`<v
 //! Speaker>` voice tags), Zoom and Google Meet ("Name: text" cues) and
@@ -284,12 +284,12 @@ fn summarise(app: AppHandle, ids: Vec<u64>) {
             if crate::notes::get(id).is_none() {
                 continue;
             }
-            crate::meetings::meeting_assist::maybe_title(&app, id, true);
-            if !crate::meetings::meeting_end::start_summary(&app, id) {
+            crate::meetings::assist::maybe_title(&app, id, true);
+            if !crate::meetings::end::start_summary(&app, id) {
                 continue;
             }
             let until = Instant::now() + SUMMARY_WAIT;
-            while crate::meetings::meeting_end::summary_running_for(id) && Instant::now() < until {
+            while crate::meetings::end::summary_running_for(id) && Instant::now() < until {
                 std::thread::sleep(Duration::from_millis(400));
             }
         }

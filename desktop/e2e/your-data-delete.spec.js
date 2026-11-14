@@ -18,7 +18,7 @@ import { test as base, expect, openSettings, settingsDialog, closeSettings, open
 const NOW = Math.floor(Date.now() / 1000);
 const AUDIO_ID = String((NOW - 120) * 1000);
 const SHOT_ID = 'img_0123456789abcdef';
-// A meeting recording's id is when it started (unix ms; meetings/meeting_audio.rs).
+// A meeting recording's id is when it started (unix ms; meetings/audio.rs).
 const REC = String((NOW - 3_600) * 1000);
 
 const SEED = {

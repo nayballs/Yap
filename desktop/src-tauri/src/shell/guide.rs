@@ -164,7 +164,7 @@ pub fn guide_typing(wpm: u32, speaking: Option<u32>) -> Result<u32, String> {
         return Err("That speed doesn't look right".to_string());
     }
     tracing::info!(wpm, ?speaking, "guide: typing test taken");
-    let now = crate::notices::notice::now_ms();
+    let now = crate::notices::policy::now_ms();
     update(|r| {
         r.typing_wpm = Some(wpm);
         if speaking.is_some() {

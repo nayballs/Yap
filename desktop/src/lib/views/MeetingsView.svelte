@@ -431,7 +431,7 @@
         // its progress and Cancel on the row. Never an imported meeting's:
         // there's no audio (meetings/import.rs).
         !n.recording && n.hasTalk && !n.imported ? { label: 'Find speakers', icon: 'person', onselect: () => findSpeakers(n.id) } : null,
-        // Its kept audio, where you pick (meetings/meeting_audio/export.rs):
+        // Its kept audio, where you pick (meetings/audio/export.rs):
         // only a meeting whose audio Yap still has.
         ...(n.recording || n.imported || !meetingAudio.byNote[n.id]?.recordings
           ? []

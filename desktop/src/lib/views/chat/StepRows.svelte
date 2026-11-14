@@ -12,7 +12,7 @@
   //   colour by the file's language, a long line wrapped under itself;
   //   where a line was changed rather than
   //   taken out, the part that was replaced is marked in a stronger red and
-  //   what replaced it in a stronger green (core/diffWords.js);
+  //   what replaced it in a stronger green (core/intralineDiff.js);
   // - **a command**: the command itself (`$ …`, with Copy), in colour, and
   //   what it printed, plain, its start and its end (agents/output.rs);
   // - **a picture** its call came back with, larger (small at the row's end);
@@ -33,7 +33,7 @@
   // (`.syn-k`…, app.css `--yap-syn-*`): nothing of a file is set as markup.
   import { rowSteps, stepRow, stepOpens, stepKind, diffRows, moreLines } from '../../core/agents.js';
   import { languageOf, shellOf, colourDiff, colourLines, loadColours } from '../../core/codeColours.js';
-  import { pairChanges, linePieces } from '../../core/diffWords.js';
+  import { pairChanges, linePieces } from '../../core/intralineDiff.js';
   import { copyText } from '../../core/itemMenus.js';
   import { placed, shown } from './chatImages.js';
   import { screenPixels } from './chatShots.svelte.js';

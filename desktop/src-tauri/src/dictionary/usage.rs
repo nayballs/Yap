@@ -173,7 +173,7 @@ pub fn dictionary_usage() -> Usage {
 }
 
 /// [`rank`] against the saved usage, now. What every Whisper prompt is built
-/// from (`config::dictionary_prompt(&dict_usage::ranked(..))`).
+/// from (`config::dictionary_prompt(&usage::ranked(..))`).
 pub fn ranked(dict: &[DictionaryEntry]) -> Vec<DictionaryEntry> {
     if dict.len() < 2 {
         return dict.to_vec();

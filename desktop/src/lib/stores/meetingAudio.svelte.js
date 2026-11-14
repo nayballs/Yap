@@ -1,4 +1,4 @@
-// A meeting note's audio kept on disk (meetings/meeting_audio.rs), for the Notes view
+// A meeting note's audio kept on disk (meetings/audio.rs), for the Notes view
 // and the meeting notepad alike:
 // - what each note has (`meeting_audio_note`: recordings, length, what a
 //   crash left to transcribe, the speech model "Transcribe again" would use),
@@ -14,7 +14,7 @@
 // - a transcript line's ▶ (`meeting_audio_clip`: both sides of its stretch,
 //   as a WAV), one line playing at a time, and a voice's ▶ (`speaker_clip`: a few seconds
 //   of its clearest speech, speakers/clip.rs);
-// - "Export audio…" (`exportAudio`, meetings/meeting_audio/export.rs): the
+// - "Export audio…" (`exportAudio`, meetings/audio/export.rs): the
 //   Save dialog, then one mixed file or both sides, with its progress.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -23,7 +23,7 @@ import { askConfirm } from '../ui/contextMenu.svelte.js';
 import { toast, updateToast, dismiss } from '../ui/toast.svelte.js';
 
 export const meetingAudio = $state({
-  /** noteId → `NoteAudio` (meetings/meeting_audio.rs). */
+  /** noteId → `NoteAudio` (meetings/audio.rs). */
   byNote: {},
   /** noteId → its latest job. */
   jobs: {},
@@ -112,7 +112,7 @@ export function runningJob(noteId) {
 
 /**
  * "The last …": "12 seconds weren't", "minute wasn't", "5 minutes weren't"
- * (as meetings/meeting_audio.rs `spoken_length` says it in the offer).
+ * (as meetings/audio.rs `spoken_length` says it in the offer).
  */
 export function lastPart(secs) {
   const s = Math.max(1, Math.round(secs || 0));

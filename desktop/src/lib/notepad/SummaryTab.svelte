@@ -1,8 +1,8 @@
 <script>
   // The Summary tab: the action plan Rust writes when the meeting ends
-  // (meetings/meeting_end.rs), with "Step 2 of 3" while it's written; above it the
+  // (meetings/end.rs), with "Step 2 of 3" while it's written; above it the
   // meeting's pre-meeting brief (calendar/brief.rs), open until the plan is
-  // written, then folded. The summary is edited in place (notes/note_edits.rs: Edit
+  // written, then folded. The summary is edited in place (notes/edits.rs: Edit
   // / Done, what's new since it with Update, "Back to Yap's summary" after an
   // edit) and its tasks tick (notes/tasks.rs); Ctrl+F finds in it
   // (SummaryFind), and 👍 / 👎 under it rate it, on this PC only
@@ -145,7 +145,7 @@
   {/if}
 
   {#if (hasSummary || summary.editing) && !writing}
-    <!-- Edit it in place (notes/note_edits.rs); what's new since it, with Update. -->
+    <!-- Edit it in place (notes/edits.rs); what's new since it, with Update. -->
     <div class="sumbar">
       {#if newLines && !summary.editing}
         <p class="sumnew" aria-live="polite">

@@ -338,8 +338,8 @@ pub fn idle_step(f: &IdleFacts) -> bool {
 /// Note Formatting scope, else the cleanup's provider), or an action plan
 /// being written.
 fn meeting_uses_it(cfg: &YapConfig) -> bool {
-    crate::meetings::meeting_end::summary_running()
-        || (crate::meetings::meeting::recording_note().is_some() && scope_provider(cfg, "noteFormatting") == PROVIDER_ONDEVICE)
+    crate::meetings::end::summary_running()
+        || (crate::meetings::recorder::recording_note().is_some() && scope_provider(cfg, "noteFormatting") == PROVIDER_ONDEVICE)
 }
 
 /// Test mode: the idle limit in ms instead of the setting's minutes (0 =

@@ -29,7 +29,7 @@
 //! Never logged (sizes and counts at most), never uploaded except inside
 //! the Chat request the person sends.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 

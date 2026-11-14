@@ -3,10 +3,10 @@
   // MeetingTranscriptChat style), live while recording and kept afterwards:
   // a run of one speaker's lines (named from the note's speaker map,
   // notepadText.js), the menu on a name or a line to rename, merge or
-  // correct who said it, a line's words fixed in place (notes/note_edits.rs:
+  // correct who said it, a line's words fixed in place (notes/edits.rs:
   // double-click, Enter or F2), ▶ a line's stretch of the meeting
-  // (meetings/meeting_audio.rs), "You dictated here" markers, a stretch that failed,
-  // and the rolling AI notes so far (meetings/meeting_summary.rs) beside it; over it,
+  // (meetings/audio.rs), "You dictated here" markers, a stretch that failed,
+  // and the rolling AI notes so far (meetings/summary.rs) beside it; over it,
   // Action plan, and what's under way on its audio.
   import { tick } from 'svelte';
   import { toast } from '../../ui/toast.svelte.js';
@@ -25,7 +25,7 @@
   /** `notes`: the view's state (notesState.svelte.js). */
   let { notes } = $props();
 
-  // "You" chunks that were the call coming through the speakers (meetings/meeting.rs
+  // "You" chunks that were the call coming through the speakers (meetings/recorder.rs
   // echo check): kept, hidden unless asked for. A dictation made mid-meeting
   // is a `dictated` marker (its words were left out of "You"): shown as a
   // quiet "You dictated here" line.
@@ -50,7 +50,7 @@
   function toggleSpeakerMenu(key, voice, lines, start = 'menu') {
     notes.speakerMenu = notes.speakerMenu?.key === key ? null : { key, voice, lines, start };
   }
-  // Fixing a line's words (notes/note_edits.rs), as in the meeting notepad:
+  // Fixing a line's words (notes/edits.rs), as in the meeting notepad:
   // double-click it, Enter or F2 on it, or Edit line in its menu; Enter
   // saves, Escape puts it back, leaving it saves.
   let lineEditEl = $state(null);
@@ -187,7 +187,7 @@
 <div class="transcript">
   <div class="thead">
     {#if notes.selected.digests?.length}
-      <!-- Transcript ↔ the rolling AI notes (meetings/meeting_summary.rs) -->
+      <!-- Transcript ↔ the rolling AI notes (meetings/summary.rs) -->
       <span class="tviews">
         <button class="tview" class:on={notes.transcriptView === 'live'} onclick={() => (notes.transcriptView = 'live')}>
           Transcript
@@ -223,7 +223,7 @@
     {/if}
   </div>
   {#if jobState(notes.selected.id)}
-    <!-- Its audio being transcribed (meetings/meeting_audio.rs), with Cancel; a refine's "Update summary". -->
+    <!-- Its audio being transcribed (meetings/audio.rs), with Cancel; a refine's "Update summary". -->
     <MeetingJob noteId={notes.selected.id} look="app" />
   {:else if meetingAudio.byNote[notes.selected.id]?.recoverableSecs && !notes.recordingThisNote}
     <!-- What a crash left of it: the audio is kept. -->
@@ -369,7 +369,7 @@
                 </p>
               {/if}
               {#if canPlay(notes.selected.id, notes.selected.transcript[line.i])}
-                <!-- ▶ this line's stretch of the meeting, both sides (meetings/meeting_audio.rs). -->
+                <!-- ▶ this line's stretch of the meeting, both sides (meetings/audio.rs). -->
                 <button
                   class="lineplay"
                   class:on={meetingAudio.playing === `${notes.selected.id}:${line.i}`}
@@ -573,7 +573,7 @@
   .bubble.menuopen {
     box-shadow: 0 0 0 2px var(--yap-border-hover);
   }
-  /* A line being fixed (notes/note_edits.rs), and one opened from the Tasks view. */
+  /* A line being fixed (notes/edits.rs), and one opened from the Tasks view. */
   .bubble.editing {
     width: 82%;
     box-shadow: 0 0 0 2px var(--yap-focus-ring);
@@ -673,7 +673,7 @@
     opacity: 0.55;
     border: 1px dashed var(--yap-border);
   }
-  /* ▶ a line (meetings/meeting_audio.rs): beside it, on hover or focus. */
+  /* ▶ a line (meetings/audio.rs): beside it, on hover or focus. */
   .lineplay {
     position: absolute;
     top: 3px;

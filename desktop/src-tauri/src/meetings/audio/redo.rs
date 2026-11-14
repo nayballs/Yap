@@ -1,5 +1,5 @@
 //! **Transcribe again**: a meeting's new lines put in place of the old ones
-//! (pure, unit-tested; `meeting_audio::transcribe_again` runs it under the
+//! (pure, unit-tested; `audio::transcribe_again` runs it under the
 //! notes store's lock).
 //!
 //! What it keeps:
@@ -8,9 +8,9 @@
 //!   it), and every "You dictated here" marker (the audio has silence there;
 //!   the marker stays where it was);
 //! - **lines the person edited** (`TranscriptSegment::edited`,
-//!   `note_edits.rs`; a line they split is two edited lines), as they wrote
+//!   `notes/edits.rs`; a line they split is two edited lines), as they wrote
 //!   them, and **lines they deleted** (gone from the note; their places in
-//!   `cuts.json`, `meeting_audio::cuts`, no new line fills): a new line of the same side over
+//!   `cuts.json`, `audio::cuts`, no new line fills): a new line of the same side over
 //!   one keeps only its words outside it (by its word times; without them
 //!   by its share of the line's place, and none when that's under half of
 //!   it) — whoever calls this (Transcribe again, a refined transcript)
@@ -206,7 +206,7 @@ pub fn rebuild(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone
 /// The note's transcript with each of `redone`'s recordings' lines put in
 /// place of the old ones (see the module notes). `old_breaks` are the old
 /// transcript's stop marks; `cuts` the places of lines the person deleted
-/// (`meeting_audio::cuts`): no new line's words there.
+/// (`audio::cuts`): no new line's words there.
 pub fn rebuild_with_cuts(old: &[TranscriptSegment], old_breaks: &[usize], redone: &[Redone], cuts: &[super::Cut]) -> Rebuilt {
     let mut kept: Vec<TranscriptSegment> = Vec::new();
     let mut by_recording: Vec<Vec<&TranscriptSegment>> = vec![Vec::new(); redone.len()];

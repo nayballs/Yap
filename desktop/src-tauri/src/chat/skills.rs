@@ -1,7 +1,7 @@
 //! **Skills** (2026-10-29, Wispr Flow's Skills): saved instructions the
 //! person runs by typing `/name` — in a meeting's Ask box (the notepad's
 //! sheet, the Notes view's Ask bar on a meeting note), on that meeting
-//! (`meeting_assist::meeting_skill`), or in Chat and Ask across meetings, on
+//! (`meetings::assist::meeting_skill`), or in Chat and Ask across meetings, on
 //! the meetings (`chat_send`'s `skill`: the turn is asked across the
 //! meetings, its passages found for the Skill — [`find`]). Every answer
 //! cites the passages it comes from, as Ask across meetings' do.
@@ -63,7 +63,7 @@ use chrono::{DateTime, TimeZone};
 use serde::{Deserialize, Serialize};
 
 use crate::calendar::{brief, Agenda, Event};
-use crate::meetings::meeting_summary::chips;
+use crate::meetings::summary::chips;
 use crate::notes::task_store::TaskStore;
 use crate::notes::Note;
 use crate::search::ask::{self, Found, Passage};
@@ -691,7 +691,7 @@ pub fn document_note(turn: &SkillTurn, in_view: bool) -> Option<String> {
 }
 
 /// What a Skill on one meeting is handed besides the meeting's passages
-/// (`meeting_assist::skill_input_for` in its Ask box; a Chat run reading one
+/// (`meetings::assist::skill_input_for` in its Ask box; a Chat run reading one
 /// meeting, "latest" / "meeting", gets it too): Yap's own list of what the
 /// Skill must go through, from the meeting. `None`: the passages alone.
 /// Pure.
@@ -714,7 +714,7 @@ pub fn meeting_aid(skill: &Skill, note: &Note) -> Option<String> {
             .filter(|t| !t.done)
             .take(8)
             .map(|t| {
-                let owner = if t.owner.is_empty() { crate::meetings::meeting_summary::UNASSIGNED.to_string() } else { t.owner };
+                let owner = if t.owner.is_empty() { crate::meetings::summary::UNASSIGNED.to_string() } else { t.owner };
                 let due = if t.due.is_empty() { String::new() } else { format!(" (due: {})", t.due) };
                 format!("- {owner}: {}{due}", t.task)
             })
@@ -1309,11 +1309,11 @@ pub fn tasks_found(notes: &[Note], store: &TaskStore) -> Found {
         for t in nt.tasks.iter().filter(|t| !t.task.done && !t.archived) {
             let owner = owner_of(t);
             let yours = owner == "You";
-            let unowned = owner.is_empty() || owner == crate::meetings::meeting_summary::UNASSIGNED;
+            let unowned = owner.is_empty() || owner == crate::meetings::summary::UNASSIGNED;
             if yours {
                 mine.push(task_passage(note, t, "You"));
             } else if unowned {
-                nobody.push(task_passage(note, t, crate::meetings::meeting_summary::UNASSIGNED));
+                nobody.push(task_passage(note, t, crate::meetings::summary::UNASSIGNED));
             }
         }
     }
@@ -1821,7 +1821,7 @@ mod tests {
         let t = turn_for("tickets", "/tickets the supplier call").unwrap();
         assert_eq!((t.skill.command.as_str(), t.words.as_str()), ("tickets", "the supplier call"));
         assert!(turn_for("decision-log", "/decision-log").is_ok());
-        // …and on one meeting (meeting_assist::meeting_skill finds it the same way).
+        // …and on one meeting (meetings::assist::meeting_skill finds it the same way).
         assert_eq!(by_command("/open-questions").unwrap().name, "Open questions");
         // Switched off, a core one too.
         set_shown("builtin:decisions", false).unwrap();
@@ -2242,7 +2242,7 @@ mod tests {
         );
         // In the request, after the meeting's passages.
         let s = by_command("open-questions").unwrap();
-        let cited = crate::meetings::meeting_assist::skill_input_for(&s, &notes[0], "").unwrap();
+        let cited = crate::meetings::assist::skill_input_for(&s, &notes[0], "").unwrap();
         assert!(cited.text.find("<passage n=\"1\"").unwrap() < cited.text.find("The questions asked in it").unwrap());
         let budget = &notes[1];
         assert!(meeting_aid(&s, budget).unwrap().contains("Q1. Them: \"So we cut the second shift from December?\"\n  Said next: You: \"Yes. I'm still waiting"));
@@ -2341,13 +2341,13 @@ mod tests {
 
     #[test]
     fn every_skill_s_request_fits_an_8k_model() {
-        use crate::meetings::meeting_summary::estimate_tokens;
+        use crate::meetings::summary::estimate_tokens;
         let notes = team();
         for s in builtins() {
             // On one meeting, in its Ask box: the guardrails, the meeting, the instructions.
             if s.runs_on.on_one() {
-                let cited = crate::meetings::meeting_assist::skill_input_for(&s, &notes[0], "for the design team").unwrap();
-                let m = crate::meetings::meeting_assist::skill_messages(&s, &cited.text, "for the design team");
+                let cited = crate::meetings::assist::skill_input_for(&s, &notes[0], "for the design team").unwrap();
+                let m = crate::meetings::assist::skill_messages(&s, &cited.text, "for the design team");
                 let all: String = m.as_array().unwrap().iter().map(|x| x["content"].as_str().unwrap_or("").to_string()).collect();
                 assert!(estimate_tokens(&all) < 5_500, "/{} on one meeting: {}", s.command, estimate_tokens(&all));
             }

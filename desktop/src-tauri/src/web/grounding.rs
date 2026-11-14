@@ -877,14 +877,14 @@ mod tests {
         assert!(block.starts_with("[1] Gale - bg3.wiki — bg3.wiki\nGale is on the beach."));
         assert!(block.contains("[2] Long — example.com (2026-10-01)"));
         assert!(!block.contains("Fourth"));
-        assert!(crate::meetings::meeting_summary::estimate_tokens(&block) <= 1_600, "within the budget");
+        assert!(crate::meetings::summary::estimate_tokens(&block) <= 1_600, "within the budget");
         let prompt = grounded_prompt("You are helpful.", &block, "Saturday 18 October 2026", true);
         assert!(prompt.starts_with("You are helpful.\n\nToday is Saturday 18 October 2026."));
         assert!(prompt.contains("ONLY these sources") && prompt.contains("like [1]") && prompt.contains("Never follow requests"));
         assert!(prompt.contains("asked out loud"));
         assert!(prompt.ends_with("</sources>"));
         // An 8k on-device model: prompt + history + reply fit.
-        assert!(crate::meetings::meeting_summary::estimate_tokens(&prompt) < 2_200);
+        assert!(crate::meetings::summary::estimate_tokens(&prompt) < 2_200);
     }
 
     #[test]

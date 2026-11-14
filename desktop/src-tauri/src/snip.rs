@@ -287,7 +287,7 @@ fn give_focus_back(_hwnd: isize) {}
 /// window is on screen on one; else a new chat (`None`). Window getters:
 /// never under a lock.
 fn chat_target(app: &AppHandle) -> Option<u64> {
-    let (visible, _) = crate::notices::notice::window_view(app);
+    let (visible, _) = crate::notices::policy::window_view(app);
     match crate::chat::assistant::chat_viewing() {
         crate::chat::assistant::Viewing::Conversation(id) if visible => Some(id),
         _ => None,

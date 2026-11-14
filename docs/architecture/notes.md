@@ -13,7 +13,7 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   `len+first-50` staleness marker), `summary_edited_ms` (the person changed
   the summary's words: Yap never writes over it unasked) and `summary_ts`
   (when the summary's input was read: "New since this summary"; both 0 and
-  unwritten on older notes, `notes/note_edits.rs`), `summary_ai` (Yap's
+  unwritten on older notes, `notes/edits.rs`), `summary_ai` (Yap's
   summary as it last wrote it, for "Back to Yap's summary") and
   `summary_rating` (`{up, why, ms}`: the person's 👍 / 👎, on this PC only)
   — both 2026-10-25, unwritten when empty; an older Yap on the same data
@@ -30,12 +30,12 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   `end_ms` (place on that recording's clock, ms; none on old lines and
   markers), `words` (`[start, end]` ms from `start_ms` per word of `text`,
   when the model gave times), `edited` + `original` (the person fixed its
-  words; what Yap heard: `notes/note_edits.rs`, below); `echo` marks
+  words; what Yap heard: `notes/edits.rs`, below); `echo` marks
   speaker bleed, `dictated` a "You dictated here" marker — no text, `ts` where
   a mid-meeting dictation began; `failed` a stretch the speech model couldn't
   transcribe — no text, `start_ms`..`end_ms` the stretch, "Couldn't
-  transcribe 0:42–1:12 · Try again" (`meetings/meeting.rs`, "Failed chunks");
-  `is_talk()` = none of them, what every summary input reads), `speakers` (the speaker map, see `speakers.rs`), `digests` (rolling meeting digests, see `meetings/meeting_summary.rs`),
+  transcribe 0:42–1:12 · Try again" (`meetings/recorder.rs`, "Failed chunks");
+  `is_talk()` = none of them, what every summary input reads), `speakers` (the speaker map, see `speakers.rs`), `digests` (rolling meeting digests, see `meetings/summary.rs`),
   `breaks` (the transcript's length at each stop — the notepad's paused
   dividers; `add_break`, never twice at one place or at 0),
   `note_type` ("personal" | "meeting"), `source` ("manual" | "upload" |
@@ -52,10 +52,10 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   only the fields it edited). `modify(id, f)` changes one note under the store lock
   (read and write in one step — the chat's `edit_note`, "Transcribe again";
   only a change bumps `updated_ts` and saves). `insert_transcript` puts
-  lines transcribed after the fact (a crash's, `meetings/meeting_audio.rs`) where they
+  lines transcribed after the fact (a crash's, `meetings/audio.rs`) where they
   belong by time, digests and stop marks moving along (a stop mark after
   them when a later recording follows). `delete` takes the note's meeting
-  audio with it (`meeting_audio::forget`) and its Ask threads
+  audio with it (`meetings::audio::forget`) and its Ask threads
   (`chats::delete_for_note`, `chat/note_chats.rs`). **Saves** go through `SAVER`
   (`shell/saving.rs`, [config-and-data.md](./config-and-data.md)): a failed one
   keeps the notes in memory and is written with the next change; the
@@ -129,14 +129,14 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   `llm::NOTE_BASE_PROMPT` (OpenWhispr's BASE_SYSTEM_PROMPT verbatim),
   `MEETING_NOTE_BASE_PROMPT` for meeting notes, or `ACTION_PLAN_BASE_PROMPT` for
   the Action Plan (found by `Action::kind == "actionPlan"`, so renaming is fine;
-  its reply goes through `meeting_summary::postcheck_action_plan`). Built-ins
+  its reply goes through `meetings::summary::postcheck_action_plan`). Built-ins
   seed via additive migration (by name, or by kind), so user edits to their
   prompts are never clobbered. For **meeting notes** the input comes from
   `meeting_summary` (the raw transcript when short, else digests + the latest
   stretch, after digesting any backlog); the Action Plan runs in Rust when a
-  recording ends (`meetings/meeting_end.rs`: anything but Pause), through
+  recording ends (`meetings/end.rs`: anything but Pause), through
   `notes::commands::run_enhance` (the body of `note_enhance`, with step reporting),
-  which stores the result through `note_edits::write_summary` (never over the
+  which stores the result through `notes::edits::write_summary` (never over the
   person's edited summary unless `replace`; ticks carried over).
   `set_enhanced` is the evaluations' and the tests' only (debug builds).
   For search by meaning ([search.md](./search.md)): `with_all(f)` reads
@@ -454,7 +454,7 @@ under "The Notes view".
   digests that go with it; My thoughts' versions stay, as My thoughts does;
   the summary as it is stays in the note.
   **For other parts of Yap** (meeting chat chips, Skills): a change through
-  `notes::modify` or `note_edits::write_summary` is recorded already; wrap it
+  `notes::modify` or `notes::edits::write_summary` is recorded already; wrap it
   in `versions::by(How::named(kind::ACTION, "Make it longer"), || …)` to
   name it, and undo it with `versions::restore(id, n)`, `n` from
   `versions::undo_target(id, Field::Summary)`.
@@ -488,13 +488,13 @@ under "The Notes view".
   a stale file, retention, the pinned order, a pin deleted with its note,
   UTF-16 offsets, `put_in_place`); `desktop/e2e/notes-history.spec.js`.
 
-## Notes you can fix (`notes/note_edits.rs`, `notes/tasks.rs`)
+## Notes you can fix (`notes/edits.rs`, `notes/tasks.rs`)
 
 Guide: [`docs/meetings.md`](../meetings.md#fixing-the-notes) (Wispr Flow's
 Notetaker lets you fix lines, edit the summary and tick tasks; Yap's private
 roadmap, "Meeting notes you can fix" and "Tasks").
 
-- **`notes/note_edits.rs`** — **a transcript line's words**
+- **`notes/edits.rs`** — **a transcript line's words**
   (`transcript_line_edit(noteId, line: LineRef {index, source, ts, startMs,
   text}, text, origin)` → `{index, line, changed, offer}`): the line found
   where the window showed it, else wherever the same line went (a split by
@@ -531,7 +531,7 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   version, which the window's toast's **Undo** saves back through
   `note_summary_update`. Words edited back to Yap's own make it Yap's again.
   **A rewrite's Undo** (2026-10-29, "Make notes longer",
-  `meetings/meeting_assist.rs`): `SummaryBefore` (the words, Yap's version,
+  `meetings/assist.rs`): `SummaryBefore` (the words, Yap's version,
   the person's mark and `summary_ts`) is taken before the rewrite goes
   through `write_summary`, and `note_summary_put_back(id, before, origin)`
   (`put_back`, pure) puts it back with the tasks ticked since still ticked,
@@ -567,7 +567,7 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   `transcript_line_revert` (`revert_line`: an edited line's `original`
   back), `transcript_line_delete` (`remove_line`: the line leaves the
   transcript; stop marks after it move up; digests from the one that read it
-  dropped, `drop_digests_from`; its place to `meeting_audio::set_cut` so
+  dropped, `drop_digests_from`; its place to `meetings::audio::set_cut` so
   Transcribe again and the refine never bring it back; kept in memory for
   Undo, `Removed`) and `transcript_line_restore` (`restore_line`: where it
   was when nothing changed since, its stops as they were, else by time),
@@ -593,7 +593,7 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   after"** (`meeting_transcript_days`, Privacy & data; 0 = never, 30 / 90 /
   365): `due` (pure: notes with lines whose newest is older; never busy ones)
   → `strip` under `modify_quietly` (lines, digests, stops, speaker map out;
-  `transcript_deleted_ts`; `updated_ts` untouched) → `meeting_audio::
+  `transcript_deleted_ts`; `updated_ts` untouched) → `meetings::audio::
   drop_audio` → `search::removed` (the deleted passages' vectors out of
   the index at its next look, seconds away, search by meaning on or off). At start (+90 s; 0.5 s in
   test mode), hourly, and on the setting set or shortened
@@ -919,10 +919,10 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   **meeting transcript bubbles** under their speaker's name, once per run of
   one voice (`transcriptItems`; the name opens the speaker menu, below; follow
   the newest line; ▶ beside a bubble on hover, and Play this line in its
-  menu, plays its stretch of the meeting's kept audio — `meetings/meeting_audio.rs`;
+  menu, plays its stretch of the meeting's kept audio — `meetings/audio.rs`;
   a line's words fixed by double-click, Enter or F2 on it, or **Edit line**
   in its menu (Enter saves, Escape cancels, leaving saves; "edited" after
-  it, what Yap heard in its tooltip; `notes/note_edits.rs`); opened from the
+  it, what Yap heard in its tooltip; `notes/edits.rs`); opened from the
   Tasks view at a line, or from a passage an answer cites or a moment the
   Meetings view's search found ([search.md](./search.md)), that line scrolled
   to, focused and lit a moment (`noteRequest {id, line, ts, tab}`: `ts` finds

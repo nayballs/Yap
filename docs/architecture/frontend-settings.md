@@ -175,7 +175,7 @@ on an element that also has a `settings.css` class (`set-note`,
   `advanced#dictionary` → `dictation#dictionary`; a page that moved keeps an
   anchor asked for. A page this build doesn't have leaves Settings where it
   is. Callers today: bar.rs `general#bar`,
-  calls/meeting_guard.rs `meetings#screen-sharing`, meetings/meeting.rs (quiet mic)
+  calls/meeting_guard.rs `meetings#screen-sharing`, meetings/recorder.rs (quiet mic)
   `dictation#microphone`, notices/alert.rs `cleanup#chat` / `voice#voice-provider`,
   updates.rs `about`, auth.rs `account`, the notepad's Audio settings
   `dictation#microphone`, call detection's "Open Settings"
@@ -494,7 +494,7 @@ on an element that also has a `settings.css` class (`set-note`,
   apart in meetings" (`SpeakersToggle`, the same switch as Speech-to-Text's,
   with a link to the models), "Suggest who's speaking"
   (`meetingSpeakerNames`). **Meeting audio** (`#settings-meeting-audio`,
-  `meetings/meeting_audio.rs`): "Keep meeting audio" (`meetingKeepAudio`, on), "Keep
+  `meetings/audio.rs`): "Keep meeting audio" (`meetingKeepAudio`, on), "Keep
   it for" (1 / 7 / 14 / 30 / 90 days → `meetingAudioDays`, greyed while
   off), "Delete all meeting audio" ("2 meetings · 180 MB" from
   `meeting_audio_status`, kept current by `yap-meeting-audio`; Delete all… →

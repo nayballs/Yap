@@ -26,7 +26,7 @@
 //!   30 s…" counts down with **Keep going** and **Stop now**; anyone
 //!   speaking cancels it, and at zero the recording stops and the action
 //!   plan is written, with a notice that says why. "Speech" is what the
-//!   recorder counts as talk (`meeting::activity`): audio above its silence
+//!   recorder counts as talk (`meetings::recorder::activity`): audio above its silence
 //!   gate on either side, or a transcribed line; a hotkey dictation's span
 //!   isn't. Quiet time runs on the meeting's audio clock, so a PC asleep or
 //!   a device that stopped delivering never counts as a quiet meeting.
@@ -38,10 +38,10 @@
 //!   recording, and goes away by itself after 2 minutes unanswered (it only
 //!   asks).
 //! - [`notice`]: one-off messages for these, the screen-share warning and
-//!   the recorder's own warnings, in one place (`notice::place`): the main
+//!   the recorder's own warnings, in one place (`notices::policy::place`): the main
 //!   window's toast (`yap-meeting-notice`) while it's focused, else a Yap
 //!   bar card or a Windows notification ([`notice_native`]), else the
-//!   window if it's on screen; not twice in ten minutes (`notice.rs`). The
+//!   window if it's on screen; not twice in ten minutes (`notices/policy.rs`). The
 //!   length warning goes the same way.
 //!
 //! The countdown and the check-ins show where the person is looking: the
@@ -95,10 +95,10 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// The main window: (on screen, focused) — `notice::window_view`. Never
+/// The main window: (on screen, focused) — `notices::policy::window_view`. Never
 /// call with a lock held: window getters wait on the main thread.
 fn window_view(app: &AppHandle) -> (bool, bool) {
-    crate::notices::notice::window_view(app)
+    crate::notices::policy::window_view(app)
 }
 
 /// The meeting notepad is on screen. Never with a lock held.
@@ -229,24 +229,24 @@ impl Notice {
     }
 }
 
-/// Show `n` in one place (`notice::place`): the main window's toast while
+/// Show `n` in one place (`notices::policy::place`): the main window's toast while
 /// the person is looking at it, else a card on the Yap bar, else a Windows
 /// notification, else the main window if it's on screen after all. A notice
 /// addressed to a window (`surface`) shows there. The same notice again
-/// within ten minutes isn't shown (`notice.rs`).
+/// within ten minutes isn't shown (`notices/policy.rs`).
 pub fn notice(app: &AppHandle, n: &Notice) {
     if n.surface.is_some() {
         let _ = app.emit(EVENT_NOTICE, n);
         return;
     }
-    match crate::notices::notice::place(app, true) {
-        crate::notices::notice::Place::Window => {
-            if crate::notices::notice::admit("meeting-notice", &n.title, &n.body) {
+    match crate::notices::policy::place(app, true) {
+        crate::notices::policy::Place::Window => {
+            if crate::notices::policy::admit("meeting-notice", &n.title, &n.body) {
                 let _ = app.emit(EVENT_NOTICE, n);
             }
         }
-        crate::notices::notice::Place::Bar | crate::notices::notice::Place::Notification => notice_native(app, n),
-        crate::notices::notice::Place::Nowhere => tracing::info!(kind = n.kind, "meeting guard: nowhere to say {}", n.title),
+        crate::notices::policy::Place::Bar | crate::notices::policy::Place::Notification => notice_native(app, n),
+        crate::notices::policy::Place::Nowhere => tracing::info!(kind = n.kind, "meeting guard: nowhere to say {}", n.title),
     }
 }
 
@@ -266,7 +266,7 @@ pub fn notice_native(app: &AppHandle, n: &Notice) {
 /// Stop the recording and write the action plan: the length limit, a call
 /// ending with "Stop and summarise automatically", and the meeting shortcut
 /// all come here. It ends the meeting as **End meeting & summarise** does
-/// (`meeting_end::end`: Rust writes the action plan once the last chunk is
+/// (`meetings::end::end`: Rust writes the action plan once the last chunk is
 /// in, or asks "Started by mistake?"), without bringing up any window: the
 /// meeting notepad shows the progress and the result when it's open, and
 /// the note has them either way. (`note_id`: only if that note is the one
@@ -279,10 +279,10 @@ pub fn stop_and_summarise(app: &AppHandle, note_id: Option<u64>) {
 /// shortcut caught by a window's in-page fallback): a question about the
 /// meeting ("Started by mistake?") shows there.
 fn stop_from(app: &AppHandle, note_id: Option<u64>, origin: Option<&str>) {
-    if note_id.is_some() && crate::meetings::meeting::recording_note() != note_id {
+    if note_id.is_some() && crate::meetings::recorder::recording_note() != note_id {
         return;
     }
-    if let Err(e) = crate::meetings::meeting_end::end(app, origin) {
+    if let Err(e) = crate::meetings::end::end(app, origin) {
         tracing::info!("meeting guard: nothing to stop ({e})");
     }
 }
@@ -290,12 +290,12 @@ fn stop_from(app: &AppHandle, note_id: Option<u64>, origin: Option<&str>) {
 /// [`stop_and_summarise`] as Yap's own stop, not the person's (the length
 /// limit, a quiet meeting, a call that ended, a full disk): call detection
 /// never offers auto-start after one, and may carry the meeting on when
-/// its call comes back (`meeting_end::end_automatically`).
+/// its call comes back (`meetings::end::end_automatically`).
 pub fn stop_automatically(app: &AppHandle, note_id: u64) {
-    if crate::meetings::meeting::recording_note() != Some(note_id) {
+    if crate::meetings::recorder::recording_note() != Some(note_id) {
         return;
     }
-    if let Err(e) = crate::meetings::meeting_end::end_automatically(app) {
+    if let Err(e) = crate::meetings::end::end_automatically(app) {
         tracing::info!("meeting guard: nothing to stop ({e})");
     }
 }
@@ -420,7 +420,7 @@ pub struct LimitWarning {
     body: String,
     /// The main window shows it (the person is looking at it, or nothing
     /// else could); otherwise it's on the Yap bar or a Windows notification
-    /// and the window doesn't repeat it (one place: `notice.rs`).
+    /// and the window doesn't repeat it (one place: `notices/policy.rs`).
     in_app: bool,
 }
 
@@ -509,11 +509,11 @@ fn warn(app: &AppHandle, gen: u64, note_id: u64, stop_at: u64, now: u64, t: &Tim
             _ => return,
         }
     }
-    // One place (`notice.rs`): the main window while the person is looking
+    // One place (`notices/policy.rs`): the main window while the person is looking
     // at it, else the Yap bar, else a Windows notification.
-    let place = crate::notices::notice::place(app, true);
+    let place = crate::notices::policy::place(app, true);
     let mut warning = LimitWarning::new(note_id, stop_at, now, t);
-    warning.in_app = matches!(place, crate::notices::notice::Place::Window | crate::notices::notice::Place::Nowhere);
+    warning.in_app = matches!(place, crate::notices::policy::Place::Window | crate::notices::policy::Place::Nowhere);
     tracing::info!(note_id, title = %warning.title, ?place, "meeting guard: length warning");
     emit_limit(app, Some(&warning));
     // The recording stopped, or Keep going landed, in between: take it back
@@ -711,7 +711,7 @@ struct Look {
     now: u64,
     /// When this recording started (unix ms).
     started: u64,
-    /// The meeting's audio clock and talk counter (`meeting::activity`).
+    /// The meeting's audio clock and talk counter (`meetings::recorder::activity`).
     clock: u64,
     talk: u64,
     /// "End notes when the meeting goes quiet".
@@ -884,7 +884,7 @@ fn pick_surface(notepad: bool, main_focused: bool, bar: bool) -> Surface {
 
 /// [`pick_surface`] now. Window getters: never with a lock held. (A test
 /// run says for itself whether the main window counts as focused:
-/// `notice::window_view`.)
+/// `notices::policy::window_view`.)
 fn surface_now(app: &AppHandle, countdown: bool) -> Surface {
     let notepad = notepad_on_screen(app);
     let main_focused = window_view(app).1;
@@ -922,7 +922,7 @@ impl Answer {
 pub enum About {
     /// "Teams is using Contoso H2 but Yap is using Northwind Audio":
     /// "use" moves "You" to that microphone for this meeting
-    /// (`calls/call_audio.rs`).
+    /// (`calls/audio.rs`).
     Mic { id: String, name: String },
     /// The PC slept mid-meeting (`meetings/sleep.rs`): "resume" carries on
     /// in the same note, "summarise" writes its action plan.
@@ -1179,7 +1179,7 @@ fn notice_on(app: &AppHandle, surface: &str, mut n: Notice) {
 
 /// The quiet guard's turn (see "Quiet meetings" at the top).
 fn quiet_tick(app: &AppHandle, gen: u64) {
-    let Some(activity) = crate::meetings::meeting::activity() else {
+    let Some(activity) = crate::meetings::recorder::activity() else {
         return;
     };
     let t = quiet_timings();
@@ -1277,7 +1277,7 @@ pub fn check_in_answer(app: &AppHandle, id: u64, answer: &str) -> Result<(), Str
 fn answer_question(app: &AppHandle, note_id: u64, about: &About, answer: &str) -> Result<(), String> {
     match (about, answer) {
         (_, "keep") => Ok(()),
-        (About::Mic { id, name }, "use") => crate::meetings::meeting::use_mic(id, name),
+        (About::Mic { id, name }, "use") => crate::meetings::recorder::use_mic(id, name),
         (About::Asleep, "resume") => {
             crate::calls::meeting_detect::forget_auto_stop(note_id);
             crate::meetings::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note_id).map(|_| ())
@@ -1285,7 +1285,7 @@ fn answer_question(app: &AppHandle, note_id: u64, about: &About, answer: &str) -
         (About::Asleep, "summarise") => {
             // Done with these notes: the call back on the mic is a new one.
             crate::calls::meeting_detect::forget_auto_stop(note_id);
-            crate::meetings::meeting_end::start_summary(app, note_id);
+            crate::meetings::end::start_summary(app, note_id);
             Ok(())
         }
         (About::AutoStart { app: call_app }, "yes") => {
@@ -1343,7 +1343,7 @@ fn start_or_stop_from(app: &AppHandle, origin: Option<&str>) {
         tracing::info!("meeting shortcut: pressed again straight away; ignored");
         return;
     }
-    if let Some(note_id) = crate::meetings::meeting::recording_note() {
+    if let Some(note_id) = crate::meetings::recorder::recording_note() {
         tracing::info!(note_id, "meeting shortcut: stop and summarise");
         stop_from(app, Some(note_id), origin);
         return;
@@ -1352,7 +1352,7 @@ fn start_or_stop_from(app: &AppHandle, origin: Option<&str>) {
     if let Some((call_id, call)) = crate::calls::meeting_detect::latest_call() {
         tracing::info!(call_id, "meeting shortcut: record the call");
         crate::calls::meeting_detect::on_tray_record(app, call_id);
-        if let Some(note_id) = crate::meetings::meeting::recording_note() {
+        if let Some(note_id) = crate::meetings::recorder::recording_note() {
             if window_view(app).0 {
                 notice(app, &Notice::taking_notes(Some(&call), shortcut.as_deref(), note_id));
             }

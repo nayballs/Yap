@@ -58,7 +58,7 @@ pub const AGENT_REPORT_UNTOLD_PREFIX: &str = "Report from the agent you started 
 pub const TOLD_ALREADY: &str = "(You told the user this in your answer just before it.)";
 /// The page's event once a report is in its chat.
 pub const EVENT: &str = "yap-agent-report";
-/// The notice's kind (its rule in `notices/notice.rs`, the bar card's id).
+/// The notice's kind (its rule in `notices/policy.rs`, the bar card's id).
 pub const NOTICE: &str = "agentDone";
 /// How long a report waits for its chat to stop answering.
 const WAIT_FOR_CHAT: Duration = Duration::from_secs(30 * 60);
@@ -509,8 +509,8 @@ pub fn notice_title(folder: &str, status: Status, plan: bool, asks: bool, direct
 /// Notifications' "Claude's replies and finished agents" is on
 /// (`notify_agents`); a question, a plan waiting for its go-ahead and one
 /// that didn't finish always. Pure.
-pub fn tells(seen: crate::notices::notice::Seen, showing_its_chat: bool, switched_on: bool, routine: bool) -> bool {
-    use crate::notices::notice::Seen;
+pub fn tells(seen: crate::notices::policy::Seen, showing_its_chat: bool, switched_on: bool, routine: bool) -> bool {
+    use crate::notices::policy::Seen;
     if seen == Seen::Front || (seen == Seen::Beside && showing_its_chat) {
         return false;
     }
@@ -533,11 +533,11 @@ fn notice(agent: &Agent, reply: &str) {
     let body = crate::agents::steps::clip(reply.trim(), 160);
     // Window getters wait on the main thread: off it.
     std::thread::spawn(move || {
-        if crate::notices::notice::yap_in_front(&app) {
+        if crate::notices::policy::yap_in_front(&app) {
             return;
         }
         let showing_its_chat = conversation.is_some_and(|c| crate::chat::assistant::chat_viewing() == crate::chat::assistant::Viewing::Conversation(c));
-        if !tells(crate::notices::notice::window_seen(&app), showing_its_chat, crate::config::load().notify_agents, routine) {
+        if !tells(crate::notices::policy::window_seen(&app), showing_its_chat, crate::config::load().notify_agents, routine) {
             tracing::info!(id = %id, routine, "Agents: no card (its chat in view, or switched off)");
             return;
         }
@@ -566,7 +566,7 @@ fn notice(agent: &Agent, reply: &str) {
                 esc(&body),
                 crate::notices::win_toast::logo_xml(),
             );
-            if crate::notices::notice::notifications_allowed() {
+            if crate::notices::policy::notifications_allowed() {
                 if let Err(e) = crate::notices::win_toast::post(&app, NOTICE, &xml, None, toast_action) {
                     tracing::info!("Agents: no Windows notification ({e})");
                 }
@@ -780,7 +780,7 @@ Its own words: Done.");
 
     #[test]
     fn no_card_while_its_chat_is_in_view_and_none_for_a_reply_once_switched_off() {
-        use crate::notices::notice::Seen;
+        use crate::notices::policy::Seen;
         // Yap in front: never.
         assert!(!tells(Seen::Front, false, true, true));
         assert!(!tells(Seen::Front, false, true, false));

@@ -364,7 +364,7 @@ pub fn save(app: &AppHandle, id: Option<u64>, content: &str) -> Result<Saved, St
         None if content.trim().is_empty() => Saved::default(),
         None => create(app, content),
         Some(id) => {
-            let recording = crate::meetings::meeting::recording_note() == Some(id);
+            let recording = crate::meetings::recorder::recording_note() == Some(id);
             let mut changed = false;
             match crate::notes::modify_or_remove(
                 id,
@@ -386,7 +386,7 @@ pub fn save(app: &AppHandle, id: Option<u64>, content: &str) -> Result<Saved, St
                         set_current(Current::New);
                     }
                     let _ = app.emit("yap-notes-changed", ());
-                    let _ = app.emit(crate::meetings::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
+                    let _ = app.emit(crate::meetings::end::EVENT_DELETED, serde_json::json!({ "id": id }));
                     Saved {
                         removed: true,
                         ..Saved::default()

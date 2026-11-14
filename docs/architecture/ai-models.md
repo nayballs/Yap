@@ -397,7 +397,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   on-device model fits (`gpu::can_run_big_model`, or a model already here)
   and five dictations: one tip in the main window after a dictation or
   when it comes to the front, only while the notice policy has the person
-  looking at it (`notice::window_view`, no dictation or meeting) — "Let Yap
+  looking at it (`notices::policy::window_view`, no dictation or meeting) — "Let Yap
   tidy what you say" with Set it up (Language Models) / Not now — and never
   again. A test run offers it only with `YAP_E2E_CLEANUP_OFFER`.
   `cleanup_styles_catalog` gives Settings the kinds, tones and built-in apps
@@ -648,7 +648,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   nothing uses the sidecar — no dictation (`pipeline_busy`), no request or
   run of requests to it under way (`requests_in_flight`, `hold` below), no
   meeting recording or action plan being written
-  (`meeting_end::summary_running`) — idle, then idle again after a settle,
+  (`meetings::end::summary_running`) — idle, then idle again after a settle,
   never under a context restart (it takes `RESTARTING` only once idle, so a
   context change isn't held up), and under the start lock, **looking again
   once it has it** (`idle_with_locks`: a Chat turn that began while it
@@ -708,7 +708,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   is the sidecar): a Chat turn (`turn::chat_turn` — the Voice
   Assistant's too — between its tool steps, web searches and page reads),
   the Notes Ask bar, an action plan (`run_enhance`: digests to the final
-  call), `meeting_summary::prepare_final` and each live digest, and a
+  call), `meetings::summary::prepare_final` and each live digest, and a
   notepad helper while it waits out a dictation (`chat_beside_dictation`):
   a context restart or a runtime swap never cuts one off between requests.
   **MTP** (`plan_for` → `Plan { runtime, mtp }`, `server_args` adds
@@ -756,7 +756,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   it up instead of spawning another llamafile). `budget_factor(context)` /
   `budget_factor_for(provider, base_url)`: whole 8K multiples, 1–4, only
   when the call really goes to the running sidecar — what the meeting
-  notes' final call and the Notes view's Ask grow by (`meetings/meeting_summary.rs`
+  notes' final call and the Notes view's Ask grow by (`meetings/summary.rs`
   `FinalBudget`, `notes::commands::note_ask`). Debug-only
   `e2e_local_llm_serving {…, ctx, usedMib}` (the stand-in "restarts" on a
   change, `e2e_local_llm_restarts`) and `e2e_local_llm_busy {busy}` (a
@@ -1251,7 +1251,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   `onboarding-weak-pc.spec.js`.
 - **`ai/ai_model.rs`** — which model a scope's next call goes to, resolved the
   calls' way (`Scope::Chat` → `turn::resolve_chat_endpoint`;
-  `Scope::Notes` → `meeting_summary::resolve_endpoint`): `ai_model_status
+  `Scope::Notes` → `meetings::summary::resolve_endpoint`): `ai_model_status
   {scope}` → `{ready, error, model, host, tools (supports_tools), fromScope,
   provider (the one the scope is set to, ready or not), keyed, maskedKeys
   (each keyed provider's key as "gsk…AbCd", `mask_key` — never the key),
@@ -1999,7 +1999,7 @@ person's own sign-in.
   `…/commands`, `…/notes`, and Chat's bare `claude-code://plan` — set where
   the endpoint is resolved (`local_llm::effective_endpoint` and a cleanup
   profile's: cleanup; `pipeline::commands_model`: Commands;
-  `meeting_summary::resolve_endpoint`: Note Formatting;
+  `meetings::summary::resolve_endpoint`: Note Formatting;
   `turn::resolve_chat_endpoint`: Chat, also on the cleanup's model). A scope
   that's off runs on the cleanup's model, under the cleanup's settings
   (Chat's stays Chat's). The call reads its warm spare, effort and fallback

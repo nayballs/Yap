@@ -10,7 +10,7 @@
 //! `notes::stamp` / `chats::stamp`, which also catches the local API's
 //! edits). **Never in a dictation's way**: a pass waits while a dictation
 //! or a meeting recording runs, and a batch under way is dropped the moment
-//! one starts (`meeting_summary::unless_busy`: the connection closes) and
+//! one starts (`meetings::summary::unless_busy`: the connection closes) and
 //! read again after. Passages already read are never read again (their key
 //! is a hash of their words), so a pass cut off keeps what it did, and the
 //! store drops the vectors of passages that are gone once they're over 30 %
@@ -524,7 +524,7 @@ pub fn init(app: &AppHandle) {
 }
 
 fn busy(app: &AppHandle) -> bool {
-    crate::meetings::meeting_summary::dictation_busy(app) || crate::meetings::meeting::is_recording()
+    crate::meetings::summary::dictation_busy(app) || crate::meetings::recorder::is_recording()
 }
 
 fn enabled() -> bool {
@@ -537,7 +537,7 @@ async fn pass(app: &AppHandle) -> Result<bool, String> {
     if busy(app) {
         set_phase(Phase::Waiting, None);
         emit(app);
-        if !crate::meetings::meeting_summary::wait_idle(|| busy(app), enabled).await {
+        if !crate::meetings::summary::wait_idle(|| busy(app), enabled).await {
             return Ok(false);
         }
     }
@@ -564,7 +564,7 @@ async fn pass(app: &AppHandle) -> Result<bool, String> {
             if busy(app) {
                 set_phase(Phase::Waiting, None);
                 emit(app);
-                if !crate::meetings::meeting_summary::wait_idle(|| busy(app), enabled).await {
+                if !crate::meetings::summary::wait_idle(|| busy(app), enabled).await {
                     return Ok(false);
                 }
                 set_phase(Phase::Indexing, None);
@@ -573,7 +573,7 @@ async fn pass(app: &AppHandle) -> Result<bool, String> {
             let group = &missing[i..(i + size).min(missing.len())];
             let texts: Vec<String> = group.iter().map(|p| p.embedded.clone()).collect();
             // A dictation starting drops the batch (read again after it).
-            let Some(result) = crate::meetings::meeting_summary::unless_busy(embedder::embed(&texts), || busy(app)).await else {
+            let Some(result) = crate::meetings::summary::unless_busy(embedder::embed(&texts), || busy(app)).await else {
                 continue;
             };
             let vectors = result?;

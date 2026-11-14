@@ -4,6 +4,6 @@
 
 pub mod alert;
 pub mod kinds;
-pub mod notice;
+pub mod policy;
 #[cfg(windows)]
 pub mod win_toast;

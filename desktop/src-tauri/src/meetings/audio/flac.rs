@@ -1,5 +1,5 @@
 //! A small FLAC encoder for the meeting audio Yap keeps on disk
-//! (`meeting_audio.rs`), and the reader that plays it back.
+//! (`audio.rs`), and the reader that plays it back.
 //!
 //! **Why FLAC, and why this one.** A meeting is two sources (the mic and the
 //! call) for up to a few hours; as 16 kHz mono 16-bit WAV that's ~115 MB an
@@ -292,7 +292,7 @@ impl Writer {
     /// A new file at `path` (never over an existing one). Other programs
     /// may read it while it's written, but not write to it or delete it:
     /// that's also how another Yap tells a recording that's going on from
-    /// one a crash left behind (`meeting_audio::in_use`).
+    /// one a crash left behind (`audio::in_use`).
     pub fn create(path: &Path) -> std::io::Result<Writer> {
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);

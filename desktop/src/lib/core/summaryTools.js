@@ -1,5 +1,5 @@
 // What a meeting's summary offers beside its words, in the notepad and the
-// Notes view alike (desktop/src-tauri/src/notes/note_edits.rs):
+// Notes view alike (desktop/src-tauri/src/notes/edits.rs):
 // - "Back to Yap's summary" (`canRestore`, `restoreSummary`): Yap keeps its
 //   own version beside one the person edited; going back to it keeps their
 //   ticks, and the toast's Undo saves their version back;

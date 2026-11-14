@@ -89,7 +89,7 @@
   const writing = $derived(job?.state === 'running');
   const hasSummary = $derived(!!note?.enhancedContent?.trim());
   const lineCount = $derived((note?.transcript || []).length);
-  // The meeting's audio kept on disk (meetings/meeting_audio.rs): ⋯ → Transcribe
+  // The meeting's audio kept on disk (meetings/audio.rs): ⋯ → Transcribe
   // again, ▶ on its lines, what a crash left of it.
   let audioFor = null;
   $effect(() => {
@@ -418,7 +418,7 @@
     if (!note || writing) return;
     flushSave();
     summary.finish();
-    // A summary the person edited goes only when they say so (notes/note_edits.rs).
+    // A summary the person edited goes only when they say so (notes/edits.rs).
     if (note.summaryEditedMs && hasSummary) {
       askReplaceSummary({ run: () => startSummary(true), returnFocus });
       return;

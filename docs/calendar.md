@@ -327,7 +327,7 @@ link), **Snooze 2 min** and ✕ (Esc, outside a text box). It stays
 until 5 minutes after the start, one card at a time, earliest first. While
 another meeting's notes record, it offers to **switch** notes instead
 (**Join & switch notes** / **Switch notes**): the running meeting ends
-(`meeting_end::end`, so its action plan is written) and the next one's
+(`meetings::end::end`, so its action plan is written) and the next one's
 notes start.
 
 Every card goes on screen through **one function**, `calendar::present_card`
@@ -395,7 +395,7 @@ with a quiet line saying why. The model's call is bounded for an 8k local
 context (≤ ~600 tokens of each earlier meeting — its action plan, else its
 digests, else its notes and transcript —, ~1k tokens in all, a 220-token
 reply cap), waits out and steps aside for any dictation, and holds the
-on-device model meanwhile (`meeting_summary::chat_beside_dictation`); one
+on-device model meanwhile (`meetings::summary::chat_beside_dictation`); one
 brief's summary is written at a time. Briefs are kept in `calendar.json`
 (`briefs`, by event key, two days after their meeting, at most 40) with a
 **fingerprint** of what they were made from (the meeting, each note's and

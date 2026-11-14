@@ -1,4 +1,4 @@
-//! **A fixed transcript line, the rest** (after `note_edits.rs`, which fixes
+//! **A fixed transcript line, the rest** (after `edits.rs`, which fixes
 //! a line's words): put a line back to what Yap heard, delete one (with
 //! Undo), or split one in two at the cursor. The meeting notepad and the
 //! Notes view, in a line's menu (and Shift+Enter while editing one: split
@@ -9,9 +9,9 @@
 //! - **Delete** ([`remove_line`]): the line goes from the note — every
 //!   view, the summaries' inputs and search — so an older Yap sharing the
 //!   data folder keeps it gone too. Its side and place on the recording's
-//!   clock are kept beside the meeting's audio (`meeting_audio::Cut`, in
+//!   clock are kept beside the meeting's audio (`meetings::audio::Cut`, in
 //!   `cuts.json`), so Transcribe again and the refine after a meeting
-//!   (`meeting_audio/redo.rs`) never bring its words back. Stop marks after
+//!   (`meetings/audio/redo.rs`) never bring its words back. Stop marks after
 //!   it move up; the rolling digests from the one that read it on are
 //!   dropped (`drop_digests_from`): they were written with its words, and
 //!   the next summary writes them again from what's left. **Undo**
@@ -38,7 +38,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::notes::note_edits::{find_line, LineRef};
+use crate::notes::edits::{find_line, LineRef};
 use crate::notes::{Note, TranscriptSegment};
 
 /// A marker (a dictation, a failed stretch, the mic disconnected, the PC
@@ -142,8 +142,8 @@ fn deleted() -> std::sync::MutexGuard<'static, Vec<(u64, Removed)>> {
 const UNDO_KEEP: usize = 32;
 
 /// A deleted line's place, kept beside the meeting's audio.
-fn cut_of(line: &TranscriptSegment) -> Option<crate::meetings::meeting_audio::Cut> {
-    Some(crate::meetings::meeting_audio::Cut {
+fn cut_of(line: &TranscriptSegment) -> Option<crate::meetings::audio::Cut> {
+    Some(crate::meetings::audio::Cut {
         source: line.source.clone(),
         ts: line.ts,
         start_ms: line.start_ms?,
@@ -251,11 +251,11 @@ pub fn split_line(seg: &TranscriptSegment, k: usize) -> Result<[TranscriptSegmen
 /// Why line edits that move lines can't run on note `note_id` now (they
 /// hold places in its transcript), if so.
 fn busy(note_id: u64, split: bool) -> Option<&'static str> {
-    if crate::meetings::meeting::recording_note() == Some(note_id) {
+    if crate::meetings::recorder::recording_note() == Some(note_id) {
         Some(if split { "Split lines once the meeting stops recording" } else { "Delete lines once the meeting stops recording" })
-    } else if crate::meetings::meeting_end::summary_running_for(note_id) {
+    } else if crate::meetings::end::summary_running_for(note_id) {
         Some("Yap is writing this meeting's summary: try again in a moment")
-    } else if crate::meetings::meeting_audio::running_job(note_id).is_some() {
+    } else if crate::meetings::audio::running_job(note_id).is_some() {
         Some("This meeting is being transcribed: try again when it's done")
     } else {
         None
@@ -340,7 +340,7 @@ pub fn transcript_line_delete(app: AppHandle, note_id: u64, line: LineRef, origi
     })?;
     // Its place, so the audio never brings it back.
     if let Some(cut) = cut_of(&removed.line) {
-        crate::meetings::meeting_audio::set_cut(note_id, cut, true);
+        crate::meetings::audio::set_cut(note_id, cut, true);
     }
     let (index, gone) = (removed.index, removed.line.clone());
     {
@@ -383,7 +383,7 @@ pub fn transcript_line_restore(
     })?;
     deleted().retain(|(n, r)| !is_it(n, r));
     if let Some(cut) = cut_of(&removed.line) {
-        crate::meetings::meeting_audio::set_cut(note_id, cut, false);
+        crate::meetings::audio::set_cut(note_id, cut, false);
     }
     tracing::info!(note_id, index = at, "Transcript line put back");
     lines_spliced(&app, note_id, at, 0, std::slice::from_ref(&removed.line), origin.as_deref().unwrap_or(""));
@@ -440,7 +440,7 @@ mod tests {
     #[test]
     fn a_reverted_line_says_what_yap_heard_again() {
         let mut s = seg("them", "we deploy on cube and eighties", 10, 0, 3_000);
-        crate::notes::note_edits::apply_line_edit(&mut s, "We deploy on Kubernetes.").unwrap();
+        crate::notes::edits::apply_line_edit(&mut s, "We deploy on Kubernetes.").unwrap();
         assert_eq!(revert_line(&mut s), Ok(true));
         assert_eq!(s.text, "we deploy on cube and eighties");
         assert!(!s.edited && s.original.is_empty());
@@ -521,7 +521,7 @@ mod tests {
         // An edited line: what Yap heard is shared where the cut falls.
         let mut fixed = seg("them", "we deploy on cube and eighties after lunch", 70, 0, 8_000);
         fixed.words = vec![[0, 500], [600, 1_000], [1_100, 1_500], [1_600, 2_400], [2_500, 2_800], [2_900, 4_000], [5_000, 6_000], [6_100, 8_000]];
-        crate::notes::note_edits::apply_line_edit(&mut fixed, "We deploy on Kubernetes after lunch").unwrap();
+        crate::notes::edits::apply_line_edit(&mut fixed, "We deploy on Kubernetes after lunch").unwrap();
         let [a, b] = split_line(&fixed, 4).unwrap();
         assert_eq!((a.text.as_str(), b.text.as_str()), ("We deploy on Kubernetes", "after lunch"));
         assert!(a.original.starts_with("we deploy on") && b.original.ends_with("lunch"));
@@ -549,7 +549,7 @@ mod tests {
     /// changes: a deleted line's words never come back, a split stays split.
     #[test]
     fn transcribing_again_keeps_deletions_and_splits() {
-        use crate::meetings::meeting_audio::redo::{rebuild_with_cuts, Redone};
+        use crate::meetings::audio::redo::{rebuild_with_cuts, Redone};
         const T0: u64 = 1_761_000_000_000;
         let line = |source: &str, text: &str, s: u64, e: u64| TranscriptSegment {
             ts: (T0 + s) / 1000,

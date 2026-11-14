@@ -4,9 +4,9 @@
 // Notes, the ⋯ menu, Share, split screen, delete), My thoughts (synced with
 // the Notes view), the live transcript (grouped bubbles, paused and dictated
 // dividers, search, copy), the summary Rust writes when the meeting ends
-// (meetings/meeting_end.rs, with steps and a Retry; also after a stop Yap makes
+// (meetings/end.rs, with steps and a Retry; also after a stop Yap makes
 // itself, calls/meeting_guard.rs), the Ask sheet with "What did I miss?" and the AI
-// meeting title (meetings/meeting_assist.rs; never over a typed title or a calendar
+// meeting title (meetings/assist.rs; never over a typed title or a calendar
 // meeting's name — a local iCal feed, support/calendar-feed.js), "Started by mistake?" (in the notepad,
 // or on the Yap bar with no Yap window on screen), the consent message,
 // hiding from screen capture (calls/capture.rs), and the dictation key and meeting
@@ -100,7 +100,7 @@ async function startMeeting(yap, title) {
 let clockTs = Math.floor(Date.now() / 1000);
 /**
  * Hand the recorder transcript lines (`[source, text, echo?]`), as if just
- * transcribed; `'dictated'` is a "You dictated here" marker (meetings/meeting.rs).
+ * transcribed; `'dictated'` is a "You dictated here" marker (meetings/recorder.rs).
  */
 async function say(yap, ...lines) {
   const segments = lines.map((line) =>
@@ -395,7 +395,7 @@ test('the transcript: paused and dictated dividers, hover copy, search, copy all
   await expect(log.getByRole('separator', { name: 'Recording paused here' })).toHaveCount(1);
   await pad.getByRole('button', { name: 'Resume' }).click();
   await expect.poll(() => recording(yap)).toBe(true);
-  // A dictation mid-meeting leaves a marker (meetings/meeting.rs keeps its words out).
+  // A dictation mid-meeting leaves a marker (meetings/recorder.rs keeps its words out).
   await say(yap, ['you', 'Back again, where were we?'], 'dictated', ['them', 'The second theme, the budget.']);
   const dictated = log.getByRole('separator', { name: 'You dictated here' });
   await expect(dictated).toHaveText('You dictated here · left out of the notes');
@@ -448,7 +448,7 @@ test('the transcript: paused and dictated dividers, hover copy, search, copy all
 
   // Copy all: the spoken lines, no markers.
   await pad.getByRole('button', { name: 'Copy transcript' }).click();
-  // The button's ✓ says it: no toast on top (notices/notice.rs).
+  // The button's ✓ says it: no toast on top (notices/policy.rs).
   await expect(pad.getByRole('button', { name: 'Copy transcript' })).toHaveAttribute('data-copied', '');
   await expect
     .poll(copied)
@@ -781,7 +781,7 @@ test('the header: back to Notes, the ⋯ menu, Share, split screen, delete', asy
   await expect(main.getByPlaceholder('Untitled Note')).toHaveValue('Header check');
 
   // After the meeting the ⋯ menu has no Audio settings, and Transcribe again
-  // and Export audio (its audio kept: meetings/meeting_audio.rs, export.rs);
+  // and Export audio (its audio kept: meetings/audio.rs, export.rs);
   // Delete asks first.
   await pauseAll(yap);
   await closeToasts(pad);
@@ -1074,7 +1074,7 @@ test('Stop writes the summary in steps; a failure says so above the bar and Retr
 });
 
 // A bug in the action plan (its task panics) ends the job as an error with
-// Retry, as a failed model call does (meeting_end.rs `RunEnds`). Until
+// Retry, as a failed model call does (meetings/end.rs `RunEnds`). Until
 // 2026-11-03 it stayed "Step 1 of 3" for ever, and Retry was refused.
 test('an action plan that crashes says so above the bar, and Retry writes it', async ({ yap }) => {
   const pad = yap.notepad;

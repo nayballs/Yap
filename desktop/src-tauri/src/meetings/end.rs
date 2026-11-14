@@ -6,7 +6,7 @@
 //!   through [`meeting_pause`] (the Notes view's Pause: Resume carries on in
 //!   the same note). This module follows the recorder through its
 //!   `yap-meeting-state` events.
-//! - **The refined transcript** (`meeting_refine.rs`): when one is due, it
+//! - **The refined transcript** (`refine.rs`): when one is due, it
 //!   runs after the action plan — or before it, then [`end_steps`], when
 //!   the live transcript has holes (chunks that failed).
 //! - **"Started by mistake?"** A meeting with only a handful of words (fewer
@@ -76,7 +76,7 @@ pub struct Summary {
     /// Which run this is (a window tells two runs' results apart by it).
     pub run: u64,
     /// "running" | "done" | "error" | "needsAi" | "nothing" | "kept" (the
-    /// person's edited summary stays: `note_edits.rs`).
+    /// person's edited summary stays: `notes/edits.rs`).
     pub state: &'static str,
     /// 1 reading the meeting, 2 writing, 3 checking (while running).
     pub step: u8,
@@ -96,8 +96,8 @@ pub fn init(app: &AppHandle) {
     app.listen("yap-meeting-state", move |event| on_state(&handle, event.payload()));
     let handle = app.clone();
     app.listen("yap-meeting-segment", move |_| {
-        if let Some(note_id) = crate::meetings::meeting::recording_note() {
-            crate::meetings::meeting_assist::maybe_title(&handle, note_id, false);
+        if let Some(note_id) = crate::meetings::recorder::recording_note() {
+            crate::meetings::assist::maybe_title(&handle, note_id, false);
         }
     });
 }
@@ -177,25 +177,25 @@ fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) -
     }
     if paused {
         tracing::info!(note_id, "Meeting paused");
-        crate::meetings::meeting_assist::maybe_title(app, note_id, true);
+        crate::meetings::assist::maybe_title(app, note_id, true);
         return false;
     }
     drop(note);
-    // The refined transcript (`meeting_refine.rs`, "Which comes first"):
+    // The refined transcript (`refine.rs`, "Which comes first"):
     // with holes in the live one (chunks failed), the refine first, then
     // these steps; else these steps now and the refine after the summary.
-    let plan = crate::meetings::meeting_refine::plan(note_id);
+    let plan = crate::meetings::refine::plan(note_id);
     if let Some(p) = plan.as_ref().filter(|p| p.first) {
-        if crate::meetings::meeting_refine::start(app, note_id, p, origin.map(str::to_string)) {
+        if crate::meetings::refine::start(app, note_id, p, origin.map(str::to_string)) {
             return false;
         }
     }
     let mistake = end_steps(app, note_id, origin);
     match plan.filter(|p| !p.first && !mistake) {
         Some(p) => {
-            crate::meetings::meeting_refine::start(app, note_id, &p, None);
+            crate::meetings::refine::start(app, note_id, &p, None);
         }
-        None => crate::meetings::meeting_audio::release(app, note_id),
+        None => crate::meetings::audio::release(app, note_id),
     }
     mistake
 }
@@ -204,7 +204,7 @@ fn finished(app: &AppHandle, note_id: u64, paused: bool, origin: Option<&str>) -
 /// mistake?" (a handful of words, nothing typed, and no stretch that
 /// couldn't be transcribed — that one may have been the meeting), or the
 /// AI title and the action plan. After the refine when that came first
-/// (`meeting_refine.rs`). Returns whether it asked "Started by mistake?".
+/// (`refine.rs`). Returns whether it asked "Started by mistake?".
 pub fn end_steps(app: &AppHandle, note_id: u64, origin: Option<&str>) -> bool {
     let Some(note) = crate::notes::get(note_id) else {
         return false; // deleted meanwhile
@@ -226,13 +226,13 @@ pub fn end_steps(app: &AppHandle, note_id: u64, origin: Option<&str>) -> bool {
         }
         return true;
     }
-    crate::meetings::meeting_assist::maybe_title(app, note_id, true);
+    crate::meetings::assist::maybe_title(app, note_id, true);
     start_summary(app, note_id);
     false
 }
 
 /// The part of a meeting a crash left is transcribed now
-/// (`meeting_audio.rs`): the end of the meeting, as a stop would have been —
+/// (`audio.rs`): the end of the meeting, as a stop would have been —
 /// its stop mark, "Started by mistake?" or the AI title and the action plan.
 pub fn recovered(app: &AppHandle, note_id: u64) {
     let app = app.clone();
@@ -289,7 +289,7 @@ fn withdraw_mistake_card(app: &AppHandle, note_id: u64) {
 pub fn end(_app: &AppHandle, origin: Option<&str>) -> Result<(), String> {
     tracing::info!(?origin, "Meeting end asked for");
     *ORIGIN.lock().unwrap_or_else(|p| p.into_inner()) = origin.map(str::to_string);
-    crate::meetings::meeting::stop().inspect_err(|_| {
+    crate::meetings::recorder::stop().inspect_err(|_| {
         *ORIGIN.lock().unwrap_or_else(|p| p.into_inner()) = None;
     })
 }
@@ -306,7 +306,7 @@ pub fn end_automatically(app: &AppHandle) -> Result<(), String> {
 pub fn pause() -> Result<(), String> {
     tracing::info!("Meeting pause asked for");
     PAUSED.store(true, Ordering::SeqCst);
-    crate::meetings::meeting::stop().inspect_err(|_| PAUSED.store(false, Ordering::SeqCst))
+    crate::meetings::recorder::stop().inspect_err(|_| PAUSED.store(false, Ordering::SeqCst))
 }
 
 /// [`pause`], as Yap's own (the PC going to sleep: `meetings/sleep.rs`).
@@ -330,7 +330,7 @@ pub fn summary_running() -> bool {
 }
 
 /// Note `note_id`'s action plan is being written (a refine waits for it,
-/// `meeting_audio.rs`).
+/// `audio.rs`).
 pub fn summary_running_for(note_id: u64) -> bool {
     jobs().get(&note_id).is_some_and(|j| j.state == "running")
 }
@@ -398,7 +398,7 @@ impl Drop for RunEnds {
 /// Write note `note_id`'s action plan in the background (the built-in Action
 /// Plan action, as "End meeting & summarise" always did), unless one is being
 /// written already. Returns whether this started one. A summary the person
-/// edited stays (the job ends "kept"; `note_edits.rs`).
+/// edited stays (the job ends "kept"; `notes/edits.rs`).
 pub fn start_summary(app: &AppHandle, note_id: u64) -> bool {
     start_summary_with(app, note_id, false)
 }
@@ -423,7 +423,7 @@ fn start_summary_with(app: &AppHandle, note_id: u64, replace: bool) -> bool {
     }
     let _ = app.emit(EVENT_SUMMARY, first);
     // From the lines as they are now: a refine's "Update summary" is answered.
-    crate::meetings::meeting_audio::summary_redone(app, note_id);
+    crate::meetings::audio::summary_redone(app, note_id);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let step = |n: u8| {
@@ -445,7 +445,7 @@ fn start_summary_with(app: &AppHandle, note_id: u64, replace: bool) -> bool {
         let (state, error) = match result {
             Ok(()) => ("done", None),
             Err(e) if e == NOTHING => ("nothing", Some(e)),
-            Err(e) if e == crate::notes::note_edits::SUMMARY_KEPT => ("kept", Some(e)),
+            Err(e) if e == crate::notes::edits::SUMMARY_KEPT => ("kept", Some(e)),
             Err(e) if needs_ai(&e) => ("needsAi", Some(e)),
             Err(e) => ("error", Some(e)),
         };
@@ -492,7 +492,7 @@ pub fn ready_body(title: &str, tasks: usize) -> String {
 fn summary_ready(app: &AppHandle, note_id: u64) {
     let app = app.clone();
     std::thread::spawn(move || {
-        if crate::notices::notice::yap_in_front(&app) {
+        if crate::notices::policy::yap_in_front(&app) {
             return;
         }
         let Some(note) = crate::notes::get(note_id) else {
@@ -522,7 +522,7 @@ async fn write_action_plan(app: &AppHandle, note_id: u64, replace: bool, step: i
         return Err(NOTHING.to_string());
     }
     // The person's edited summary stays, unless they said it may go.
-    crate::notes::note_edits::keeps_summary(&note, replace)?;
+    crate::notes::edits::keeps_summary(&note, replace)?;
     // Found by kind (renaming it is fine); older stores fall back to Meeting
     // Notes, as the Notes view does.
     // Who each voice is, before the plan names owners: the AI's answers
@@ -577,12 +577,12 @@ pub fn meeting_pause() -> Result<(), String> {
 #[tauri::command]
 pub fn meeting_summarise(app: AppHandle, note_id: u64, replace: Option<bool>) -> Result<(), String> {
     crate::notes::get(note_id).ok_or("Note not found")?;
-    if crate::meetings::meeting::recording_note() == Some(note_id) {
+    if crate::meetings::recorder::recording_note() == Some(note_id) {
         return Err("Stop the recording first".to_string());
     }
-    // The transcript is being completed first (`meeting_refine.rs`): the
+    // The transcript is being completed first (`refine.rs`): the
     // summary follows by itself.
-    if crate::meetings::meeting_audio::running_job(note_id).is_some_and(|j| j.then_summary) {
+    if crate::meetings::audio::running_job(note_id).is_some_and(|j| j.then_summary) {
         return Ok(());
     }
     start_summary_with(&app, note_id, replace.unwrap_or(false));
@@ -601,7 +601,7 @@ pub fn meeting_summary_status(note_id: u64) -> Option<Summary> {
 #[tauri::command]
 pub fn meeting_discard(app: AppHandle, note_id: u64) -> Result<(), String> {
     crate::notes::get(note_id).ok_or("Note not found")?;
-    crate::meetings::meeting::delete_note(note_id)?;
+    crate::meetings::recorder::delete_note(note_id)?;
     jobs().remove(&note_id);
     withdraw_mistake_card(&app, note_id);
     tracing::info!(note_id, "Meeting note deleted");
@@ -616,11 +616,11 @@ pub fn meeting_discard(app: AppHandle, note_id: u64) -> Result<(), String> {
 /// that's going away), then as [`meeting_discard`].
 #[tauri::command]
 pub async fn meeting_delete(app: AppHandle, note_id: u64) -> Result<(), String> {
-    if crate::meetings::meeting::recording_note() == Some(note_id) {
+    if crate::meetings::recorder::recording_note() == Some(note_id) {
         pause()?;
         // The recorder transcribes its last few seconds before it lets go.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        while crate::meetings::meeting::is_recording() {
+        while crate::meetings::recorder::is_recording() {
             if std::time::Instant::now() > deadline {
                 return Err("The recording didn't stop, so the note was kept".to_string());
             }
@@ -672,7 +672,7 @@ mod tests {
         crate::notes::load_json_for_test(&format!(r#"{{"notes":[{{"id":{id},"title":"Weekly sync","content":"","createdTs":1,"updatedTs":1}}]}}"#));
         jobs().insert(id, Summary { note_id: id, run: 1, state: "running", step: 2, steps: STEPS, error: None });
         assert!(summary_running_for(id));
-        crate::meetings::meeting::delete_note(id).unwrap();
+        crate::meetings::recorder::delete_note(id).unwrap();
         assert!(!summary_running_for(id));
         assert!(jobs().get(&id).is_none());
     }

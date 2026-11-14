@@ -10,7 +10,7 @@
 //! memory: a restart starts the day's count afresh).
 //!
 //! Through the one notice policy: a module about to show one asks
-//! `notice::place_tip` (its place, or Nowhere when its kind is off or used
+//! `policy::place_tip` (its place, or Nowhere when its kind is off or used
 //! up today — counted when it isn't, and the count given back if it never
 //! shows after all: [`give_back`]), and the page asks [`notice_allow`]
 //! for its own (the "Updated to …" note). Questions, alerts and notices

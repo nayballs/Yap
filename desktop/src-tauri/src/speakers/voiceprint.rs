@@ -142,7 +142,7 @@ pub fn available() -> bool {
 /// made of.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Span {
-    /// The recording (`meeting_audio::Meta::recording`).
+    /// The recording (`meetings::audio::Meta::recording`).
     pub recording: u64,
     /// Its place among the note's recordings, oldest first (what a test's
     /// staged prints name).
@@ -190,7 +190,7 @@ impl Printer {
             Some(model) => {
                 let from = span.start_ms * 16;
                 let n = (span.ms().min(MAX_CLIP_MS) * 16) as usize;
-                let audio = crate::meetings::meeting_audio::read_side(self.note_id, span.recording, &span.side, from, n).ok()?;
+                let audio = crate::meetings::audio::read_side(self.note_id, span.recording, &span.side, from, n).ok()?;
                 // Silence isn't a voice (a stretch the engine placed on a
                 // pause, a muted side).
                 let rms = (audio.iter().map(|s| (*s as f64).powi(2)).sum::<f64>() / audio.len().max(1) as f64).sqrt();

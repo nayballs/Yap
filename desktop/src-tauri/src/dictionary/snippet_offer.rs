@@ -27,7 +27,7 @@
 //!   snippets for text you use often" on (the Dictionary view; "Don't
 //!   suggest this again" turns it off). It waits out a dictation (up to a
 //!   minute), as the notice policy holds it (kind [`CARD`]).
-//! - **The offer** ([`offer`]), in one place (`notice::place`): a toast in
+//! - **The offer** ([`offer`]), in one place (`notices::policy::place`): a toast in
 //!   the main window while it's focused (`yap-snippet-suggestion`,
 //!   `lib/notices/snippetSuggestions.js`), else a Yap bar card; never a
 //!   Windows notification. **Save snippet** adds `{from: the phrase to say,
@@ -64,7 +64,7 @@ const MAX_CHARS: usize = 400;
 const WAIT_MS: u64 = 60_000;
 /// The main window's event.
 const EVENT: &str = "yap-snippet-suggestion";
-/// The bar card's id (its rule in `notice.rs`) and the "saved" card's.
+/// The bar card's id (its rule in `notices/policy.rs`) and the "saved" card's.
 pub const CARD: &str = "snippet-suggestion";
 const CARD_SAVED: &str = "snippet-saved";
 /// How long the card stays up (then it's left unanswered).
@@ -287,7 +287,7 @@ pub fn phrases(text: &str) -> Vec<Phrase> {
 /// A fingerprint of a phrase's words (FNV-1a, stable across runs): what a
 /// typed phrase is kept as.
 pub fn fingerprint(key: &str) -> u64 {
-    crate::notices::notice::fingerprint(key, "")
+    crate::notices::policy::fingerprint(key, "")
 }
 
 // ---- snippet_suggestions.json --------------------------------------------------------
@@ -557,7 +557,7 @@ fn consider(app: &AppHandle, text: String, typed: bool) {
         };
         // Never over a dictation (the one that typed it is still pasting).
         let waited = std::time::Instant::now();
-        while crate::notices::notice::moment().dictating {
+        while crate::notices::policy::moment().dictating {
             if waited.elapsed() > Duration::from_millis(WAIT_MS) {
                 tracing::debug!("Snippet offer: a dictation went on too long; dropped");
                 return;
@@ -576,12 +576,12 @@ fn consider(app: &AppHandle, text: String, typed: bool) {
 /// Ask about `f`: a toast in the main window while it's on screen, else a
 /// Yap bar card. `true` if shown.
 fn offer(app: &AppHandle, f: &Found, dict: &[DictionaryEntry]) -> bool {
-    let place = crate::notices::notice::place_tip(app, "snippet-suggestion");
-    if place == crate::notices::notice::Place::Nowhere {
+    let place = crate::notices::policy::place_tip(app, "snippet-suggestion");
+    if place == crate::notices::policy::Place::Nowhere {
         tracing::debug!("Snippet offer: nowhere to show it");
         return false;
     }
-    let in_window = place == crate::notices::notice::Place::Window;
+    let in_window = place == crate::notices::policy::Place::Window;
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
     let say = trigger(&f.phrase, dict);
     let (title, body) = prompt_text(&f.phrase, f.times, &say);
@@ -621,7 +621,7 @@ fn offer(app: &AppHandle, f: &Found, dict: &[DictionaryEntry]) -> bool {
         )
     };
     // Not shown after all: the day's count back.
-    let shown = crate::notices::notice::tip_shown(CARD, place, shown);
+    let shown = crate::notices::policy::tip_shown(CARD, place, shown);
     if shown {
         tracing::info!(kind = f.phrase.kind.name(), times = f.times, len = f.phrase.text.len(), in_window, "Snippet offer: offered");
         let now = now_ms();

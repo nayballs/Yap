@@ -35,7 +35,7 @@ pub struct DictionaryEntry {
     #[serde(default)]
     pub snippet: bool,
     /// Starred in the Dictionary view: listed first there (its "Starred
-    /// first" sort) and given to the speech model first (`dict_usage::rank`,
+    /// first" sort) and given to the speech model first (`dictionary::usage::rank`,
     /// as Wispr Flow ranks starred words). Written only when set, so a
     /// dictionary with no stars saves as it always did.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -526,7 +526,7 @@ pub struct YapConfig {
     pub learn_words: bool,
     /// "Show tips" (Settings → General → Notifications): coaching hints and
     /// nudges ("Connect your calendar"). Off, Yap's notice policy drops every
-    /// tip (`notice.rs`); alerts, questions and notices still show. On by
+    /// tip (`notices/policy.rs`); alerts, questions and notices still show. On by
     /// default.
     #[serde(default = "default_true")]
     pub show_tips: bool,
@@ -1153,7 +1153,7 @@ pub struct YapConfig {
     pub meeting_consent_message: String,
     /// "Keep meeting audio" (Settings → Meetings): each recording's audio
     /// stays on this PC for `meeting_audio_days`, to transcribe a meeting
-    /// again and play its lines (`meeting_audio.rs`). Off, it's still
+    /// again and play its lines (`meetings/audio.rs`). Off, it's still
     /// written while a meeting records (a crash loses nothing) and deleted
     /// once the meeting is transcribed. On by default.
     #[serde(default = "default_true")]
@@ -1169,7 +1169,7 @@ pub struct YapConfig {
     pub meeting_transcript_days: u32,
     /// "Improve the transcript after the meeting" (Settings → Meetings):
     /// "auto" (when it helps: chunks failed, or a more accurate speech
-    /// model is installed), "always" or "never" (`meeting_refine.rs`).
+    /// model is installed), "always" or "never" (`meetings/refine.rs`).
     #[serde(default = "default_meeting_refine")]
     pub meeting_refine: String,
     /// "Tell speakers apart in meetings" (beta; Settings → Speech-to-Text,
@@ -1496,10 +1496,10 @@ fn default_meeting_max_minutes() -> u32 {
     120
 }
 fn default_meeting_audio_days() -> u32 {
-    crate::meetings::meeting_audio::DEFAULT_DAYS
+    crate::meetings::audio::DEFAULT_DAYS
 }
 fn default_meeting_refine() -> String {
-    crate::meetings::meeting_refine::AUTO.into()
+    crate::meetings::refine::AUTO.into()
 }
 fn default_meeting_call_end() -> String {
     "ask".into()
@@ -2956,7 +2956,7 @@ fn stray_full_stop(expansion: &str, rest: &str) -> usize {
 /// Build the Whisper `initial_prompt` vocabulary from the dictionary: the
 /// distinct canonical (`to`) spellings joined ", " (Handy's format — the
 /// prompt biases whisper.cpp's decoder toward these spellings), in the order
-/// given — callers pass `dict_usage::ranked(..)`, so the words you use most
+/// given — callers pass `dictionary::usage::ranked(..)`, so the words you use most
 /// lately come first and survive the cap. Capped at ~600 chars cut at a
 /// comma boundary (Whisper only reads ~224 tokens of prompt; OpenWhispr
 /// truncates the same way). Snippets are left out (their text isn't

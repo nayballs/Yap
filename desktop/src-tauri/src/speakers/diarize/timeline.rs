@@ -8,7 +8,7 @@ use super::protocol::RawSegment;
 /// A stretch of one voice on a recording's call side ("Them").
 ///
 /// Times are milliseconds on that recording's **session clock**, the one
-/// `meeting.rs` counts its "Them" samples on (a position in samples / 16):
+/// `meetings/recorder.rs` counts its "Them" samples on (a position in samples / 16):
 /// 0 is the recording's first sample, silence the recorder filled in counts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

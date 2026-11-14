@@ -1,4 +1,4 @@
-// The meeting recorder's audio, end to end (desktop/src-tauri/src/meetings/meeting.rs):
+// The meeting recorder's audio, end to end (desktop/src-tauri/src/meetings/recorder.rs):
 // - a hotkey dictation mid-meeting is kept out of "You" (silence instead of
 //   the words, from its pre-roll on) and leaves a "You dictated here" marker
 //   that summaries skip;
@@ -238,7 +238,7 @@ test('a side gone quiet while the other talks says so, and the recording carries
 }) => {
   // 6 s of the meeting instead of 3 minutes (2 s of talk instead of 10).
   await yap.invoke('e2e_meeting_quiet', { quietSecs: 6, talkSecs: 2 });
-  // In one place (notices/notice.rs): the main window, where the person is looking.
+  // In one place (notices/policy.rs): the main window, where the person is looking.
   const warning = main.getByRole('status').filter({ hasText: "Yap can't hear" });
 
   // The call never comes through (Teams on a headset that isn't the

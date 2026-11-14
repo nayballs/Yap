@@ -2,7 +2,7 @@
 // `yap.exe diarize`), driven through Yap: `diarize_wav` on a test meeting
 // scored against its reference turns, and a meeting recording whose "Them"
 // side is that meeting, labelled while it records and finished when it
-// stops (speakers/diarize.rs, meetings/meeting.rs's tee) — its "Them" lines ending up with
+// stops (speakers/diarize.rs, meetings/recorder.rs's tee) — its "Them" lines ending up with
 // one voice per person (speakers/labels.rs) — and Find speakers over a saved
 // meeting (speakers/rerun.rs: the engine again, a name the person gave
 // kept on its voice).

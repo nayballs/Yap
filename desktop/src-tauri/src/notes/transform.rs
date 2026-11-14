@@ -14,7 +14,7 @@
 //! spaces around it; over the whole text if it's still what was sent), as a
 //! version of its own (`versions.rs`, "Polish"), so Version history — or the
 //! window's Undo, [`Transformed::previous`] — takes it back. A summary
-//! transformed is the person's (`note_edits::apply_summary_edit`): Yap asks
+//! transformed is the person's (`edits::apply_summary_edit`): Yap asks
 //! before writing over it. Text changed while the model worked is left
 //! alone, and the result is handed back to be copied.
 //!
@@ -226,7 +226,7 @@ pub async fn note_transform(
                     note.content = text;
                     true
                 }
-                Field::Summary => super::note_edits::apply_summary_edit(note, &text, now),
+                Field::Summary => super::edits::apply_summary_edit(note, &text, now),
             };
             Ok(((field.of(note).to_string(), start, end), changed))
         })
@@ -243,7 +243,7 @@ pub async fn note_transform(
     let origin = origin.as_deref().unwrap_or("transform");
     match field {
         Field::Notes => super::commands::note_changed(&app, id, origin),
-        Field::Summary => super::note_edits::summary_changed(&app, id, origin),
+        Field::Summary => super::edits::summary_changed(&app, id, origin),
     }
     tracing::info!(note_id = id, transform = kind_of(&t), field = ?field, outcome = "replaced", chars = out.chars().count(), "Transform in a note");
     crate::notes::saved()?;

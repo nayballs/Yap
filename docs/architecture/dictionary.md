@@ -50,7 +50,7 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   plain long phrase, then the longest. Worked out first, then it waits out
   a dictation (≤ a minute; notice kind `snippet-suggestion`, held and
   dropped unseen after a minute). **The offer**, in one place
-  (`notice::place`): a toast in the main window while it's focused
+  (`notices::policy::place`): a toast in the main window while it's focused
   (`yap-snippet-suggestion`, `notices/snippetSuggestions.js`: Save snippet
   / Not now / "Don't suggest this again"), else a Yap bar card (✕ = Not
   now, 30 s fade = no answer); never a Windows notification. **Save
@@ -305,7 +305,7 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   mail app), only a message quoted below the cursor (`below_the_cursor` +
   `command_screen::quoted_part`); then the walk with `skip_focused` (the
   focused box neither read nor named). Logged as counts (`debug`).
-- **`dictionary/dict_usage.rs`** — how much each dictionary word is used, for the Whisper
+- **`dictionary/usage.rs`** — how much each dictionary word is used, for the Whisper
   prompt's order (Wispr Flow ranks its vocabulary the same way):
   `<data>/dictionary_usage.json`, word (lowercased `to`) → `{uses, lastUsed}`
   (unix secs) — its own store, never config.json (Settings' wholesale saves
@@ -386,7 +386,7 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   Add puts it in that entry, `variants::add_heard`; 2026-10-25). One per
   spelling (case-blind), terms with a capital first, ≤ 3. **The prompt** (`offer`): "Add
   “Kubernetes” to your dictionary? Yap heard “cube and eighties”." — Add /
-  Not now / "Don't suggest this"; in one place (`notice::place`): a toast
+  Not now / "Don't suggest this"; in one place (`notices::policy::place`): a toast
   (`yap-word-suggestion`, `wordSuggestions.js`, kind `tip`) while the main
   window is focused, else a Yap bar card (`word-suggestion`, icon
   `dictionary`; ✕ = Not now, 30 s fade = no answer; it waits out a
@@ -403,7 +403,7 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   `on_dictionary_saved`, and a correction whose trigger and spelling are
   both gone (an edit of one isn't a removal; snippets don't count) goes
   into the store's `removed` terms. **A meeting line the person fixed**
-  (`offer_for_line`, from `notes/note_edits.rs`; the notepad and the Notes view):
+  (`offer_for_line`, from `notes/edits.rs`; the notepad and the Notes view):
   the same `suggestions` over the line's words before and after the edit
   (its start a sentence's), the same answers left out, no watch and no
   three-minute gap before it (they just fixed it; it still counts as the

@@ -193,7 +193,7 @@
   history is still on; `dictation/history/keep.rs`), update_checks_enabled, dictionary_fuzzy, learn_words
   ("Suggest words from your corrections", default on, `dictionary/learn.rs`),
   show_tips ("Show tips", default on: coaching hints and nudges;
-  `notices/notice.rs`) + notify_suggestions / notify_milestones /
+  `notices/policy.rs`) + notify_suggestions / notify_milestones /
   notify_feature_tips / notify_news (2026-10-29, Settings → General →
   Notifications, each default on: one kind of nice-to-know notice each,
   `notices/kinds.rs`; an older Yap drops them when it saves, so one switched
@@ -204,16 +204,16 @@
   notepad: meeting_open_notepad (default on) + meeting_split_screen (default
   off) + meeting_live_transcript (default on) + meeting_consent_message (the
   notepad's "Copy consent message" text; empty = the default), meeting
-  audio (`meetings/meeting_audio.rs`, Settings → Meetings): meeting_keep_audio ("Keep
+  audio (`meetings/audio.rs`, Settings → Meetings): meeting_keep_audio ("Keep
   meeting audio", on: to transcribe a meeting again and play its lines; off,
   it's still written while a meeting records and deleted once it's
   transcribed) + meeting_audio_days (14; 1 / 7 / 14 / 30 / 90; never longer
-  than the transcripts': `meeting_audio::keep_days`) +
+  than the transcripts': `meetings::audio::keep_days`) +
   meeting_transcript_days ("Delete meeting transcripts after", Privacy &
   data: 0 = never, the default; 30 / 90 / 365 — a meeting's lines, digests
   and audio go, its notes, summary and tasks stay; `notes/retention.rs`) +
   meeting_refine ("Improve the transcript after the meeting",
-  `meetings/meeting_refine.rs`: "auto" — when chunks failed or a more accurate
+  `meetings/refine.rs`: "auto" — when chunks failed or a more accurate
   speech model is installed for the meeting's language —, "always",
   "never"; default "auto"), speaker
   diarization: meeting_diarization ("Tell speakers apart in meetings", beta,
@@ -374,7 +374,7 @@
   load/save + `apply_dictionary` (corrections; skips snippets) +
   `apply_snippets` + `term_regex` (the whole-word matcher both use) +
   `dictionary_prompt` (the Whisper `initial_prompt` vocabulary, in the order
-  given — callers pass `dict_usage::ranked(..)`; no snippets; ~600-char cap) +
+  given — callers pass `dictionary::usage::ranked(..)`; no snippets; ~600-char cap) +
   `resolve_cleanup` (per-app plan: body + endpoint).
   `data_dir()` is portable-aware. `load()` also migrates saved Groq picks (cleanup,
   LLM scopes, profiles) off models Groq retired in 2026 (`RETIRED_GROQ_MODELS` —
@@ -590,17 +590,17 @@
   for a call side that's often silent) and `<recording>.json` (when it
   started, how far each side is in the note, where dictations began,
   whether it ended — not after a crash, which the next start offers to
-  transcribe) (`meetings/meeting_audio.rs`). Never leaves the PC; kept
+  transcribe) (`meetings/audio.rs`). Never leaves the PC; kept
   `meeting_audio_days` (14) from the recording's start, ≤ 10 GB in all (the
   oldest first), deleted with its note, by Settings → Meetings → Delete all
   meeting audio, or once transcribed with "Keep meeting audio" off — held
   until the refine after the meeting or a Try again is done when one is
   due, a day at most (`release`, `HELD_MS`). Its `.json` also names the
   speech model of the live pass (`model`), for the refine. `cuts.json` beside
-  them: the places of lines the person deleted (`meeting_audio::Cut`), so a
+  them: the places of lines the person deleted (`meetings::audio::Cut`), so a
   meeting transcribed again never brings them back; it goes with the last
   recording. Every one of these `.json` saved through `saving.rs`
-  (`meeting_audio::SAVER`), a torn one set aside (`.json.corrupt-<secs>`) and
+  (`meetings::audio::SAVER`), a torn one set aside (`.json.corrupt-<secs>`) and
   made again from the audio. With "Delete meeting transcripts after" set, a
   meeting's audio goes with its transcript (or sooner, by its own days).
 - Tasks: `%APPDATA%/yap/tasks.json` — the tasks the person added (in a
@@ -935,7 +935,7 @@
   an installed copy, by the uninstaller's "Delete the application data".
 - Dictionary usage: `%APPDATA%/yap/dictionary_usage.json` — each dictionary
   word's use count and last use, which orders the Whisper vocabulary prompt
-  (`dictionary/dict_usage.rs`) and the Dictionary view's "Most used" sort.
+  (`dictionary/usage.rs`) and the Dictionary view's "Most used" sort.
   Safe to delete (the order falls back to the list's).
 - The Dictionary view's sort: the main window's `localStorage`
   (`yap.dictionarySort`), a convenience of that window, never config.json.
@@ -1239,7 +1239,7 @@
   their provider's own search — `web_search_native` — and local ones Exa),
   opening apps when asked **on** (`open_apps` — only apps in the Start
   menu, `apps.rs`), tips
-  **on** (`show_tips`; one notice at a time either way, `notices/notice.rs`), call
+  **on** (`show_tips`; one notice at a time either way, `notices/policy.rs`), call
   detection **on**
   (`meeting_detection` — it only asks; nothing records without a click) as
   **pop-ups** (`meeting_detect_style`), for work apps only (Discord, WhatsApp,
@@ -1404,7 +1404,7 @@ app deletes those of the stores it clears, like the set-aside copies.
 
 **What waits for a store that couldn't be read.** Anything that deletes what
 a store no longer names: meeting audio of "deleted" notes
-(`meeting_audio::kept_all`, `notes::unread`), chat screenshots no
+(`meetings::audio::kept_all`, `notes::unread`), chat screenshots no
 conversation names (`snip::images::sweep`, `chats::unread`), search by
 meaning's vectors of gone passages (`search::index::sweep`). **Reset app and
 Download your data are refused** meanwhile (`saving::unread_store`,

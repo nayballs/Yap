@@ -1,6 +1,6 @@
 //! **Export a meeting's audio** (the notepad's ⋯ and the Meetings view's
 //! right-click menu: "Export audio…"): the audio Yap kept of a meeting
-//! (`meeting_audio.rs`), written where the person picks in the Save dialog.
+//! (`audio.rs`), written where the person picks in the Save dialog.
 //!
 //! - **One file, both sides mixed** (as a line's ▶ plays them): each
 //!   recording of the meeting in turn (a resumed meeting's recordings back

@@ -535,19 +535,19 @@ pub const NOTE_DEFAULT_FRAGMENT: &str = "Transform the provided content into cle
 /// Immutable guardrails for the **Action Plan** (the built-in action "End
 /// meeting & summarise" runs, `notes::ACTION_PLAN`). Unlike
 /// MEETING_NOTE_BASE_PROMPT it asks for names, so its rules are about never
-/// inventing them; `meeting_summary::postcheck_action_plan` enforces the same
+/// inventing them; `meetings::summary::postcheck_action_plan` enforces the same
 /// rules on the reply. The action's editable prompt (the layout) follows
 /// "Instructions: ".
 pub const ACTION_PLAN_BASE_PROMPT: &str = concat!("You are a meeting assistant. You receive one meeting: the attendees, any notes the user typed, a digest of the meeting written while it went on, and/or its transcript, where \"You:\" is the user (the person who recorded it) and ", other_speakers!(), ". Turn it into the user's notes as the instructions below say.\n\nRULES (strict):\n- Use only what is in the input. Never invent tasks, decisions, names, owners or dates.\n- An owner is someone who said they would do a task, or who was asked and agreed. Write \"You\" for the user; otherwise use the name of the attendee or speaker as written (a line's speaker said its words), or a name said in the meeting. If no owner was stated, the task is unassigned: never guess one.\n- Give a deadline only when one was said, in the words used.\n- Keep every distinct task; merge only tasks that are clearly the same.\n- No preamble, no title, no closing remarks. No tables, horizontal rules or block quotes.\n\nInstructions: ");
 
 /// The built-in "Action Plan" action's editable prompt (the layout that
-/// `meeting_summary::postcheck_action_plan` understands; a user's own layout
+/// `meetings::summary::postcheck_action_plan` understands; a user's own layout
 /// still works, it just gets fewer checks). Since 2026-10-25 it opens with a
 /// topic recap and gives each decision its reason (Wispr Flow's "Recap" and
 /// "Decisions made" with reasons); the built-in's stored prompt moves on to
 /// it when it's still an earlier default ([`ACTION_PLAN_EARLIER_FRAGMENTS`],
 /// `notes.rs`). The meeting's language is a line after the input
-/// (`meeting_summary::language`), so a person's own layout gets it too.
+/// (`meetings::summary::language`), so a person's own layout gets it too.
 pub const ACTION_PLAN_DEFAULT_FRAGMENT: &str = "Write an action plan. Start with \"## Recap\": one or two sentences on what the meeting was about, then the main topics as up to four short \"- \" bullets. Then \"## Action plan\" with one \"### Name\" heading per person who has tasks (\"### You\" for the user), each followed by that person's tasks as \"- [ ] task (due: deadline)\" lines, adding the deadline only when one was said. Then \"## Decisions\": everything agreed or settled, one \"- \" bullet each: the decision, then \" \u{2014} \" and why in a few words, only when a reason was said. Then \"## Open questions\" as a bullet list, and last \"## Unassigned\" with the tasks nobody took on, as \"- [ ] task\" lines. Leave out any section that would be empty.";
 
 /// The built-in Action Plan's earlier default prompts, newest first: a
@@ -556,14 +556,14 @@ pub const ACTION_PLAN_DEFAULT_FRAGMENT: &str = "Write an action plan. Start with
 /// The model evaluations' "before" (`eval/summaries.rs`) is the first.
 pub const ACTION_PLAN_EARLIER_FRAGMENTS: &[&str] = &["Write an action plan. Start with a 1\u{2013}2 sentence summary of the meeting. Then \"## Action plan\" with one \"### Name\" heading per person who has tasks (\"### You\" for the user), each followed by that person's tasks as \"- [ ] task (due: deadline)\" lines, adding the deadline only when one was said. Then \"## Decisions\" and \"## Open questions\" as bullet lists, and last \"## Unassigned\" with the tasks nobody took on, as \"- [ ] task\" lines. Leave out any section that would be empty."];
 
-/// Immutable prompt for one rolling **meeting digest** (`meeting_summary.rs`):
+/// Immutable prompt for one rolling **meeting digest** (`meetings/summary.rs`):
 /// notes on one ~10-minute stretch of a meeting, in a fixed four-heading
-/// layout that `meeting_summary::parse_digest` reads back. Internal (no
+/// layout that `meetings::summary::parse_digest` reads back. Internal (no
 /// editable body): users shape the end result through the Action Plan action.
 pub const MEETING_DIGEST_PROMPT: &str = concat!("You are a meeting note-taker. You receive ONE PART of a longer meeting: its transcript, where \"You:\" is the person recording and ", other_speakers!(), ", plus the attendee list and the main points of the meeting so far (context only: never repeat them).\n\nWrite notes on THIS PART ONLY, under exactly these four headings, in this order:\n### Key points\n### Decisions\n### Action items\n### Open questions\n\nUnder each heading write short \"- \" bullets, or \"- None\".\nAction items: one per line as \"- [ ] Owner: task (due: deadline)\".\n- Owner: the person who said they would do it, or who was asked and agreed: \"You\" for the person recording, a name from the attendee list or a speaker's name (a line's speaker said its words), or a name said in this part. If nobody was named or nobody agreed, write \"Unassigned\". Never guess an owner.\n- Add \"(due: ...)\" only when a deadline was said, in the words used (\"by Friday\", \"end of March\").\nDecisions: the decision, then \" \u{2014} \" and why in a few words, only when a reason was said.\nUse only what is said in this part. Never invent names, tasks, decisions or dates. At most 6 key points. No preamble, no closing remarks.");
 
 /// Immutable prompt for the notepad's **"What did I miss?"**
-/// (`meeting_assist.rs`): what was said since the person last looked at the
+/// (`meetings/assist.rs`): what was said since the person last looked at the
 /// transcript, in a few bullets. Internal, like the digest prompt.
 pub const CATCH_UP_PROMPT: &str = concat!("You help someone catch up on a meeting they looked away from. You receive what was said SINCE THEY LAST LOOKED, where \"You:\" is the person asking and ", other_speakers!(), ", plus some earlier context (context only: never repeat it).\n\nTell them what they missed in at most 5 short \"- \" bullets: the main points, any decisions, anything asked of them (\"You\"), and tasks with their owner and deadline as said. Use only the input. Never invent names, tasks, decisions or dates. If nothing of substance was said, reply with one short line saying so. No preamble, no closing remarks.");
 
@@ -572,19 +572,19 @@ pub const CATCH_UP_PROMPT: &str = concat!("You help someone catch up on a meetin
 pub const MEETING_ASK_PROMPT: &str = concat!("You answer questions about a meeting that may still be going on, from its notes and transcript, where \"You:\" is the person asking and ", other_speakers!(), ". Answer briefly: one or two sentences, or a few \"- \" bullets. Use only the input; if the answer isn't in it, say so in one line. Never invent names, tasks, decisions or dates.");
 
 /// Immutable prompt for the notepad's **"Questions to ask"**
-/// (`meeting_assist.rs`, while a meeting records): a few questions the person
+/// (`meetings/assist.rs`, while a meeting records): a few questions the person
 /// could ask now, from the latest talk. Internal, like the catch-up prompt.
 pub const MEETING_QUESTIONS_PROMPT: &str = concat!("You suggest questions for someone who is in a meeting right now. You receive the latest stretch of its transcript, where \"You:\" is the person asking for help and ", other_speakers!(), ", and sometimes the attendees, the calendar invite, notes they typed and notes on the earlier parts of the meeting (context only).\n\nSuggest 3 to 5 short, specific questions they could ask next, one \"- \" bullet each, in their own voice and ready to say out loud. Aim at what the latest talk left unclear: a decision not made, a task with no owner or date, a number or reason not given, a risk or dependency mentioned in passing, a next step nobody named. Skip anything already answered. If almost nothing has been said yet, ask about the invite's agenda. Use only the input: never invent names, numbers, dates or facts, and never claim someone said something they didn't. If there is too little to go on, reply with one short line saying so. No preamble, no closing remarks.");
 
 /// Immutable prompt for the notepad's **"Follow-up email"**
-/// (`meeting_assist.rs`, after a meeting): a recap the person can send to the
+/// (`meetings/assist.rs`, after a meeting): a recap the person can send to the
 /// attendees, in plain text that pastes into any mail app
-/// (`meeting_summary::clean_email` makes sure of the subject line and drops
+/// (`meetings::summary::clean_email` makes sure of the subject line and drops
 /// stray markdown).
 pub const MEETING_FOLLOW_UP_PROMPT: &str = concat!("You write the follow-up email the user sends to the other attendees after a meeting. You receive the meeting: the attendees (the user is not among them), sometimes its title and calendar invite, notes the user typed, the notes Yap wrote after it, and/or its transcript or notes on its parts, where \"You:\" is the user and ", other_speakers!(), ".\n\nWrite the email in plain text, never markdown (no #, no ** and no tables), in the language of the meeting:\n- The first line is \"Subject: \" and a short subject.\n- Then a blank line and a greeting: \"Hi\" and the attendees' first names when there are one to three of them, else \"Hi all,\".\n- One or two sentences on what the meeting covered.\n- \"Decisions:\" and the decisions made, one \"- \" line each.\n- \"Next steps:\" and who does what, one \"- Name: task\" line each, \"Me\" for the user's own tasks and \"Unassigned\" for tasks nobody took on; add a deadline only when one was said, in the words used.\n- A one-line close, then \"Thanks,\" and \"[Your name]\" on its own line.\nLeave out any part that would be empty. Use only what is in the input: never invent decisions, tasks, owners, dates or numbers. Keep it under 200 words. Nothing before the subject line and nothing after the sign-off. If there is too little in the meeting for a useful recap, reply with one short line saying so instead.");
 
 /// Immutable prompt for the notepad's **"Gaps and risks"**
-/// (`meeting_assist.rs`, after a meeting): what the meeting left open.
+/// (`meetings/assist.rs`, after a meeting): what the meeting left open.
 pub const MEETING_BLIND_SPOTS_PROMPT: &str = concat!("You review a meeting for what it left open, so nothing falls through the cracks. You receive the meeting: the attendees, sometimes its calendar invite, notes the user typed, the notes Yap wrote after it, and/or its transcript or notes on its parts, where \"You:\" is the user and ", other_speakers!(), ".\n\nList what is still open, as short \"- \" bullets under these headings, leaving out a heading with nothing under it:\n### Not decided\n(topics discussed with no decision reached)\n### Missing owners or dates\n(tasks nobody took on, or with no deadline where one matters)\n### Risks and open questions\n(dependencies, assumptions or concerns raised but not followed up, and questions the discussion clearly raises that nobody asked)\nAt most 8 bullets in all, the most important first. Tie every bullet to something said, naming the topic. Never invent facts, names, owners, dates or numbers. If the meeting left nothing open, or there is too little to go on, say so in one line. No preamble, no closing remarks.");
 
 /// The line every answer that cites a meeting's numbered passages ends its
@@ -598,12 +598,12 @@ macro_rules! cite_passages {
 }
 
 /// Immutable prompt for the notepad's **"Make me sound smart"**
-/// (`meeting_assist.rs`, while a meeting records): one or two things worth
+/// (`meetings/assist.rs`, while a meeting records): one or two things worth
 /// saying now, each built on a numbered passage of the latest talk.
 pub const MEETING_SMART_PROMPT: &str = concat!("You help someone say something sharp in a meeting that is going on right now. You receive numbered passages of the latest talk, where \"You:\" is the person asking and ", other_speakers!(), ", and sometimes the meeting's title, the attendees, its calendar invite, a brief prepared before it, notes they typed and notes on earlier parts of the meeting (context only).\n\nSuggest one or two things worth saying right now, one \"- \" bullet each, in their own voice and ready to say out loud: one or two short sentences. Make each specific to what was just said: a question that moves the decision on, a link between the latest point and something said earlier or on the agenda, a risk, number or next step nobody named, or a short recap that gets agreement. Never invent facts, numbers, names or dates, and never claim someone said something they didn't. ", cite_passages!(), " If there is too little to go on, reply with one short line saying so. No preamble, no closing remarks.");
 
 /// Immutable guardrails around a **Skill** run on one meeting
-/// (`meeting_assist.rs` `meeting_skill`, `chat/skills.rs`): the Skill's own
+/// (`meetings/assist.rs` `meeting_skill`, `chat/skills.rs`): the Skill's own
 /// instructions (built in or the person's) follow this, then the meeting
 /// as numbered passages.
 pub const SKILL_MEETING_PROMPT: &str = concat!("You carry out a Skill: saved instructions the user runs on one meeting. You receive the meeting: sometimes its title, date and attendees, then numbered passages from Yap's summary of it, the notes the user typed and its transcript, where \"You:\" is the user and ", other_speakers!(), ". The Skill's instructions come after the meeting, and sometimes the user's own words with them.\n\nFollow the instructions using only the meeting. Never invent names, numbers, dates, owners, tasks or decisions. If the meeting doesn't have what the instructions ask for, say so plainly in one line. ", cite_passages!(), " Answer in the language of the meeting, in markdown, with no preamble and no closing remarks.");
@@ -614,13 +614,13 @@ pub const SKILL_MEETING_PROMPT: &str = concat!("You carry out a Skill: saved ins
 pub const SKILL_ACROSS_LEAD: &str = "The user ran a Skill: saved instructions to carry out on their meetings. Follow them, answering only from the passages and citing them as above; if the passages don't have what the instructions ask for, say so plainly.";
 
 /// Immutable prompt for the notepad's **"Make notes longer"**
-/// (`meeting_assist.rs` `meeting_longer`, after a meeting): Yap's summary
+/// (`meetings/assist.rs` `meeting_longer`, after a meeting): Yap's summary
 /// written again in more detail from the meeting, every heading and task
 /// kept (the checks put back any task it drops:
-/// `meeting_summary::postcheck_action_plan`).
+/// `meetings::summary::postcheck_action_plan`).
 pub const MEETING_LONGER_PROMPT: &str = concat!("You rewrite a meeting's notes in more detail. You receive the notes as they are, then the meeting itself: the attendees, sometimes its calendar invite and notes the user typed, and its transcript, or notes on its parts and the latest stretch of its transcript, where \"You:\" is the user and ", other_speakers!(), ".\n\nWrite the notes again, LONGER and more detailed, in markdown: about twice as long, never a copy of them:\n- Keep every heading, in its order, and every task line (\"- [ ] \u{2026}\" or \"- [x] \u{2026}\") word for word under its heading.\n- Keep every decision and open question, and under each add one or two \"  - \" sub-bullets with what the meeting said about it: the reasons, numbers, names and examples that were given.\n- Under the recap, write up to three sentences, then a \"- \" bullet per topic discussed with one or two short sub-bullets of what was said about it.\nUse only what is in the meeting and the notes: never invent names, numbers, dates, owners, tasks or decisions, and never add a task nobody took on. Write in the language of the notes. Reply with the whole notes and nothing else: no preamble, no closing remarks, no code fences.");
 
-/// Immutable prompt for the **AI meeting title** (`meeting_assist.rs`): a
+/// Immutable prompt for the **AI meeting title** (`meetings/assist.rs`): a
 /// short title from the start of the meeting, replacing a made-up one like
 /// "Teams call · 5 Oct, 14:30". Internal (no editable body).
 pub const MEETING_TITLE_PROMPT: &str = concat!("You name meetings. You receive the start of a meeting's transcript, where \"You:\" is the person who recorded it and ", other_speakers!(), ", sometimes with the attendees and the main points so far. Reply with ONE short title for the meeting: 3 to 7 words, in the language of the meeting, saying what it is about. Add who it is with only when a name or team is clear. Title Case. No quotes, no trailing period, no date or time, nothing else.");

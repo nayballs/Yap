@@ -23,7 +23,7 @@ test.beforeAll(() => {
 });
 test.afterAll(() => withoutDom());
 
-// A meeting's summary as Yap writes it (meetings/meeting_summary, the action
+// A meeting's summary as Yap writes it (meetings/summary, the action
 // plan) and as a model may: owners' headings, tasks, a task with a list in
 // it, numbered decisions with blank lines between, a quote, a table.
 const SUMMARY = [

@@ -21,13 +21,13 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 
 | Piece | Code |
 |---|---|
-| Recorder: capture, chunking, echo check, dictations kept out, following the output device, quiet sides | `desktop/src-tauri/src/meetings/meeting.rs` |
+| Recorder: capture, chunking, echo check, dictations kept out, following the output device, quiet sides | `desktop/src-tauri/src/meetings/recorder.rs` |
 | The dictation signal; the correction dictionary (`apply_corrections`) | `desktop/src-tauri/src/dictation/pipeline.rs` |
 | Guard rails: maximum length, quiet meetings and check-ins, the meeting shortcut, notices | `desktop/src-tauri/src/calls/meeting_guard.rs` |
 | Hiding meeting windows from screen capture | `desktop/src-tauri/src/calls/capture.rs` |
-| Rolling digests, the final input, the checks; the notepad's catch-up, helper and title inputs | `desktop/src-tauri/src/meetings/meeting_summary.rs` |
-| The end of a meeting: pause or end, "Started by mistake?", the action plan job | `desktop/src-tauri/src/meetings/meeting_end.rs` |
-| "What did I miss?", the one-tap helpers (Questions to ask, Make me sound smart, Follow-up email, Gaps and risks, Make notes longer), a Skill on the meeting, the AI meeting title | `desktop/src-tauri/src/meetings/meeting_assist.rs` (inputs: `meeting_summary/chips.rs`) |
+| Rolling digests, the final input, the checks; the notepad's catch-up, helper and title inputs | `desktop/src-tauri/src/meetings/summary.rs` |
+| The end of a meeting: pause or end, "Started by mistake?", the action plan job | `desktop/src-tauri/src/meetings/end.rs` |
+| "What did I miss?", the one-tap helpers (Questions to ask, Make me sound smart, Follow-up email, Gaps and risks, Make notes longer), a Skill on the meeting, the AI meeting title | `desktop/src-tauri/src/meetings/assist.rs` (inputs: `meetings/summary/chips.rs`) |
 | Skills (/name) and Chat's one-tap prompts | `desktop/src-tauri/src/chat/skills.rs` |
 | First-meeting coach marks in the notepad | `desktop/src-tauri/src/meetings/coach_marks.rs` |
 | The notepad window: docking, split screen | `desktop/src-tauri/src/meetings/notepad.rs` |
@@ -38,7 +38,7 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 | Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_QUESTIONS_PROMPT`, `MEETING_FOLLOW_UP_PROMPT`, `MEETING_BLIND_SPOTS_PROMPT`, `MEETING_TITLE_PROMPT`) | `desktop/src-tauri/src/ai/llm.rs` |
 | Storage (`Note::digests`, `Note::speakers`, `TranscriptSegment::echo` / `::dictated` / `::speaker` / `::start_ms` / `::words`, `Action::kind`, `Note::title_auto`) | `desktop/src-tauri/src/notes.rs` |
 | The action run (`note_enhance` / `run_enhance`) | `desktop/src-tauri/src/notes/commands.rs` |
-| Fixing the notes: a line's words, the summary's, never written over unasked; tasks ticked and listed | `desktop/src-tauri/src/notes/note_edits.rs`, `desktop/src-tauri/src/notes/tasks.rs`, `desktop/src/lib/core/noteEdits.js`, `desktop/src/lib/views/TasksView.svelte` |
+| Fixing the notes: a line's words, the summary's, never written over unasked; tasks ticked and listed | `desktop/src-tauri/src/notes/edits.rs`, `desktop/src-tauri/src/notes/tasks.rs`, `desktop/src/lib/core/noteEdits.js`, `desktop/src/lib/views/TasksView.svelte` |
 | UI | `desktop/src/lib/NotesView.svelte`, `desktop/src/lib/Notepad.svelte`, `desktop/src/lib/stores/meetingSummary.svelte.js` |
 | Importing another app's transcript (Teams, Zoom, Meet, Otter, Granola) | `desktop/src-tauri/src/meetings/import.rs` (+ `import/`), `desktop/src/lib/components/TranscriptImportDialog.svelte`, `desktop/src/lib/stores/transcriptImport.svelte.js` |
 
@@ -183,7 +183,7 @@ call) gets the "Them" warning once too; its wording says "If".
 
 ## The meeting's audio, kept on disk
 
-Since 2026-10-23 (`meetings/meeting_audio.rs`) the recorder keeps the meeting's
+Since 2026-10-23 (`meetings/audio.rs`) the recorder keeps the meeting's
 audio as well as its lines, on this PC only, so that a crash loses nothing,
 a meeting can be **transcribed again** later, and a line can be **played**.
 Wispr Flow keeps 14 days of meeting audio to play back; Meetily transcribes
@@ -233,7 +233,7 @@ leaves a recording that never ended. At the next start Yap finds it (not
 one another Yap is writing: the files are opened so nobody else may write
 them, which a second Yap on the same data can tell), counts what never
 became lines, and — at least a second of it — says so in one place
-(`notices/notice.rs`: a toast while the main window is looked at, else the Yap bar,
+(`notices/policy.rs`: a toast while the main window is looked at, else the Yap bar,
 else a Windows notification): "Yap closed during a meeting · The last
 3 minutes of “Supplier call” weren't transcribed. The audio is kept:
 transcribe it into the note now?" with **Transcribe it**. The note says it
@@ -242,7 +242,7 @@ the recorder's own steps over the audio from where the note stops — the
 same cuts in pauses, engine, correction dictionary, echo check and
 dictation markers — puts the lines where they belong by time, and then does
 what a stop would have: the ⏸ mark, then "Started by mistake?" or the AI
-title and the action plan (`meetings/meeting_end.rs`).
+title and the action plan (`meetings/end.rs`).
 
 **Transcribe again.** On a past meeting with its audio kept — the Notes
 view's note menu (**Transcribe again…**) or the notepad's ⋯ — Yap asks first
@@ -264,7 +264,7 @@ summary is written from the new lines.
 its right-click menu) plays both sides of its stretch, a quarter second
 either side, mixed — while the meeting still records, too.
 
-**Export the audio** (2026-10-25, `meetings/meeting_audio/export.rs`). The
+**Export the audio** (2026-10-25, `meetings/audio/export.rs`). The
 notepad's ⋯ has **Export audio…** and **Export each side…** after the
 meeting; the Meetings view's menu on a past meeting has them when its audio
 is kept, and the Notes view's note menu has Export audio…. Windows' Save
@@ -306,7 +306,7 @@ deleted lines' passages leave its index at once.
 
 ### A part that couldn't be transcribed
 
-Since 2026-10-24 (`meetings/meeting.rs`, "Failed chunks"; code review #6). A chunk
+Since 2026-10-24 (`meetings/recorder.rs`, "Failed chunks"; code review #6). A chunk
 the speech model can't transcribe — no model, the graphics card lost after
 the PC slept, a driver reset, a crash in the engine — used to be recorded
 as silence: a meeting could end with an empty transcript and only "Nothing
@@ -336,7 +336,7 @@ meeting audio" off, until it's transcribed (a day at most).
 
 ### The refined transcript, after the meeting
 
-Since 2026-10-24 (`meetings/meeting_refine.rs`), after Wispr Flow's "refined
+Since 2026-10-24 (`meetings/refine.rs`), after Wispr Flow's "refined
 transcript": when a meeting ends, Yap transcribes it again in the background
 from its audio — **when it helps**. Settings → Meetings → Meeting audio →
 **Improve the transcript after the meeting**:
@@ -612,7 +612,7 @@ read carefully (they lose track in long inputs) and for the end-of-meeting
 tail to stay short. It's large enough that a two-hour meeting is 11–12 calls,
 not one per chunk.
 
-The reply is read back leniently (`meeting_summary::parse_digest`: other
+The reply is read back leniently (`meetings::summary::parse_digest`: other
 heading styles, numbered lists, "- None") and checked against the part's own
 transcript: an owner must be "You", "Everyone", an attendee (spelled as in the
 attendee list) or a name actually said in that part, else the task is
@@ -648,7 +648,7 @@ cap thinking.
 
 ### Budgets
 
-Estimated tokens (`meeting_summary::estimate_tokens` runs high on purpose:
+Estimated tokens (`meetings::summary::estimate_tokens` runs high on purpose:
 3.5 characters per token for ASCII, 1 per other character):
 
 | Call | Input | Reply | Total, of an 8,192 context |
@@ -667,7 +667,7 @@ digest); every task still reaches the action plan (see the checks below).
 **End meeting & summarise**, the notepad's **Stop**, or a stop from anywhere
 else (call detection's **Stop and summarise**, the Yap bar, an automatic stop)
 stops the recorder, which transcribes the last few seconds; then Rust runs the
-built-in **Action Plan** action (`meetings/meeting_end.rs`, following the recorder's
+built-in **Action Plan** action (`meetings/end.rs`, following the recorder's
 `yap-meeting-state`). **Pause** (`meeting_pause`) stops without it. It no
 longer depends on a window: until 2026-10 the Notes view wrote the plan, and
 only for the note it was showing. Every window follows the job through
@@ -689,7 +689,7 @@ the bar off nobody asks. **Discard** deletes the note (`meeting_discard`) and
 closes the notepad; **Keep** (or the ✕) leaves it, with **Generate summary**
 for when it's wanted after all.
 
-1. `meeting_summary::prepare_final` waits for a live digest in flight (rather
+1. `meetings::summary::prepare_final` waits for a live digest in flight (rather
    than writing it twice), then digests whatever the final call can't take
    raw: a backlog, or a meeting recorded before digests existed ("Catching up
    on the meeting: part 3 of 12…").
@@ -709,7 +709,7 @@ for when it's wanted after all.
    a meeting held in French gets its notes in French, the headings in
    English (as Wispr Flow does; they're what the checks, the Tasks view and
    the brief read). Yap reads the language from the meeting's own words
-   (`meeting_summary/language.rs`; whatever model transcribed it); not sure —
+   (`meetings/summary/language.rs`; whatever model transcribed it); not sure —
    too little said, two languages half and half — it's your first language
    in My languages, else English. The line saying so goes after the meeting
    in the call (the digests get one too); an English meeting gets none.
@@ -757,7 +757,7 @@ A meeting's notes aren't Yap's alone to write: a line it misheard, a
 summary that missed the point and the tasks in the action plan are the
 person's to fix (Wispr Flow's Notetaker does the same). Whatever model wrote
 the summary — on this PC or a cloud one — the person's changes are local data,
-and Yap never writes over them without asking. Code: `desktop/src-tauri/src/notes/note_edits.rs`
+and Yap never writes over them without asking. Code: `desktop/src-tauri/src/notes/edits.rs`
 (lines, the summary, the rule), `desktop/src-tauri/src/notes/tasks.rs` (tasks),
 `desktop/src/lib/core/noteEdits.js` and `desktop/src/lib/views/TasksView.svelte`.
 
@@ -784,7 +784,7 @@ before; off with the setting.
 **Transcribe again keeps it.** The new lines go in around a line the person
 fixed, never over it: a new line of the same side over it keeps only its words
 outside it (by its word times; without them, by its share of the line, and
-none when it's mostly the fixed line) (`meetings/meeting_audio/redo.rs` `rebuild`, so
+none when it's mostly the fixed line) (`meetings/audio/redo.rs` `rebuild`, so
 anything that replaces a meeting's lines that way keeps fixes too). The voice
 separation never splits a fixed line either.
 
@@ -1070,7 +1070,7 @@ puts it away; Stop shrinks to a round button meanwhile). Your questions show
 as bubbles on the right, answers as formatted text with 👍 👎 and copy under
 each. A rating is kept in the notepad's own storage on this PC only and never
 sent anywhere. **What did I miss?** answers from what was said
-**since you last looked** (`meeting_assist::meeting_catch_up`). The notepad
+**since you last looked** (`meetings::assist::meeting_catch_up`). The notepad
 counts a transcript line as seen while the Transcript tab is on screen (the
 window shown and not minimised, asked of the window since WebView2 reports a
 hidden window's page as visible) and scrolled to its newest line, or when an
@@ -1089,7 +1089,7 @@ looked." without calling a model. Otherwise one call on the meeting's model
 That's under 4.5k tokens with the reply, comfortable for an 8k local model. A
 question typed in the same chat ("Who owns the budget?") is answered from the
 whole meeting so far, bounded like the Ask bar (`MEETING_ASK_PROMPT`, ≤ ~3.3k
-in). Neither ever slows a dictation (`meeting_summary::chat_beside_dictation`):
+in). Neither ever slows a dictation (`meetings::summary::chat_beside_dictation`):
 on a local endpoint the call waits until no dictation is recording or
 transcribing (+2 s), and if one starts mid-call the request is dropped (the
 closed connection cancels it in llama.cpp) and asked again after it. Without
@@ -1111,7 +1111,7 @@ messages are kept.)
 
 Chips in the Ask sheet (a row under the thread) do the common asks in one
 tap, built like What did I miss?: one call on the meeting's model through
-`meeting_assist::meeting_assist(noteId, kind)`, talk only (never echo or "You
+`meetings::assist::meeting_assist(noteId, kind)`, talk only (never echo or "You
 dictated here" markers), never slowing a dictation, the answer in the sheet
 with 👍 👎 and copy, and the setup card linking to Language Models when
 there's no AI model. The set follows the recording state
@@ -1129,7 +1129,7 @@ there's no AI model. The set follows the recording state
 **Skills** (2026-10-29): type "/" in the Ask box for saved instructions —
 your own from Settings → Skills, then Yap's /followup-email, /decisions and
 /summary-for — run on this meeting, the answer citing its lines
-(`meeting_assist::meeting_skill`). Enter runs the one highlighted; Tab
+(`meetings::assist::meeting_skill`). Enter runs the one highlighted; Tab
 puts it in the box so you can add words ("/summary-for Priya in support").
 More of Yap's — /open-questions, /risks, /tickets, /prd and /coach on a
 meeting — wait in Settings → Skills' More Skills: switch one on and it's in
@@ -1148,7 +1148,7 @@ else (no digests, typed notes, summary, or an invite to ask about), Yap says
 so itself without calling a model ("Not enough has been said yet to suggest
 questions…").
 
-The email is cleaned up in Rust (`meeting_summary::clean_email`): anything
+The email is cleaned up in Rust (`meetings::summary::clean_email`): anything
 before the subject line ("Here's a draft:") and code fences go, markdown
 (`**`, `#`, `* ` bullets) becomes plain text, blank lines are single, and a
 missing subject line becomes "Follow-up: <title>" (or "Meeting follow-up"
@@ -1275,7 +1275,7 @@ block under "Ask about calls in"). Code: `desktop/src-tauri/src/calls/meeting_gu
 | **Meeting shortcut** | `meetingHotkey` | Win+Alt+M (`kb:alt+win+77`) | Win+Alt+M |
 
 Every stop below goes through `meeting_guard::stop_and_summarise`, which ends
-the meeting as **End meeting & summarise** does (`meeting_end::end`: Rust
+the meeting as **End meeting & summarise** does (`meetings::end::end`: Rust
 writes the action plan once the last chunk is in, or asks "Started by
 mistake?") without bringing up any window: the [meeting
 notepad](#the-meeting-notepad) shows the progress and the plan when it's open,
@@ -1330,7 +1330,7 @@ Two ways a recording that has outlived its meeting gets noticed, on the same
 watcher thread as the length guard (once a second; `QuietWatch::step`, pure
 and unit-tested).
 
-- **Speech** is what the recorder counts as talk (`meeting::activity`): any
+- **Speech** is what the recorder counts as talk (`meetings::recorder::activity`): any
   audio above its silence gate on either side, or a transcribed line. A
   hotkey dictation's span ("You dictated here") isn't: the recorder blanks
   it. Quiet time runs on the **meeting's audio clock** (how much audio the
@@ -1445,7 +1445,7 @@ KeyTips) and Win the Start menu.
   owner, a dropped task, a made-up deadline), digests having to continue each
   other, older note stores loading and getting the Action Plan once, and a
   digest giving way to a dictation (`unless_busy`). The recorder's audio
-  (`cargo test --lib -- meeting:: pipeline:: notes::`): a dictation blanked
+  (`cargo test --lib -- meetings::recorder:: pipeline:: notes::`): a dictation blanked
   with its pre-roll and the callback that saw it end, its marker coming once
   with the chunk it starts in when a cut lands in the middle of it, two
   dictations in one chunk (one cancelled a callback later), one that began
@@ -1480,7 +1480,7 @@ KeyTips) and Win the Start menu.
   one, moved at the end; a user's name for "Them" on one voice only), and
   digests and stop marks moving with a split line (and a digest following
   its last line). The audio on disk (`cargo test --lib -- meeting_audio
-  meeting:: notes::`): the FLAC encoder against Symphonia (every kind of
+  meetings::recorder:: notes::`): the FLAC encoder against Symphonia (every kind of
   block, a short last one, a file cut off mid-frame or mid-header, seeking
   to the sample), the disk queue equal to the buffer sample for sample with
   a dictation blanked and a stall filled, retention (age, a deleted note's,
@@ -1489,7 +1489,7 @@ KeyTips) and Win the Start menu.
   over two voices split, a line that barely touches keeping its side,
   markers and lines without audio staying, each recording's stop mark),
   lines recovered into a resumed meeting. Since 2026-10-24
-  (`cargo test --lib -- meeting:: meeting_refine redo bridge:: pipeline::tests::a_
+  (`cargo test --lib -- meetings::recorder:: meeting_refine redo bridge:: pipeline::tests::a_
   pipeline::tests::one_`): two starts at once give one recorder, the note
   being recorded or started never deleted (here and by the local API) —
   each fails on the code before the fix —; a failed chunk leaving a marker
@@ -1921,7 +1921,7 @@ the chosen style. It doesn't fade: it's about a recording that's still
 running. "That
 call" means the recording its prompt started, or one started during the call.
 **Stop and summarise** ends the meeting, so the action plan is written exactly
-as after **End meeting & summarise** (in Rust, `meetings/meeting_end.rs`), and shows
+as after **End meeting & summarise** (in Rust, `meetings/end.rs`), and shows
 it where the person looks: the meeting notepad when it's on screen, the note
 in the main window's Notes view when that's on screen, and with neither, the
 main window comes up on the note. A call that starts while
@@ -1945,7 +1945,7 @@ question and says so.
 ### Smarter about the call itself
 
 Since 2026-10-29 Yap looks at the call it records a little more closely
-(`calls/call_audio.rs`, `meetings/sleep.rs`, `calls/meeting_detect.rs`):
+(`calls/audio.rs`, `meetings/sleep.rs`, `calls/meeting_detect.rs`):
 
 - **Sure about the ending.** Off the mic for 15 s isn't enough on its own:
   if the call app still plays sound, or a window still shows the meeting
@@ -2151,7 +2151,7 @@ meetings and their notes meet in four places:
   call detection's ("Design review · ● In 1 min · with Tanay +1"), else a
   Windows notification. While another meeting's
   notes record, it offers to **switch** notes: the running meeting ends
-  (`meeting_end::end`, so its action plan is written) and the next one's
+  (`meetings::end::end`, so its action plan is written) and the next one's
   notes start. A call starting during the next meeting while the last one
   still records brings the same switch card.
 - **A note's meeting.** However a recording starts during a meeting (the

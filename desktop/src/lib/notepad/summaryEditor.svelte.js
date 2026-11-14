@@ -1,4 +1,4 @@
-// The meeting's summary, edited in place (notes/note_edits.rs): Edit turns it into
+// The meeting's summary, edited in place (notes/edits.rs): Edit turns it into
 // its markdown, saved 600 ms after typing stops; Done (or Esc, another note,
 // Generate summary) saves what's left. Kept while another tab is up, and
 // read by the notepad's loads: words typed and not yet saved are never

@@ -13,7 +13,7 @@
 //! otherwise **Answer in Yap** (the chat, where its card has every option)
 //! / **Let it decide**.
 //!
-//! One card at a time (`agentApprove`, a question in `notices/notice.rs`
+//! One card at a time (`agentApprove`, a question in `notices/policy.rs`
 //! that waits out a dictation): the oldest prompt waiting. Answered here or
 //! in Chat, timed out, or its agent gone, the card goes (or the next one takes
 //! its place). Its ✕ only hides it: the prompt still waits in Chat.
@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 
 use crate::integrations::claude_live::{self, Pending};
 
-/// The card's id (its rule in `notices/notice.rs`).
+/// The card's id (its rule in `notices/policy.rs`).
 pub const CARD: &str = "agentApprove";
 /// How often a waiting prompt asks again whether a Yap window is in front.
 const RECHECK: Duration = Duration::from_secs(2);
@@ -158,7 +158,7 @@ pub fn sync() {
         Do::Check(p) => {
             // Window getters wait on the main thread: off the agent's task.
             let spawned = std::thread::Builder::new().name("agents-approve-card".into()).spawn(move || {
-                let up = !crate::notices::notice::yap_in_front(&app) && crate::bar::show_card(&app, card(&p), Box::new(on_action));
+                let up = !crate::notices::policy::yap_in_front(&app) && crate::bar::show_card(&app, card(&p), Box::new(on_action));
                 let was = {
                     let mut st = lock();
                     st.checking = false;

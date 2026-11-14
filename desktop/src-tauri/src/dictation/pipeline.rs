@@ -68,7 +68,7 @@ pub(crate) const PREROLL_SAMPLES: usize = (0.3 * TARGET_SAMPLE_RATE as f64) as u
 
 /// Dictations as the meeting recorder sees them: `count << 1 | recording`,
 /// where `count` goes up by one each time a dictation starts. One atomic, so
-/// `meeting.rs` reads a consistent pair from its audio callback without a
+/// `meetings/recorder.rs` reads a consistent pair from its audio callback without a
 /// lock, and still notices a dictation that started and ended between two of
 /// its callbacks. While one records, a meeting's "You" side gets silence
 /// instead of the dictated words (and its pre-roll).
@@ -235,7 +235,7 @@ pub(crate) fn destination(edit: bool, assistant: bool, chat_armed: bool, chat_fo
 
 /// A dictation's own errors ("No microphone found", "Transcription
 /// failed"…): the dictation overlay says them, where the dictation is, and
-/// nothing else does (`notice.rs`: one notice, one place). Other errors
+/// nothing else does (`notices/policy.rs`: one notice, one place). Other errors
 /// (`yap-error`) are the main window's toasts.
 pub const DICTATION_ERROR: &str = "yap-dictation-error";
 
@@ -694,13 +694,13 @@ impl Shared {
 
     /// The dictionary vocabulary as a Whisper `initial_prompt` bias (None when
     /// the dictionary is empty), the words used most lately first
-    /// (`dict_usage::ranked`). Snapshotted per transcription like
+    /// (`dictionary::usage::ranked`). Snapshotted per transcription like
     /// `language_settings`; only Whisper engines consume it.
     fn dictionary_prompt(&self) -> Option<String> {
         let (dict, name) = self.config.read().ok().map(|c| (c.dictionary.clone(), c.about_name.clone()))?;
         // The dictionary's words, then your name and the names Yap
         // remembers (memory.rs).
-        config::dictionary_prompt(&crate::dictionary::dict_usage::ranked(&crate::memory::with_names(&dict, &name)))
+        config::dictionary_prompt(&crate::dictionary::usage::ranked(&crate::memory::with_names(&dict, &name)))
     }
 
     /// A dictation's Whisper prompt: [`Self::dictionary_prompt`]'s words,
@@ -708,7 +708,7 @@ impl Shared {
     /// (`screen_terms`; never waited for).
     fn dictation_prompt(&self) -> Option<String> {
         let (dict, name) = self.config.read().ok().map(|c| (c.dictionary.clone(), c.about_name.clone()))?;
-        let words = crate::dictionary::dict_usage::ranked(&crate::memory::with_names(&dict, &name));
+        let words = crate::dictionary::usage::ranked(&crate::memory::with_names(&dict, &name));
         crate::dictionary::screen_terms::whisper_prompt(words, crate::dictionary::screen_terms::peek().as_deref())
     }
 

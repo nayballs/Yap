@@ -1104,7 +1104,7 @@ mod tests {
         assert!(instructions(Gate::Look, true).contains("find_pictures"));
         assert_eq!(instructions(Gate::Off, true), "");
         // Small: every step sends them.
-        let est = crate::meetings::meeting_summary::estimate_tokens;
+        let est = crate::meetings::summary::estimate_tokens;
         let weight = est(&look) + est(&definitions(Gate::Look, false).to_string());
         println!("the picture tools add {weight} tokens");
         assert!(weight <= 400, "{weight} tokens");

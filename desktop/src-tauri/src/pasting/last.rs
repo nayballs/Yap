@@ -27,7 +27,7 @@ use tracing::{info, warn};
 use crate::notices::alert::{self, Alert};
 use crate::pasting::text_injector;
 
-/// The quiet notes' kind (a bar card's id, `notice.rs`'s rule).
+/// The quiet notes' kind (a bar card's id, `notices/policy.rs`'s rule).
 pub const KIND: &str = "lastTranscript";
 
 const NOTHING_TO_COPY: &str = "Nothing to copy yet — dictate something first";

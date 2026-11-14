@@ -10,7 +10,7 @@
 //!   in). When it isn't the one "You" records from ([`mismatch`]): "Teams is
 //!   using Contoso H2 but Yap is using Northwind Audio", once per call and
 //!   pair of microphones ([`Said`]), with **Use Contoso H2** (this meeting
-//!   only: `meeting::use_mic`; the person's order stays as it is) and Not
+//!   only: `meetings::recorder::use_mic`; the person's order stays as it is) and Not
 //!   now. A software microphone (Krisp, NVIDIA Broadcast: enumerator
 //!   "ROOT") is fed by a real one, likely Yap's: never a mismatch. A call
 //!   app on two microphones at once (a browser with two tabs) can't say
@@ -25,7 +25,7 @@
 //!   only, a window that isn't minimised, and for Meet the meeting's tab in
 //!   front). Read only while "You" has heard nothing for a while (the only
 //!   time it matters), every few seconds; "Yap can't hear your mic" stays
-//!   quiet while you're muted (`meeting.rs`, [`muted_in_call`]).
+//!   quiet while you're muted (`meetings/recorder.rs`, [`muted_in_call`]).
 //! - **Is the call still on?** Call detection's ending wants a second
 //!   opinion before it stops anything (`meeting_detect.rs`): the call app
 //!   still playing sound (an active output session) or, for a call in a
@@ -210,7 +210,7 @@ pub fn init(app: &AppHandle) {
 fn watch(app: AppHandle, note_id: u64, gen: u64) {
     loop {
         std::thread::sleep(if crate::shell::e2e::active() { TEST_TICK } else { TICK });
-        if GEN.load(Ordering::SeqCst) != gen || crate::meetings::meeting::recording_note() != Some(note_id) {
+        if GEN.load(Ordering::SeqCst) != gen || crate::meetings::recorder::recording_note() != Some(note_id) {
             return;
         }
         let Some(call) = crate::calls::meeting_detect::call_for(note_id) else {
@@ -231,7 +231,7 @@ fn watch(app: AppHandle, note_id: u64, gen: u64) {
             }
         }
         // Muted? Only worth reading while "You" is quiet.
-        let quiet = crate::meetings::meeting::you_quiet_ms().is_some_and(|ms| ms >= mute_look_after());
+        let quiet = crate::meetings::recorder::you_quiet_ms().is_some_and(|ms| ms >= mute_look_after());
         let muted = quiet && (mic.as_ref().is_some_and(|m| m.muted) || muted_by_buttons(call.app));
         if muted != MUTED.swap(muted, Ordering::SeqCst) {
             tracing::info!(note_id, app = call.app, muted, "call audio: muted in the call");
@@ -250,7 +250,7 @@ fn mute_look_after() -> u64 {
 /// The microphone "You" records from: (endpoint id, name), the id looked
 /// up by name when it was opened as Windows' default.
 fn yap_mic() -> Option<(String, String)> {
-    let (id, name) = crate::meetings::meeting::mic_in_use()?;
+    let (id, name) = crate::meetings::recorder::mic_in_use()?;
     if !id.is_empty() {
         return Some((id, name));
     }

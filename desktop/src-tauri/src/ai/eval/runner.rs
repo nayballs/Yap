@@ -110,7 +110,7 @@ Pre-meeting briefs:
   --brief                  instead of the scenarios: write the brief of each meeting in
                            evals/briefs/*.json (--only picks them) through calendar/brief.rs, and
                            score the model's reply as written and the brief as shown; brief.md
-Meeting chips and Skills (meeting_summary/chips.rs; instead of the scenarios; chips.md):
+Meeting chips and Skills (meetings/summary/chips.rs; instead of the scenarios; chips.md):
   --chips                  each case in evals/chips/cases.json (--only picks them by name or kind:
                            smart, skill, longer) as the notepad sends it: cited, not made up,
                            longer notes keeping every task

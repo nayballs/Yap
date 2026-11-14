@@ -1,5 +1,5 @@
 // The meeting notepad's newer chips, Skills and Chat's one-tap prompts
-// (meetings/meeting_assist.rs, meetings/meeting_summary/chips.rs,
+// (meetings/assist.rs, meetings/summary/chips.rs,
 // chat/skills.rs; Wispr Flow's Notetaker chips and Skills):
 // - Make me sound smart while a meeting records: something to say, citing
 //   the latest talk, its pill opening the line in the transcript;

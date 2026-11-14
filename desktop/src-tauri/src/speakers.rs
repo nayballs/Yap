@@ -330,7 +330,7 @@ pub fn voices(note: &Note) -> Vec<String> {
 
 /// Everyone the note knows by name: its attendees, then the speaker map's
 /// names (a guess included: the invite named them). What the owner checks
-/// accept (`meeting_summary::resolve_owner`): a name here is a known person.
+/// accept (`meetings::summary::resolve_owner`): a name here is a known person.
 pub fn known_people(note: &Note) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let names = note

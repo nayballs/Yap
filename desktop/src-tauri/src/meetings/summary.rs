@@ -566,7 +566,7 @@ pub fn kick(app: &AppHandle, note_id: u64) {
 }
 
 async fn live_digests(app: &AppHandle, note_id: u64) {
-    let recording = || crate::meetings::meeting::recording_note() == Some(note_id);
+    let recording = || crate::meetings::recorder::recording_note() == Some(note_id);
     loop {
         if !recording() {
             return;

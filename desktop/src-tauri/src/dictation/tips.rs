@@ -42,7 +42,7 @@ use crate::ai::cleanup_styles::{Category, Style};
 pub const MIN_GAP_MS: u64 = 10 * 60_000;
 /// The main window's event: a [`Tip`].
 const EVENT: &str = "yap-feature-tip";
-/// The bar card's id and its rule in `notice.rs`.
+/// The bar card's id and its rule in `notices/policy.rs`.
 pub const KIND: &str = "featureTip";
 const CARD_MS: u64 = 12_000;
 
@@ -287,17 +287,17 @@ fn noticing() -> bool {
 /// due, once the dictation is over (never mid-dictation), within a minute.
 /// Off the pipeline's locks: a thread of its own.
 pub fn after_dictation(app: &AppHandle, seen: Seen) {
-    if seen == Seen::default() || !noticing() || crate::notices::notice::tips_off() {
+    if seen == Seen::default() || !noticing() || crate::notices::policy::tips_off() {
         return;
     }
-    let Some(feature) = due(&seen, &crate::dictation::coaching::record().features, crate::notices::notice::now_ms()) else {
+    let Some(feature) = due(&seen, &crate::dictation::coaching::record().features, crate::notices::policy::now_ms()) else {
         return;
     };
     let app = app.clone();
     let _ = std::thread::Builder::new().name("dictation-feature-tip".into()).spawn(move || {
         let started = std::time::Instant::now();
         std::thread::sleep(std::time::Duration::from_millis(400));
-        while crate::notices::notice::moment().dictating && started.elapsed() < std::time::Duration::from_secs(60) {
+        while crate::notices::policy::moment().dictating && started.elapsed() < std::time::Duration::from_secs(60) {
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
         offer(&app, feature);
@@ -308,17 +308,17 @@ pub fn after_dictation(app: &AppHandle, seen: Seen) {
 /// the person looks at it, else a Yap bar card; nowhere else (a tip can go
 /// unsaid). Counted only when shown.
 fn offer(app: &AppHandle, feature: Feature) {
-    if crate::notices::notice::tips_off() {
+    if crate::notices::policy::tips_off() {
         return;
     }
     // Never over a meeting (the main window's toast doesn't wait one out,
     // and a bar card would wait unseen and be dropped): not shown, not
     // counted, so it comes again after a later dictation.
-    if crate::notices::notice::moment().meeting {
+    if crate::notices::policy::moment().meeting {
         tracing::debug!(kind = feature.key(), "Feature tips: a meeting is recording; not now");
         return;
     }
-    let now = crate::notices::notice::now_ms();
+    let now = crate::notices::policy::now_ms();
     let seen = Seen {
         self_correction: feature == Feature::SelfCorrection,
         list: feature == Feature::List,
@@ -338,10 +338,10 @@ fn offer(app: &AppHandle, feature: Feature) {
 /// ([`language_due`]), once the dictation is over (never mid-dictation),
 /// within a minute. Off the pipeline's locks: a thread of its own.
 pub fn language(app: &AppHandle, code: &str) {
-    if !noticing() || crate::notices::notice::tips_off() {
+    if !noticing() || crate::notices::policy::tips_off() {
         return;
     }
-    if !language_due(&crate::dictation::coaching::record().features, crate::notices::notice::now_ms()) {
+    if !language_due(&crate::dictation::coaching::record().features, crate::notices::policy::now_ms()) {
         return;
     }
     let app = app.clone();
@@ -349,14 +349,14 @@ pub fn language(app: &AppHandle, code: &str) {
     let _ = std::thread::Builder::new().name("dictation-language-tip".into()).spawn(move || {
         let started = std::time::Instant::now();
         std::thread::sleep(std::time::Duration::from_millis(400));
-        while crate::notices::notice::moment().dictating && started.elapsed() < std::time::Duration::from_secs(60) {
+        while crate::notices::policy::moment().dictating && started.elapsed() < std::time::Duration::from_secs(60) {
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
         // Never over a meeting (as `offer`): it comes again another time.
-        if crate::notices::notice::tips_off() || crate::notices::notice::moment().meeting {
+        if crate::notices::policy::tips_off() || crate::notices::policy::moment().meeting {
             return;
         }
-        let now = crate::notices::notice::now_ms();
+        let now = crate::notices::policy::now_ms();
         if !language_due(&crate::dictation::coaching::record().features, now) {
             return;
         }
@@ -371,15 +371,15 @@ pub fn language(app: &AppHandle, code: &str) {
 /// later press asks again). Off the input hook's forwarder: a thread of its
 /// own.
 pub fn side_buttons(app: &AppHandle) {
-    if !noticing() || crate::notices::notice::tips_off() {
+    if !noticing() || crate::notices::policy::tips_off() {
         return;
     }
-    let moment = crate::notices::notice::moment();
+    let moment = crate::notices::policy::moment();
     if moment.dictating || moment.meeting {
         tracing::debug!("Feature tips: the side buttons' tip waits for a quieter moment");
         return;
     }
-    let now = crate::notices::notice::now_ms();
+    let now = crate::notices::policy::now_ms();
     if !side_buttons_due(&crate::dictation::coaching::record().features, now) {
         return;
     }
@@ -394,10 +394,10 @@ pub fn side_buttons(app: &AppHandle) {
 /// Yap bar card; nowhere else. Counted (hints.json's `features`) only when
 /// shown. The side buttons' has Set up (Settings → Shortcuts' dialog).
 fn show(app: &AppHandle, feature: Feature, title: String, body: String, now: u64) {
-    let place = crate::notices::notice::place_tip(app, KIND);
+    let place = crate::notices::policy::place_tip(app, KIND);
     let shown = match place {
-        crate::notices::notice::Place::Window => app.emit(EVENT, Tip { kind: feature, title, body }).is_ok(),
-        crate::notices::notice::Place::Bar => {
+        crate::notices::policy::Place::Window => app.emit(EVENT, Tip { kind: feature, title, body }).is_ok(),
+        crate::notices::policy::Place::Bar => {
             let set_up = feature == Feature::SideButtons;
             let card = crate::bar::Card {
                 id: KIND.into(),
@@ -421,8 +421,8 @@ fn show(app: &AppHandle, feature: Feature, title: String, body: String, now: u64
         _ => false,
     };
     // Not shown after all: the day's count back.
-    if crate::notices::notice::tip_shown(KIND, place, shown) {
-        tracing::info!(kind = feature.key(), window = place == crate::notices::notice::Place::Window, "Feature tips: shown");
+    if crate::notices::policy::tip_shown(KIND, place, shown) {
+        tracing::info!(kind = feature.key(), window = place == crate::notices::policy::Place::Window, "Feature tips: shown");
         crate::dictation::coaching::update_record(|mut r| {
             r.features.insert(feature.key().to_string(), now);
             r

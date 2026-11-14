@@ -139,7 +139,7 @@ pub type Off = std::collections::BTreeSet<String>;
 
 /// A meeting records or a call is on.
 pub fn in_meeting() -> bool {
-    crate::meetings::meeting::is_recording() || crate::calls::meeting_detect::call_live()
+    crate::meetings::recorder::is_recording() || crate::calls::meeting_detect::call_live()
 }
 
 /// **One connector tool a turn offers.**

@@ -177,7 +177,7 @@ const STEP: &str = "yap-assistant-step";
 /// How many sentences go to the voice while the answer is still being
 /// written: the short version's ([`spoken_answer`]'s `tts::brief(…, 2)`).
 const STREAM_SAY: usize = 2;
-/// The answer's card on the bar (its rule in `notice.rs`).
+/// The answer's card on the bar (its rule in `notices/policy.rs`).
 pub const CARD: &str = "assistant";
 /// The "no AI model" alert's kind.
 pub const NO_MODEL: &str = "assistantNoModel";
@@ -346,10 +346,10 @@ pub fn reply(voice_on: bool, meeting: bool, interrupted: bool) -> Reply {
 /// app or on another view: no. The card on the Yap bar is for someone who
 /// can't see Chat (30 Oct 2026: it came up over Chat, maximised, with the
 /// answer streaming in front of the maintainer). `seen` is the window's
-/// real state, from Rust (`notice::window_seen`); `viewing`, what the Chat
+/// real state, from Rust (`notices::policy::window_seen`); `viewing`, what the Chat
 /// view says it shows. Pure.
-pub fn answer_in_view(seen: crate::notices::notice::Seen, viewing: Viewing, conversation: Option<u64>) -> bool {
-    use crate::notices::notice::Seen;
+pub fn answer_in_view(seen: crate::notices::policy::Seen, viewing: Viewing, conversation: Option<u64>) -> bool {
+    use crate::notices::policy::Seen;
     match seen {
         Seen::Front => true,
         Seen::Beside => match viewing {
@@ -594,7 +594,7 @@ pub fn asked_in_chat() -> bool {
 /// ([`answer_in_view`] on the window's real state)? Window getters: never
 /// with a lock held.
 fn answer_seen(app: &AppHandle, conversation: Option<u64>) -> bool {
-    answer_in_view(crate::notices::notice::window_seen(app), view(), conversation)
+    answer_in_view(crate::notices::policy::window_seen(app), view(), conversation)
 }
 
 fn now_secs() -> u64 {
@@ -1471,8 +1471,8 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // question. In front, or beside the app in front showing Chat: the
     // answer is in view there (a document's line points at the panel).
     // (Asked from a phone: nobody's at the PC to see it come up.)
-    let seen = if pc { crate::notices::notice::window_seen(&app) } else { crate::notices::notice::Seen::No };
-    let focused = seen == crate::notices::notice::Seen::Front;
+    let seen = if pc { crate::notices::policy::window_seen(&app) } else { crate::notices::policy::Seen::No };
+    let focused = seen == crate::notices::policy::Seen::Front;
     let in_chat = answer_in_view(seen, viewing, conversation_id);
     // The passage quoted over Chat's box (a document's "Change this…"): it
     // goes with a question asked with Chat in view, to the conversation it's
@@ -2249,7 +2249,7 @@ mod tests {
 
     #[test]
     fn the_card_is_for_someone_who_cant_see_chat() {
-        use crate::notices::notice::Seen;
+        use crate::notices::policy::Seen;
         let chat = Viewing::Conversation(7);
         // Yap's window in front (Chat comes up there with the question),
         // maximised or not, on any view.

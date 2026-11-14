@@ -117,7 +117,7 @@
     },
     openSettings: (section) => openSettings(section),
   });
-  // The action plan Rust writes when a meeting ends (meetings/meeting_end.rs), for
+  // The action plan Rust writes when a meeting ends (meetings/end.rs), for
   // the Notes view; started here so no job's progress is missed.
   initMeetingSummary();
   // Meeting guard rails (calls/meeting_guard.rs, calls/capture.rs via meetingGuard.js):

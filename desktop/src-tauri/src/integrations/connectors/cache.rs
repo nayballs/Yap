@@ -247,7 +247,7 @@ pub fn tool_of(tool: &Value) -> Tool {
     let skipped = if name.trim().is_empty() { Some("It has no name.".to_string()) } else { skipped };
     // Flagged on the whole description, not just the part kept.
     let flag = flag_of(full).or_else(|| title.as_deref().and_then(flag_of));
-    let tokens = crate::meetings::meeting_summary::estimate_tokens(&format!(
+    let tokens = crate::meetings::summary::estimate_tokens(&format!(
         "{name} {} {}",
         description,
         input_schema.as_ref().map(canonical).unwrap_or_default()

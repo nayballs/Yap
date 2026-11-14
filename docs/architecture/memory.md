@@ -126,7 +126,7 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   **The sidecar's rules**:
   a pass holds `local_llm::hold` (the small path: for all its calls),
   waits out a dictation and is dropped if one starts
-  (`beside_dictation`: `meeting_summary::wait_idle` / `unless_busy` /
+  (`beside_dictation`: `meetings::summary::wait_idle` / `unless_busy` /
   `dictation_busy`; a background small pass dropped applies nothing and
   reads the chat again later); a background pass never starts a stopped
   on-device model (it waits for the next). **On this PC's processor**
@@ -151,7 +151,7 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   memory.json (`pending`) so a quit doesn't lose it — read a minute after the
   next start (no model call on quit). Not in test mode or an evaluation (the
   e2e suite and the runner call the passes). **Learning from a meeting**
-  (`meeting_ended`, from `meetings/meeting_end.rs` when an action plan is written;
+  (`meeting_ended`, from `meetings/end.rs` when an action plan is written;
   "Learn from meetings", off): its title, attendees and action plan (≤ 1,500
   tokens), people and projects only, once a note — the full path only (a
   meeting is other people's words in the third person: the small path has
@@ -257,7 +257,7 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   with no trigger, after the dictionary's own words, leaving out what it
   already spells; each word of a longer name too ("Sarah Jenkins":
   "Jenkins"). All of them go to the **Whisper `initial_prompt`**
-  (`memory::with_names`, ranked by use like dictionary words — `dict_usage`
+  (`memory::with_names`, ranked by use like dictionary words — `dictionary::usage`
   counts them — in `pipeline::dictionary_prompt` and the meeting prompt); a
   name is a **near-miss target** for ONNX models (Parakeet) only when it can't
   swallow an ordinary word (`safe_for_fuzzy`): ≥ 4 letters, not
@@ -353,7 +353,7 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   tools), memory's **"You" block** — "What Yap remembers about the user from
   earlier chats… About them: …; How they want answers (follow it): …". The
   Notes view's Ask bar (`note_ask`) ends the same way; the notepad's helpers
-  ("What did I miss?", questions, the follow-up email, gaps — `meetings/meeting_assist.rs`)
+  ("What did I miss?", questions, the follow-up email, gaps — `meetings/assist.rs`)
   get `helper_block`: About you's name and note, then the You block, after their
   immutable prompt.
 - **The question's `<context>`** (a tool model) or the system prompt (one

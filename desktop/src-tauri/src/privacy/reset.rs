@@ -673,7 +673,7 @@ fn busy(app: &AppHandle) -> Option<String> {
         .try_state::<crate::AppState>()
         .and_then(|s| s.pipeline.lock().ok().map(|p| p.as_ref().is_some_and(|p| p.is_busy())))
         .unwrap_or(false);
-    blocked(dictating, crate::meetings::meeting::is_recording())
+    blocked(dictating, crate::meetings::recorder::is_recording())
 }
 
 /// A store kind `kind` changes whose file Yap couldn't read: what's in it
@@ -752,7 +752,7 @@ fn measure(pages: Option<&Path>) -> Vec<Line> {
                     (count(days, "day", "days"), file_bytes(&data.join("dictation_stats.json")), days == 0)
                 }
                 Kind::Meetings => {
-                    let (audio, audio_bytes) = dir_bytes(&crate::meetings::meeting_audio::root());
+                    let (audio, audio_bytes) = dir_bytes(&crate::meetings::audio::root());
                     (count(meetings.len(), "meeting", "meetings"), audio_bytes + versions(&meetings), meetings.is_empty() && audio == 0)
                 }
                 Kind::Notes => (count(others.len(), "note", "notes"), versions(&others), others.is_empty()),
@@ -872,7 +872,7 @@ fn clear_stores(c: &Choice, done: &mut Done) -> Gone {
             crate::notes::versions::reset();
             crate::notes::pins::reset();
             for id in &gone.notes {
-                crate::meetings::meeting_end::forget(*id);
+                crate::meetings::end::forget(*id);
             }
             // The meetings' companies the folder rules kept (the rules stay).
             crate::calendar::filing::forget_notes();
@@ -891,13 +891,13 @@ fn clear_stores(c: &Choice, done: &mut Done) -> Gone {
     // Meeting audio: every recording with the meetings (a recording going
     // on can't be: a deletion waits for it), else an other note's own.
     if c.meeting_audio() == Cut::Whole {
-        done.meeting_audio = crate::meetings::meeting_audio::clear();
+        done.meeting_audio = crate::meetings::audio::clear();
     }
     for id in &gone.notes {
-        crate::meetings::meeting_audio::forget(*id);
+        crate::meetings::audio::forget(*id);
     }
-    if c.meeting_audio() == Cut::Whole && !crate::meetings::meeting::is_recording() {
-        let dir = crate::meetings::meeting_audio::root();
+    if c.meeting_audio() == Cut::Whole && !crate::meetings::recorder::is_recording() {
+        let dir = crate::meetings::audio::root();
         if dir.exists() {
             let _ = std::fs::remove_dir_all(&dir);
         }
@@ -1041,7 +1041,7 @@ fn clear_files(app: &AppHandle, c: &Choice, done: &mut Done) -> Result<(), Strin
 /// deletion's.
 fn tell(app: &AppHandle, c: &Choice, gone: &Gone, done: &Done) {
     for id in &gone.notes {
-        let _ = app.emit(crate::meetings::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
+        let _ = app.emit(crate::meetings::end::EVENT_DELETED, serde_json::json!({ "id": id }));
         crate::meetings::notepad::on_note_deleted(app, *id);
     }
     let mut events: Vec<&str> = Vec::new();
@@ -1065,7 +1065,7 @@ fn tell(app: &AppHandle, c: &Choice, gone: &Gone, done: &Done) {
         let _ = app.emit(event, ());
     }
     if c.meeting_audio() != Cut::Keep {
-        let _ = app.emit(crate::meetings::meeting_audio::EVENT_AUDIO, serde_json::json!({ "noteId": null }));
+        let _ = app.emit(crate::meetings::audio::EVENT_AUDIO, serde_json::json!({ "noteId": null }));
     }
     let _ = app.emit(EVENT, done);
 }

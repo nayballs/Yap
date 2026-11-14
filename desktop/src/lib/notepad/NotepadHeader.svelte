@@ -230,7 +230,7 @@
               >
                 <Icon name="person" /><span>Find speakers</span>
               </button>
-              <!-- The meeting's kept audio, where you pick (meetings/meeting_audio/export.rs). -->
+              <!-- The meeting's kept audio, where you pick (meetings/audio/export.rs). -->
               <button
                 role="menuitem"
                 class="item"

@@ -1,5 +1,5 @@
 // Smarter about the call itself (2026-10-29; calls/meeting_detect.rs,
-// calls/call_audio.rs, meetings/sleep.rs): the call on another microphone
+// calls/audio.rs, meetings/sleep.rs): the call on another microphone
 // ("Teams is using … but Yap is using …", Use it), muted in the call (no
 // "Yap can't hear your mic"), the PC asleep mid-meeting (a line in the
 // transcript, Resume), another call while one records ("Switch to …?"),

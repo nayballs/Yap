@@ -1,5 +1,5 @@
 //! **Disk space while a meeting records** (Wispr Flow's low-disk guard).
-//! A meeting writes its audio as it records (`meeting_audio.rs`: both sides,
+//! A meeting writes its audio as it records (`audio.rs`: both sides,
 //! lossless FLAC) and its lines into notes.json, so a disk that fills up
 //! mid-meeting would cut both off. While a meeting records, Yap looks at
 //! the free space on the drive its data is on every minute and:
@@ -131,7 +131,7 @@ fn watch(app: AppHandle, gen: u64, note_id: u64) {
         let Some(free) = free_now() else { continue };
         let per_min = match stand_in().and_then(|(_, r)| r) {
             Some(r) => r,
-            None => rate(crate::meetings::meeting_audio::live_bytes(note_id), started.elapsed()),
+            None => rate(crate::meetings::audio::live_bytes(note_id), started.elapsed()),
         };
         match step(free, per_min, warned) {
             Step::Wait => {}

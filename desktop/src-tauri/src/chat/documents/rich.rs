@@ -437,7 +437,7 @@ fn read(args: &Value) -> Value {
     }
     let limit = arg_u64(args, &["limit"]).map_or(PAGE_BLOCKS, |l| (l as usize).clamp(1, PAGE_BLOCKS));
     let budget = crate::chat::note_text::PAGE_TOKENS;
-    let est = crate::meetings::meeting_summary::estimate_tokens;
+    let est = crate::meetings::summary::estimate_tokens;
     let mut shown: Vec<Value> = Vec::new();
     let mut used = 0usize;
     let mut cut = false;

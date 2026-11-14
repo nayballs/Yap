@@ -246,7 +246,7 @@ export function snippetWarnings(dict) {
   return out;
 }
 
-/** The key dictionary_usage.json counts a word under (dict_usage.rs `key`). */
+/** The key dictionary_usage.json counts a word under (dictionary/usage.rs `key`). */
 export function usageKey(entry) {
   return String(entry?.to ?? '')
     .trim()

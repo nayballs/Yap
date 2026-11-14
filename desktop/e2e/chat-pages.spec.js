@@ -201,7 +201,7 @@ test('browser_navigate brings the live page up beside the chat: its own webview,
   await main.keyboard.press('Escape');
   await expect(main.getByRole('menuitem')).toHaveCount(0);
   // Open: its Page tab, in front.
-  await card.getByTestId('chat-page-pill').click();
+  await card.getByTestId('chat-page-card-open').click();
   await expect(main.getByTestId('chat-page-title')).toHaveText('Fort Joy - Example Wiki');
 
   // Open in your browser: open_external (a test run keeps the link).

@@ -3,7 +3,7 @@
   // corners) with a hover copy, named from the note's speaker map — the menu
   // on a name, or on a line's person button, renames a voice everywhere or
   // just that line, merges two voices, and undoes a guess ("Priya?" → Not
-  // Priya); ▶ plays a line's stretch of the meeting (meetings/meeting_audio.rs); a
+  // Priya); ▶ plays a line's stretch of the meeting (meetings/audio.rs); a
   // paused divider where a recording stopped (`Note::breaks`); a marker where
   // the person dictated mid-meeting (a `dictated` segment); a stretch that
   // failed to transcribe, with Try again. A line's words are fixed in place:
@@ -58,7 +58,7 @@
       setTimeout(() => view.copiedLine === line.i && (view.copiedLine = null), 1200);
     }
   }
-  // Fixing a line's words (notes/note_edits.rs): double-click it, or Edit line in
+  // Fixing a line's words (notes/edits.rs): double-click it, or Edit line in
   // its menu. Enter saves, Escape puts it back, leaving it saves. It keeps
   // its time, voice and audio (▶ plays what was said), shows "edited", and
   // a misheard word it fixed is offered for the dictionary.
@@ -284,7 +284,7 @@
                 </button>
               {/if}
               {#if canPlay(note.id, note.transcript?.[line.i])}
-                <!-- ▶ this line's stretch of the meeting, both sides (meetings/meeting_audio.rs). -->
+                <!-- ▶ this line's stretch of the meeting, both sides (meetings/audio.rs). -->
                 <button
                   class="lineplay"
                   class:on={meetingAudio.playing === `${note.id}:${line.i}`}
@@ -554,7 +554,7 @@
   .linecopy:focus-visible {
     opacity: 1;
   }
-  /* ▶ a line (meetings/meeting_audio.rs), left of the person and copy buttons. */
+  /* ▶ a line (meetings/audio.rs), left of the person and copy buttons. */
   .row.playable {
     padding-right: 76px;
   }

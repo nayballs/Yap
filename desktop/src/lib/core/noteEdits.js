@@ -1,5 +1,5 @@
 // Fixing meeting notes by hand, for the meeting notepad and the Notes view
-// alike (desktop/src-tauri/src/notes/note_edits.rs and notes/tasks.rs):
+// alike (desktop/src-tauri/src/notes/edits.rs and notes/tasks.rs):
 // - a transcript line's words (`editLine`: double-click or Edit line; the
 //   line keeps its time, voice and audio, is marked edited, and a misheard
 //   word or name it fixed is offered for the dictionary, here, by
@@ -20,7 +20,7 @@ import { showSaveError } from '../notices/saveErrors.js';
 import { taskLines } from './markdown.js';
 import { lineRef, taskText, withLineEdit, withLineSplit, breaksAfterSplit, withLineRemoved, withLineRestored } from './notepadText.js';
 
-/** What a summary run says when it left the person's edited summary alone (notes/note_edits.rs). */
+/** What a summary run says when it left the person's edited summary alone (notes/edits.rs). */
 export const SUMMARY_KEPT = "Your edited summary was kept: Yap didn't write over it.";
 
 /**

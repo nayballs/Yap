@@ -1,5 +1,5 @@
 // A meeting summary's fields beside its words, as the windows keep them
-// (desktop/src-tauri/src/notes/note_edits.rs `SummaryState`): whether "Back to Yap's
+// (desktop/src-tauri/src/notes/edits.rs `SummaryState`): whether "Back to Yap's
 // summary" is offered, and Rust's answer laid onto the note shown. Pure
 // (unit-tested in desktop/e2e/notes-summary.spec.js); summaryTools.js acts on them.
 

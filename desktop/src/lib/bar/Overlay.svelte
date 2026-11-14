@@ -25,7 +25,7 @@
   //             again"), once each (bar/pointer.rs); not a region, never
   //             with a card up;
   //   cards     26 px above the pill: Yap's notices while its window isn't
-  //             focused, one at a time (notices/notice.rs picks it; the rest wait);
+  //             focused, one at a time (notices/policy.rs picks it; the rest wait);
   //             the reading card (voice/read_aloud.rs) nearest the pill while Yap
   //             reads aloud, bar on or off, a notice above it.
   // The window is click-through except over what this page reports as
@@ -130,7 +130,7 @@
             : 'idle'
   );
   const hovering = $derived(pointer === 'pill' || pointer === 'menu' || domHover);
-  // One card at a time: Rust's notice policy (notices/notice.rs) picks which, and
+  // One card at a time: Rust's notice policy (notices/policy.rs) picks which, and
   // the rest wait their turn (`bar.waiting`), so nothing stacks.
   const cards = $derived(bar.enabled ? bar.cards.slice(-1) : []);
   // The pill's place, measured: cards sit 26 px above the pill whatever it
@@ -285,7 +285,7 @@
   // Every button goes through `bar_action`: Rust gives the focus back to the
   // app you're in first, then dictates, starts or stops meeting notes (as
   // the meeting shortcut does, calls/meeting_guard.rs; a stop ends the meeting in
-  // meetings/meeting_end.rs, which writes the action plan), or opens the notepad.
+  // meetings/end.rs, which writes the action plan), or opens the notepad.
   async function act(action) {
     tip = null;
     try {
