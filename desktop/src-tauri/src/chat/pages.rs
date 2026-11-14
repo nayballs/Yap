@@ -1266,6 +1266,12 @@ async fn width(turn: &mut crate::web::Turn, args: &Value) -> Value {
     if let Some(r) = on_search_page(&t, "set the tab's width") {
         return r;
     }
+    // A phone's or a tablet's layout from browser_view goes too: the width is the one asked for (14 Nov 2026, a
+    // report from the maintainer's Code chat: "the panel's width" said it worked, the page stayed 375 px wide).
+    let viewed = backend::real_input() && backend::devtools_call(&t.key, "Emulation.clearDeviceMetricsOverride", &json!({})).await.is_ok();
+    if viewed {
+        let _ = backend::devtools_call(&t.key, "Emulation.setTouchEmulationEnabled", &json!({ "enabled": false })).await;
+    }
     let v = match backend::width(&t.key, width).await {
         Ok(v) => v,
         Err(e) => return failed(e.clone(), format!("Couldn't set tab {}'s width: {}", t.tab, crate::web::short(&e))),

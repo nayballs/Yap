@@ -302,7 +302,10 @@ const DEV_TOOLS = [
   ...call(5, 'browser_javascript', { code: 'document.title + " / " + document.querySelectorAll("[role=tab]").length' }),
   ...call(6, 'browser_view', { preset: 'mobile', color_scheme: 'dark' }),
   ...call(7, 'browser_javascript', { code: 'innerWidth + " " + matchMedia("(prefers-color-scheme: dark)").matches' }),
-  ...call(8, 'browser_view', { preset: 'desktop', color_scheme: 'auto' }),
+  // The colours back; the size back by the tab's width (the panel's), which clears the phone's layout too.
+  ...call(8, 'browser_view', { color_scheme: 'auto' }),
+  ...call(21, 'browser_tabs', { action: 'width', width: 0 }),
+  ...call(22, 'browser_javascript', { code: 'String(innerWidth)' }),
   // Typed at the cursor (no ref), as Claude Code's own browser types: real input, what was there kept.
   ...call(19, 'browser_type', { text: 'Healing' }),
   ...call(20, 'browser_type', { text: ' guide' }),
@@ -989,7 +992,7 @@ test('its session has Claude Code’s developer tools: the console, the network 
   await send(main, `Open ${LEVELING_URL} and check its console and requests.`);
   const agent = await newAgent(yap, before);
   // A script asks first (outside Bypass): its card in the thread, its words on it. Allow once (twice).
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 3; i++) {
     const card = thread(main).getByTestId('chat-page-confirm').locator('.asking, [data-state="asking"]').first();
     const asking = thread(main).locator('[data-testid="chat-page-confirm"][data-state="asking"]').first();
     await expect(asking).toBeVisible({ timeout: 60_000 });
@@ -1003,6 +1006,8 @@ test('its session has Claude Code’s developer tools: the console, the network 
   const of = (tool, i = 0) => text(dumps.filter((d) => d.tool === tool)[i]);
   expect(dumps[0].tools.map((t) => t.name)).toEqual(expect.arrayContaining(['browser_console', 'browser_network', 'browser_javascript', 'browser_view']));
   expect(of('browser_console')).toContain('[log] Guide loaded');
+  // Once: a line is never repeated by Yap (the same one again at once is counted, "(×N)").
+  expect(of('browser_console').match(/Guide loaded/g)).toHaveLength(1);
   // The request, its token hidden, its status (the fake web has no such page). (Its host is the test web's own:
   // a request outside the stand-in's prefix isn't turned back to the page's address, as a real page's needs no turning.)
   expect(of('browser_network')).toMatch(/GET \S+\/api\/progress\?token=REDACTED&level=20 4\d\d \[Fetch\]/);
@@ -1010,19 +1015,24 @@ test('its session has Claude Code’s developer tools: the console, the network 
   expect(of('browser_javascript')).toContain('Leveling guide - Example Wiki / 2');
   expect(of('browser_view')).toContain('375×812 (touch), dark colours');
   expect(of('browser_javascript', 1)).toContain('375 true');
-  expect(of('browser_view', 1)).toContain("the panel's own size, the system's colours");
+  expect(of('browser_view', 1)).toContain("the system's colours");
+  // The panel's width again: no longer a phone's 375.
+  expect(of('browser_tabs')).toContain('back to the panel');
+  expect(of('browser_javascript', 2)).not.toMatch(/"value":"375"/);
   // Typed at the cursor in the field with the focus, as keys: the second after the first.
   expect(of('browser_type')).toContain('"field":"Healing"');
   expect(of('browser_type')).toContain('"typed":"as keys"');
   expect(of('browser_type', 1)).toContain('"field":"Healing guide"');
   // Real keystrokes, a combination among them; the scroll and the hover at a point done.
-  expect(of('browser_read')).toContain('Keys: Ctrl+a x');
+  // The words typed at the cursor came as key presses (no "(script)" mark), then the keys pressed.
+  expect(of('browser_read')).toContain('Keys: H e a l i n g');
+  expect(of('browser_read')).toContain('g u i d e Ctrl+a x');
   expect(dumps.filter((d) => ['browser_key', 'browser_scroll', 'browser_hover'].includes(d.tool)).map((d) => [d.tool, d.isError])).toEqual([['browser_key', false], ['browser_scroll', false], ['browser_hover', false], ['browser_scroll', false]]);
   // (The guide is shorter than the view: the wheel there moved nothing, and says so.)
   expect(of('browser_scroll')).toContain("Didn't scroll down at that point on wiki.example.com: nothing there goes further");
   // The tree: landmarks, the tabs with their state, headings by level, every node's ref; the folded rows not there.
   const tree = of('browser_read', 1);
-  for (const want of ['- tablist', '- tab \\"Healing\\" (selected) [', '- heading (level 2) \\"Build Order\\"', '- button \\"Buy the full guide\\" [', '- paragraph \\"Keys: Ctrl+a x\\"']) expect(tree).toContain(want);
+  for (const want of ['- tablist', '- tab \\"Healing\\" (selected) [', '- heading (level 2) \\"Build Order\\"', '- button \\"Buy the full guide\\" [', '- paragraph \\"Keys: H e a l i n g']) expect(tree).toContain(want);
   expect(tree).not.toContain('Moss Shield');
   const controls = of('browser_read', 2);
   expect(controls).toContain('- tab \\"Damage\\"');

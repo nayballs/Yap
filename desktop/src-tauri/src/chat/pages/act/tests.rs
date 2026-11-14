@@ -1,4 +1,20 @@
 use super::*;
+
+#[test]
+fn a_typed_character_is_a_keyboards_keydown_text_and_keyup() {
+    // (14 Nov 2026: Input.insertText put the words in, but a page listening for keys never heard them.)
+    let a = typed_char('a', false);
+    assert_eq!(a.len(), 2);
+    assert_eq!((a[0].1["type"].clone(), a[0].1["key"].clone(), a[0].1["text"].clone(), a[0].1["code"].clone(), a[0].1["windowsVirtualKeyCode"].clone()), (json!("keyDown"), json!("a"), json!("a"), json!("KeyA"), json!(65)));
+    assert_eq!(a[1].1["type"], "keyUp");
+    assert_eq!(typed_char('?', false)[0].1["code"], "Slash");
+    // An accent or an emoji: its text alone, as an input method sends it.
+    let e = typed_char('é', false);
+    assert!(e[0].1["code"].is_null() && e[0].1["text"] == "é", "{e:?}");
+    // A line break: Enter in a field of several lines, nothing in a one-line field (it would send the form).
+    assert!(typed_char('\n', false).is_empty());
+    assert_eq!(typed_char('\n', true)[0].1["key"], "Enter");
+}
 use crate::chat::pages::sim::Browser;
 use crate::chat::stream::{Event, Live, Sink};
 use crate::web::{Endpoints, Service, Settings, Turn};
