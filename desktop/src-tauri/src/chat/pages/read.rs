@@ -26,7 +26,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::view::{self, OpenTab};
-use super::{backend, clip, failed, search_page, READ_MAX};
+use super::{backend, clip, failed, search_page};
 
 /// The most of a page's text a paged read goes through (characters).
 pub const TEXT_FULL: usize = 200_000;
@@ -107,8 +107,9 @@ pub fn known_source(turn: &crate::web::Turn, url: &str) -> bool {
 }
 
 /// **`browser_read { offset }`**: the page's text from character `offset`
-/// on ([`READ_MAX`] of it), the headings in that part and the links whose
-/// words it holds; `next` where to go on.
+/// on ([`super::read_max`] of it: [`super::READ_MAX`], more in a Claude Code
+/// session's turn), the headings in that part and the links whose words it
+/// holds; `next` where to go on.
 pub async fn text_from(turn: &mut crate::web::Turn, tab: &OpenTab, offset: usize, act: bool) -> Value {
     let shown = crate::web::short_url(&tab.url);
     let page = match backend::text_long(&tab.key).await {
@@ -119,9 +120,10 @@ pub async fn text_from(turn: &mut crate::web::Turn, tab: &OpenTab, offset: usize
     if offset >= total.max(1) {
         return failed(format!("offset {offset} is past the end: the page's text is {total} characters (browser_read without offset starts it)."), format!("Didn't read {shown}: past its end"));
     }
-    let (from, to) = (byte_at(&page.text, offset), byte_at(&page.text, offset + READ_MAX));
+    let max = super::read_max(turn);
+    let (from, to) = (byte_at(&page.text, offset), byte_at(&page.text, offset + max));
     let body = &page.text[from..to];
-    let more = offset + READ_MAX < total;
+    let more = offset + max < total;
     let title = if page.title.trim().is_empty() { tab.title.clone() } else { page.title.clone() };
     let already = known_source(turn, &tab.url);
     let n = turn.read_open(&title, &tab.url, body);
@@ -141,7 +143,7 @@ pub async fn text_from(turn: &mut crate::web::Turn, tab: &OpenTab, offset: usize
         "more": more,
     });
     if more {
-        data["next"] = json!({ "offset": offset + READ_MAX });
+        data["next"] = json!({ "offset": offset + max });
     }
     // Its links in this part: the page's own, for a link the user asks for or browser_navigate.
     let links: Vec<(String, String)> = page
@@ -158,6 +160,66 @@ pub async fn text_from(turn: &mut crate::web::Turn, tab: &OpenTab, offset: usize
     }
     tracing::info!(tab = tab.tab, offset, chars = body.chars().count(), more, "Chat: a part of the page beside the chat read");
     json!({ "success": true, "data": data, "note": note, "displayText": format!("Read {shown} beside the chat (from character {offset})") })
+}
+
+/// **`browser_read { ref }`**: just that part of the page (14 Nov 2026; Yap's
+/// Claude, asked what was hard on a long guide: "a way to read one named
+/// section by its heading", as Claude Code's own browser reads one element
+/// by its ref) — a heading's ref: its section, the heading and what follows
+/// it up to the next heading at its level or above; any other element's:
+/// that element. What the person sees of it, from `offset` on
+/// ([`super::read_max`] of it), `next` where to go on. Web content, a
+/// source of the turn, as a whole read.
+pub async fn section(turn: &mut crate::web::Turn, tab: &OpenTab, r: u32, offset: usize) -> Value {
+    let shown = crate::web::short_url(&tab.url);
+    let max = super::read_max(turn);
+    let got = match backend::act(&tab.key, "section", &json!({ "ref": r, "offset": offset, "max": max })).await {
+        Ok(v) => v,
+        Err(e) => return failed(e.clone(), format!("Couldn't read {shown}: {}", crate::web::short(&e))),
+    };
+    if got["r"] != "ok" {
+        return failed(
+            format!("There's no element [{r}] on the page now: browser_find (or browser_read mode \"elements\") gives its ref again."),
+            format!("Didn't read [{r}] on {shown}: it isn't there"),
+        );
+    }
+    let text = got["text"].as_str().unwrap_or("").to_string();
+    let heading = got["heading"].as_str().unwrap_or("").trim().to_string();
+    let more = got["more"].as_bool().unwrap_or(false);
+    let already = known_source(turn, &tab.url);
+    let n = turn.read_open(&tab.title, &tab.url, &text);
+    let mut note = web_note(n, tab, already);
+    if text.is_empty() && heading.is_empty() {
+        note.push_str(" It has no words the user can see (closed, or pictures only): open it first if it folds, or read the page.");
+    }
+    let mut data = json!({ "tab": tab.tab, "n": n, "url": tab.url, "ref": r, "text": text, "more": more });
+    if !heading.is_empty() {
+        data["section"] = json!(heading);
+    }
+    // **Only its heading shows**: the section is folded (14 Nov 2026, Yap Lab: Haiku read a closed guide
+    // section by its ref, got its heading alone, and told the person the guide didn't list it). Said plainly,
+    // with the next step: open it, read it again.
+    if folded(&heading, &text) {
+        data["folded"] = json!(true);
+        note.push_str(&format!(" Only its heading shows: the section under it is folded (closed). browser_click with ref {r} opens it; then browser_read with ref {r} again."));
+    }
+    if offset > 0 {
+        data["offset"] = json!(offset);
+    }
+    if more {
+        data["next"] = json!({ "ref": r, "offset": offset + max });
+    }
+    let what = if heading.is_empty() { format!("[{r}]") } else { format!("‘{}’", clip(&heading, 60)) };
+    tracing::info!(tab = tab.tab, chars = text.chars().count(), more, heading = !heading.is_empty(), "Chat: one part of the page beside the chat read");
+    json!({ "success": true, "data": data, "note": note, "displayText": format!("Read {what} on {shown} beside the chat") })
+}
+
+/// **A heading's section with nothing under it showing** (its words are
+/// the heading's alone): folded, most likely — a click opens it. Pure.
+pub fn folded(heading: &str, text: &str) -> bool {
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let (h, t) = (squash(heading), squash(text));
+    !h.is_empty() && (t.is_empty() || t == h)
 }
 
 /// **`browser_read { mode: "elements", offset }`**: the page's links,

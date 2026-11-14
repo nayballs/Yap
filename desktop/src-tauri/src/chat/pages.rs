@@ -217,6 +217,22 @@ pub mod old {
 
 /// What `browser_read` gives of a page's text, at most (characters).
 pub const READ_MAX: usize = 5000;
+/// **…in a Claude Code session's turn** (a plan chat's, a Code chat's own:
+/// `web::Turn::uncapped`; 14 Nov 2026 — Yap's Claude, asked what was hard on
+/// a long guide, said it paged through 5,000 characters at a time guessing
+/// which part held the section; Claude Code's own browser reads 50,000): its
+/// context is big and it compacts a long one.
+pub const SESSION_READ_MAX: usize = 20_000;
+
+/// **How much of a page's text one read gives this turn** ([`READ_MAX`], or
+/// [`SESSION_READ_MAX`] in a Claude Code session's). Pure.
+pub fn read_max(turn: &crate::web::Turn) -> usize {
+    if turn.pages.uncapped {
+        SESSION_READ_MAX
+    } else {
+        READ_MAX
+    }
+}
 /// What `browser_read` gives of a page's links, at most.
 pub const LINKS_MAX: usize = 40;
 /// Pages a turn may open in new tabs.
@@ -361,7 +377,8 @@ pub fn definitions(gate: Gate, act: bool) -> Value {
         // pages to open is web search; every word here counts on a small
         // context: turn/fit.rs.)
         tool(NAVIGATE, "Open a page in the tab in front (a new tab if none): an address or search words (results for the user: web search finds pages); or \"back\"/\"forward\".", json!({ "url": s(), "search": s(), "tab": tab() }), &[]),
-        tool(READ, "Read the page: text and links; mode \"elements\": links, buttons and fields by ref.", json!({ "mode": mode, "offset": { "type": "integer" }, "tab": tab() }), &[]),
+        // (ref: one part — 14 Nov 2026, so a model needn't page through a long page to find one section.)
+        tool(READ, "Read the page: text and links; mode \"elements\": links, buttons and fields by ref; ref: one part (a heading: its section).", json!({ "mode": mode, "ref": r(), "offset": { "type": "integer" }, "tab": tab() }), &[]),
         tool(FIND, "Find words on the page: matches by ref.", json!({ "query": s(), "tab": tab() }), &["query"]),
     ];
     if look {
@@ -1019,6 +1036,10 @@ async fn read(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
     if search_page(&tab.url) {
         return failed(read::search_refusal(ctx.search), format!("Didn't read {shown}: a search engine's results"));
     }
+    // One part of it: a heading's section, or one element (its ref from browser_find or the elements).
+    if let Some(r) = ref_of(&args["ref"]) {
+        return read::section(turn, &tab, r, offset.unwrap_or(0)).await;
+    }
     if mode == "tables" {
         return read::tables(turn, &tab, offset.unwrap_or(0)).await;
     }
@@ -1046,7 +1067,7 @@ async fn read(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
     let title = if text.title.trim().is_empty() { tab.title.clone() } else { text.title.clone() };
     let already = read::known_source(turn, &tab.url);
     let n = turn.read_open(&title, &tab.url, &text.text);
-    let cap = if snap.is_some() { act::ELEMENTS_TEXT } else { READ_MAX };
+    let cap = if snap.is_some() { act::ELEMENTS_TEXT } else { read_max(turn) };
     let more = text.text.chars().count() > cap;
     let body: String = text.text.chars().take(cap).collect();
     tracing::info!(tab = tab.tab, tabs = tabs.len(), chars = body.chars().count(), more, elements = snap.as_ref().map_or(0, |s| s.elements.len()), "Chat: the page beside the chat read");
@@ -1055,6 +1076,10 @@ async fn read(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
     if act && snap.is_none() {
         // A plain read has no refs: the way to them, for a model that acts.
         web.push_str(" To act on it: browser_read mode \"elements\" gives refs.");
+    }
+    // A long page: one section at a time, not page after page (a small model guessed which part held it).
+    if more && snap.is_none() {
+        web.push_str(" Looking for one part of it? browser_find its heading, then browser_read with that ref: just that section.");
     }
     let mut result = json!({
         "success": true,

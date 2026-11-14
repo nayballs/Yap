@@ -201,8 +201,9 @@ fn one_toolset_for_every_model_with_pages_acting_and_shots_only_where_they_may()
     println!("the browser tools: {small} tokens (no pictures), {seeing} (pictures), {acting} (acting, no pictures), {all} (acting too)");
     // (8 Nov 2026: browser_read's offset and tables, and what a search is for: 593 / 1187 / 966 / 1515;
     // then `tab` on every tool: 607 / 1237 / 1011 / 1596; then a tab's desktop width, a click's
-    // button and count, browser_drag: 637 / 1382 / 1041 / 1747.)
-    assert!(small <= 645 && acting <= 1390 && seeing <= 1050 && all <= 1755, "{small} / {acting} / {seeing} / {all}");
+    // button and count, browser_drag: 637 / 1382 / 1041 / 1747; 14 Nov, browser_read's ref — one part of a
+    // page, a heading's section, so a small model needn't page through a long one: 656 / 1401 / 1060 / 1765.)
+    assert!(small <= 660 && acting <= 1405 && seeing <= 1065 && all <= 1770, "{small} / {acting} / {seeing} / {all}");
     // The new parameters: a width for every model, the clicks and the drag where they act.
     assert!(defs_has(Gate::Show, false, "\"width\"") && defs_has(Gate::Show, true, "\"count\"") && defs_has(Gate::Show, true, "browser_drag"));
     assert!(!defs_has(Gate::Show, false, "browser_drag") && !defs_has(Gate::Show, true, "{x, y}") && defs_has(Gate::Look, true, "{x, y}"));
@@ -1018,4 +1019,50 @@ async fn a_page_brought_up_by_its_address_takes_its_title_once_read() {
     let r = call(&mut t, READ, json!({}), &log).await.result;
     assert_eq!(r["data"]["title"], "West field", "{r}");
     assert_eq!(t.pages.shown[0].title, "West field");
+}
+
+/// **One part of a page by its ref** (14 Nov 2026; Yap's Claude on a long guide: "a way to read one named section
+/// by its heading"): a heading's ref reads its section, up to the next heading like it; a Claude Code session's
+/// turn reads 20,000 characters at once, not 5,000.
+#[tokio::test]
+async fn a_headings_ref_reads_its_section_and_a_claude_code_session_reads_more_at_once() {
+    sim::install(Some(web()));
+    sim::with(|b| b.open(GUIDE));
+    let mut t = turn("What does the hiking guide say about maps?");
+    let found = plain(&mut t, FIND, json!({ "query": "Maps" })).await;
+    let matches = found["data"]["matches"].as_str().unwrap_or("").to_string();
+    let r: u32 = matches.split_once('[').and_then(|(_, rest)| rest.split_once(']')).and_then(|(n, _)| n.parse().ok()).expect(&matches);
+    assert!(matches.contains("heading \"Maps\""), "{matches}");
+    let part = plain(&mut t, READ, json!({ "ref": r })).await;
+    let text = part["data"]["text"].as_str().unwrap();
+    assert_eq!(part["data"]["section"], "Maps", "{part}");
+    assert!(text.starts_with("Maps\ncompass compass"), "{text:.60}");
+    assert!(!text.contains("cloud") && !text.contains("Weather"), "the next section isn't in it");
+    assert_eq!(part["displayText"], "Read ‘Maps’ on guides.example.com/hiking beside the chat");
+    assert_eq!(part["data"]["more"], false);
+    assert!(t.seen(), "web content, as a whole read");
+    // A ref that isn't on the page: said so, with the way to one.
+    let gone = plain(&mut t, READ, json!({ "ref": 999 })).await;
+    assert_eq!(gone["success"], false);
+    assert!(gone["error"].as_str().unwrap().contains("browser_find"), "{gone}");
+    // A whole read of a long page says how to read one part of it.
+    let whole = plain(&mut turn("Read the guide"), READ, json!({})).await;
+    assert!(whole["note"].as_str().unwrap().contains("browser_read with that ref"), "{whole}");
+    // A Claude Code session's turn (web::Turn::uncapped): the guide's 16,000 characters in one read.
+    let mut s = turn("Read me the whole hiking guide").uncapped();
+    let all = plain(&mut s, READ, json!({})).await;
+    assert_eq!(all["data"]["more"], false, "{}", all["data"]["text"].as_str().unwrap().len());
+    assert!(all["data"]["text"].as_str().unwrap().chars().count() > READ_MAX);
+    assert!(!all["note"].as_str().unwrap().contains("browser_read with that ref"), "all of it is here");
+}
+
+/// A folded section read by its heading's ref: only the heading shows — said so, with the next step (Yap Lab,
+/// 14 Nov 2026: Haiku took a closed section's lone heading for "the guide doesn't list them").
+#[test]
+fn a_section_with_only_its_heading_showing_is_folded() {
+    assert!(read::folded("Talent Order", "Talent Order"));
+    assert!(read::folded("Talent  Order", " Talent Order\n"));
+    assert!(read::folded("Talent Order", ""));
+    assert!(!read::folded("Maps", "Maps\ncompass compass"));
+    assert!(!read::folded("", "Just a paragraph"), "an element that isn't a heading");
 }

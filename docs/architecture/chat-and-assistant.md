@@ -2349,7 +2349,8 @@ reads, ≈ 1,011 for one that sees, ≈ 1,237 acting without seeing (the
 on-device Qwen), ≈ 1,596 with both (8 Nov 2026: `browser_read`'s `offset`
 and "tables", and what a search is for, ≈ 35 more; then `tab` on every
 tool, ≈ 15–80 more; then a tab's desktop width, a click's `button` and
-`count` and `browser_drag`: ≈ 637 / 1,041 / 1,382 / 1,747) — about 300 more than the page tools
+`count` and `browser_drag`: ≈ 637 / 1,041 / 1,382 / 1,747; 14 Nov, `browser_read`'s
+`ref`: ≈ 656 / 1,060 / 1,401 / 1,765) — about 300 more than the page tools
 and the drive tier were for a model that acts, which a cloud model's
 context never notices; a strong model on a server on this PC that doesn't
 say its context (Yap assumes 8K) no longer fits its whole toolset (rich
@@ -2445,12 +2446,15 @@ of sight. What they share is said once, in the line.
   refuses a website (`apps::plan::for_the_web`: the request's phrase asks
   for the web or names a site, and no app has exactly that name). English
   only so far: in another language the model opens it (`browser_navigate`).
-- **`browser_read { mode?: "text" | "elements" | "tables", offset?, tab? }`**: the page in front
+- **`browser_read { mode?: "text" | "elements" | "tables", ref?, offset?, tab? }`**: the page in front
   beside the chat (or tab n, `view::pick_tab`), read in place
   (`view::PAGE_TEXT_SCRIPT`, Yap's own read-only script through
   `view::run_script`: the title, the `main` / `article` element's headings
   and text, else the page's) — its text cut at `READ_MAX` (5,000
-  characters, `more` when there's more), its headings, **its links** (the
+  characters, `more` when there's more; **20,000 in a Claude Code session's
+  turn**, `SESSION_READ_MAX`, `pages::read_max`: 14 Nov 2026, Yap's Claude
+  paged through a long guide 5,000 at a time guessing which part held the
+  section, where Claude Code's own browser reads 50,000), its headings, **its links** (the
   main part's, once each, their words and address, at most `LINKS_MAX` = 40,
   never a search engine's: for "send me the link to that one" — Haiku
   couldn't give a listing's address from its text alone, 1 Nov 2026 — and
@@ -2493,7 +2497,21 @@ of sight. What they share is said once, in the line.
     characters, 400 headings, 600 links): `offset`, `chars` (the text's
     length), the headings that start in that part (`read::headings_in`: each
     found after the one before it, at most 60), the links whose words it
-    holds (they may open), `more`, `next`; no tabs list. Past the end: said,
+    holds (they may open), `more`, `next`; no tabs list. **`ref`: one part
+    of the page** (14 Nov 2026, `read::section`; Yap's Claude, asked what was
+    hard: "a way to read one named section by its heading", as Claude Code's
+    own browser reads one element by its ref): a heading's ref (h1–h6 or
+    `role=heading`, from `browser_find` or the elements) reads its section —
+    the heading and what follows it up to the next heading at its level or
+    above — and any other element's ref that element; what the person sees
+    of it (nothing hidden, no script or style: `act/script.rs` `section`), a
+    line a block, `read_max` of it from `offset`, `section` its heading,
+    `next` `{ref, offset}`. **Only its heading showing** (a folded section,
+    `read::folded`): `folded: true` and the next step said — click that ref
+    to open it, then read it again (Yap Lab: Haiku took a closed section's lone
+    heading for "the guide doesn't list them"). A whole read of a long page says how ("browser_find
+    its heading, then browser_read with that ref"), and so does a find's
+    result. Past the end: said,
     with the length. In mode "elements", `offset` is an element's number:
     the next `MAX_ELEMENTS` from there (at most 3,000 into the page:
     `browser_find` finds the rest), refs as ever. No text filter of its own:
@@ -2885,7 +2903,12 @@ review (safely, for any user, in any language Yap speaks).
   toggle laid over its "Build Order" heading, else the element itself —
   gets pointerdown, mousedown, pointerup, mouseup and click; before, the
   element's own `el.click()`, which that toggle and a menu opening on
-  `mousedown` never heard), typing the value's native setter and `input` /
+  `mousedown` never heard). **Something on top of it** (a cookie banner, a
+  dialog): the click still goes to the element, and its result says what was
+  on top with that cover's buttons by ref ("something was on top of it (We
+  Care About Your Privacy — its buttons: [387] I Accept, [388] Reject All)";
+  Yap Lab, 14 Nov 2026: Haiku was told only "a popup opened" and took five
+  steps to see why). Typing: the value's native setter and `input` /
   `change` events: untrusted events, which a few sites ignore.
   A link with a `target` (a new window: a script's click has no user
   gesture, so the new-window rule would drop it as a pop-up) goes to its

@@ -13,8 +13,9 @@
   //   in the thread, **the lead** instead (14 Nov 2026, the maintainer: the
   //   chat's own Claude "like the leader… clearly different from the agent
   //   animations"): its crew character in a captain's cap, conducting
-  //   (CrewAvatar's `lead`), and how long it's worked and its tokens, as
-  //   Claude Code's own working line ("3m 44s · 9.4k tokens"). Writing, or
+  //   (CrewAvatar's `lead`), and how long it's worked ("3m 44s"; its tokens
+  //   aren't here: the context ring under the message box has them — the
+  //   maintainer, 14 Nov 2026). Writing, or
   //   between steps, the lead stays on a line of its own at the foot.
   // - **Its words as it writes them** (12 Nov 2026, as Claude Code's own
   //   transcript shows them): the message it's writing now is the last
@@ -51,7 +52,7 @@
   import CrewAvatar from './CrewAvatar.svelte';
   import { characterFor } from '../../core/crew.js';
   import { workClock } from '../../core/agents.js';
-  import { turnSecs, tokensOf, fmtTokens } from '../../core/agentPanel.js';
+  import { turnSecs } from '../../core/agentPanel.js';
   import StepRows from './StepRows.svelte';
 
   /**
@@ -94,12 +95,8 @@
     const tick = setInterval(() => (now = Date.now() / 1000), 1000);
     return () => clearInterval(tick);
   });
-  /** "1m 12s · 9.4k tokens": how long it's worked this turn, and what it's used. */
-  const clock = $derived.by(() => {
-    if (!lead || !live || !note) return '';
-    const used = tokensOf(note.usage);
-    return [workClock(turnSecs(note, now)), used ? `${fmtTokens(used)} tokens` : ''].filter(Boolean).join(' · ');
-  });
+  /** "1m 12s": how long it's worked this turn. */
+  const clock = $derived(lead && live && note ? workClock(turnSecs(note, now)) : '');
   /** Its step line is up now (the last item a stretch of steps): the lead's on it; else on a line of its own. */
   const stepUp = $derived(onStep && items.length > 0 && items[items.length - 1].kind !== 'said');
   const leadName = $derived(characterFor('claude-plan', agent?.model));
@@ -260,7 +257,7 @@
   .chev.down {
     transform: rotate(90deg);
   }
-  /* How long it's worked, and its tokens: quieter than its words. */
+  /* How long it's worked: quieter than its words. */
   .wclock {
     flex: 0 0 auto;
     color: var(--yap-muted-70);

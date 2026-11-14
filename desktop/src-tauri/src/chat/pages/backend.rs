@@ -330,6 +330,7 @@ pub async fn act(key: &str, op: &str, a: &Value) -> Result<Value, String> {
         }
         "dragMove" => super::act::script::drag_move(num("f")),
         "dragEnd" => super::act::script::drag_end(),
+        "section" => super::act::script::section(r, a["offset"].as_u64().unwrap_or(0) as usize, a["max"].as_u64().unwrap_or(super::READ_MAX as u64) as usize),
         "hover" => super::act::script::hover(r, role, name),
         "check" => super::act::script::check(r, role, name, a["on"].as_bool().unwrap_or(true)),
         "key" => {

@@ -565,6 +565,13 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, ctx: &super::Ctx<'_>) 
             said = w;
         }
     }
+    // Something on top of it (a cookie banner, a dialog: 14 Nov 2026, Yap Lab — a small model clicked a guide's
+    // heading under a consent banner, was told "a popup opened", and took five steps to see why): said, with
+    // what to do. (The click went to the element as before.)
+    if let Some(cover) = done["covered"].as_str().map(str::trim).filter(|c| !c.is_empty()) {
+        said = format!("{said}; something was on top of it ({}): if nothing happened, close or answer that first", rules::clip(cover, 200));
+        data["covered"] = json!(true);
+    }
     data["changed"] = json!(said);
     if !did.selected.trim().is_empty() {
         data["selected"] = json!(did.selected);
