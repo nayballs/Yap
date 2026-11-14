@@ -34,6 +34,7 @@
   import { agents, agentById } from '../../stores/agents.svelte.js';
   import { pillsByAnswer, pillsByQuestion, answeredAfter, directLine, plainReport, agentOfReport, reportFolder } from '../../core/agents.js';
   import { chatStatus } from '../../stores/chatStatus.svelte.js';
+  import QueuedMessage from './QueuedMessage.svelte';
 
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
   // …and under the person's own message, in a Code chat that works directly
@@ -246,6 +247,7 @@
           {:else}
             <ChatMessage
               {m}
+              tick={m.role === 'user' ? chat.tickOf(m.id) : null}
               last={i === chat.messages.length - 1}
               sources={chat.citedSources(i)}
               reading={m.role === 'assistant' && !!m.id && chat.speakingId === m.id}
@@ -322,6 +324,10 @@
             hint={chat.modelHere && !answering && chat.waitedS >= STILL_WORKING_S ? slowHint : ''}
           />
         {/if}
+        {#each chat.queued as q (q.qid)}
+          <!-- Sent while Claude works: waiting for it (chatState's queue), as in Claude Code's own app. -->
+          <QueuedMessage {q} oncancel={chat.cancelQueued} onsend={chat.sendQueuedNow} />
+        {/each}
       </div>
     </div>
     {#if !pinned}

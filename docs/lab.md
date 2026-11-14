@@ -115,6 +115,10 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   is when Chat still shows it: a follow-up in a Code chat too); `<id>` that
   conversation (Chat opens on it); `code:<workspace>` a new Code chat there
   (`--yap-code on`).
+- `--while`: typed and sent in the chat shown **while a turn still goes**, as the person
+  would mid-answer (14 Nov 2026, the message box's queue), with no turn of the lab's
+  own: returns at once; the queued bubble, its ✓✓ and the answers show in the thread
+  (`probe`, `shot`, `wait --agents`).
 - `--cards allow|deny`: answer every card this turn asks at once (otherwise `ask`
   returns `status: "waiting"` and you `answer` it).
 - `shots`: the turn's screenshots ([Screenshots](#screenshots)) — after it ends, and
@@ -223,6 +227,17 @@ uses it.
 
 ```json
 {"ok":true,"window":"thread","found":true,"theme":"light","words":"THE END","has":true}
+```
+
+### `click --window main|thread|panel --css <selector>`
+
+Clicks one of the test Yap's own buttons, as the person would (14 Nov 2026, for the
+message box's queue: a queued message's **Send now** — `[data-testid="chat-queued-send-now"]`
+— and **Cancel and edit** — `[data-testid="chat-queued-cancel"]`): the first match that
+shows, in Yap's own window only, never a page beside the chat.
+
+```json
+{"ok":true,"window":"thread","css":"[data-testid=\"chat-queued-send-now\"]","clicked":true}
 ```
 
 ### `pick "<words on the page>"` or `pick --css <selector>`

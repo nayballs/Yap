@@ -8,6 +8,7 @@
 // An answer being written belongs to its conversation (`Answer`, 7 Nov
 // 2026): several can be answering at once, and the thread and the composer
 // show the open one's only.
+import { isLive } from '../../core/agentNow.js';
 import { invoke } from '@tauri-apps/api/core';
 import { tick, untrack } from 'svelte';
 import { toast } from '../../ui/toast.svelte.js';
@@ -1396,41 +1397,193 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
    * Windows (snip/ocr.rs), goes in their place to a model that can't read
    * images. (As a click handler it gets the event: a plain send.)
    */
+  // ---- the queue (14 Nov 2026; the maintainer, from Claude Code's own app: a message sent while Claude works waits
+  // as a bubble of its own — Queued, × Cancel and edit, Send now — and shows ✓✓ once Claude has read it). Before, it
+  // went straight into the turn, and one Claude read after its answer had ended came back joined to that answer and
+  // shown twice. A Code chat that works directly only (`queueGate`: its session working).
+
+  /** Messages waiting for Claude: `{ qid, conv, text, at }`, in order. */
+  let queued = $state([]);
+  let queueSeq = 0;
+  /** Whether a message sent now might wait (ChatView: a Code chat is shown); Rust's `agent_queue` says if it does. */
+  let queueGate = () => false;
+  /** Conversations whose turn ended with messages waiting: the next goes once its answer is in (`agentReported`). */
+  const releaseAfter = new Map();
+  /** Messages sent from the queue whose turn hasn't begun (sent after one ended): read once it does. */
+  const startedBy = new Map();
+
+  function setQueueGate(fn) {
+    queueGate = typeof fn === 'function' ? fn : () => false;
+  }
+  const queuedIn = (conv) => queued.filter((q) => q.conv === conv);
+
+  /** A queued message, sent: with its words, never the box's (`send`'s `text`), marked to tick as it's read — only
+   * while its own chat is the one shown (else it waits until that chat opens again), after a send still going. */
+  async function sendQueued(q, how) {
+    if (q.conv !== activeId) {
+      waitingOpen.add(q.conv);
+      return false;
+    }
+    for (let i = 0; sending && i < 300; i++) await new Promise((r) => setTimeout(r, 100));
+    if (sending || q.conv !== activeId || !queued.some((x) => x.qid === q.qid)) return false;
+    queued = queued.filter((x) => x.qid !== q.qid);
+    await send({ text: q.text, fromQueue: how });
+    return true;
+  }
+  /** Chats with messages waiting that went unsent while another chat was shown: tried again as they open. */
+  const waitingOpen = new Set();
+  // A chat shown, however it came up — a click, the bar's "Claude replied" Open, Open in Chat (each sets `activeId`
+  // its own way): what waited in it goes now, if its session is free (Yap Lab found the bar's Open missed, 14 Nov).
+  $effect(() => {
+    const id = activeId;
+    if (id != null) untrack(() => openedWithQueue(id));
+  });
+  /** A chat opened: what waits in it goes, if its session isn't working any more. */
+  async function openedWithQueue(conv) {
+    if (!waitingOpen.has(conv)) return;
+    waitingOpen.delete(conv);
+    if (!queuedIn(conv).length) return;
+    let state = 'idle';
+    try {
+      state = await invoke('agent_queue', { conversation: conv });
+    } catch {
+      /* as ever */
+    }
+    if (state === 'idle') release(conv);
+    else waitingOpen.add(conv);
+  }
+
+  /** × Cancel and edit: out of the queue, its words back in the box (before what's there). */
+  function cancelQueued(qid) {
+    const q = queued.find((x) => x.qid === qid);
+    if (!q) return;
+    queued = queued.filter((x) => x.qid !== qid);
+    input = input.trim() ? `${q.text}\n${input}` : q.text;
+  }
+
+  /** Send now: to Claude at once (it takes it in at its next step, or as its next turn). */
+  async function sendQueuedNow(qid) {
+    const q = queued.find((x) => x.qid === qid);
+    if (q) await sendQueued(q, 'now');
+  }
+
+  /**
+   * **What the chat's own session did** (`yap-agent`): a step beginning — a tool call — takes what waits in its
+   * chat now (Claude reads it as that step ends, as its own app hands a queued message over); a message read
+   * (`read`, its id) ticks ✓✓; its turn ending lets the next wait for its answer, then go as its next turn.
+   */
+  function agentEvent(p) {
+    if (!p || p.conversation == null) return;
+    const conv = p.conversation;
+    if (p.read) markQueue(p.read, 'read');
+    // A turn of its own that a queued message started: read now it's begun.
+    const starter = startedBy.get(conv);
+    if (starter && isLive(p.status) && (p.step || p.said)) {
+      startedBy.delete(conv);
+      markQueue(starter, 'read');
+    }
+    if (!queuedIn(conv).length) return;
+    if (p.call && p.step && isLive(p.status) && !p.under) {
+      releaseAfter.delete(conv);
+      const waiting = queuedIn(conv);
+      (async () => {
+        for (const q of waiting) if (!(await sendQueued(q, 'step'))) break;
+      })();
+      return;
+    }
+    if (!isLive(p.status)) {
+      // Over: the first waiting goes as its next turn once the answer is in (or after a while without one).
+      if (!releaseAfter.has(conv)) releaseAfter.set(conv, setTimeout(() => release(conv), 20_000));
+    }
+  }
+
+  /** Its answer is in (`yap-agent-report`): the next waiting message goes now, a turn of its own. */
+  function agentReported(p) {
+    const conv = p?.conversation ?? p?.conversationId;
+    if (conv == null || !releaseAfter.has(conv)) return;
+    release(conv);
+  }
+
+  function release(conv) {
+    clearTimeout(releaseAfter.get(conv));
+    releaseAfter.delete(conv);
+    const next = queuedIn(conv)[0];
+    if (next) sendQueued(next, 'turn');
+  }
+
+  /** The messages sent from the queue, by id: ✓ sent, ✓✓ read and when (kept apart from `messages`, which a
+   * report reads again from the chat as saved). */
+  let ticks = $state({});
+  function markQueue(id, state) {
+    if (!id) return;
+    if (!ticks[id]) {
+      if (state === 'read') earlyReads.add(id);
+      return;
+    }
+    ticks = { ...ticks, [id]: { ...ticks[id], state, readAt: state === 'read' ? Date.now() : ticks[id].readAt } };
+  }
+  /** Read before its id came back (a quick session): ticked as the id lands. */
+  const earlyReads = new Set();
+
   async function send(opts) {
     const asText = opts?.asText === true;
     // With a screenshot waiting, an empty box asks "What's this?".
+    const fromBox = opts?.text == null;
     // Elements picked on a page beside the chat (chat/pages/pick.rs): their blocks go with the words, their
-    // pictures with the screenshots — but to a model that can't read images, the words alone.
-    const elements = pickedElements.list;
+    // pictures with the screenshots — but to a model that can't read images, the words alone. (A message from
+    // the queue goes with its own words only: what's in the box stays there.)
+    const elements = fromBox ? pickedElements.list : [];
     const noImages = vision.images === false;
-    const shots = noImages ? waitingShots.list.filter((s) => s.source !== 'element') : waitingShots.list;
-    const text = input.trim() || (shots.length || elements.length ? DEFAULT_PROMPT : '');
+    const boxShots = fromBox ? waitingShots.list : [];
+    const shots = noImages ? boxShots.filter((s) => s.source !== 'element') : boxShots;
+    const text = (fromBox ? input.trim() : String(opts.text).trim()) || (shots.length || elements.length ? DEFAULT_PROMPT : '');
+    // **Claude is working** (a Code chat's own session): the message waits, a bubble of its own, until Claude can
+    // take it (its next step) or its turn ends. With a screenshot, a picked element, a passage or a Skill it goes
+    // now, as before.
+    let queuedHow = opts?.fromQueue ?? null;
+    if (fromBox && text && !shots.length && !elements.length && !quote && activeId != null && !sending && !skills.parse(text)?.skill && queueGate()) {
+      // Rust says (agents/runner.rs `queue_state`): writing its answer — it waits; a tool call out — it goes now,
+      // read as that ends (✓, then ✓✓); nothing of the chat's own working — sent as ever.
+      let state = 'idle';
+      try {
+        state = await invoke('agent_queue', { conversation: activeId });
+      } catch {
+        /* an older Yap: as ever */
+      }
+      if (state === 'writing') {
+        queued = [...queued, { qid: `q${++queueSeq}`, conv: activeId, text, at: Date.now() }];
+        input = '';
+        followThread();
+        return;
+      }
+      if (state === 'taking') queuedHow = 'step';
+    }
     if (!text || sending) return;
     // The model can't read the screenshot: the line above the box says so.
     if (shots.length && vision.images === false && !asText) return;
     // Too long for the model on its own: the line under the box says so,
     // and nothing goes (chat/budget.rs checks again).
-    if (inputTooLong) {
+    if (fromBox && inputTooLong) {
       shortenPaste();
       return;
     }
-    tooLong = '';
-    const voice = byVoice;
+    if (fromBox) tooLong = '';
+    const voice = fromBox && byVoice;
     // "/decisions last week" (or a one-tap prompt): a Skill, asked across
     // the meetings (chat/skills.rs).
     const skill = opts?.skill ?? skills.parse(text)?.skill?.command ?? null;
     if (skill && !messages.length && !scope) scope = 'meetings';
-    input = '';
+    if (fromBox) input = '';
     // The passage it's about (the document panel), out of the box with it.
-    const about = skill ? null : quote;
-    quote = null;
+    const about = skill || !fromBox ? null : quote;
+    if (fromBox) quote = null;
     // Out of the box (Rust takes them with the question, chat_send).
-    waitingShots.list = [];
-    const sentElements = takePicked().map((e) => (noImages ? { ...e, image: null } : e));
+    if (fromBox) waitingShots.list = [];
+    const sentElements = fromBox ? takePicked().map((e) => (noImages ? { ...e, image: null } : e)) : [];
     if (noImages) for (const e of elements) if (e.image) invoke('chat_waiting_remove', { id: e.image }).catch(() => {});
-    byVoice = false;
+    if (fromBox) byVoice = false;
     // Think it through (chat/think.rs): this question only.
-    const thinkIt = takeThink();
+    const thinkIt = fromBox ? takeThink() : false;
     // The next question: the last answer stops talking.
     stopReading();
     // This send's question and bubble carry its `turn`, and are found by
@@ -1540,6 +1693,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         messages = messages
           .filter((m) => !(m.role === 'assistant' && m.streaming && m.turn === turn))
           .map((m) => (m.role === 'user' && m.turn === turn && m.id == null ? { ...m, id: res.userMessageId ?? rec.askedId ?? null } : m));
+        // From the queue: a turn of its own (its session wasn't working) is read once it begins; one handed to a
+        // working turn is read when Claude says so (`agentEvent`'s `read`) — or already was.
+        const sentId = res.userMessageId ?? rec.askedId ?? null;
+        if (queuedHow && sentId) {
+          ticks = { ...ticks, [sentId]: { state: 'sent', how: queuedHow, sentAt: Date.now() } };
+          if (earlyReads.delete(sentId)) markQueue(sentId, 'read');
+          else if (queuedHow === 'turn' && res.conversationId != null) startedBy.set(res.conversationId, sentId);
+        }
         refreshList();
         followThread();
         contextStamp += 1;
@@ -1795,6 +1956,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   }
 
   return {
+    get queued() { return queued.filter((q) => q.conv === activeId); },
+    /** A message's ✓ / ✓✓ (sent from the queue), or null. */
+    tickOf: (id) => (id ? (ticks[id] ?? null) : null),
+    setQueueGate,
+    cancelQueued,
+    sendQueuedNow,
+    agentEvent,
+    agentReported,
     get doc() { return doc; },
     get connectors() { return connectors; },
     get conversations() { return conversations; },

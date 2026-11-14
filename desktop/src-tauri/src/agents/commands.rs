@@ -42,6 +42,14 @@ pub async fn agent_get(id: String) -> Result<AgentWithLog, String> {
     Ok(AgentWithLog { agent, log })
 }
 
+/// **What a message for this chat's own session does now** (the message
+/// box's queue): `"taking"` sends it (a tool call is out), `"writing"`
+/// queues it, `"idle"` sends it as ever (`runner::queue_state`).
+#[tauri::command]
+pub fn agent_queue(conversation: u64) -> &'static str {
+    runner::queue_state(conversation)
+}
+
 /// Stop an agent (a queued one comes off the queue).
 #[tauri::command]
 pub async fn agent_stop(id: String) -> Result<Agent, String> {

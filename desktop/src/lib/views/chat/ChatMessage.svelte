@@ -42,7 +42,9 @@
    * own chunk): `conversation` the chat's id, `onshared(p)` a shared picture
    * opened (a `ShownPicture`).
    */
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null } = $props();
+  // A message sent from the queue (chatState's `ticks`): ✓ sent, ✓✓ once Claude read it, and when.
+  const readAt = $derived(tick?.readAt ? new Date(tick.readAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
 
   // The documents it made or changed: saved with it, or (while it's
   // written) as they come.
@@ -238,6 +240,18 @@
     <PageConfirm confirms={m.confirms} />
   {/await}
 {/if}
+{#if m.role === 'user' && tick}
+  <!-- Sent from the queue: ✓ with Claude, ✓✓ read (as Claude Code's own app ticks a queued message). -->
+  <p class="ticks" data-testid="chat-ticks" data-state={tick.state} title={tick.state === 'read' ? 'Claude has read it' : 'Sent: Claude reads it at its next step'}>
+    {#if tick.state === 'read'}
+      <svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12.5l4.5 4.5L17 7.5" /><path d="M12.5 16l1 1L23 7.5" /></svg>
+      Read{readAt ? ` · ${readAt}` : ''}
+    {:else}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+      Sent
+    {/if}
+  </p>
+{/if}
 {#if m.role === 'user' && m.stopped && last}
   <!-- Stopped before any of the answer came. -->
   <p class="stoppednote">Stopped</p>
@@ -379,6 +393,22 @@
   :global(:root[data-motion='reduced']) .cbubble.streaming .cbody > :global(*)::after,
   :global(:root[data-motion='reduced']) .cbubble.streaming .cbody > :global(* > li)::after {
     animation: none;
+  }
+  .ticks {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    margin: 2px 2px 0 auto;
+    color: var(--yap-paper-muted);
+    font-size: 12px;
+  }
+  .ticks[data-state='read'] {
+    color: var(--yap-link);
+  }
+  .ticks svg {
+    width: 16px;
+    height: 14px;
   }
   .stoppednote {
     align-self: flex-end;

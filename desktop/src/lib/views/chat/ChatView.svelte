@@ -143,6 +143,9 @@
   // **Code chats** (codeChats.svelte.js): with Yap Code on, the list's Chat |
   // Code switch, a Code chat's workspace and its look.
   const code = createCodeChats(chat, { opensettings: () => onopensettings });
+  // A message sent while a Code chat's own session works waits in the queue (chatState's `queued`).
+  // (A Code chat: Rust says whether its own session works — the page's list of agents lags a moment behind.)
+  chat.setQueueGate(() => code.current != null);
 
   // **Yap Code** (stores/agents.svelte.js): the bar card's or a notification's
   // Open (`yap-agent-open`) shows the agent's chat and its tab (a Code chat at
@@ -448,6 +451,9 @@
       listen('yap-assistant-stream', (e) => chat.followAssistantStream(e.payload)),
       // What a Code chat's own Claude opened in Yap's browser beside the chat (agents/runner.rs).
       listen('yap-agent-shown', (e) => chat.agentShown(e.payload)),
+      // The queue: a step beginning takes what waits, a message read ticks ✓✓, a turn's end lets the next go.
+      listen('yap-agent', (e) => chat.agentEvent(e.payload)),
+      listen('yap-agent-report', (e) => chat.agentReported(e.payload)),
       // Whether a spoken question is being listened for (Esc calls it off).
       listen('yap-assistant', (e) => {
         chat.assistantListening = e.payload?.phase === 'listening';
