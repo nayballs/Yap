@@ -466,8 +466,10 @@ workspace, word for word, and no model of Chat's is asked.
     "Real input"), a click takes `modifiers` (Ctrl, Shift, Alt, Meta), a read
     takes a ref (one section, or the controls inside one part with mode
     "elements") and gives up to 50,000 characters, `browser_type` with no
-    ref types at the cursor as real input (what's there kept), and the
-    session has the
+    ref types at the cursor as real input (what's there kept), the person
+    can select an element on a page or annotate it for the message (the
+    address row's arrow, Ctrl+Shift+S: chat-and-assistant.md, "Select an
+    element or annotate"), and the session has the
     **developer's tools**: `browser_console`, `browser_network`,
     `browser_javascript` (asked first, but in Bypass) and `browser_view`
     (`pages/dev.rs`). Left out on purpose: none of Claude Code's browser
@@ -565,7 +567,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
 - **Its page**: `http://localhost:<port>` of a server running now (also `127.0.0.1`, `[::1]`, a `*.localhost` name, and its live-reload socket) is the one exception to the browser's "never this PC" (`servers::running_origin`). It applies in four places:
   - the panel's loads, navigations and requests (`view.rs` `load_url`, `may_navigate`, `refused_request`);
   - the address bar (`localhost:5173` opens it);
-  - Claude's own navigation (`pages::checked`).
+  - Claude's own navigation (`pages::checked`, and `browser_navigate`'s `act::go`: refused before 14 Nov 2026, Yap Lab found it).
   Never another port of this PC, and never once it stops. "Not secure" isn't shown for a localhost page, as browsers count it a secure context.
 - **The Dev servers menu** (`ServersMenu.svelte`, in the panel's tab row with the page's other buttons, after its +, as the Claude Code app has them; the browser opens with Ctrl+Shift+B, and a new tab lists the servers too, each with ▶):
   - each server with its state (a dot) and ▶ start / ■ stop;
@@ -574,7 +576,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
   - **Add server** (a name, a command line and a port, written to launch.json; refused when the file has comments, which rewriting would lose: Claude adds it then).
   - The person's own click asks nothing.
 - **Claude's tools** (`chat/pages/preview.rs`; a Code chat's own session with the pages on: its run's folder is the workspace, `rpc.rs` `servers_offered`, listed and in `--allowedTools`):
-  - `preview_start {name}`: started, and its page opened in a new tab beside the chat;
+  - `preview_start {name}`: started, and its page opened in a new tab beside the chat; started again (a restart) with its page still open, that page loads again, never the old server's left on screen;
   - `preview_list`;
   - `preview_stop` and `preview_logs {level, lines, search}`, each by `serverId` or name.
   - Its instructions: write launch.json if it's missing, never run a dev server with Bash, and look at the page after changing what it shows.

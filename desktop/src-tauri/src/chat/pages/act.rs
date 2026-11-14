@@ -1892,15 +1892,20 @@ pub(super) async fn go(turn: &mut crate::web::Turn, args: &Value, ctx: &super::C
             if let Some(e) = crate::chat::pictures::local::not_a_page(&given) {
                 return failed(e, format!("Didn't go to {}: a file on this PC", crate::chat::pictures::local::chip_name(&given)));
             }
-            if let Err(e) = crate::web::check_url(&given) {
+            // A Code chat's dev server running now (`agents/servers.rs`): its own
+            // page, on this PC, as browser_open takes it (refused before 14 Nov 2026).
+            if crate::agents::servers::running_origin(&given) {
+                (given.clone(), None)
+            } else if let Err(e) = crate::web::check_url(&given) {
                 return failed(e.clone(), format!("Didn't go to {}: {}", crate::web::short_url(&given), crate::web::short(&e)));
-            }
-            match stored_address(turn, &given) {
-                Some(found) => found,
-                None => match super::written_or_refused(&given, turn, ctx, &format!("Didn't go to {}", crate::web::short_url(&given))) {
-                    Ok(url) => (url, None),
-                    Err(refused) => return refused,
-                },
+            } else {
+                match stored_address(turn, &given) {
+                    Some(found) => found,
+                    None => match super::written_or_refused(&given, turn, ctx, &format!("Didn't go to {}", crate::web::short_url(&given))) {
+                        Ok(url) => (url, None),
+                        Err(refused) => return refused,
+                    },
+                }
             }
         }
     };

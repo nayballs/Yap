@@ -99,7 +99,8 @@ pub(super) async fn with_tools(
         docs: Some(&built.doc_turn),
         // Words selected in another app or on a page beside the chat (never
         // one of Yap's own windows): web content.
-        web_question: t.about_selection.as_ref().is_some_and(|s| s.web),
+        // (An element picked on a page is web content too: `pages/pick.rs`.)
+        web_question: t.about_selection.as_ref().is_some_and(|s| s.web) || crate::chat::pages::pick::has_element(&t.text),
         ..g.extra(memory, Some(conv.id), calendar, agents, connectors.as_ref())
     };
     let looped = crate::chat::tools::run_tool_loop_with(

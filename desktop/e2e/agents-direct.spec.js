@@ -1085,7 +1085,7 @@ test('the Dev servers menu starts the workspace’s server from .claude/launch.j
   await expect(main.getByTestId('chat-page-new-servers').getByRole('button', { name: /garden/ })).toContainText(':43517');
   // The page's buttons in the panel's tab row, as the app has them; the address bar has its row to itself.
   await expect(main.getByTestId('chat-page-actions').getByTestId('chat-dev-servers')).toBeVisible();
-  await expect(main.getByTestId('chat-page').getByTestId('chat-page-shot')).toHaveCount(0);
+  await expect(main.getByTestId('chat-page').getByTestId('chat-dev-servers')).toHaveCount(0);
   await main.getByTestId('chat-dev-servers').click();
   const row = main.getByTestId('chat-dev-server').filter({ hasText: 'garden' });
   await expect(row).toHaveAttribute('data-state', 'stopped');
@@ -1142,6 +1142,132 @@ test('its session has the workspace’s dev servers, as the Claude Code app’s 
   // Its lines in the work, in words.
   const log = (await yap.invoke('agent_get', { id: agent.id })).log;
   expect(log.some((e) => e.step === 'Starting the dev server ‘garden’')).toBe(true);
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
+});
+
+/** The fake guide open beside a Code chat by its address bar (no Claude): its page's key. */
+async function guideBeside(yap, main) {
+  await main.getByRole('button', { name: 'Browser', exact: true }).click();
+  const address = main.getByTestId('chat-page-address');
+  await address.fill(LEVELING_URL);
+  await address.press('Enter');
+  let key = null;
+  await expect
+    .poll(async () => {
+      const v = (await yap.invoke('e2e_page_views')).find((x) => String(x.url || '').includes('guide/leveling') && x.loaded);
+      key = v?.key ?? null;
+      return !!key;
+    }, { timeout: 20_000, message: 'the guide to load beside the chat' })
+    .toBe(true);
+  return key;
+}
+
+test('Select an element on a page beside the chat: DevTools’ own inspect mode, its chip in the message box, sent to the session with its picture', async ({ yap, main, shot }) => {
+  test.setTimeout(120_000);
+  await setConfig(yap, main, { webSearch: true });
+  await script(yap, SEES, 'element-seen');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  const key = await guideBeside(yap, main);
+  // The arrow at the end of the address row (Ctrl+Shift+S): the tools under the page, Select on.
+  await main.getByTestId('chat-page-select').click();
+  await expect(main.getByTestId('chat-page-tools')).toBeVisible();
+  await expect(main.getByTestId('chat-page-tool-select')).toHaveClass(/\bon\b/);
+  await expect(main.getByTestId('chat-page-tool-select')).toHaveAttribute('title', /^Select element \(Ctrl\+Shift\+S\)/);
+  // No footer under the page any more (the maintainer: "not needed"); the tools sit at its foot.
+  await expect(main.getByTestId('chat-page-source')).toHaveCount(0);
+  await shot(main, '84-select-an-element');
+  // A person's click on the guide's "Build: Healing" line (real input at its point: the inspect overlay takes it).
+  const at = JSON.parse(
+    await yap.invoke('e2e_page_view_eval', { key, script: "(() => { const r = document.getElementById('build').getBoundingClientRect(); return { x: r.left + 12, y: r.top + r.height / 2 }; })()" }),
+  );
+  await yap.invoke('e2e_page_click', { key, x: at.x, y: at.y });
+  // Its chip in the message box; the tools closed (one pick, as the Claude Code app's).
+  const chip = main.getByTestId('chat-elements').getByTestId('chat-element-chip');
+  await expect(chip).toHaveCount(1, { timeout: 20_000 });
+  await expect(chip).toContainText('<p id="build">');
+  await expect(main.getByTestId('chat-page-tools')).toHaveCount(0);
+  // Its card: "Included with your message", the element, its words, more details; its picture in it, not a tile.
+  await chip.getByRole('button', { name: /Element/ }).focus();
+  const card = chip.getByTestId('chat-element-card');
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('Included with your message');
+  await expect(card.getByTestId('chat-element-line')).toHaveText('<p id="build" />');
+  await expect(card.getByTestId('chat-element-text')).toHaveText('Build: Healing');
+  await expect(card.locator('img.elpic')).toBeVisible();
+  await expect(card.getByTestId('chat-element-more')).toContainText(/Show \d+ more details/);
+  await shot(main, '85-an-element-in-the-message-box');
+  await expect(main.getByTestId('chat-attachments')).toHaveCount(0);
+  const waiting = await yap.invoke('chat_waiting_get');
+  expect(waiting.images.map((i) => i.source)).toEqual(['element']);
+  // Sent: the session gets the words, the element's block after them, and its picture.
+  await send(main, 'Make this line bold.');
+  const agent = await newAgent(yap, before);
+  const done = await ended(yap, agent.id, 60_000);
+  const seen = fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).at(-1);
+  expect(seen.user_text).toMatch(/^Make this line bold\.\n\n<selected-element page="[^"]*guide\/leveling" tag="p" id="build" picture="attached">/);
+  expect(seen.user_text).toContain('<text>Build: Healing</text>');
+  expect(seen.user_text).toContain('<path>');
+  expect(seen.user_pictures).toHaveLength(1);
+  // The question shows the words and a chip, never the block; the box is empty again.
+  const sent = thread(main).getByTestId('chat-elements-sent');
+  await expect(sent.getByTestId('chat-element-chip')).toContainText('<p id="build">');
+  await expect(thread(main)).not.toContainText('<selected-element');
+  await expect(main.getByTestId('chat-elements')).toHaveCount(0);
+  // Saved with its source: the element's picture is its chip's, never a screenshot of the question
+  // (Yap Lab, 14 Nov 2026: it was kept as "snip" and showed as a tile once the chat was read again).
+  const question = (await yap.invoke('chat_get', { id: done.conversation })).messages.find((m) => m.role === 'user');
+  expect(question.images.map((i) => i.source)).toEqual(['element']);
+  await expect(thread(main).locator('.shots')).toHaveCount(0);
+  await sent.getByRole('button', { name: /Element/ }).focus();
+  await expect(sent.getByTestId('chat-element-card').locator('img.elpic')).toBeVisible();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
+});
+
+test('Annotate a page beside the chat: a rectangle and words drawn on a still of it, Ctrl+Z, its picture in the message box', async ({ yap, main, shot }) => {
+  test.setTimeout(90_000);
+  await setConfig(yap, main, { webSearch: true });
+  await codeChat(main);
+  const key = await guideBeside(yap, main);
+  await main.getByTestId('chat-page-select').click();
+  // A shape: a still of the page in its place (the live page out of sight), to draw on.
+  await main.getByTestId('chat-page-tool-shape').click();
+  const surface = main.getByTestId('chat-page-annotate');
+  await expect(surface).toBeVisible();
+  await expect.poll(async () => (await yap.invoke('e2e_page_views')).find((v) => v.key === key)?.onScreen, { timeout: 10_000 }).toBe(false);
+  const canvas = main.getByTestId('chat-page-annotate-canvas');
+  const box = await canvas.boundingBox();
+  await main.mouse.move(box.x + 30, box.y + 30);
+  await main.mouse.down();
+  await main.mouse.move(box.x + 160, box.y + 110, { steps: 6 });
+  await main.mouse.up();
+  await expect(surface).toHaveAttribute('data-marks', '1');
+  // Words where you click.
+  await main.getByTestId('chat-page-tool-text').click();
+  await canvas.click({ position: { x: 40, y: 140 } });
+  const words = main.getByTestId('chat-page-annotate-text');
+  await words.fill('this one');
+  await words.press('Enter');
+  await expect(surface).toHaveAttribute('data-marks', '2');
+  // An ellipse from the shapes, and Ctrl+Z takes it back.
+  await main.getByTestId('chat-page-tool-shapes').click();
+  await main.getByTestId('chat-page-shape-ellipse').click();
+  await main.mouse.move(box.x + 200, box.y + 40);
+  await main.mouse.down();
+  await main.mouse.move(box.x + 260, box.y + 90, { steps: 4 });
+  await main.mouse.up();
+  await expect(surface).toHaveAttribute('data-marks', '3');
+  await main.keyboard.press('Control+z');
+  await expect(surface).toHaveAttribute('data-marks', '2');
+  await shot(main, '86-annotating-a-page');
+  // Add to message: the marked still in the box as a picture; the live page back.
+  await main.getByTestId('chat-page-tool-add').click();
+  await expect(main.getByTestId('chat-page-tools')).toHaveCount(0);
+  await expect(main.getByTestId('chat-attachments').locator('.shotchip')).toHaveCount(1, { timeout: 10_000 });
+  const waiting = await yap.invoke('chat_waiting_get');
+  expect(waiting.images.map((i) => i.source)).toEqual(['annotation']);
+  await expect.poll(async () => (await yap.invoke('e2e_page_views')).find((v) => v.key === key)?.onScreen, { timeout: 10_000 }).toBe(true);
+  await yap.invoke('chat_waiting_clear');
   await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 

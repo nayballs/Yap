@@ -18,6 +18,8 @@
   import { closePartial, settle } from '../../core/streaming.js';
   import { menuKey, openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { removedLine, sizeLine, imageItems, splitScreenText, sentPlaced, shown } from './chatImages.js';
+  import { splitElements } from '../../core/selectedElements.js';
+  import ElementChip from './ElementChip.svelte';
   import { screenPixels } from './chatShots.svelte.js';
   import { thoughtLabel } from './chatThink.svelte.js';
   import { appLabel } from '../../core/appNames.js';
@@ -57,11 +59,24 @@
 
   // A question whose screenshot went as its text (snip/ocr.rs): its own
   // words, and the text read from the picture, folded under them.
-  const said = $derived(m.role === 'user' ? splitScreenText(m.text) : { question: m.text, screenText: null });
+  // Elements picked on a page beside the chat (chat/pages/pick.rs): their blocks out of the words, a chip
+  // each (core/selectedElements.js) — the question's own `elements` while it's new, its text's once saved.
+  const picks = $derived(m.role === 'user' ? splitElements(m.text) : { text: m.text, elements: [] });
+  const chips = $derived(m.role === 'user' ? (m.elements?.length ? m.elements : picks.elements) : []);
+  // Their pictures, each in its chip's card (in order), never a screenshot of the question's own.
+  const elPics = $derived((m.images || []).filter((i) => i.source === 'element'));
+  const shotList = $derived((m.images || []).filter((i) => i.source !== 'element'));
+  const said = $derived(m.role === 'user' ? splitScreenText(picks.text) : { question: m.text, screenText: null });
 
   // A question's own words, a quoted passage or the text read from its
   // screenshot: the bubble (under its screenshots, as the Claude app has it).
-  const hasText = $derived(m.role === 'user' && (!m.images?.length || !!(said.question || m.quote?.text || said.screenText || m.voice)));
+  const hasText = $derived(m.role === 'user' && (!shotList.length || !!(said.question || m.quote?.text || said.screenText || m.voice)));
+  /** The picture of picked element `i`: its own id while new, else the question's element pictures in order. */
+  function picOf(el, i) {
+    if (el.image) return el.image;
+    const withPic = chips.slice(0, i + 1).filter((c) => c.picture || c.image).length;
+    return el.picture ? (elPics[withPic - 1]?.id ?? null) : null;
+  }
 
   /** A screenshot's right-click menu (its own: not the question's). */
   function shotMenu(e, img) {
@@ -108,7 +123,7 @@
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <div
   class="cbubble {m.role}"
-  class:withshots={m.role === 'user' && m.images?.length > 0}
+  class:withshots={m.role === 'user' && shotList.length > 0}
   class:reading
   class:streaming={m.streaming}
   role="article"
@@ -130,18 +145,18 @@
       <p class="cwait" aria-live="polite">Waiting for your dictation to finish…</p>
     {/if}
   {:else}
-    {#if m.images?.length}
+    {#if shotList.length}
       <!-- The screenshots it asked about (snip.rs), over its words as the
            Claude app has them: each at its own pixels when it fits (one per
            device pixel), at most 480 × 320 (240 wide each of several), in the
            screenshot frame (chatImages.js `sentPlaced`); one past "Keep chat
            screenshots" says so in its place. -->
       <div class="shots" role="group" aria-label="Screenshots">
-        {#each m.images as img (img.id)}
+        {#each shotList as img (img.id)}
           {#if img.gone}
             <span class="shot gone" data-testid="chat-shot-gone">{removedLine(keepDays)}</span>
           {:else}
-            {@const p = sentPlaced(img, screenPixels.ratio, room, m.images.length > 1)}
+            {@const p = sentPlaced(img, screenPixels.ratio, room, shotList.length > 1)}
             <div class="shotframe" class:astext={img.asText} style:width="{p.frame.w}px" style:aspect-ratio="{p.frame.w} / {p.frame.h}">
               <button
                 type="button"
@@ -166,6 +181,14 @@
               {#if img.asText}<span class="astextnote">Sent as text</span>{/if}
             </div>
           {/if}
+        {/each}
+      </div>
+    {/if}
+    {#if chips.length}
+      <!-- The elements picked on a page with it: a chip each, its card on hover (ElementChip). -->
+      <div class="elchips" data-testid="chat-elements-sent">
+        {#each chips as el, i (i)}
+          <ElementChip {el} picture={picOf(el, i)} />
         {/each}
       </div>
     {/if}
@@ -292,6 +315,13 @@
 {/if}
 
 <style>
+  .elchips {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
   /* Reading text: Settings → General → Appearance (app.css). */
   .cbubble {
     max-width: 78%;
