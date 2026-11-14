@@ -465,7 +465,9 @@ workspace, word for word, and no model of Chat's is asked.
     script's own events only when that can't land; chat-and-assistant.md,
     "Real input"), a click takes `modifiers` (Ctrl, Shift, Alt, Meta), a read
     takes a ref (one section, or the controls inside one part with mode
-    "elements") and gives up to 50,000 characters, and the session has the
+    "elements") and gives up to 50,000 characters, `browser_type` with no
+    ref types at the cursor as real input (what's there kept), and the
+    session has the
     **developer's tools**: `browser_console`, `browser_network`,
     `browser_javascript` (asked first, but in Bypass) and `browser_view`
     (`pages/dev.rs`). Left out on purpose: none of Claude Code's browser

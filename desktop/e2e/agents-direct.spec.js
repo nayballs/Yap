@@ -242,8 +242,9 @@ const OPENS_A_PAGE = [
   result(OPENED, 0.01),
   { _wait_user: true },
 ];
-/** Refs the guide's elements get (`browser_find` numbers them in the page's order; checked below). */
-const REF = { order: 7, tab: 2, buy: 4 };
+/** Refs the guide's elements get (`browser_find` numbers them in the page's order, its controls first, then
+ * its text: the notes field at its end moved the "Build Order" heading from 7 to 8; checked below). */
+const REF = { order: 8, tab: 2, buy: 4 };
 const CLICKED = 'The build order starts at Moss Shield.';
 /** The chat's own Claude acts on a page, as Claude Code's own app's browser does: opens the guide, finds the
  * collapsed "Build Order" and clicks it open, reads it, switches the build's tab, then tries to buy (Yap asks). */
@@ -302,6 +303,9 @@ const DEV_TOOLS = [
   ...call(6, 'browser_view', { preset: 'mobile', color_scheme: 'dark' }),
   ...call(7, 'browser_javascript', { code: 'innerWidth + " " + matchMedia("(prefers-color-scheme: dark)").matches' }),
   ...call(8, 'browser_view', { preset: 'desktop', color_scheme: 'auto' }),
+  // Typed at the cursor (no ref), as Claude Code's own browser types: real input, what was there kept.
+  ...call(19, 'browser_type', { text: 'Healing' }),
+  ...call(20, 'browser_type', { text: ' guide' }),
   // Any key or combination as real keystrokes; a scroll and a hover at a point of the latest shot.
   ...call(9, 'browser_key', { keys: 'ctrl+a x' }),
   ...call(10, 'browser_read', {}),
@@ -1007,6 +1011,10 @@ test('its session has Claude Code’s developer tools: the console, the network 
   expect(of('browser_view')).toContain('375×812 (touch), dark colours');
   expect(of('browser_javascript', 1)).toContain('375 true');
   expect(of('browser_view', 1)).toContain("the panel's own size, the system's colours");
+  // Typed at the cursor in the field with the focus, as keys: the second after the first.
+  expect(of('browser_type')).toContain('"field":"Healing"');
+  expect(of('browser_type')).toContain('"typed":"as keys"');
+  expect(of('browser_type', 1)).toContain('"field":"Healing guide"');
   // Real keystrokes, a combination among them; the scroll and the hover at a point done.
   expect(of('browser_read')).toContain('Keys: Ctrl+a x');
   expect(dumps.filter((d) => ['browser_key', 'browser_scroll', 'browser_hover'].includes(d.tool)).map((d) => [d.tool, d.isError])).toEqual([['browser_key', false], ['browser_scroll', false], ['browser_hover', false], ['browser_scroll', false]]);

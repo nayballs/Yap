@@ -404,7 +404,7 @@ pub fn definitions(gate: Gate, act: bool) -> Value {
             ("Click a ref; count 2 or 3: a double or triple click; modifiers: keys held (ctrl+shift).", json!({ "ref": r(), "button": button(), "count": { "type": "integer" }, "modifiers": s(), "tab": tab() }), &["ref", "text"][..])
         };
         out.push(tool(act::CLICK, click, click_props, &[]));
-        let type_what = if look { "Type into a field (ref, else the focused one); submit: Enter after." } else { "Type into a field; submit: Enter after." };
+        let type_what = if look { "Type: ref sets that field to text; no ref types at the cursor (what's there stays); submit: Enter after." } else { "Type into a field; submit: Enter after." };
         out.push(tool(act::TYPE, type_what, json!({ "ref": r(), "text": s(), "submit": { "type": "boolean" }, "tab": tab() }), typed));
         out.push(tool(act::KEY, "Press keys: Enter, Tab, Escape, arrows, PageDown…, letters or combinations (ctrl+a).", json!({ "keys": s(), "repeat": { "type": "integer" }, "tab": tab() }), &["keys"]));
         if look {

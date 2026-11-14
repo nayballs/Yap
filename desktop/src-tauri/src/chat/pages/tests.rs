@@ -207,8 +207,9 @@ fn one_toolset_for_every_model_with_pages_acting_and_shots_only_where_they_may()
     // browser_scroll and browser_hover at a point, browser_key's letters and combinations: 656 / 1429 / 1084 / 1833;
     // then browser_zoom saying it takes the shot's pixels too: 656 / 1429 / 1092 / 1841; then browser_read's
     // tree (depth, filter), browser_find by role and browser_scroll left and right, the last of what set Claude
-    // Code's own browser apart, and browser_key's repeat: 691 / 1473 / 1132 / 1889.)
-    assert!(small <= 695 && acting <= 1475 && seeing <= 1135 && all <= 1890, "{small} / {acting} / {seeing} / {all}");
+    // Code's own browser apart, and browser_key's repeat: 691 / 1473 / 1132 / 1889; then browser_type saying a
+    // ref sets the field and no ref types at the cursor: 691 / 1473 / 1132 / 1899.)
+    assert!(small <= 695 && acting <= 1475 && seeing <= 1135 && all <= 1900, "{small} / {acting} / {seeing} / {all}");
     // The new parameters: a width for every model, the clicks and the drag where they act.
     assert!(defs_has(Gate::Show, false, "\"width\"") && defs_has(Gate::Show, true, "\"count\"") && defs_has(Gate::Show, true, "browser_drag"));
     assert!(!defs_has(Gate::Show, false, "browser_drag") && !defs_has(Gate::Show, true, "{x, y}") && defs_has(Gate::Look, true, "{x, y}"));
@@ -807,6 +808,29 @@ async fn the_pages_structure_reads_as_a_tree_its_controls_alone_or_one_part() {
     // A key over and over (`repeat`, as Claude Code's own browser's key), said once with its count.
     let k = call(&mut t, act::KEY, json!({ "keys": "Tab", "repeat": 3 }), &log).await.result;
     assert_eq!(k["displayText"], "Pressed Tab ×3 on emberwiki.example", "{k}");
+    sim::install(None);
+}
+
+#[tokio::test]
+async fn a_ref_sets_a_field_and_no_ref_types_at_the_cursor() {
+    // (14 Nov 2026, the maintainer: browser_type to "type at the cursor like" Claude Code's own browser.)
+    sim::install(Some(web()));
+    sim::with(|b| b.open(ARTICLE_URL));
+    let mut t = turn("Search the Fort Joy wiki for Saltmarsh Docks");
+    let log = Log::default();
+    let els = call(&mut t, READ, json!({ "mode": "elements" }), &log).await.result;
+    let lines = els["data"]["elements"].as_str().unwrap().to_string();
+    let line = lines.lines().find(|l| l.contains("\"Search Emberwiki\"")).unwrap();
+    let r: u32 = line[1..line.find(']').unwrap()].parse().unwrap();
+    // By ref: the field holds those words.
+    let first = call(&mut t, act::TYPE, json!({ "ref": r, "text": "Saltmarsh" }), &log).await.result;
+    assert_eq!(first["data"]["field"], "Saltmarsh", "{first}");
+    let again = call(&mut t, act::TYPE, json!({ "ref": r, "text": "Saltmarsh" }), &log).await.result;
+    assert_eq!(again["data"]["field"], "Saltmarsh", "set, not added to: {again}");
+    // No ref: at the cursor where the focus is, what was there kept.
+    let more = call(&mut t, act::TYPE, json!({ "text": " Docks" }), &log).await.result;
+    assert_eq!(more["data"]["field"], "Saltmarsh Docks", "{more}");
+    assert!(more["note"].as_str().unwrap().starts_with("The words went in at the cursor"), "{more}");
     sim::install(None);
 }
 

@@ -322,7 +322,9 @@ pub async fn act(key: &str, op: &str, a: &Value) -> Result<Value, String> {
     let num = |k: &str| a[k].as_f64().unwrap_or(0.0);
     let script = match op {
         "click" => super::act::script::click(r, role, name),
+        "type" if a["caret"] == true => super::act::script::type_at_caret(r, role, name, a["text"].as_str().unwrap_or(""), a["submit"].as_bool().unwrap_or(false)),
         "type" => super::act::script::type_text(r, role, name, a["text"].as_str().unwrap_or(""), a["submit"].as_bool().unwrap_or(false)),
+        "fieldNow" => super::act::script::field_now(r),
         "choose" => super::act::script::choose(r, role, name, a["text"].as_str().unwrap_or(""), a["again"].as_bool().unwrap_or(false)),
         "where" => super::act::script::where_is(r),
         "scroll" => super::act::script::scroll(a["to"].as_str().unwrap_or("down"), a["amount"].as_f64().unwrap_or(1.0), (r > 0).then_some(r)),
