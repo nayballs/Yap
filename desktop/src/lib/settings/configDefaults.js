@@ -14,6 +14,8 @@ export const FIELD_DEFAULTS = {
   notifyMilestones: true,
   notifyFeatureTips: true,
   notifyNews: true,
+  // The Yap bar's "Claude replied" / "Agent done" card (chat/turn/report.rs `tells`).
+  notifyAgents: true,
   quietOtherApps: false,
   pauseMedia: false,
   keepMicReady: false,

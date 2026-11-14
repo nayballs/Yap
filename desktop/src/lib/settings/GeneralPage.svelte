@@ -20,6 +20,7 @@
   import AboutYouSettings from './AboutYouSettings.svelte';
   import AppearanceSettings from './AppearanceSettings.svelte';
   import { BAR_THEME_OPTIONS } from '../core/appearance.js';
+  import { AGENT_NOTICES_LABEL, AGENT_NOTICES_DESC } from '../core/codeChats.js';
 
   let { cfg, barHiddenUntil = null, goto = null } = $props();
 
@@ -159,5 +160,10 @@
       label="News"
       desc="What's new once Yap has updated itself, with its release notes a click away"
     />
+  </Row>
+  <!-- The Yap bar's "Claude replied" / "Agent done" card (chat/turn/report.rs
+       `tells`); the same switch is on Yap Code's page, by its reports. -->
+  <Row setting="notify-agents">
+    <Toggle bind:checked={cfg.notifyAgents} label={AGENT_NOTICES_LABEL} desc={AGENT_NOTICES_DESC} />
   </Row>
 </Group>

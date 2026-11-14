@@ -42,7 +42,7 @@
   import { EFFORT_LABELS } from '../core/effort.js';
   import { agents, initAgents, refreshAgents } from '../stores/agents.svelte.js';
   import { statusWord, statusTone, costLine, MODE_LABELS, modelLabel, canUndo, BYPASS_WARNING } from '../core/agents.js';
-  import { FEATURE_NAME, CODE_NAME, WORKSPACES, samePath } from '../core/codeChats.js';
+  import { FEATURE_NAME, CODE_NAME, WORKSPACES, samePath, AGENT_NOTICES_LABEL, AGENT_NOTICES_DESC } from '../core/codeChats.js';
 
   let { cfg, goto = null, onshowview = null } = $props();
 
@@ -321,6 +321,10 @@
   </Row>
   <Row label="Read agent reports aloud" desc="When an agent ends, its report in the chat's own voice" setting="yap-code-speak">
     <Select bind:value={cfg.agentsSpeak} options={SPEAK} ariaLabel="Read agent reports aloud" />
+  </Row>
+  <!-- The same switch as General → Notifications' (config `notifyAgents`). -->
+  <Row setting="yap-code-notify">
+    <Toggle bind:checked={cfg.notifyAgents} label={AGENT_NOTICES_LABEL} desc={AGENT_NOTICES_DESC} />
   </Row>
   <Row>
     <p class="set-note" data-setting="yap-code-limits">Backups of changed files are kept 7 days. One agent at a time per workspace, at most 3 at once.</p>

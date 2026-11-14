@@ -197,7 +197,10 @@
   notify_feature_tips / notify_news (2026-10-29, Settings → General →
   Notifications, each default on: one kind of nice-to-know notice each,
   `notices/kinds.rs`; an older Yap drops them when it saves, so one switched
-  off comes back on — harmless, a few tips more), the meeting
+  off comes back on — harmless, a few tips more) + notify_agents
+  ("Claude's replies and finished agents", 2026-11-14, default on: the Yap
+  bar's "Claude replied" / "Agent done" card, `chat/turn/report.rs` `tells`;
+  off, only its questions, plans waiting and failures show), the meeting
   notepad: meeting_open_notepad (default on) + meeting_split_screen (default
   off) + meeting_live_transcript (default on) + meeting_consent_message (the
   notepad's "Copy consent message" text; empty = the default), meeting

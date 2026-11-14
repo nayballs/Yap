@@ -54,7 +54,13 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   rate-limits it itself and never asks during a dictation), micSwitched
   ("Using Contoso H2 for dictation", the same words not twice in 10 min),
   agentDone ("Agent done: garden-planner" with Open, 2026-11-07,
-  `chat/turn/report.rs`: with no Yap window in front, held over a dictation,
+  `chat/turn/report.rs`: with no Yap window in front — no card while Yap's main window is in front, nor while the chat it's
+  about is in view beside the app in front (Chat showing it, the window at
+  least half uncovered: full screen on another monitor, `report::tells`,
+  14 Nov 2026); a reply or a finished agent only while "Claude's replies and
+  finished agents" is on (`notifyAgents`, Settings → General → Notifications
+  and Yap Code's Asking and reports) — questions, plans waiting and failures
+  always —, held over a dictation,
   gone if unseen a minute — its chat has the report; with the bar off, a
   Windows notification with Open instead),
   language-added ("French is in My languages", 10 s) — > Tip — hint,

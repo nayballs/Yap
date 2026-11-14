@@ -17,6 +17,15 @@ export const CODE_NAME = 'Code';
 export const WORKSPACE = 'workspace';
 export const WORKSPACES = 'Workspaces';
 
+/**
+ * **The Yap bar's "Claude replied" / "Agent done" card's switch** (config
+ * `notifyAgents`, chat/turn/report.rs `tells`; 14 Nov 2026): its row in
+ * Settings → General → Notifications and on Yap Code's page says the same,
+ * in the card's own words so a search for them finds it.
+ */
+export const AGENT_NOTICES_LABEL = "Claude's replies and finished agents";
+export const AGENT_NOTICES_DESC = `The "Claude replied" and "Agent done" cards on the Yap bar, when a ${CODE_NAME} chat's Claude replies or an agent finishes and that chat isn't in view. Questions and plans waiting for you always show.`;
+
 /** The label on a Code chat's message box: "Code · garden-planner". */
 export function codeLabel(name) {
   return name ? `${CODE_NAME} · ${name}` : CODE_NAME;
