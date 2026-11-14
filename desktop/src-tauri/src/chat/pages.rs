@@ -134,6 +134,7 @@ pub mod pick;
 pub mod preview;
 pub mod read;
 pub mod see;
+pub mod thumb;
 #[cfg(any(test, debug_assertions))]
 pub mod sim;
 pub mod view;
@@ -161,6 +162,11 @@ pub struct ShownPage {
     /// answer's `open_page { section }`).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub section: String,
+    /// **Its picture**, for its card in the thread ([`thumb`], 14 Nov 2026):
+    /// the top of the page once it had loaded. An older answer has none, and
+    /// an older Yap's save drops it: the card shows without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumb: Option<thumb::PageThumb>,
 }
 
 /// **A button an older answer offers**: open `url` in the person's browser
@@ -1017,13 +1023,15 @@ async fn open(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
         Some(words) => (format!("Search: {words}"), crate::web::site_of(&url), 0),
         None => titled(turn, &url),
     };
-    let page = ShownPage { url, title, site, section: String::new() };
+    let page = ShownPage { url, title, site, ..Default::default() };
     tracing::info!(pages = turn.pages.shown.len() + 1, "Chat: a page brought up beside the chat");
     turn.pages.shown.push(page.clone());
     let mut result = ok(format!("Brought up {shown} beside the chat"));
     // (The stand-in browser of an evaluation opens it; the panel's is made
     // out of sight now, then shown by the Chat view.)
     act::closed_note(turn, &mut result, backend::opened(&page.url, "").await);
+    // Its picture for the card in the thread, once it has loaded.
+    thumb::take_soon(&page.url);
     ctx.tell(Event::Page { page });
     result
 }

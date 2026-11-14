@@ -2373,7 +2373,7 @@ of sight. What they share is said once, in the line.
   Page tab** (`pages::open`, as `browser_tabs { action: "new" }`):
   `stream::Event::Page {page: ShownPage}` opens it mid-turn; the answer keeps
   it, `ChatMessage.pages`, so its tab comes back with the conversation; a
-  pill under the answer, `PagePills.svelte` — a page from this turn's results
+  card under the answer, `PagePills.svelte` (below) — a page from this turn's results
   or the person's messages (opened at the address the turn holds for it,
   `Turn::stored`, never the model's copy with a fragment or `utm_…` added),
   **the home page of a site the person named**
@@ -2385,6 +2385,34 @@ of sight. What they share is said once, in the line.
   new tab as a tab navigating (`rules::needs_ok`). Nothing of the page goes
   to the model by opening it; going somewhere in a tab tells the page after
   (`act::after`, web content). Four new tabs a turn.
+  - **Its card under the answer** (14 Nov 2026, `PagePills.svelte` with
+    `chat/pages/thumb.rs`; the maintainer, from the Claude Code app, where a
+    page Claude opens shows as a card with a small picture of it). Where the
+    pill was, a card: the top of the page as it looked once loaded, its
+    title, "<site>, opened beside the chat", **Open** (its Page tab) and ⋯
+    (Open beside the chat, Open in <browser>, Copy link).
+    - **The picture**: taken in the background as the page is brought up
+      (`thumb::take_soon`): its tab found within 8 s, its load waited for up
+      to 12 s, 0.9 s more to draw, then `backend::shot` (on screen or not).
+      Its top, twice as wide as tall, at most 720 px wide (`top_of`); none
+      when nothing was drawn (`blank`). The page's own title comes with it
+      (its tab's then): a page brought up unread was named by its site, and
+      the card says "Fort Joy - Example Wiki", not the site twice
+      (`thumb::apply`; never an address for a title).
+    - **Kept** in `chat-images/` (`snip::images::save`) and on the answer's
+      `ShownPage.thumb` (`{id, w, h}`): as the answer is saved
+      (`thumb::fill`, from the pictures this run took), or on the answer
+      saved before it was taken (`chats::set_page_thumb`: answers of the last
+      hour that brought that address up). Live: `yap-page-thumb {url, thumb}`
+      (chatState's `pageThumbs`). Swept with the chat's pictures ("Keep chat
+      screenshots": `ChatMessage::image_ids`). Never sent to a model.
+    - **Everywhere a page is brought up**: Chat, a Code chat (its Claude's
+      `browser_navigate` is the same `open`) and Yap's own "show me
+      <address>" (`turn/fast.rs`). An older answer, or one an older Yap
+      saved, has no picture: its card is its words alone.
+    - Tests: `chat-pages.spec.js` (the card, its picture shown and kept,
+      Open), `agents-direct.spec.js` (a Code chat's), `thumb.rs` (the top, a
+      blank page, by address).
   - **An address the model writes itself** (8 Nov 2026, `pages::written`;
     Chat's own test of the toolset against Claude Code's found a well-formed
     `https://www.example.com/forever` refused until a search had found it):

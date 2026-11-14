@@ -40,9 +40,10 @@
    * brought up (a `ShownPage`, chat/pages.rs). The files it shared into the
    * conversation (`files`, chat/shares.rs) show under it (SharedFiles, its
    * own chunk): `conversation` the chat's id, `onshared(p)` a shared picture
-   * opened (a `ShownPicture`).
+   * opened (a `ShownPicture`). `pagethumb(url)`: a page's picture taken
+   * since the answer was read (chat/pages/thumb.rs), for its card.
    */
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null } = $props();
   // A message sent from the queue (chatState's `ticks`): ✓ sent, ✓✓ once Claude read it, and when.
   const readAt = $derived(tick?.readAt ? new Date(tick.readAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
 
@@ -291,7 +292,7 @@
     {/if}
     {#if pages.length}
       {#await import('./PagePills.svelte') then { default: PagePills }}
-        <PagePills {pages} {onpage} />
+        <PagePills {pages} {onpage} thumbFor={pagethumb} />
       {/await}
     {/if}
   </div>

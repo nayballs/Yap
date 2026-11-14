@@ -182,12 +182,27 @@ test('browser_navigate brings the live page up beside the chat: its own webview,
   await inPage(yap, "localStorage.setItem('yap-pages-probe','1'); document.cookie='probe=1; path=/'; 'ok'");
   expect(await main.evaluate(() => document.cookie.includes('probe=1'))).toBe(false);
 
-  // The answer: its pill, and its steps folded under it.
+  // The answer: its page's card — as the Claude Code app shows a page it opened (14 Nov 2026): the top of the page
+  // as it looked once loaded (chat/pages/thumb.rs), its title and site, Open — and its steps folded under it.
   await expect(main.getByText('It’s open beside the chat')).toBeVisible();
-  await expect(main.getByTestId('chat-page-pill')).toHaveCount(1);
-  await expect(main.getByTestId('chat-page-pill')).toContainText('wiki.example.com');
+  const card = main.getByTestId('chat-page-card');
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText('Fort Joy - Example Wiki');
+  await expect(card).toContainText('wiki.example.com, opened beside the chat');
+  await expect(card.getByTestId('chat-page-thumb')).toBeVisible({ timeout: 20_000 });
+  await expect.poll(() => card.getByTestId('chat-page-thumb').evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
   await expect(main.getByText('Brought up a page')).toBeVisible();
   await shot(main, '01-page-beside-the-chat');
+  // Its picture is kept with the answer (and swept with the chat's pictures).
+  await expectStore(yap, 'chats.json', (s) => s.conversations.some((c) => /^img_[0-9a-f]{16}$/.test(c.messages.at(-1)?.pages?.[0]?.thumb?.id ?? '')));
+  // ⋯: Open beside the chat, Open in your browser, Copy link.
+  await card.getByRole('button', { name: /^More for the page/ }).click();
+  await expect(main.getByRole('menuitem')).toHaveText([/Open beside the chat/, /Open in /, /Copy link/]);
+  await main.keyboard.press('Escape');
+  await expect(main.getByRole('menuitem')).toHaveCount(0);
+  // Open: its Page tab, in front.
+  await card.getByTestId('chat-page-pill').click();
+  await expect(main.getByTestId('chat-page-title')).toHaveText('Fort Joy - Example Wiki');
 
   // Open in your browser: open_external (a test run keeps the link).
   await main.getByTestId('chat-page-open').click();
