@@ -69,6 +69,15 @@ export function costLine(agent) {
   return agent?.pay === 'key' ? `API key · ${money(cost)}` : `Your Claude plan · ≈ ${money(cost)} on the API`;
 }
 
+/** **How long the chat's own Claude has worked this turn**, as Claude Code's working line says it: "12s", "3m 44s", "1h 5m". */
+export function workClock(secs) {
+  const s = Math.max(0, Math.floor(Number(secs) || 0));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
 /** Seconds as the screens say a length of time: "12 s", "3 min", "1 h 5 min". */
 export function duration(secs) {
   const s = Math.max(0, Math.round(Number(secs) || 0));

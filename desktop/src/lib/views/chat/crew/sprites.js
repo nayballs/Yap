@@ -18,7 +18,7 @@
 //   and lower square: done shuts the upper, needs looks up), a / A its
 //   accent and the accent's shade, k ink, w white, g / G metal and its
 //   shade, l glass, n wood, y / Y pencil, p eraser, s a faint mark, v a
-//   visor's shine.
+//   visor's shine, q / Q the lead's cap and its peak, o its gold badge.
 // Its feet: two 2 × 2 squares that step. Its shoulder: where a prop's arm
 // starts. `t0`: one step's time (Haiku quick, Opus calm). `talk`: the Claude
 // crew's mouth opening while it works (they're Yap's bubbles: they yap).
@@ -252,6 +252,22 @@ const PROPS = {
 /** The Modes' props, by id. */
 export const PROP_IDS = Object.keys(PROPS);
 
+/**
+ * **The lead** (14 Nov 2026; the maintainer: the chat's own Claude, the one
+ * that "organises agents", should look "like the leader… so it's clearly
+ * different from the agent animations"): a Code chat's own Claude on its
+ * working line in the thread, where the agents it sends walk in the Agent
+ * panel with their Mode's tool. It stands and conducts: a captain's cap
+ * ([`cap`]) and a baton beating up and down (f1 raised, f2 forward), on the
+ * beat of `fd`. Not a Mode's prop (`prop: 'lead'`, never in [`PROP_IDS`]).
+ */
+const LEAD = {
+  cap: true,
+  f1: { y: -4, art: ['....w', '...k', '..k', '.b', 'b'] },
+  f2: { y: -1, art: ['.....w', '..kkk', 'bb'] },
+  fd: '0.7s',
+};
+
 /** Every square of an art block: `[{x, y, c}]`, at (`dx`, `dy`). */
 function squares(block, dx = 0, dy = 0) {
   const out = [];
@@ -313,6 +329,16 @@ function helmet(b) {
   return `<g class="c-helmet">${rects(glass)}${rects(shine)}${rects(rim)}</g>`;
 }
 
+/** **The lead's captain's cap**, on the body `b`: a navy crown with a gold badge, its band and peak (forward, to the right) a shade darker. */
+function cap(b) {
+  const mid = Math.round((b.x0 + b.x1) / 2);
+  const squaresOf = [];
+  for (let x = b.x0 + 2; x <= b.x1 - 2; x++) squaresOf.push({ x, y: b.y0 - 3, c: 'q' });
+  for (let x = b.x0 + 1; x <= b.x1 - 1; x++) squaresOf.push({ x, y: b.y0 - 2, c: x === mid ? 'o' : 'q' });
+  for (let x = b.x0; x <= b.x1 + 2; x++) squaresOf.push({ x, y: b.y0 - 1, c: 'Q' });
+  return `<g class="c-cap">${rects(squaresOf)}</g>`;
+}
+
 /** Auto's speed lines behind the body `b` (inside the grid). */
 function speedLines(b) {
   const at = (y, from, to) => {
@@ -343,7 +369,7 @@ const foot = ([x, y]) => [
 /** **A character's SVG** (`character`, its Mode's `prop`), every pose's parts in it: crew.css shows each pose. */
 export function crewSvg(character, prop = 'auto') {
   const ch = CHARACTERS[character] ?? CHARACTERS.generic;
-  const pr = PROPS[prop] ?? PROPS.auto;
+  const pr = prop === 'lead' ? LEAD : (PROPS[prop] ?? PROPS.auto);
   const body = squares(ch);
   const b = boundsOf(body);
   const [sx, sy] = ch.shoulder;
@@ -374,6 +400,7 @@ export function crewSvg(character, prop = 'auto') {
     fx +
     (ch.talk ? `<g class="c-talk" style="--fd: 0.5s">${group('w2', ch.talk.map(([x, y]) => ({ x, y, c: 'm' })))}</g>` : '') +
     held +
+    (pr.cap ? cap(b) : '') +
     `</g></g></svg>`
   );
 }
@@ -392,17 +419,18 @@ const cache = new Map();
  * **An avatar's markup**: the character `character` holding its Mode's
  * `prop`, in `pose` (working, needs, done, stopped, failed, queued), with
  * its badge; `label` its accessible name ("Opus, working, Auto mode");
- * `size` 2 for twice as big (the crew sheet). The same string for the same
+ * `size` 2 for twice as big (the crew sheet), 0.5 for a line of text (the
+ * lead on a Code chat's working line). The same string for the same
  * arguments, so a row redrawn every second never restarts its steps.
  */
 export function crewMarkup({ character = 'sonnet', prop = 'auto', pose = 'working', label = '', size = 1, testid = '' } = {}) {
   const id = CHARACTERS[character] ? character : 'generic';
-  const p = PROPS[prop] ? prop : 'auto';
+  const p = PROPS[prop] || prop === 'lead' ? prop : 'auto';
   const key = [id, p, pose, label, size, testid].join('|');
   const hit = cache.get(key);
   if (hit) return hit;
   const ch = CHARACTERS[id];
-  const classes = ['crew', `ch-${id}`, `pr-${p}`, `po-${pose}`, ch.calm ? 'calm' : '', size === 2 ? 'size-2' : ''].filter(Boolean).join(' ');
+  const classes = ['crew', `ch-${id}`, `pr-${p}`, `po-${pose}`, ch.calm ? 'calm' : '', size === 2 ? 'size-2' : size === 0.5 ? 'size-half' : ''].filter(Boolean).join(' ');
   const html =
     `<span class="${classes}" role="img" aria-label="${esc(label)}" data-character="${id}" data-prop="${p}" data-pose="${esc(pose)}" style="--t0: ${ch.t0}s"` +
     `${testid ? ` data-testid="${esc(testid)}"` : ''}>${crewSvg(id, p)}${BADGES[pose] ?? ''}</span>`;

@@ -171,6 +171,9 @@ body {
   --yap-crew-wood: #a8743c;
   --yap-crew-pencil: #f0c232;
   --yap-crew-eraser: #e8899b;
+  /* the lead's captain's cap and its badge (a Code chat's own Claude) */
+  --yap-crew-cap: #2f3d6b;
+  --yap-crew-gold: #e0b43a;
   --yap-crew-feet: 45%;
   --yap-crew-haiku: #f0b23e;
   --yap-crew-haiku-accent: #5e9e3c;
@@ -586,6 +589,8 @@ body {
      magnifying glass's rim and a wrench still show */
   --yap-crew-metal: #b4bac2;
   --yap-crew-metal-dark: #8c929a;
+  --yap-crew-cap: #5a6fb4;
+  --yap-crew-gold: #f2c95a;
   --yap-crew-glass: rgba(150, 210, 245, 0.26);
   --yap-crew-feet: 58%;
   --yap-crew-haiku: #f6c255;
