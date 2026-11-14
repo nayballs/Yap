@@ -28,6 +28,7 @@
 //! "<script.jsonl>"]`). A test run (`YAP_E2E=1`) without them finds nothing,
 //! so the e2e suite never reaches the person's own Claude Code.
 
+use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -348,6 +349,8 @@ pub(crate) fn give_clean_env(cmd: &mut Command) {
 pub(crate) struct Captured {
     pub code: Option<i32>,
     pub stdout: String,
+    /// What it said on stderr (the first 64 KiB).
+    pub stderr: String,
 }
 
 /// Run `program args` to the end (at most `timeout`), its output captured:
@@ -367,17 +370,19 @@ pub(crate) fn run_captured(program: &Program, args: &[&str], timeout: Duration) 
         }
         String::from_utf8_lossy(&out).into_owned()
     });
-    if let Some(mut err) = child.stderr.take() {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = (&mut err).take(64 << 10).read_to_end(&mut buf);
-            let text = String::from_utf8_lossy(&buf);
-            for line in text.lines().map(str::trim).filter(|l| !l.is_empty()).take(20) {
-                let cut: String = line.chars().take(300).collect();
-                tracing::debug!("claude code (probe) stderr: {cut}");
-            }
-        });
-    }
+    let mut stderr = child.stderr.take();
+    let err_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(err) = stderr.as_mut() {
+            let _ = err.take(64 << 10).read_to_end(&mut buf);
+        }
+        let text = String::from_utf8_lossy(&buf).into_owned();
+        for line in text.lines().map(str::trim).filter(|l| !l.is_empty()).take(20) {
+            let cut: String = line.chars().take(300).collect();
+            tracing::debug!("claude code (probe) stderr: {cut}");
+        }
+        text
+    });
     let until = Instant::now() + timeout;
     let code = loop {
         match child.try_wait() {
@@ -392,7 +397,44 @@ pub(crate) fn run_captured(program: &Program, args: &[&str], timeout: Duration) 
         }
     };
     let stdout = reader.join().unwrap_or_default();
-    Ok(Captured { code, stdout })
+    let stderr = err_reader.join().unwrap_or_default();
+    Ok(Captured { code, stdout, stderr })
+}
+
+/// **Does this Claude Code take `--resume-session-at`** (a Code chat's
+/// Rewind and Fork from here: `agents/rewind.rs`)? Anthropic documents it
+/// as the Agent SDK's `resumeSessionAt` ("load the conversation only up to
+/// and including the message with this UUID… usually with `fork_session`"),
+/// but the CLI reference doesn't list the flag, so a Claude Code may not
+/// take it. Yap asks the one installed, once per program and version: a
+/// session that doesn't exist, resumed at a message that doesn't either —
+/// refused for the missing session ("No conversation found…": nothing is
+/// sent anywhere) where the flag is known, "unknown option" where it isn't.
+/// No answer counts as no (Rewind and Fork then start afresh with the
+/// conversation as text). Never cached in test mode (each spec's own).
+pub fn resumes_at(program: &Program) -> bool {
+    static KNOWN: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
+    let key = format!("{}|{}", program.path().display(), status().version.unwrap_or_default());
+    let cache = !crate::shell::e2e::active();
+    if cache {
+        if let Some(known) = KNOWN.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&key).copied()) {
+            return known;
+        }
+    }
+    const NONE: &str = "00000000-0000-4000-8000-000000000000";
+    const NOWHERE: &str = "00000000-0000-4000-8000-000000000001";
+    let takes = match run_captured(program, &["-p", "--resume", NONE, "--fork-session", "--resume-session-at", NOWHERE, "x"], PROBE_TIMEOUT) {
+        Ok(out) => !format!("{}\n{}", out.stdout, out.stderr).to_lowercase().contains("unknown option"),
+        Err(e) => {
+            tracing::info!("Claude Code: couldn't ask about --resume-session-at ({e})");
+            false
+        }
+    };
+    tracing::info!(takes, "Claude Code: --resume-session-at");
+    if cache {
+        KNOWN.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(key, takes);
+    }
+    takes
 }
 
 /// `claude --version`.

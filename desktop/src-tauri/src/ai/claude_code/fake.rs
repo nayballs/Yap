@@ -57,6 +57,11 @@
 //! - `{"_dump_env":["ANTHROPIC_API_KEY",…]}`: prints `{"type":"system",
 //!   "subtype":"fake_env","present":{"ANTHROPIC_API_KEY":false,…}}` (never a
 //!   value).
+//! - `{"_exit_if_arg":{"arg":"--resume-session-at","stderr":"…","code":1}}`
+//!   (anywhere in the script): a process started with that argument prints
+//!   `stderr` and exits with `code` at once, before anything else — a
+//!   Claude Code that doesn't take a flag ("error: unknown option '…'"), or
+//!   one that refuses it (a Rewind's branch point it can't find).
 //! - `{"_stderr":"text"}`: a line on stderr.
 //! - `{"_write_file":{"path":"notes.md","text":"…"}}`: write a file inside
 //!   the working folder (an agent's edit, after its backup hook).
@@ -151,6 +156,16 @@ pub fn main(args: Vec<String>) -> i32 {
             return 2;
         }
     };
+    // A Claude Code that doesn't take an argument, or refuses it: said and over at once (`_exit_if_arg`).
+    for line in script.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { continue };
+        let Some(rule) = v.get("_exit_if_arg") else { continue };
+        let arg = rule.get("arg").and_then(Value::as_str).unwrap_or_default();
+        if !arg.is_empty() && claude_args.iter().any(|a| a == arg) {
+            eprintln!("{}", rule.get("stderr").and_then(Value::as_str).unwrap_or_default());
+            return rule.get("code").and_then(Value::as_i64).unwrap_or(1) as i32;
+        }
+    }
     let ctx = match Ctx::from_args(claude_args) {
         Ok(c) => c,
         Err(e) => {

@@ -174,6 +174,12 @@ const ECHOES = [
 const ECHOES_SLOWLY = [ECHOES[0], ECHOES[1], ECHOES[2], { _sleep_ms: 4000 }, ...ECHOES.slice(3)];
 /** WATERING, its end marked. */
 const WATERING_MARKED = WATERING.map((l) => (l.message?.id === 'w2' ? { ...l, uuid: 'end-watering' } : l));
+/** ECHOES on a Claude Code without `--resume-session-at` (the CLI reference doesn't list it): "unknown option", as any. */
+const ECHOES_NO_FLAG = [{ _exit_if_arg: { arg: '--resume-session-at', stderr: "error: unknown option '--resume-session-at'", code: 1 } }, ...ECHOES];
+/** ECHOES on one that knows the flag but can't find the point (its transcript changed): the branched run never starts. */
+const ECHOES_NO_POINT = [{ _exit_if_arg: { arg: '--resume-session-at', stderr: 'No message found with message.uuid of: end-One', code: 1 } }, ...ECHOES];
+/** The words the latest turn's first message carried, as the stand-in saw them. */
+const lastUserText = () => fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).at(-1)?.user_text ?? '';
 /** The row under the person's message `text`: Copy, Rewind, Fork from here. */
 const actionsOf = (main, text) => thread(main).locator('.cbubble.user', { hasText: text }).locator('xpath=following-sibling::*[1][@data-testid="chat-message-actions"]');
 const queuedBubble = (main) => thread(main).getByTestId('chat-queued');
@@ -984,6 +990,69 @@ test('Fork from here: a new Code chat with the conversation up to that message�
   const again = argsSeen().at(-1);
   expect([after(again, '--resume'), after(again, '--resume-session-at'), again.includes('--fork-session')]).toEqual([original.session, 'end-One', true]);
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: A third way']);
+});
+
+// The flag isn't in Claude Code's CLI reference (the Agent SDK's resumeSessionAt is): where a Claude Code doesn't take
+// it, or can't branch at the point, the next turn starts afresh with the conversation kept so far as text.
+test('on a Claude Code without --resume-session-at, a Rewind’s next turn starts afresh with the conversation so far as text', async ({ yap, main }) => {
+  test.setTimeout(120_000);
+  await script(yap, ECHOES_NO_FLAG, 'echoes-no-flag');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'One');
+  const agent = await newAgent(yap, before);
+  await ended(yap, agent.id);
+  await send(main, 'Two');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(2);
+  await ended(yap, agent.id);
+  await thread(main).locator('.cbubble.user', { hasText: 'Two' }).hover();
+  await actionsOf(main, 'Two').getByTestId('chat-rewind').click();
+  await main.getByRole('alertdialog', { name: 'Rewind to before this message?' }).getByRole('button', { name: 'Rewind', exact: true }).click();
+  await expect(thread(main).locator('.cbubble.user')).toHaveText(['One']);
+  const rewound = (await agents(yap)).find((j) => j.id === agent.id);
+  expect(rewound.branch.at).toBeUndefined();
+  expect(rewound.branch.seed).toContain('Me: One\n\nYou: Answer to: One');
+  await send(main, 'Two, again');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(3);
+  const done = await ended(yap, agent.id);
+  expect(done.status).toBe('done');
+  // A new session, never a resume; its first message the conversation as text, then the person's words.
+  const args = argsSeen().at(-1);
+  expect([args.includes('--resume'), args.includes('--resume-session-at'), after(args, '--session-id')]).toEqual([false, false, done.session]);
+  expect(lastUserText()).toMatch(/Me: One\s+You: Answer to: One[\s\S]*Two, again$/);
+  expect(done.branch).toBeUndefined();
+});
+
+test('a branch Claude Code can’t make: the turn says so, and the next message starts afresh with the conversation so far as text', async ({ yap, main }) => {
+  test.setTimeout(120_000);
+  await script(yap, ECHOES_NO_POINT, 'echoes-no-point');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'One');
+  const agent = await newAgent(yap, before);
+  await ended(yap, agent.id);
+  await send(main, 'Two');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(2);
+  await ended(yap, agent.id);
+  await thread(main).locator('.cbubble.user', { hasText: 'Two' }).hover();
+  await actionsOf(main, 'Two').getByTestId('chat-rewind').click();
+  await main.getByRole('alertdialog', { name: 'Rewind to before this message?' }).getByRole('button', { name: 'Rewind', exact: true }).click();
+  // It takes the flag: a branch at the end of "One"…
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).branch?.at).toBe('end-One');
+  await send(main, 'Two, again');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(3);
+  // …that it can't make: the turn fails and says what happens next; nothing is stuck.
+  const failed = await ended(yap, agent.id);
+  expect(failed.status).toBe('failed');
+  expect(failed.turnList.at(-1).error).toMatch(/couldn’t pick the conversation up|couldn't pick the conversation up/);
+  expect(failed.branch.seed).toContain('Me: One\n\nYou: Answer to: One');
+  await send(main, 'Two, third try');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(4);
+  const done = await ended(yap, agent.id);
+  expect(done.status).toBe('done');
+  const args = argsSeen().at(-1);
+  expect([args.includes('--resume-session-at'), after(args, '--session-id')]).toEqual([false, done.session]);
+  expect(lastUserText()).toMatch(/Me: One\s+You: Answer to: One[\s\S]*Two, third try$/);
 });
 
 test('a message with a screenshot goes straight to its session too: the picture with its words, each turn its own', async ({ yap, main, shot }) => {

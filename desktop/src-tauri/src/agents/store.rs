@@ -442,6 +442,12 @@ pub struct Branch {
     /// first turn: the original's, at the fork's point).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
+    /// **No branch Claude Code can make** (it doesn't take
+    /// `--resume-session-at`, the session isn't on this PC, or the branch
+    /// failed): a new session, its first message the conversation kept so
+    /// far as text, then the person's words (`agents/rewind.rs` `seed_of`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
 }
 
 /// **A chat forked from another** (a Code chat's Fork from here): the
@@ -453,6 +459,10 @@ pub struct Fork {
     pub at: String,
     /// The chat it came from.
     pub from: u64,
+    /// No branch Claude Code can make: its first turn starts afresh with the
+    /// conversation as text ([`Branch::seed`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
 }
 
 impl TurnNote {
