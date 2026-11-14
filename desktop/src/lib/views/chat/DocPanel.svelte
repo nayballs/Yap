@@ -41,7 +41,7 @@
   // name is the page's title as it is now. An agent Chat started (Yap Code) shows
   // in an agent tab (AgentTab.svelte): its folder's name on the row; closing it
   // never stops the agent.
-  import { tick, untrack } from 'svelte';
+  import { setContext, tick, untrack } from 'svelte';
   import PictureTab from './PictureTab.svelte';
   import PageTab from './PageTab.svelte';
   import AgentTab from './AgentTab.svelte';
@@ -69,7 +69,17 @@
    * and pictures are the row of tabs); `conversationId`: the chat a page's
    * shot is kept in.
    */
-  let { doc, cover = false, narrow = false, onquote = null, messages = [], conversationId = null } = $props();
+  let { doc, cover = false, narrow = false, onquote = null, messages = [], conversationId = null, workspace = null } = $props();
+
+  // **The page's buttons in the tab row** (PageTab.svelte hands them up while it shows: its Dev servers, Save a
+  // shot, Open in your browser, expand, close), so the address bar has the row below to itself.
+  let rowActions = $state(null);
+  setContext('yap-doc-row-actions', {
+    set: (s) => (rowActions = s),
+    clear: (s) => {
+      if (rowActions === s) rowActions = null;
+    },
+  });
 
   let box = $state(null);
   let bodyEl = $state(null);
@@ -664,6 +674,10 @@
     <button type="button" class="tabnew" onclick={() => doc.newPage()} aria-label="New tab" title="New tab (Ctrl+T)" data-testid="chat-panel-new-tab">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
     </button>
+    {#if rowActions && doc.showing === 'page'}
+      <!-- The page's own buttons (PageTab.svelte's `actions`), at the row's right, as Claude Code's app has them. -->
+      <div class="rowactions" data-testid="chat-page-actions">{@render rowActions()}</div>
+    {/if}
     </div>
   {/if}
   {#if doc.showing === 'picture' && doc.picture}
@@ -671,7 +685,7 @@
   {:else if doc.showing === 'page' && doc.page}
     <!-- One per page tab: each its own webview, its place kept while another tab shows. -->
     {#key tabKeyOf(doc.page)}
-      <PageTab {doc} {narrow} {conversationId} recent={recentPages} />
+      <PageTab {doc} {narrow} {conversationId} recent={recentPages} {workspace} />
     {/key}
   {:else if doc.showing === 'agent' && doc.agent}
     <!-- An agent Chat started: what it's doing, live (closing it never stops it). -->
@@ -895,6 +909,14 @@
     scrollbar-width: none;
   }
   /* The row's +: a new page tab. */
+  .rowactions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+    padding: 0 6px 0 4px;
+  }
   .tabnew {
     flex: 0 0 auto;
     display: inline-flex;

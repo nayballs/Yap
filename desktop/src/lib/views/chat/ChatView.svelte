@@ -628,7 +628,7 @@
          reduced motion); the panel's ground while its chunk is on its way. -->
     <div id="chat-panel" class="docslot" class:cover class:ground={!DocPanel} style={cover ? undefined : `width: ${room.panelWidth}px`} data-testid="chat-panel-slot">
       {#if DocPanel}
-        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} messages={chat.messages} conversationId={chat.activeId} />
+        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} messages={chat.messages} conversationId={chat.activeId} workspace={code.current?.path ?? null} />
       {/if}
     </div>
   {/if}

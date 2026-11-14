@@ -152,7 +152,7 @@ pub fn all_names() -> Vec<&'static str> {
 
 /// Whether `name` is one of the tools here.
 pub fn is_one(name: &str) -> bool {
-    name == see_screen::LOOK || pages::ALL.contains(&name) || pages::dev::NAMES.contains(&name) || PICTURES.contains(&name) || name == shares::NAME
+    pages::preview::NAMES.contains(&name) || name == see_screen::LOOK || pages::ALL.contains(&name) || pages::dev::NAMES.contains(&name) || PICTURES.contains(&name) || name == shares::NAME
 }
 
 /// Where `share_files` is offered with `eyes`: as `show_picture` takes a
@@ -241,6 +241,10 @@ fn title(name: &str) -> &'static str {
         pages::dev::NETWORK => "Read the page's network requests",
         pages::dev::JAVASCRIPT => "Run a script on the page",
         pages::dev::VIEW => "Resize the page",
+        pages::preview::START => "Start a dev server",
+        pages::preview::LIST => "List the dev servers",
+        pages::preview::STOP => "Stop a dev server",
+        pages::preview::LOGS => "Read a dev server's output",
         pictures::FIND => "List a page's pictures",
         pictures::LOOK => "Look at a picture",
         shares::NAME => "Share files in the chat",
@@ -274,6 +278,29 @@ pub fn definitions(eyes: Eyes) -> Vec<Value> {
         .collect()
 }
 
+/// **A Code chat's dev-server tools as an MCP server lists them**
+/// (`chat/pages/preview.rs`; its run lists them where it has a workspace and
+/// the pages, `rpc.rs` `servers_offered`). Pure.
+pub fn preview_definitions() -> Vec<Value> {
+    pages::preview::definitions()
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|d| {
+            let f = &d["function"];
+            let name = f["name"].as_str().unwrap_or("");
+            json!({
+                "name": name,
+                "title": title(name),
+                "description": f["description"],
+                "inputSchema": f["parameters"],
+                "annotations": { "title": title(name), "readOnlyHint": matches!(name, pages::preview::LIST | pages::preview::LOGS), "openWorldHint": false },
+            })
+        })
+        .collect()
+}
+
 /// The tool loop's failure shape (`tools::tool_error`).
 fn failed(error: &str, chip: &str) -> Value {
     json!({ "success": false, "error": error, "data": Value::Null, "displayText": chip })
@@ -284,6 +311,10 @@ fn failed(error: &str, chip: &str) -> Value {
 /// acting — during a meeting or a call (`meeting`), before anything is
 /// asked. Pure.
 pub fn refused(name: &str, eyes: Eyes, meeting: bool) -> Option<Value> {
+    // A Code chat's dev servers (listed only where its run has a workspace and the pages): with the pages.
+    if pages::preview::NAMES.contains(&name) {
+        return (eyes.pictures == Gate::Off).then(|| failed("There's no panel beside the chat for this question: answer in words.", "Didn't start a dev server: no panel here"));
+    }
     if name == see_screen::LOOK {
         if meeting {
             return Some(failed("Yap doesn't look at the screen during a meeting or a call. Say so in a few words.", "Didn't look at your screen: a meeting or a call"));
@@ -451,6 +482,19 @@ async fn run_for(slot: &Slot, turn: &Call, name: &str, args: &Value, wait: std::
             result["note"] = json!(SHOT_NOTE);
         }
         (result, run.looks)
+    } else if pages::preview::NAMES.contains(&name) {
+        // A Code chat's dev servers (`agents/servers.rs`): its page opened beside the chat as browser_tabs does.
+        let ctx = pages::Ctx {
+            gate: turn.ctx.eyes.pictures,
+            act: turn.ctx.eyes.act,
+            provider: PROVIDER,
+            base_url: BASE_URL,
+            live: Some(Live { sink: sink_for, beside: None }),
+            outside,
+            search: Some("WebSearch"),
+        };
+        let ws = turn.ctx.workspace.as_deref().map(std::path::Path::new);
+        (pages::preview::execute(&mut w, name, args, &ctx, ws).await, Vec::new())
     } else if pages::dev::NAMES.contains(&name) {
         // The developer's tools: the console, the network, a script (asked first, but in Bypass), the view.
         let ctx = pages::Ctx {

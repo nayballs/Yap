@@ -165,6 +165,13 @@ fn agent_eyes_lines(eyes: eyes::Eyes, unattended: bool) -> Vec<&'static str> {
 /// And, where the run reads Yap's own data ([`RunSpec::reads`]).
 const READS_INSTRUCTIONS: &str = "Yap's other tools read, never change, the user's own Yap data on this computer: their meetings (summaries, notes and transcripts), their notes, their tasks and their calendar. Use them only when the user's request refers to one of those (\"what we decided in yesterday's meeting\", \"the note about the launch\"), never to look around; what they return is the user's private data, so put into files, commits or commands only what the task needs.";
 
+/// **A run offered its workspace's dev servers** (`preview_*`): a Code
+/// chat's own session (it reads Yap's data) with a folder and the pages
+/// beside the chat. Pure.
+pub(super) fn servers_offered(spec: &RunSpec) -> bool {
+    spec.tools == Tools::Agent && spec.reads && spec.folder.is_some() && spec.eyes.pictures != crate::chat::pictures::Gate::Off
+}
+
 fn instructions(spec: &RunSpec) -> String {
     let mut base = CHAT_INSTRUCTIONS.replace("{memory}", if spec.memory { MEMORY_PART } else { "" });
     if spec.connectors.is_some() {
@@ -175,7 +182,12 @@ fn instructions(spec: &RunSpec) -> String {
     match spec.tools {
         Tools::Chat if spec.agents => format!("{} {AGENT_INSTRUCTIONS}", chat()),
         Tools::Chat => chat(),
-        Tools::Agent if spec.reads => [AGENT_RUN_INSTRUCTIONS, READS_INSTRUCTIONS].into_iter().chain(agent_eyes_lines(spec.eyes, spec.approval.as_ref().is_some_and(|a| a.unattended))).collect::<Vec<_>>().join(" "),
+        Tools::Agent if spec.reads => [AGENT_RUN_INSTRUCTIONS, READS_INSTRUCTIONS]
+            .into_iter()
+            .chain(agent_eyes_lines(spec.eyes, spec.approval.as_ref().is_some_and(|a| a.unattended)))
+            .chain(servers_offered(spec).then_some(crate::chat::pages::preview::INSTRUCTIONS))
+            .collect::<Vec<_>>()
+            .join(" "),
         Tools::Agent => AGENT_RUN_INSTRUCTIONS.to_string(),
     }
 }
@@ -254,6 +266,10 @@ pub fn tools(ep: &Endpoint, spec: &RunSpec) -> Vec<Value> {
             out.extend(crate::integrations::mcp::tools(false).iter().filter_map(|t| serde_json::to_value(t).ok()));
             out.extend(own_chat_tools(ep.reads.calendar_connected(), false));
             out.extend(eyes::definitions(spec.eyes));
+            // Its workspace's dev servers (14 Nov 2026, as the Claude Code app's preview): with the pages.
+            if servers_offered(spec) {
+                out.extend(eyes::preview_definitions());
+            }
             out
         }
         Tools::Agent => vec![approve::definition()],
@@ -315,7 +331,9 @@ fn call(ep: &Endpoint, run: &Run, id: Value, params: &Value) -> Value {
         return ok(id, connectors::call(run, name, &args, &rpc));
     }
     // Only the run's own tools; `create_note` is never one (read only).
-    if !tool_names(run.spec.tools, true, run.spec.agents, run.spec.memory, run.spec.eyes, run.spec.reads).contains(&name) {
+    // (Its workspace's dev servers, where it lists them: `servers_offered`.)
+    let preview = servers_offered(&run.spec) && crate::chat::pages::preview::NAMES.contains(&name);
+    if !preview && !tool_names(run.spec.tools, true, run.spec.agents, run.spec.memory, run.spec.eyes, run.spec.reads).contains(&name) {
         return error(id, INVALID_PARAMS, &format!("Unknown tool: {name}"));
     }
     let started = std::time::Instant::now();

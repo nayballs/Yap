@@ -1032,7 +1032,7 @@ test('a price with no search service: said plainly; “Search beside the chat”
   await expect
     .poll(async () => (await opened(yap)).filter((u) => u.startsWith('https://duckduckgo.com/?q=Driftwood+Pro+subscription+price')).length)
     .toBe(1);
-  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
   const quiet = fakeWeb.requests.length;
   // Kept with the answer, and back when the conversation is reopened.
   await expectStore(yap, 'chats.json', (s) => {

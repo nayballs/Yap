@@ -325,6 +325,23 @@ const DEV_TOOLS = [
   result(DEVVED, 0.01),
   { _wait_user: true },
 ];
+const PREVIEWED = 'The garden server ran; it shows 3 beds.';
+/** A Code chat's dev servers, as the Claude Code app's preview tools (.claude/launch.json): listed, started (its
+ * page beside the chat), read, its output, stopped — by name. */
+const DEV_SERVER = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  { _mcp: { list: true, dump: TOOLS } },
+  ...call(31, 'preview_list', {}),
+  ...call(32, 'preview_start', { name: 'garden' }),
+  ...call(33, 'browser_read', {}),
+  ...call(34, 'preview_logs', { name: 'garden' }),
+  ...call(35, 'preview_stop', { name: 'garden' }),
+  said('s99', [{ type: 'text', text: PREVIEWED }], 'end_turn'),
+  result(PREVIEWED, 0.01),
+  { _wait_user: true },
+];
 const LOOKED = 'Those are two monitors, both blank.';
 /** The chat's own Claude looks at the screen when asked (Yap's look_at_screen). */
 const LOOKS_AT_THE_SCREEN = [
@@ -455,6 +472,16 @@ async function dropPicture(yap, main, name, colour, count = 1) {
   fs.writeFileSync(file, writePng(96, 60, colour));
   await yap.invoke('e2e_drag_drop', { paths: [file] });
   await expect(attachments(main).locator('.shotchip')).toHaveCount(count);
+}
+/** The garden workspace's dev server (.claude/launch.json): a tiny node server, its page "Garden planner (dev)" (.cjs: the
+ * repo's package.json makes .js files modules). */
+function gardenServer(port) {
+  fs.mkdirSync(path.join(GARDEN, '.claude'), { recursive: true });
+  fs.writeFileSync(
+    path.join(GARDEN, 'server.cjs'),
+    "const p=+process.env.PORT;require('http').createServer((q,r)=>{r.setHeader('content-type','text/html');r.end('<!doctype html><title>Garden planner (dev)</title><h1>Garden planner</h1><p>Beds: 3</p>');}).listen(p,'127.0.0.1',()=>console.log('garden server on '+p));",
+  );
+  fs.writeFileSync(path.join(GARDEN, '.claude', 'launch.json'), JSON.stringify({ version: '0.0.1', configurations: [{ name: 'garden', program: 'server.cjs', port }] }, null, 2) + '\n');
 }
 async function codeChat(main) {
   await openView(main, 'Chat');
@@ -930,7 +957,7 @@ test('its session opens pages in Yap’s browser beside the chat, as Claude Code
   expect(messages[2].pages?.map((p) => p.url)).toEqual([FORT_JOY_URL]);
   expect((await agents(yap)).find((j) => j.id === agent.id).turnList[0].beside?.pages?.length).toBe(1);
   await shot(main, '70-a-page-opened-beside-the-chat');
-  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 test('its session acts on the page as Claude Code’s own browser does: a collapsed section clicked open, a tab switched; buying asks first, in the thread', async ({ yap, main, shot }) => {
@@ -978,7 +1005,7 @@ test('its session acts on the page as Claude Code’s own browser does: a collap
   const messages = await messagesOf(yap, done.conversation, 3);
   expect(messages[2].text).toBe(CLICKED);
   await expect(card).toHaveAttribute('data-state', /refused|timedOut/);
-  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 // The maintainer, 14 Nov 2026: the buy card "must not appear in bypass permissions" (Claude asks in the chat instead: its instructions, rpc.rs).
@@ -1045,7 +1072,77 @@ test('its session has Claude Code’s developer tools: the console, the network 
   expect(of('browser_find', 1)).toMatch(/\[\d+\] tablist/);
   const log = (await yap.invoke('agent_get', { id: agent.id })).log;
   expect(log.some((e) => e.step === "Reading the page's console beside the chat")).toBe(true);
-  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
+});
+
+test('the Dev servers menu starts the workspace’s server from .claude/launch.json and opens its page; ■ stops it; Add server writes one', async ({ yap, main, shot }) => {
+  test.setTimeout(120_000);
+  gardenServer(43_517);
+  await setConfig(yap, main, { webSearch: true });
+  await codeChat(main);
+  // The browser (the title bar's button): a new tab offering the workspace's servers, as Claude Code's app does.
+  await main.getByRole('button', { name: 'Browser', exact: true }).click();
+  await expect(main.getByTestId('chat-page-new-servers').getByRole('button', { name: /garden/ })).toContainText(':43517');
+  // The page's buttons in the panel's tab row, as the app has them; the address bar has its row to itself.
+  await expect(main.getByTestId('chat-page-actions').getByTestId('chat-dev-servers')).toBeVisible();
+  await expect(main.getByTestId('chat-page').getByTestId('chat-page-shot')).toHaveCount(0);
+  await main.getByTestId('chat-dev-servers').click();
+  const row = main.getByTestId('chat-dev-server').filter({ hasText: 'garden' });
+  await expect(row).toHaveAttribute('data-state', 'stopped');
+  await shot(main, '80-dev-servers-menu');
+  await row.getByTestId('chat-dev-server-start').click();
+  // Its page beside the chat, from this PC (the one exception to "never this PC": a server running now).
+  await expect(main.getByTestId('chat-page-address')).toHaveValue(/^http:\/\/localhost:\d+\/$/, { timeout: 30_000 });
+  await expect(main.getByTestId('chat-panel-tab').last()).toHaveText('Garden planner (dev)', { timeout: 20_000 });
+  await shot(main, '81-dev-server-page');
+  // Running: said so in the menu; ■ stops it.
+  await main.getByTestId('chat-dev-servers').click();
+  await expect(row).toHaveAttribute('data-state', 'ready');
+  await row.getByTestId('chat-dev-server-stop').click();
+  await expect(row).toHaveAttribute('data-state', 'stopped', { timeout: 15_000 });
+  // Add server: written to launch.json, as the Claude Code app reads it.
+  await main.getByTestId('chat-dev-server-add').click();
+  const form = main.getByTestId('chat-dev-server-add-form');
+  await form.getByLabel('Name').fill('docs');
+  await form.getByLabel('Command').fill('npm run docs -- --port 4400');
+  await form.getByLabel('Port').fill('4400');
+  await form.getByRole('button', { name: 'Add' }).click();
+  await expect(main.getByTestId('chat-dev-server').filter({ hasText: 'docs' })).toBeVisible();
+  const launch = JSON.parse(fs.readFileSync(path.join(GARDEN, '.claude', 'launch.json'), 'utf8'));
+  expect(launch.configurations.map((c) => c.name)).toEqual(['garden', 'docs']);
+  expect(launch.configurations[1]).toEqual({ name: 'docs', runtimeExecutable: 'npm', runtimeArgs: ['run', 'docs', '--', '--port', '4400'], port: 4400 });
+});
+
+test('its session has the workspace’s dev servers, as the Claude Code app’s preview tools: started by name, its page beside the chat, its output, stopped', async ({ yap, main }) => {
+  test.setTimeout(120_000);
+  fs.rmSync(TOOLS, { force: true });
+  gardenServer(43_518);
+  await setConfig(yap, main, { webSearch: true });
+  await script(yap, DEV_SERVER, 'dev-server');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Start the dev server and tell me how many beds it shows.');
+  const agent = await newAgent(yap, before);
+  await ended(yap, agent.id, 90_000);
+  const dumps = toolDumps();
+  const text = (d) => (d?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join(' ');
+  const of = (tool, i = 0) => text(dumps.filter((d) => d.tool === tool)[i]);
+  expect(dumps[0].tools.map((t) => t.name)).toEqual(expect.arrayContaining(['preview_start', 'preview_list', 'preview_stop', 'preview_logs']));
+  expect(of('preview_list')).toContain('"name":"garden"');
+  expect(of('preview_start')).toContain('Started ‘garden’ on port 43518');
+  expect(of('preview_start')).toContain('"url":"http://localhost:43518/"');
+  // The tab it opened in, by its number (as the browser tools take it).
+  expect(of('preview_start')).toMatch(/"tab":\d+/);
+  // Its page, read beside the chat.
+  expect(of('browser_read')).toContain('Beds: 3');
+  expect(of('preview_logs')).toContain('garden server on 43518');
+  expect(of('preview_stop')).toContain('Stopped ‘garden’');
+  expect(of('preview_stop')).toContain('"state":"stopped"');
+  expect(dumps.filter((d) => d.tool.startsWith('preview_')).map((d) => [d.tool, d.isError])).toEqual([['preview_list', false], ['preview_start', false], ['preview_logs', false], ['preview_stop', false]]);
+  // Its lines in the work, in words.
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  expect(log.some((e) => e.step === 'Starting the dev server ‘garden’')).toBe(true);
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 test('in Bypass permissions acting on a page asks nothing: no card, the click goes ahead', async ({ yap, main }) => {
@@ -1066,7 +1163,7 @@ test('in Bypass permissions acting on a page asks nothing: no card, the click go
   expect(text(toolDumps().find((d) => d.tool === 'browser_read'))).toContain('Bought');
   await expect(thread(main).getByTestId('chat-page-confirm')).toHaveCount(0);
   await expect(main.getByTestId('chat-page').getByText('Allow once')).toHaveCount(0);
-  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 test('its session looks at the screen when asked, as Chat’s own does: the screenshots with the message, the pictures to Claude Code', async ({ yap, main, shot }) => {
@@ -1118,7 +1215,7 @@ test('its session isn’t held to Chat’s per-turn counts: more than 12 page sh
   expect(shots).toHaveLength(SHOTS);
   expect(shots.filter((d) => d.isError)).toEqual([]);
   expect(shots.every((d) => d.content.some((b) => b.type === 'image'))).toBe(true);
-  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 test('its session reads Yap’s own data on request: meetings, notes, tasks and the calendar, never its memory', async ({ yap, main }) => {

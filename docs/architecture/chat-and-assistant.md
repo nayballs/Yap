@@ -2707,7 +2707,10 @@ of sight. What they share is said once, in the line.
   this PC or its network — an IP address in a loopback, private,
   link-local, unique-local, shared or other non-public range however it's
   written, `127.0.0.2`, `[::ffff:7f00:1]`, `2130706433`, or a local name,
-  `localhost`, `*.localhost`, `*.local`, one with no dot — gets a 403. **Not
+  `localhost`, `*.localhost`, `*.local`, one with no dot — gets a 403 (one
+  exception since 14 Nov 2026: a Code chat's dev server running now, its
+  own loopback origin and nothing else of this PC, `agents/servers.rs`
+  `running_origin`; yap-code.md, "Dev servers"). **Not
   caught**: a public name that resolves to such an address, DNS
   rebinding, and a WebSocket — WebView2 never shows Yap one's request;
   both checked in a test run, 2 Nov 2026 — so Yap's own helpers on this PC
