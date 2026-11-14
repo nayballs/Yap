@@ -169,7 +169,7 @@ async function send(main, text) {
 async function freshChat(main) {
   await openView(main, 'Chat');
   // (A page left open by an earlier test: the panel closed, so the chat list shows.)
-  const closePanel = main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' });
+  const closePanel = main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' });
   if (await closePanel.count()) await closePanel.click();
   const cfg = await main.evaluate(() => window.__TAURI_INTERNALS__.invoke('get_config'));
   if (cfg?.agentsEnabled) await toSide(main, 'Chat');

@@ -806,7 +806,7 @@ test('look_at_screen: a model that reads images sees every monitor, Yap left out
   });
   // (A page left open by the last test: the panel closed, so the chat list shows.)
   await openView(main, 'Chat');
-  const closePanel = main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' });
+  const closePanel = main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' });
   if (await closePanel.count()) await closePanel.click();
   const from = fakeLlm.requests.length;
   fakeLlm.scriptChat([{ tools: [{ name: 'look_at_screen', args: {} }] }, { content: 'Those are the speakers on your other monitor: a 3.5mm input.' }]);
@@ -832,7 +832,7 @@ test('asked out loud with Chat in view: Yap opens the page itself and the model 
   await setConfig(yap, main, { ...chatConfig(fakeLlm), assistantScreen: true, llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-vision-chat' } } });
   await yap.invoke('e2e_snip', { monitors: [{ x: 0, y: 0, width: 1280, height: 720, scale: 1, hdr: false, whiteNits: 80 }], windows: [], start: false });
   await openView(main, 'Chat');
-  const closePanel = main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' });
+  const closePanel = main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' });
   if (await closePanel.count()) await closePanel.click();
   await main.getByRole('button', { name: 'New chat' }).first().click();
   const from = fakeLlm.requests.length;
@@ -894,7 +894,7 @@ test('look_at_screen sees the page open beside the chat too, as its own picture 
   expect(texts).toContain('The page open beside the chat (wiki.example.com), as it is now.');
   // Both shown with the question, in the screenshot frame.
   await expect(main.getByRole('group', { name: 'Screenshots' }).last().getByRole('button', { name: /^Screenshot,/ })).toHaveCount(2);
-  const closePanel = main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' });
+  const closePanel = main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' });
   if (await closePanel.count()) await closePanel.click();
 });
 
@@ -985,6 +985,6 @@ test('a desktop width: the tab laid out 1280 px wide, read and seen as the deskt
   await expect.poll(() => here('document.getElementById("layout").textContent'), { timeout: 10_000 }).toBe('Narrow layout');
   expect(await here('innerWidth')).toBeLessThan(900);
   expect((await views(yap)).find((v) => v.key === key)).toMatchObject({ width: null, zoom: 1 });
-  const closePanel = main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' });
+  const closePanel = main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' });
   if (await closePanel.count()) await closePanel.click();
 });

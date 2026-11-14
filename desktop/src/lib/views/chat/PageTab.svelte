@@ -12,14 +12,19 @@
   // - Its bar, after Claude Code's browser pane (2026-11-01): Back, Forward,
   //   Reload, the address (where the page is now; type an address or words
   //   and Enter: `page_view_go`, a search on the person's engine — Ctrl+L
-  //   in the panel, Esc puts it back; "Not secure" on a plain-http page),
-  //   then Save a shot (a picture of it, kept with the answer:
-  //   `page_view_shot`), Open in <browser> (`open_external`, the browser
-  //   Settings → General → Links chose), expand, ✕.
+  //   in the panel, Esc puts it back; "Not secure" on a plain-http page,
+  //   never a localhost one) across the whole row. Its buttons — a Code
+  //   chat's Dev servers (ServersMenu.svelte), Save a shot (a picture of it,
+  //   kept with the answer: `page_view_shot`), Open in <browser>
+  //   (`open_external`, the browser Settings → General → Links chose),
+  //   expand, ✕ — sit in the panel's tab row after its + (`actions`, drawn
+  //   by DocPanel.svelte's `rowActions`), as Claude Code's app has them
+  //   (14 Nov 2026, the maintainer's screenshot of it).
   // - A new tab (the row's +, Ctrl+T: chatDoc.svelte.js `newPage`) has no
-  //   page yet: the address waits, over the pages this chat read (`recent`,
-  //   as Claude Code's offers the project's servers); its webview is made
-  //   once there's somewhere to go.
+  //   page yet: the address waits, over a Code chat's dev servers (▶ starts
+  //   one and opens it here; a running one opens) and the pages this chat
+  //   read (`recent`), as Claude Code's offers the project's servers; its
+  //   webview is made once there's somewhere to go.
   // - While Chat acts on the page (chat/pages/act.rs: clicks, typing), a
   //   strip under the bar says "Yap is using this page", with Stop (the
   //   turn's ■: chatDoc.svelte.js `acting`), until the turn ends. When Yap
@@ -37,7 +42,7 @@
   //   menu, Rust's), and Snip to Chat.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import { onMount, tick, untrack } from 'svelte';
+  import { getContext, onMount, tick, untrack } from 'svelte';
   import { openExternalLink } from '../../core/externalLinks.js';
   import { toast } from '../../ui/toast.svelte.js';
   import { useBrowserName, openInLabel } from '../../stores/browserName.svelte.js';
@@ -57,6 +62,50 @@
   const page = untrack(() => doc.page);
   const key = tabKeyOf(page);
   const browser = useBrowserName();
+
+  // Its buttons — the Dev servers, Save a shot, Open in your browser, expand, close — in the panel's tab row,
+  // after its + (14 Nov 2026; the maintainer, from the Claude Code app's browser pane: "this is where they put
+  // their buttons"), so the address bar has the row below to itself (DocPanel.svelte `rowActions`).
+  const rowActions = getContext('yap-doc-row-actions');
+  onMount(() => {
+    rowActions?.set(actions);
+    return () => rowActions?.clear(actions);
+  });
+
+  // A Code chat's dev servers on a new tab (as Claude Code's app lists them there): what launch.json has.
+  let servers = $state([]);
+  let starting = $state('');
+  let serverError = $state('');
+  async function loadServers() {
+    if (!workspace || !blank) return;
+    try {
+      servers = (await invoke('dev_servers', { workspace }))?.configs ?? [];
+    } catch {
+      servers = [];
+    }
+  }
+  async function startServer(c) {
+    starting = c.name;
+    serverError = '';
+    try {
+      const info = await invoke('dev_server_start', { workspace, name: c.name });
+      await go(info.url);
+    } catch (e) {
+      serverError = String(e);
+    } finally {
+      starting = '';
+    }
+  }
+  onMount(() => {
+    loadServers();
+    let un = null;
+    let on = true;
+    listen('yap-dev-servers', () => loadServers()).then((u) => (on ? (un = u) : u()));
+    return () => {
+      on = false;
+      un?.();
+    };
+  });
 
   // What Rust says the page is doing (`yap-page-view`).
   // `width`: the desktop width Chat laid the page out at (chat/pages.rs
@@ -281,6 +330,37 @@
   const openOutside = () => openExternalLink(here);
 </script>
 
+{#snippet actions()}
+    {#if workspace}
+      <!-- A Code chat's dev servers (.claude/launch.json): its page opens here when this tab has none, else in a new tab. -->
+      <ServersMenu {workspace} onopen={(url, name) => (blank ? go(url) : doc.showPage({ url, title: name }))} />
+    {/if}
+    <button type="button" class="pagebtn" onclick={saveShot} disabled={blank || shooting || !!failed} aria-label="Save a shot of the page" title="Save a shot (a picture of the page as it is)" data-testid="chat-page-shot">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
+    </button>
+    <button type="button" class="pagebtn" onclick={openOutside} disabled={blank} aria-label={openInLabel(browser.label)} title={`${openInLabel(browser.label)}\n${here}`}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5H5V6h5" /></svg>
+    </button>
+    {#if !narrow}
+      <button
+        type="button"
+        class="pagebtn"
+        onclick={() => (doc.expanded = !doc.expanded)}
+        aria-label={doc.expanded ? 'Back beside the chat' : 'Expand to full width'}
+        title={doc.expanded ? 'Back beside the chat' : 'Expand to full width'}
+      >
+        {#if doc.expanded}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /></svg>
+        {:else}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
+        {/if}
+      </button>
+    {/if}
+    <button type="button" class="pagebtn" onclick={() => doc.close()} aria-label="Close the panel" title="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+    </button>
+{/snippet}
+
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <section class="pagetab" aria-label={blank ? 'New tab' : `Page: ${title}`} data-testid="chat-page" onkeydown={tabKey}>
   <h2 class="sr-title" data-testid="chat-page-title">{blank ? 'New tab' : title}</h2>
@@ -327,36 +407,10 @@
         </button>
       </span>
     {/if}
-    <div class="pageactions">
-      {#if workspace}
-        <!-- A Code chat's dev servers (.claude/launch.json): its page opens here when this tab has none, else in a new tab. -->
-        <ServersMenu {workspace} onopen={(url, name) => (blank ? go(url) : doc.showPage({ url, title: name }))} />
-      {/if}
-      <button type="button" class="pagebtn" onclick={saveShot} disabled={blank || shooting || !!failed} aria-label="Save a shot of the page" title="Save a shot (a picture of the page as it is)" data-testid="chat-page-shot">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
-      </button>
-      <button type="button" class="pagebtn" onclick={openOutside} disabled={blank} aria-label={openInLabel(browser.label)} title={`${openInLabel(browser.label)}\n${here}`}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5H5V6h5" /></svg>
-      </button>
-      {#if !narrow}
-        <button
-          type="button"
-          class="pagebtn"
-          onclick={() => (doc.expanded = !doc.expanded)}
-          aria-label={doc.expanded ? 'Back beside the chat' : 'Expand to full width'}
-          title={doc.expanded ? 'Back beside the chat' : 'Expand to full width'}
-        >
-          {#if doc.expanded}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /></svg>
-          {:else}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
-          {/if}
-        </button>
-      {/if}
-      <button type="button" class="pagebtn" onclick={() => doc.close()} aria-label="Close the panel" title="Close">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
-      </button>
-    </div>
+    {#if !rowActions}
+      <!-- (Outside the panel's tab row: here, as before.) -->
+      <div class="pageactions">{@render actions()}</div>
+    {/if}
   </header>
   {#if addrError}
     <p class="addrerror" role="alert" data-testid="chat-page-address-error">{addrError}</p>
@@ -406,6 +460,26 @@
   <div class="stage" class:blank bind:this={stageEl} role="region" aria-label={blank ? 'New tab' : `The page: ${title}`} data-testid="chat-page-stage">
     {#if blank}
       <div class="newtab" data-testid="chat-page-new">
+        {#if workspace && servers.length}
+          <!-- A Code chat's dev servers (.claude/launch.json), as Claude Code's app offers them on a new tab: ▶ starts
+               one and opens it here; a running one opens. -->
+          <ul class="ntlist" aria-label="Dev servers" data-testid="chat-page-new-servers">
+            {#each servers as c (c.name)}
+              {@const on = c.server && (c.server.state === 'ready' || c.server.state === 'starting')}
+              <li class="ntserver">
+                <button type="button" class="ntrow" onclick={() => (on ? go(c.server.url) : startServer(c))} disabled={starting === c.name} title={on ? c.server.url : `Start: ${c.line}`}>
+                  <svg class="nticon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="7" rx="1.5" /><rect x="4" y="13" width="16" height="7" rx="1.5" /><path d="M8 7.5h.01M8 16.5h.01" /></svg>
+                  <span class="nttitle">{c.name}</span>
+                  <span class="ntsite">:{on ? c.server.port : c.port}</span>
+                  <span class="ntplay" class:on aria-hidden="true">
+                    {#if starting === c.name}…{:else if on}<svg viewBox="0 0 24 24"><path d="M5 12h12M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>{:else}<svg viewBox="0 0 24 24"><path d="M8 6l10 6-10 6z" fill="currentColor" /></svg>{/if}
+                  </span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+          {#if serverError}<p class="addrerror" role="alert">{serverError}</p>{/if}
+        {/if}
         {#if recent.length}
           <ul class="ntlist" aria-label="Pages from this chat">
             {#each recent as r (r.url)}
@@ -420,7 +494,11 @@
           </ul>
         {/if}
         <p class="nthint">
-          Search the web or type an address.<br />Pages open here, apart from your own browser and its sign-ins.
+          {#if workspace}
+            Run a server to preview your app, or search the web and type an address.<br />Edit the servers in .claude/launch.json (or Dev servers, above).
+          {:else}
+            Search the web or type an address.<br />Pages open here, apart from your own browser and its sign-ins.
+          {/if}
         </p>
       </div>
     {:else if failed}
@@ -710,6 +788,24 @@
   .actstop:focus-visible {
     outline: 2px solid var(--yap-focus-ring);
     outline-offset: 1px;
+  }
+  .ntplay {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--yap-r);
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
+  }
+  .ntplay.on {
+    color: var(--yap-success-text);
+  }
+  .ntplay svg {
+    width: 14px;
+    height: 14px;
   }
   .pageactions {
     flex: 0 0 auto;

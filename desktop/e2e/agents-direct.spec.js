@@ -957,7 +957,7 @@ test('its session opens pages in Yap’s browser beside the chat, as Claude Code
   expect(messages[2].pages?.map((p) => p.url)).toEqual([FORT_JOY_URL]);
   expect((await agents(yap)).find((j) => j.id === agent.id).turnList[0].beside?.pages?.length).toBe(1);
   await shot(main, '70-a-page-opened-beside-the-chat');
-  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 test('its session acts on the page as Claude Code’s own browser does: a collapsed section clicked open, a tab switched; buying asks first, in the thread', async ({ yap, main, shot }) => {
@@ -1005,7 +1005,7 @@ test('its session acts on the page as Claude Code’s own browser does: a collap
   const messages = await messagesOf(yap, done.conversation, 3);
   expect(messages[2].text).toBe(CLICKED);
   await expect(card).toHaveAttribute('data-state', /refused|timedOut/);
-  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 // The maintainer, 14 Nov 2026: the buy card "must not appear in bypass permissions" (Claude asks in the chat instead: its instructions, rpc.rs).
@@ -1072,7 +1072,7 @@ test('its session has Claude Code’s developer tools: the console, the network 
   expect(of('browser_find', 1)).toMatch(/\[\d+\] tablist/);
   const log = (await yap.invoke('agent_get', { id: agent.id })).log;
   expect(log.some((e) => e.step === "Reading the page's console beside the chat")).toBe(true);
-  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 test('the Dev servers menu starts the workspace’s server from .claude/launch.json and opens its page; ■ stops it; Add server writes one', async ({ yap, main, shot }) => {
@@ -1080,8 +1080,12 @@ test('the Dev servers menu starts the workspace’s server from .claude/launch.j
   gardenServer(43_517);
   await setConfig(yap, main, { webSearch: true });
   await codeChat(main);
-  // The browser (the title bar's button): a new tab, its bar with the Dev servers button (a Code chat's).
+  // The browser (the title bar's button): a new tab offering the workspace's servers, as Claude Code's app does.
   await main.getByRole('button', { name: 'Browser', exact: true }).click();
+  await expect(main.getByTestId('chat-page-new-servers').getByRole('button', { name: /garden/ })).toContainText(':43517');
+  // The page's buttons in the panel's tab row, as the app has them; the address bar has its row to itself.
+  await expect(main.getByTestId('chat-page-actions').getByTestId('chat-dev-servers')).toBeVisible();
+  await expect(main.getByTestId('chat-page').getByTestId('chat-page-shot')).toHaveCount(0);
   await main.getByTestId('chat-dev-servers').click();
   const row = main.getByTestId('chat-dev-server').filter({ hasText: 'garden' });
   await expect(row).toHaveAttribute('data-state', 'stopped');
@@ -1138,7 +1142,7 @@ test('its session has the workspace’s dev servers, as the Claude Code app’s 
   // Its lines in the work, in words.
   const log = (await yap.invoke('agent_get', { id: agent.id })).log;
   expect(log.some((e) => e.step === 'Starting the dev server ‘garden’')).toBe(true);
-  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 test('in Bypass permissions acting on a page asks nothing: no card, the click goes ahead', async ({ yap, main }) => {
@@ -1159,7 +1163,7 @@ test('in Bypass permissions acting on a page asks nothing: no card, the click go
   expect(text(toolDumps().find((d) => d.tool === 'browser_read'))).toContain('Bought');
   await expect(thread(main).getByTestId('chat-page-confirm')).toHaveCount(0);
   await expect(main.getByTestId('chat-page').getByText('Allow once')).toHaveCount(0);
-  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 test('its session looks at the screen when asked, as Chat’s own does: the screenshots with the message, the pictures to Claude Code', async ({ yap, main, shot }) => {
@@ -1211,7 +1215,7 @@ test('its session isn’t held to Chat’s per-turn counts: more than 12 page sh
   expect(shots).toHaveLength(SHOTS);
   expect(shots.filter((d) => d.isError)).toEqual([]);
   expect(shots.every((d) => d.content.some((b) => b.type === 'image'))).toBe(true);
-  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 test('its session reads Yap’s own data on request: meetings, notes, tasks and the calendar, never its memory', async ({ yap, main }) => {

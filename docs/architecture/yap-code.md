@@ -567,7 +567,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
   - the address bar (`localhost:5173` opens it);
   - Claude's own navigation (`pages::checked`).
   Never another port of this PC, and never once it stops. "Not secure" isn't shown for a localhost page, as browsers count it a secure context.
-- **The Dev servers menu** (`ServersMenu.svelte`, in the page tab's bar of a Code chat; the browser opens with Ctrl+Shift+B):
+- **The Dev servers menu** (`ServersMenu.svelte`, in the panel's tab row with the page's other buttons, after its +, as the Claude Code app has them; the browser opens with Ctrl+Shift+B, and a new tab lists the servers too, each with ▶):
   - each server with its state (a dot) and ▶ start / ■ stop;
   - a running one's name opens its page;
   - Stop all;
