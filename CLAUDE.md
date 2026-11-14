@@ -190,7 +190,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `chat/shares.rs` — `share_files`: files shared into the conversation (a picture inline, other files as cards to open), an agent's report showing its turn's pictures.
 
 **Snip to Chat** — [snip.md](./docs/architecture/snip.md)
-- `snip.rs` — drag a box over any screen into Chat; never sent by itself; the `yapsnip` scheme.
+- `snip.rs` — drag a box over any screen into Chat (Shift as you let go keeps it and snips another; Ctrl copies, Ctrl+S saves); never sent by itself; the `yapsnip` scheme.
 - `snip/waiting.rs` — the screenshots waiting in Chat's box, kept in Rust.
 - `snip/capture.rs` / `snip/hdr.rs` — every monitor at once; HDR → sRGB.
 - `snip/overlay.rs` / `snip/geom.rs` / `snip/pick.rs` / `snip/copy_save.rs` — the native overlay, its pure maths, the windows to pick, copy and save.

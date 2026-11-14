@@ -33,10 +33,19 @@
 //!   picks windows while it's held. The window under the pointer is lit
 //!   with its frame; a click takes its visible area. Enter takes what's lit;
 //! - **Ctrl** held as you let go (or Ctrl+C while the box is up): **copy**
-//!   instead of Chat; **Shift** (or Ctrl+S): **save** — the box's label
-//!   says so as you hold them ("812 × 430 · Copy");
+//!   instead of Chat; **Ctrl+S**: **save** — the box's label says so as you
+//!   hold Ctrl ("812 × 430 · Copy");
+//! - **Shift** held as you let go (14 Nov 2026, the maintainer: "take
+//!   screenshot after screenshot… a keybind that lets the user take multiple
+//!   screenshots when snip is active"): **that one is kept and the overlay
+//!   stays up** for the next — lit, numbered — up to [`MAX_KEPT`]; letting
+//!   go without Shift, or Enter, sends them all to Chat together, in order.
+//!   Once one's kept the snip is Chat's: Ctrl and Ctrl+S do nothing more.
+//!   (Shift saved before; saving is Ctrl+S's alone now: Chat comes first.)
 //! - **Esc**, right-click or the snip shortcut again cancel; another app
-//!   taking the focus, or the monitors changing, cancel too.
+//!   taking the focus, or the monitors changing, cancel too — **with shots
+//!   kept, any of them sends those** ([`Select::ended`]): a snip taken is
+//!   never lost.
 //!
 //! All of it runs on its own UI thread (`snip-ui`) with a message loop; the
 //! rest of Yap talks to it through [`open`] / [`close`].
@@ -63,7 +72,7 @@ pub enum Action {
     Chat,
     /// Onto the clipboard (Ctrl held as you let go, Ctrl+C).
     Copy,
-    /// Saved as a PNG where you choose (Shift held, Ctrl+S).
+    /// Saved as a PNG where you choose (Ctrl+S).
     Save,
 }
 
@@ -82,8 +91,9 @@ pub enum Kind {
 /// How a snip ended.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outcome {
-    /// What was taken, in virtual-desktop physical pixels.
-    Snipped { rect: Rect, kind: Kind, action: Action },
+    /// What was taken, in virtual-desktop physical pixels: the last one, and
+    /// those kept before it (Shift held as you let go), in order — for Chat.
+    Snipped { rect: Rect, kind: Kind, action: Action, kept: Vec<(Rect, Kind)> },
     /// Esc, right-click, the shortcut again, another app, the monitors.
     Cancelled(&'static str),
 }
@@ -104,16 +114,19 @@ pub struct Options {
     pub windows: Vec<Rect>,
 }
 
-/// Ctrl held: copy; Shift held: save; neither: Chat. Pure.
-pub fn action_for(ctrl: bool, shift: bool) -> Action {
+/// Ctrl held: copy; else Chat (Shift keeps it and snips another:
+/// [`Select::released`]; Ctrl+S saves). Pure.
+pub fn action_for(ctrl: bool) -> Action {
     if ctrl {
         Action::Copy
-    } else if shift {
-        Action::Save
     } else {
         Action::Chat
     }
 }
+
+/// **The most shots one snip keeps** (Shift held as you let go): as many as a
+/// question carries (`images::MAX_PER_REQUEST`). The last one allowed ends it.
+pub const MAX_KEPT: usize = super::images::MAX_PER_REQUEST;
 
 /// A key the overlay acts on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,6 +152,9 @@ pub enum Step {
     Redraw,
     /// Picking windows went on or off: repaint, and show the hint again.
     Mode,
+    /// A shot kept (Shift held as you let go): it stays lit and numbered,
+    /// the hint says how many, the overlay waits for the next.
+    Kept,
     Done(Outcome),
 }
 
@@ -160,6 +176,8 @@ pub struct Select {
     pub alt: bool,
     pub ctrl: bool,
     pub shift: bool,
+    /// The shots kept so far (Shift held as you let go), in order.
+    pub kept: Vec<(Rect, Kind)>,
     drag: Option<(i32, i32)>,
     pointer: Option<(i32, i32)>,
     target: Option<(Rect, Kind)>,
@@ -251,38 +269,71 @@ impl Select {
     }
 
     /// The left button came up: a click takes the monitor (or the window
-    /// picked), a drag its box — or nothing, a box too thin to snip.
+    /// picked), a drag its box — or nothing, a box too thin to snip. With
+    /// Shift held it's kept, and the overlay waits for the next ([`Self::take`]).
     pub fn released(&mut self, at: (i32, i32), ctrl: bool, shift: bool) -> Step {
         let Some(start) = self.drag.take() else { return Step::Nothing };
         self.pointer = Some(at);
         self.ctrl = ctrl;
         self.shift = shift;
-        let action = action_for(ctrl, shift);
         if super::geom::is_click(start, at) {
             let (rect, kind) = match self.picking_windows().then(|| self.window_under(at)).flatten() {
                 Some(w) => (w, Kind::Window),
                 None => (self.monitor_under(at), Kind::Monitor),
             };
-            return Step::Done(Outcome::Snipped { rect, kind, action });
+            return self.take(rect, kind, ctrl, shift);
         }
         let rect = super::geom::drag_box_on(start, at, &self.desktop);
         if super::geom::big_enough(&rect) {
-            return Step::Done(Outcome::Snipped { rect, kind: Kind::Box, action });
+            return self.take(rect, Kind::Box, ctrl, shift);
         }
         // A twitch: nothing; the box goes.
         self.refresh();
         Step::Redraw
     }
 
+    /// **A shot taken**: with Shift held (and room for another), kept — the
+    /// overlay waits for the next; else the snip is done with it and every
+    /// one kept before it. Once one's kept the snip is Chat's (Ctrl does
+    /// nothing more).
+    fn take(&mut self, rect: Rect, kind: Kind, ctrl: bool, shift: bool) -> Step {
+        let chat_run = !self.kept.is_empty();
+        if shift && (chat_run || !ctrl) && self.kept.len() + 1 < MAX_KEPT {
+            self.kept.push((rect, kind));
+            self.refresh();
+            return Step::Kept;
+        }
+        let action = if chat_run { Action::Chat } else { action_for(ctrl) };
+        Step::Done(Outcome::Snipped { rect, kind, action, kept: std::mem::take(&mut self.kept) })
+    }
+
+    /// **The snip ends with what's kept** (Esc, Enter with nothing lit,
+    /// anything that would cancel it): those shots go to Chat — a snip taken
+    /// is never lost. Nothing kept: cancelled, `why`.
+    pub fn ended(&mut self, why: &'static str) -> Outcome {
+        match self.kept.pop() {
+            Some((rect, kind)) => Outcome::Snipped { rect, kind, action: Action::Chat, kept: std::mem::take(&mut self.kept) },
+            None => Outcome::Cancelled(why),
+        }
+    }
+
     /// A key.
     pub fn key(&mut self, key: Key) -> Step {
         let done = |s: &Select, action: Action| {
             let (rect, kind) = s.current();
-            Step::Done(Outcome::Snipped { rect, kind, action })
+            Step::Done(Outcome::Snipped { rect, kind, action, kept: Vec::new() })
         };
+        let chat_run = !self.kept.is_empty();
         match key {
-            Key::Escape => Step::Done(Outcome::Cancelled("escape")),
-            Key::Enter => done(self, action_for(self.ctrl, self.shift)),
+            Key::Escape => Step::Done(self.ended("escape")),
+            // Shots kept: what's lit joins them (nothing lit: just them), into Chat.
+            Key::Enter if chat_run => match self.target {
+                Some((rect, kind)) => self.take(rect, kind, false, false),
+                None => Step::Done(self.ended("enter")),
+            },
+            Key::Enter => done(self, action_for(self.ctrl)),
+            // (Shots kept: the snip is Chat's.)
+            Key::Copy | Key::Save if chat_run => Step::Nothing,
             Key::Copy => done(self, Action::Copy),
             Key::Save => done(self, Action::Save),
             Key::Space if self.dragging() => Step::Nothing,
@@ -312,14 +363,20 @@ impl Select {
 }
 
 /// The lit box's label: its size in physical pixels, and what letting go
-/// with Ctrl or Shift does — "812 × 430 · Ctrl copy · Shift save", or,
-/// while one's held, "812 × 430 · Copy". Pure.
-pub fn label_text(r: &Rect, ctrl: bool, shift: bool) -> String {
+/// with Ctrl or Shift does — "812 × 430 · Ctrl copy · Shift another", or,
+/// while one's held, "812 × 430 · Copy" / "812 × 430 · Another"; with
+/// `kept` shots, how many go to Chat as you let go ("812 × 430 · 3 to
+/// Chat"), or "Another" with Shift. Pure.
+pub fn label_text(r: &Rect, ctrl: bool, shift: bool, kept: usize) -> String {
     let size = size_text(r);
-    match action_for(ctrl, shift) {
-        Action::Copy => format!("{size}  \u{b7}  Copy"),
-        Action::Save => format!("{size}  \u{b7}  Save"),
-        Action::Chat => format!("{size}  \u{b7}  Ctrl copy  \u{b7}  Shift save"),
+    let room = kept + 1 < MAX_KEPT;
+    if kept > 0 {
+        return if shift && room { format!("{size}  \u{b7}  Another") } else { format!("{size}  \u{b7}  {} to Chat", kept + 1) };
+    }
+    match (ctrl, shift) {
+        (true, _) => format!("{size}  \u{b7}  Copy"),
+        (false, true) => format!("{size}  \u{b7}  Another"),
+        _ => format!("{size}  \u{b7}  Ctrl copy  \u{b7}  Shift another"),
     }
 }
 
@@ -329,6 +386,16 @@ pub fn hint_text(picking_windows: bool) -> &'static str {
         WINDOW_HINT
     } else {
         HINT
+    }
+}
+
+/// **The hint once shots are kept**: how many, and how to go on or finish —
+/// "2 taken  ·  Snip the next (Shift for more)  ·  Enter to finish". Pure.
+pub fn kept_hint(kept: usize) -> String {
+    if kept + 1 >= MAX_KEPT {
+        format!("{kept} taken  \u{b7}  Snip the last one  \u{b7}  Enter to finish")
+    } else {
+        format!("{kept} taken  \u{b7}  Snip the next (Shift for more)  \u{b7}  Enter to finish")
     }
 }
 
@@ -707,6 +774,10 @@ mod win {
         label: Option<(Rect, String, Pill)>,
         /// The hint and its alpha (255 → 0 as it fades).
         hint: Option<(Rect, Pill, u8)>,
+        /// The shots kept so far (Shift held as you let go), in this
+        /// window's own pixels, each lit with its edge — and its number's
+        /// pill on the screen holding most of it.
+        kept: Vec<(Rect, Option<(Rect, Pill)>)>,
     }
 
     struct Session {
@@ -780,7 +851,7 @@ mod win {
                 unsafe {
                     let _ = DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &off as *const i32 as *const _, 4);
                 }
-                wins.push(Win { hwnd, screen: None, bright: None, dim: None, scratch: None, sel: None, label: None, hint: None });
+                wins.push(Win { hwnd, screen: None, bright: None, dim: None, scratch: None, sel: None, label: None, hint: None, kept: Vec::new() });
             }
         });
     }
@@ -833,7 +904,7 @@ mod win {
     fn do_open(screens: Vec<Screen>, opts: Options, done: Done) -> Result<Shown, String> {
         let t0 = Instant::now();
         // A snip still up (shouldn't happen: snip.rs refuses one): ended.
-        finish(Outcome::Cancelled("replaced"));
+        end("replaced");
         ensure_windows(screens.len());
         let count = WINDOWS.with(|w| w.borrow().len());
         if count < screens.len() {
@@ -921,6 +992,15 @@ mod win {
         Ok(Shown { setup_ms, visible_ms: t0.elapsed().as_secs_f64() * 1000.0, focused })
     }
 
+    /// **The snip ends another way than its own** (Esc's window message,
+    /// right-click, Alt+F4, the shortcut again, another app, the monitors, the
+    /// time, a newer snip): the shots kept go to Chat ([`Select::ended`]);
+    /// none kept, cancelled.
+    fn end(why: &'static str) {
+        let outcome = SESSION.with(|s| s.borrow_mut().as_mut().map(|s| s.select.ended(why))).unwrap_or(Outcome::Cancelled(why));
+        finish(outcome);
+    }
+
     /// End the session: windows hidden and cloaked, bitmaps freed, `done` told.
     fn finish(outcome: Outcome) {
         let session = SESSION.with(|s| s.borrow_mut().take());
@@ -936,6 +1016,7 @@ mod win {
                 win.hint = None;
                 win.sel = None;
                 win.screen = None;
+                win.kept.clear();
             }
             wins.iter().map(|w| w.hwnd).collect()
         });
@@ -984,7 +1065,7 @@ mod win {
                     let shown = do_open(screens, opts, done);
                     let _ = reply.send(shown);
                 }
-                Job::Close(why) => finish(Outcome::Cancelled(why)),
+                Job::Close(why) => end(why),
                 #[cfg(debug_assertions)]
                 Job::Input(screen, msgs) => {
                     let hwnd = WINDOWS.with(|w| w.borrow().get(screen).map(|w| w.hwnd));
@@ -1073,12 +1154,12 @@ mod win {
                 let Some(scratch) = win.scratch.as_ref() else { continue };
                 unsafe {
                     let _ = BitBlt(scratch.dc, 0, 0, r.w, r.h, Some(dim.dc), r.x, r.y, SRCCOPY);
-                    if let Some(sel) = win.sel {
+                    // A box lit at full brightness, with the edge just outside it.
+                    let lit = |sel: Rect| {
                         let inside = sel.intersect(&r);
                         if !inside.is_empty() {
                             let _ = BitBlt(scratch.dc, inside.x - r.x, inside.y - r.y, inside.w, inside.h, Some(bright.dc), inside.x, inside.y, SRCCOPY);
                         }
-                        // The edge, just outside the box.
                         let e = edge_px(scale);
                         let brush = CreateSolidBrush(colorref(colours::EDGE));
                         let outer = sel.inflate(e);
@@ -1095,6 +1176,13 @@ mod win {
                             }
                         }
                         let _ = DeleteObject(brush.into());
+                    };
+                    // The shots kept so far, then the box being dragged.
+                    for (k, _) in &win.kept {
+                        lit(*k);
+                    }
+                    if let Some(sel) = win.sel {
+                        lit(sel);
                     }
                     let blend = |dst: &Dib, at: &Rect, src: &Dib, alpha: u8| {
                         let part = at.intersect(&r);
@@ -1104,6 +1192,12 @@ mod win {
                         let f = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: alpha, AlphaFormat: AC_SRC_ALPHA as u8 };
                         let _ = AlphaBlend(dst.dc, part.x - r.x, part.y - r.y, part.w, part.h, src.dc, part.x - at.x, part.y - at.y, part.w, part.h, f);
                     };
+                    // Each kept shot's number.
+                    for (_, number) in &win.kept {
+                        if let Some((at, p)) = number {
+                            blend(scratch, at, &p.dib, 255);
+                        }
+                    }
                     if let Some((at, _, p)) = &win.label {
                         blend(scratch, at, &p.dib, 255);
                     }
@@ -1147,14 +1241,14 @@ mod win {
     /// The selection changed: every screen's part of the lit box, the
     /// label on the screen holding most of it, what to repaint.
     fn redraw_all() {
-        let Some((target, ctrl, shift)) = SESSION.with(|s| s.borrow().as_ref().map(|s| (s.select.target(), s.select.ctrl, s.select.shift)))
+        let Some((target, ctrl, shift, kept)) = SESSION.with(|s| s.borrow().as_ref().map(|s| (s.select.target(), s.select.ctrl, s.select.shift, s.select.kept.len())))
         else {
             return;
         };
         let rect = target.map(|(r, _)| r);
         let places: Vec<Rect> = WINDOWS.with(|w| w.borrow().iter().map(|x| x.screen.as_ref().map(place_of).unwrap_or_default()).collect());
         let label_on = rect.and_then(|r| super::super::geom::main_monitor(&r, &places));
-        let text = rect.map(|r| label_text(&r, ctrl, shift));
+        let text = rect.map(|r| label_text(&r, ctrl, shift, kept));
         let dirty_rects: Vec<(HWND, Rect, Rect)> = WINDOWS.with(|w| {
             let mut wins = w.borrow_mut();
             let mut out = Vec::new();
@@ -1199,6 +1293,52 @@ mod win {
             invalidate(hwnd, &before);
             invalidate(hwnd, &after);
         }
+    }
+
+    /// **A shot was kept**: every window's part of the kept shots (lit, and
+    /// each one's number by its top left corner on the screen holding most
+    /// of it), repainted whole; the hint says how many.
+    fn sync_kept() {
+        let Some((kept, pointer, places_all)) = SESSION.with(|s| s.borrow().as_ref().map(|s| (s.select.kept.clone(), s.select.pointer(), s.select.places.clone()))) else {
+            return;
+        };
+        let places: Vec<Rect> = WINDOWS.with(|w| w.borrow().iter().map(|x| x.screen.as_ref().map(place_of).unwrap_or_default()).collect());
+        let hwnds: Vec<HWND> = WINDOWS.with(|w| {
+            let mut wins = w.borrow_mut();
+            let mut out = Vec::new();
+            for (i, win) in wins.iter_mut().enumerate() {
+                let Some((place, scale)) = win.screen.as_ref().map(|s| (place_of(s), s.monitor.scale)) else { continue };
+                win.kept = kept
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(n, (r, _))| {
+                        let local = Rect::new(r.x - place.x, r.y - place.y, r.w, r.h);
+                        if local.intersect(&Rect::new(0, 0, place.w, place.h)).is_empty() {
+                            return None;
+                        }
+                        let number = (super::super::geom::main_monitor(r, &places) == Some(i))
+                            .then(|| pill(&(n + 1).to_string(), scale, 13.0))
+                            .flatten()
+                            .map(|p| {
+                                let inset = super::super::geom::scaled(6.0, scale);
+                                let part = local.intersect(&Rect::new(0, 0, place.w, place.h));
+                                (Rect::new(part.x + inset, part.y + inset, p.dib.w, p.dib.h), p)
+                            });
+                        Some((local, number))
+                    })
+                    .collect();
+                out.push(win.hwnd);
+            }
+            out
+        });
+        for hwnd in hwnds {
+            unsafe {
+                let _ = InvalidateRect(Some(hwnd), None, false);
+            }
+        }
+        redraw_all();
+        let screen = super::super::geom::monitor_at(&places_all, pointer.0, pointer.1).unwrap_or(0);
+        show_hint(screen, &kept_hint(kept.len()));
     }
 
     fn hide_hint(hwnd: HWND) {
@@ -1263,6 +1403,7 @@ mod win {
                 }
                 set_cursor();
             }
+            Some(Step::Kept) => sync_kept(),
             Some(Step::Done(outcome)) => {
                 unsafe {
                     let _ = ReleaseCapture();
@@ -1339,7 +1480,7 @@ mod win {
             }
             WM_RBUTTONDOWN => LRESULT(0),
             WM_RBUTTONUP => {
-                finish(Outcome::Cancelled("right-click"));
+                end("right-click");
                 LRESULT(0)
             }
             WM_KEYDOWN | WM_KEYUP => {
@@ -1349,7 +1490,7 @@ mod win {
             // Alt (and keys pressed with it) come as system keys: handled
             // here, so Alt never opens a window menu. Alt+F4 cancels.
             WM_SYSKEYDOWN if wp.0 as u16 == VK_F4.0 => {
-                finish(Outcome::Cancelled("escape"));
+                end("escape");
                 LRESULT(0)
             }
             WM_SYSKEYDOWN | WM_SYSKEYUP => {
@@ -1360,19 +1501,19 @@ mod win {
             // Another app took the focus (Alt+Tab, a notification clicked).
             WM_ACTIVATEAPP if wp.0 == 0 => {
                 if !hidden_session() && index_of(hwnd).is_some() && is_open() {
-                    finish(Outcome::Cancelled("another app"));
+                    end("another app");
                 }
                 LRESULT(0)
             }
             WM_DISPLAYCHANGE => {
-                finish(Outcome::Cancelled("the monitors changed"));
+                end("the monitors changed");
                 LRESULT(0)
             }
             WM_TIMER if wp.0 == GIVE_UP_TIMER => {
                 unsafe {
                     let _ = KillTimer(Some(hwnd), GIVE_UP_TIMER);
                 }
-                finish(Outcome::Cancelled("timed out"));
+                end("timed out");
                 LRESULT(0)
             }
             WM_TIMER if wp.0 == HINT_TIMER => {
@@ -1443,12 +1584,18 @@ mod tests {
         assert_eq!(size_text(&Rect::new(4, 5, 812, 430)), "812 × 430");
         // …and what Ctrl or Shift does as you let go, or what it will do.
         let r = Rect::new(0, 0, 812, 430);
-        assert_eq!(label_text(&r, false, false), "812 × 430  ·  Ctrl copy  ·  Shift save");
-        assert_eq!(label_text(&r, true, false), "812 × 430  ·  Copy");
-        assert_eq!(label_text(&r, false, true), "812 × 430  ·  Save");
-        assert_eq!(label_text(&r, true, true), "812 × 430  ·  Copy", "Ctrl wins");
+        assert_eq!(label_text(&r, false, false, 0), "812 × 430  ·  Ctrl copy  ·  Shift another");
+        assert_eq!(label_text(&r, true, false, 0), "812 × 430  ·  Copy");
+        assert_eq!(label_text(&r, false, true, 0), "812 × 430  ·  Another");
+        assert_eq!(label_text(&r, true, true, 0), "812 × 430  ·  Copy", "Ctrl wins");
+        // With shots kept: how many go to Chat as you let go, or another with Shift (Ctrl does nothing more).
+        assert_eq!(label_text(&r, false, false, 2), "812 × 430  ·  3 to Chat");
+        assert_eq!(label_text(&r, true, true, 2), "812 × 430  ·  Another");
+        assert_eq!(label_text(&r, false, true, MAX_KEPT - 1), format!("812 × 430  ·  {MAX_KEPT} to Chat"), "the last one allowed");
         assert_eq!(hint_text(false), HINT);
         assert_eq!(hint_text(true), WINDOW_HINT);
+        assert_eq!(kept_hint(1), "1 taken  ·  Snip the next (Shift for more)  ·  Enter to finish");
+        assert_eq!(kept_hint(MAX_KEPT - 1), format!("{} taken  ·  Snip the last one  ·  Enter to finish", MAX_KEPT - 1));
     }
 
     /// The e2e suite's two fake monitors, and two windows on the first: a
@@ -1463,9 +1610,84 @@ mod tests {
 
     fn snipped(step: Step) -> (Rect, Kind, Action) {
         match step {
-            Step::Done(Outcome::Snipped { rect, kind, action }) => (rect, kind, action),
+            Step::Done(Outcome::Snipped { rect, kind, action, kept }) if kept.is_empty() => (rect, kind, action),
+            other => panic!("not one snip: {other:?}"),
+        }
+    }
+
+    /// A finished snip's shots, in order (those kept, then the last), and what for.
+    fn shots(step: Step) -> (Vec<Rect>, Action) {
+        match step {
+            Step::Done(Outcome::Snipped { rect, action, kept, .. }) => (kept.iter().map(|(r, _)| *r).chain(std::iter::once(rect)).collect(), action),
             other => panic!("not a snip: {other:?}"),
         }
+    }
+
+    /// A box dragged from `a` to `b` and let go, Shift held or not.
+    fn drag(s: &mut Select, a: (i32, i32), b: (i32, i32), shift: bool) -> Step {
+        s.pressed(a);
+        s.moved(b, false, shift);
+        s.released(b, false, shift)
+    }
+
+    #[test]
+    fn shift_as_you_let_go_keeps_it_and_snips_another_then_they_all_go_to_chat() {
+        // Shift: kept, the overlay waits; let go without it: done, every one in order, for Chat.
+        let mut s = select();
+        assert_eq!(drag(&mut s, (40, 40), (240, 140), true), Step::Kept);
+        assert_eq!(s.kept, [(Rect::new(40, 40, 200, 100), Kind::Box)]);
+        assert_eq!(s.target(), None, "the next box starts afresh");
+        // A click with Shift: the whole monitor, kept too (here the second one).
+        assert_eq!(drag(&mut s, (1500, 100), (1500, 100), true), Step::Kept);
+        assert_eq!(s.kept[1], (Rect::new(1280, 0, 960, 540), Kind::Monitor));
+        assert_eq!(shots(drag(&mut s, (300, 300), (500, 400), false)), (vec![Rect::new(40, 40, 200, 100), Rect::new(1280, 0, 960, 540), Rect::new(300, 300, 200, 100)], Action::Chat));
+        assert!(s.kept.is_empty());
+
+        // Once one's kept the snip is Chat's: Ctrl as you let go doesn't copy, Ctrl+C / Ctrl+S do nothing.
+        let mut s = select();
+        drag(&mut s, (40, 40), (240, 140), true);
+        s.pressed((300, 300));
+        s.moved((500, 400), true, false);
+        assert_eq!(s.key(Key::Copy), Step::Nothing);
+        assert_eq!(s.key(Key::Save), Step::Nothing);
+        assert_eq!(shots(s.released((500, 400), true, false)).1, Action::Chat);
+        // Ctrl and Shift together, nothing kept yet: Ctrl wins (a copy), as before.
+        let mut s = select();
+        s.pressed((40, 40));
+        assert_eq!(snipped(s.released((240, 140), true, true)).2, Action::Copy);
+
+        // Enter: what's lit joins them; nothing lit, just them. Esc, or any other end: the ones kept.
+        let mut s = select();
+        drag(&mut s, (40, 40), (240, 140), true);
+        s.pressed((300, 300));
+        s.moved((500, 400), false, false);
+        assert_eq!(shots(s.key(Key::Enter)).0.len(), 2);
+        let mut s = select();
+        drag(&mut s, (40, 40), (240, 140), true);
+        drag(&mut s, (300, 300), (500, 400), true);
+        assert_eq!(shots(s.key(Key::Enter)), (vec![Rect::new(40, 40, 200, 100), Rect::new(300, 300, 200, 100)], Action::Chat));
+        let mut s = select();
+        drag(&mut s, (40, 40), (240, 140), true);
+        assert_eq!(shots(s.key(Key::Escape)), (vec![Rect::new(40, 40, 200, 100)], Action::Chat));
+        let mut s = select();
+        drag(&mut s, (40, 40), (240, 140), true);
+        assert!(matches!(s.ended("another app"), Outcome::Snipped { action: Action::Chat, .. }));
+        // Nothing kept: those cancel, as ever.
+        assert_eq!(select().ended("another app"), Outcome::Cancelled("another app"));
+
+        // A twitch keeps nothing; the kept stay.
+        let mut s = select();
+        drag(&mut s, (40, 40), (240, 140), true);
+        assert_eq!(drag(&mut s, (300, 300), (302, 400), true), Step::Redraw);
+        assert_eq!(s.kept.len(), 1);
+
+        // The last one allowed ends it, Shift or not.
+        let mut s = select();
+        for i in 0..MAX_KEPT - 1 {
+            let x = 20 + i as i32 * 60;
+            assert_eq!(drag(&mut s, (x, 20), (x + 50, 70), true), Step::Kept, "shot {}", i + 1);
+        }
+        assert_eq!(shots(drag(&mut s, (20, 300), (120, 400), true)).0.len(), MAX_KEPT);
     }
 
     #[test]
@@ -1541,14 +1763,11 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_copies_and_shift_saves() {
+    fn ctrl_copies_and_ctrl_s_saves() {
         let mut s = select();
         s.pressed((40, 40));
         s.moved((240, 140), false, false);
         assert_eq!(snipped(s.released((240, 140), true, false)).2, Action::Copy);
-        let mut s = select();
-        s.pressed((40, 40));
-        assert_eq!(snipped(s.released((240, 140), false, true)).2, Action::Save);
         // Ctrl+C / Ctrl+S while the box is up: that box.
         let mut s = select();
         s.pressed((40, 40));
@@ -1561,7 +1780,7 @@ mod tests {
         assert_eq!(s.key(Key::Ctrl(true)), Step::Redraw);
         assert_eq!(snipped(s.key(Key::Enter)).2, Action::Copy);
         assert_eq!(s.key(Key::Escape), Step::Done(Outcome::Cancelled("escape")));
-        assert_eq!(action_for(false, false), Action::Chat);
+        assert_eq!(action_for(false), Action::Chat);
     }
 
     #[test]

@@ -35,8 +35,9 @@
 //   (or Alt held) picks the window under the pointer, on either monitor; a
 //   box dragged from one monitor into the other is put together from both
 //   (black where neither is).
-// - Ctrl as you let go (or Ctrl+C) copies, Shift (or Ctrl+S) saves: nothing
-//   goes to Chat. The copy lands on a pretend clipboard (the real one is
+// - Ctrl as you let go (or Ctrl+C) copies, Ctrl+S saves: nothing goes to
+//   Chat. (Shift saved until 14 Nov 2026; now it keeps the shot and snips
+//   another: several land in Chat together.) The copy lands on a pretend clipboard (the real one is
 //   never touched here; the robot tests use it); the save at a path the test
 //   names (Windows' dialog never opens).
 // - A chat screenshot's right-click menu copies or saves it.
@@ -639,7 +640,7 @@ test('a box dragged from one monitor into the other is put together from both', 
   await clearBox(main);
 });
 
-test('Ctrl as you let go copies, Shift saves — nothing goes to Chat', async ({ yap, main }) => {
+test('Ctrl as you let go copies, Ctrl+S saves — nothing goes to Chat', async ({ yap, main }) => {
   await openView(main, 'Home');
   // Ctrl held as the box is let go: copied, privately (a pretend clipboard here).
   await startSnip(yap);
@@ -663,8 +664,8 @@ test('Ctrl as you let go copies, Shift saves — nothing goes to Chat', async ({
   expect(keyed).toMatchObject({ action: 'copy', rect: { x: 260, y: 40, w: 200, h: 100 } });
   expect(worstError(await clipboardPng(yap), RED)).toBeLessThanOrEqual(1);
 
-  // Shift: saved where the person chooses (here, a path the test names);
-  // the folder is remembered for next time.
+  // Ctrl+S while the box is up: saved where the person chooses (here, a path
+  // the test names); the folder is remembered for next time.
   const dir = path.join(yap.dataDir, 'saved-snips');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'dark block.png');
@@ -672,7 +673,9 @@ test('Ctrl as you let go copies, Shift saves — nothing goes to Chat', async ({
   await startSnip(yap);
   const saved = await snipBy(yap, 0, [
     { kind: 'down', x: 40, y: 160 },
-    { kind: 'up', x: 240, y: 260, shift: true },
+    { kind: 'move', x: 240, y: 260 },
+    { kind: 'key', key: 'ctrl' },
+    { kind: 'key', key: 's' },
   ]);
   expect(saved).toMatchObject({ action: 'save', size: [200, 100] });
   await expect.poll(() => fs.existsSync(file)).toBe(true);
@@ -687,6 +690,53 @@ test('Ctrl as you let go copies, Shift saves — nothing goes to Chat', async ({
   await expect.poll(() => fs.existsSync(whole)).toBe(true);
   // Nothing came up: Home is still showing.
   await expect(sidebar(main).getByRole('button', { name: 'Home', exact: true })).toHaveAttribute('aria-current', 'page');
+});
+
+test('Shift as you let go keeps it and snips another: they all land in Chat together, in order; Esc sends the ones kept', async ({ yap, main, shot }) => {
+  await clearBox(main);
+  await openView(main, 'Home');
+  await startSnip(yap);
+  // The grey block, Shift held as it's let go: kept — the overlay stays up, nothing lands yet.
+  await yap.invoke('e2e_snip_input', { screen: 0, events: [{ kind: 'down', x: 40, y: 40 }, { kind: 'up', x: 240, y: 140, shift: true }] });
+  await main.waitForTimeout(400);
+  expect((await last(yap)).outcome).toBe('selecting');
+  // The red block on the second monitor, Shift again; then the dark block, let go without it: done.
+  await yap.invoke('e2e_snip_input', { screen: 1, events: [{ kind: 'down', x: 460, y: 140 }, { kind: 'up', x: 260, y: 40, shift: true }] });
+  await main.waitForTimeout(200);
+  expect((await last(yap)).outcome).toBe('selecting');
+  const done = await snipBy(yap, 0, [
+    { kind: 'down', x: 40, y: 160 },
+    { kind: 'up', x: 240, y: 260 },
+  ]);
+  expect(done).toMatchObject({ action: 'chat', kind: 'box' });
+  expect(done.images).toHaveLength(3);
+  expect(done.image.id).toBe(done.images[2].id);
+  // In the order they were taken, each exact.
+  const pixels = done.images.map((i) => readPng(fs.readFileSync(imageFile(yap, i.id))));
+  expect(worstError(pixels[0], GREY)).toBeLessThanOrEqual(1);
+  expect(worstError(pixels[1], RED)).toBeLessThanOrEqual(1);
+  expect(worstError(pixels[2], DARK)).toBeLessThanOrEqual(1);
+  // All three in Chat's message box, together.
+  await inChat(main);
+  await expect(attachments(main).getByRole('button', { name: /^Screenshot,/ })).toHaveCount(3);
+  await shot(main, '40-three-snips-at-once');
+
+  // Esc with one kept: that one lands (a snip taken is never lost).
+  await clearBox(main);
+  await openView(main, 'Home');
+  await startSnip(yap);
+  await yap.invoke('e2e_snip_input', { screen: 0, events: [{ kind: 'down', x: 40, y: 40 }, { kind: 'up', x: 240, y: 140, shift: true }] });
+  const esc = await snipBy(yap, 0, [{ kind: 'esc' }]);
+  expect(esc.images).toHaveLength(1);
+  await inChat(main);
+  await expect(attachments(main).getByRole('button', { name: /^Screenshot,/ })).toHaveCount(1);
+  // Nothing kept, Esc cancels as ever.
+  await clearBox(main);
+  await openView(main, 'Home');
+  await startSnip(yap);
+  await yap.invoke('e2e_snip_input', { screen: 0, events: [{ kind: 'esc' }] });
+  await expect.poll(async () => (await last(yap))?.outcome).toBe('cancelled');
+  await clearBox(main);
 });
 
 test("a chat screenshot's right-click menu copies and saves it", async ({ yap, main }) => {

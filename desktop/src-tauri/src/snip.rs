@@ -133,7 +133,11 @@ pub struct Last {
     /// From the release to the image saved.
     pub save_ms: f64,
     pub focused: bool,
+    /// The (last) picture kept for Chat.
     pub image: Option<crate::chat::chats::ChatImage>,
+    /// **Every picture kept for Chat, in order** (Shift held as you let go
+    /// keeps one and snips another: `overlay::Select`); `image` is the last.
+    pub images: Vec<crate::chat::chats::ChatImage>,
     pub conversation_id: Option<u64>,
     /// What was taken: "box" | "monitor" | "window".
     pub kind: Option<overlay::Kind>,
@@ -461,26 +465,33 @@ fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
             last.reason = why.into();
             set_last(last);
         }
-        overlay::Outcome::Snipped { rect, kind, action } => {
+        overlay::Outcome::Snipped { rect, kind, action, kept } => {
             let t = Instant::now();
             last.kind = Some(kind);
             last.action = Some(action);
             last.rect = Some(rect);
-            // A snip for Chat goes on the clipboard too, once Chat is up.
+            // A snip for Chat goes on the clipboard too, once Chat is up (its last picture).
             let mut to_copy: Option<Picture> = None;
             let result = cut(&snip, &rect).and_then(|(rgba, w, h)| {
                 last.size = Some((w, h));
                 match action {
                     overlay::Action::Chat => {
+                        // The ones kept before it (Shift held as you let go), in order, then it.
+                        let mut images = Vec::with_capacity(kept.len() + 1);
+                        for (r, _) in &kept {
+                            let (rgba, w, h) = cut(&snip, r)?;
+                            images.push(keep(&rgba, w, h)?.0);
+                        }
                         let (image, png) = keep(&rgba, w, h)?;
                         to_copy = Some(Picture { rgba, w, h, png });
-                        Ok(Some(image))
+                        images.push(image);
+                        Ok(images)
                     }
                     overlay::Action::Copy => {
                         let png = images::encode_png(&rgba, w, h, true)?;
                         copy_save::copy(&rgba, w, h, &png)?;
                         crate::notices::alert::snip_copied(app, w, h);
-                        Ok(None)
+                        Ok(Vec::new())
                     }
                     overlay::Action::Save => {
                         let png = images::encode_png(&rgba, w, h, false)?;
@@ -489,12 +500,12 @@ fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
                             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                             crate::notices::alert::snip_saved(app, &name);
                         }
-                        Ok(None)
+                        Ok(Vec::new())
                     }
                 }
             });
             match result {
-                Ok(image) => {
+                Ok(images) => {
                     last.save_ms = t.elapsed().as_secs_f64() * 1000.0;
                     let (w, h) = last.size.unwrap_or_default();
                     tracing::info!(
@@ -502,18 +513,21 @@ fn finish(app: &AppHandle, generation: u64, outcome: overlay::Outcome) {
                         h,
                         kind = ?kind,
                         action = ?action,
+                        shots = images.len().max(1),
                         ms = last.save_ms.round() as u64,
                         total_ms = snip.started.elapsed().as_millis() as u64,
                         "snip: taken"
                     );
                     last.outcome = "snipped".into();
-                    last.image = image.clone();
+                    last.image = images.last().cloned();
+                    last.images = images.clone();
                     last.conversation_id = snip.conversation;
                     set_last(last);
-                    match image {
-                        Some(image) => hand_to_chat(app, image, snip.conversation, snip.origin, to_copy),
+                    if images.is_empty() {
                         // Copied or saved: back to the app you were in.
-                        None => give_focus_back(snip.foreground),
+                        give_focus_back(snip.foreground);
+                    } else {
+                        hand_to_chat(app, images, snip.conversation, snip.origin, to_copy);
                     }
                 }
                 Err(e) => {
@@ -582,20 +596,23 @@ pub(crate) fn keep_as(rgba: &[u8], w: u32, h: u32, source: &str) -> Result<(crat
     Ok((image, png))
 }
 
-/// The main window up on Chat with the image in its message box (waiting
-/// there, `snip/waiting.rs`), and the copy for the selected model made
-/// meanwhile. Then, off this thread: the picture on the clipboard too
-/// ("Copy every snip to the clipboard"), and — a spoken "snip" — the
-/// question listened for ([`listens_after`]).
-fn hand_to_chat(app: &AppHandle, image: crate::chat::chats::ChatImage, conversation: Option<u64>, origin: Origin, picture: Option<Picture>) {
+/// The main window up on Chat with the images in its message box, in
+/// order (waiting there, `snip/waiting.rs`: one snip's, or several kept
+/// with Shift), and the copies for the selected model made meanwhile. Then,
+/// off this thread: the last picture on the clipboard too ("Copy every snip
+/// to the clipboard"), and — a spoken "snip" — the question listened for
+/// ([`listens_after`]).
+fn hand_to_chat(app: &AppHandle, images: Vec<crate::chat::chats::ChatImage>, conversation: Option<u64>, origin: Origin, picture: Option<Picture>) {
+    let Some(image) = images.last().cloned() else { return };
     let cfg = crate::config::load();
     if let Ok((base_url, _key, _model, provider, _p, _t)) = crate::chat::turn::resolve_chat_endpoint(&cfg) {
         let here = crate::ai::ai_model::runs_here(&provider, &base_url);
-        images::prepare(vec![image.id.clone()], images::fit_for(&provider, here));
+        images::prepare(images.iter().map(|i| i.id.clone()).collect(), images::fit_for(&provider, here));
     }
     let id = image.id.clone();
-    waiting::landed(app, conversation, image.clone());
-    let payload = serde_json::json!({ "image": image, "conversationId": conversation, "origin": origin });
+    waiting::landed(app, conversation, images.clone());
+    // (`image`: the last, as a page from before several had it; `images`: all of them.)
+    let payload = serde_json::json!({ "image": image, "images": images, "conversationId": conversation, "origin": origin });
     if let Some(main) = app.get_webview_window("settings") {
         let _ = main.emit(EVENT, payload);
     }
