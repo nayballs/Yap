@@ -2755,9 +2755,11 @@ of sight. What they share is said once, in the line.
   browser" uses —, never another scheme ("file:", "javascript:"…: said
   under the bar), and `load_url` still holds it to public web pages; the
   view keeps the address as its own, so the tab shown again opens there),
-  then **Save a shot** (`page_view_shot`: kept with the answer that
-  brought the page up, `chats::add_shot`, and shown as a picture tab), Open
-  in <browser>, expand, ✕; under it "From <site> · <section> · Open in
+  and its buttons — since 14 Nov 2026 in the panel's tab row after its +, as
+  the Claude Code app has them: a Code chat's Dev servers, Open in
+  <browser>, expand, ✕ (**Save a shot**, `page_view_shot`, kept with the
+  answer as a picture tab, left the bar the same day: Claude never used it,
+  and annotating puts a picture in the message instead); under it "From <site> · <section> · Open in
   <browser>". The page's title is its tab's name (`chatDoc.svelte.js`
   `pageNow`: each page tab's title and address as Rust says, and where the
   address bar took it). **A new tab**: with a page showing, the row of tabs

@@ -14,8 +14,7 @@
   //   and Enter: `page_view_go`, a search on the person's engine — Ctrl+L
   //   in the panel, Esc puts it back; "Not secure" on a plain-http page,
   //   never a localhost one) across the whole row. Its buttons — a Code
-  //   chat's Dev servers (ServersMenu.svelte), Save a shot (a picture of it,
-  //   kept with the answer: `page_view_shot`), Open in <browser>
+  //   chat's Dev servers (ServersMenu.svelte), Open in <browser>
   //   (`open_external`, the browser Settings → General → Links chose),
   //   expand, ✕ — sit in the panel's tab row after its + (`actions`, drawn
   //   by DocPanel.svelte's `rowActions`), as Claude Code's app has them
@@ -44,7 +43,6 @@
   import { listen } from '@tauri-apps/api/event';
   import { getContext, onMount, tick, untrack } from 'svelte';
   import { openExternalLink } from '../../core/externalLinks.js';
-  import { toast } from '../../ui/toast.svelte.js';
   import { useBrowserName, openInLabel } from '../../stores/browserName.svelte.js';
   import { tabKeyOf } from './chatDoc.svelte.js';
   import { questionParts, whyOf } from './pageConfirm.js';
@@ -113,7 +111,6 @@
   let st = $state({ title: '', url: '', canGoBack: false, canGoForward: false, loading: true, error: null, width: null });
   let stageEl = $state(null);
   let addrEl = $state(null);
-  let shooting = $state(false);
   let failed = $state('');
   // Where the address bar last took this tab (a tab shown again opens there).
   const went = untrack(() => doc.pageNow[key]?.went || '');
@@ -313,20 +310,6 @@
     }
   }
 
-  /** Save a shot: a picture of the page as it is, kept with the answer, shown in its tab. */
-  async function saveShot() {
-    if (shooting) return;
-    shooting = true;
-    try {
-      const picture = await invoke('page_view_shot', { key, url: here, title, conversationId });
-      doc.showPicture(picture);
-    } catch (e) {
-      toast({ title: "Couldn't take a shot of the page", description: String(e), variant: 'destructive' });
-    } finally {
-      shooting = false;
-    }
-  }
-
   const openOutside = () => openExternalLink(here);
 </script>
 
@@ -335,9 +318,6 @@
       <!-- A Code chat's dev servers (.claude/launch.json): its page opens here when this tab has none, else in a new tab. -->
       <ServersMenu {workspace} onopen={(url, name) => (blank ? go(url) : doc.showPage({ url, title: name }))} />
     {/if}
-    <button type="button" class="pagebtn" onclick={saveShot} disabled={blank || shooting || !!failed} aria-label="Save a shot of the page" title="Save a shot (a picture of the page as it is)" data-testid="chat-page-shot">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
-    </button>
     <button type="button" class="pagebtn" onclick={openOutside} disabled={blank} aria-label={openInLabel(browser.label)} title={`${openInLabel(browser.label)}\n${here}`}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5H5V6h5" /></svg>
     </button>

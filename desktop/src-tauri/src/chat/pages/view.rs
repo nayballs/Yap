@@ -53,7 +53,9 @@
 //! app is, `assistant/selected.rs`, the site named) and **Read aloud**
 //! (`voice/read_aloud.rs`); **Snip to Chat** always (`snip.rs`).
 //!
-//! **A shot** (`page_view_shot`, the tab's Save a shot; [`shot_in_view`],
+//! **A shot** (`page_view_shot`, once the tab's Save a shot — its button left the bar on 14 Nov 2026, the
+//! maintainer: Claude never uses it, and annotating puts a picture in the message instead; the UI tests still
+//! take one, what the person sees; [`shot_in_view`],
 //! the model's `browser_screenshot`): `ICoreWebView2::CapturePreview` as a
 //! PNG of what's in view at its scroll — on screen as it is, out of sight
 //! drawn a moment under Yap's own page at the size the panel last had.
@@ -2716,7 +2718,8 @@ mod win {
     /// **Page `key`'s console and network, kept** (`dev::record`): DevTools'
     /// Runtime, Log and Network domains on, their events into its log.
     fn watch_devtools(core: &ICoreWebView2, key: &str) -> windows::core::Result<()> {
-        const EVENTS: [&str; 6] = ["Runtime.consoleAPICalled", "Runtime.exceptionThrown", "Log.entryAdded", "Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFailed"];
+        // (And the element the person picked in select mode: `pick.rs`.)
+        const EVENTS: [&str; 7] = ["Runtime.consoleAPICalled", "Runtime.exceptionThrown", "Log.entryAdded", "Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFailed", "Overlay.inspectNodeRequested"];
         for event in EVENTS {
             let receiver = unsafe { core.GetDevToolsProtocolEventReceiver(&HSTRING::from(event))? };
             let k = key.to_string();
@@ -2727,7 +2730,12 @@ mod win {
                         if let Some(args) = args {
                             let mut p = PWSTR::null();
                             if args.ParameterObjectAsJson(&mut p).is_ok() {
-                                crate::chat::pages::dev::record(&k, event, &take_pwstr(p));
+                                let params = take_pwstr(p);
+                                if event == "Overlay.inspectNodeRequested" {
+                                    crate::chat::pages::pick::requested(&k, &params);
+                                } else {
+                                    crate::chat::pages::dev::record(&k, event, &params);
+                                }
                             }
                         }
                         Ok(())

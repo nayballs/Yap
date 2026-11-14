@@ -158,6 +158,7 @@ pub async fn chat_send(
     think: Option<bool>,
     selection: Option<crate::chat::documents::Selection>,
     page_quote: Option<crate::chat::pages::view::PageQuote>,
+    elements: Option<Vec<crate::chat::pages::pick::Picked>>,
     code_folder: Option<String>,
     connectors_off: Option<Vec<String>>,
 ) -> Result<serde_json::Value, String> {
@@ -171,6 +172,8 @@ pub async fn chat_send(
     // question that fails before its answer gives them back, as the page
     // gives the question back (not one a newer question replaced, nor one
     // stopped: those are kept as asked).
+    // Elements picked on a page beside the chat (`pick.rs`): their blocks after the words, for the model.
+    let text = crate::chat::pages::pick::with_elements(&text, &elements.unwrap_or_default());
     let image_ids = images.unwrap_or_default();
     let taken = if image_ids.is_empty() { Vec::new() } else { crate::snip::waiting::sent(&app, &image_ids) };
     // A passage selected in the document panel ("Change this…", documents.rs):

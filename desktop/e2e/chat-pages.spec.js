@@ -3,7 +3,7 @@
 // - `browser_navigate` brings the page up in a Page tab (no tab open yet):
 //   its own WebView2 (its own profile), laid over the tab by Rust — no Yap
 //   IPC in it at all (`window.__TAURI_INTERNALS__` absent, Yap's IPC
-//   unreachable); Back / Reload / Save a shot / Open in your browser; the
+//   unreachable); Back / Reload / Open in your browser; the
 //   answer keeps it (its pill, `pages` in chats.json); its tab closes it. A
 //   search opens on the person's engine; a site they named (`browser_tabs`
 //   new), at its home page.
@@ -198,21 +198,6 @@ test('browser_navigate brings the live page up beside the chat: its own webview,
     s.conversations.some((c) => c.messages.at(-1)?.pages?.[0]?.url === FORT_JOY_URL)
   );
 
-  // Save a shot: a picture of the page as it is, its tab, kept with the answer.
-  await main.getByTestId('chat-page-shot').click();
-  await expect(main.getByTestId('chat-picture')).toBeVisible({ timeout: 20_000 });
-  await expect(main.getByTestId('chat-picture-caption')).toHaveText('A shot of Fort Joy - Example Wiki');
-  await expect
-    .poll(() => main.getByTestId('chat-picture-img').evaluate((img) => img.complete && img.naturalWidth > 0), { timeout: 10_000 })
-    .toBe(true);
-  // The page stays alive behind it, out of sight; its tab brings it back.
-  await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.onScreen).toBe(false);
-  await expectStore(yap, 'chats.json', (s) => s.conversations.some((c) => c.messages.at(-1)?.pictures?.some((p) => p.caption === 'A shot of Fort Joy - Example Wiki')));
-  const tabs = main.getByTestId('chat-panel-tab');
-  await expect(tabs).toHaveCount(2);
-  await tabs.first().click();
-  await expect(tab).toBeVisible();
-  await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.onScreen).toBe(true);
 
   // Something of Yap's over it (Settings): out of sight until it goes.
   await openSettings(main);

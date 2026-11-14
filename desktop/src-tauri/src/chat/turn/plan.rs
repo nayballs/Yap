@@ -500,7 +500,7 @@ fn run_context(
         agents: t.gates.agents.then(|| crate::chat::tools::AgentsTurn::asked(t.scope, t.by_voice)),
         // Words selected in another app (never one of Yap's own windows):
         // web content, as the tool loop's `Extra::web_question`.
-        web: t.about_selection.as_ref().is_some_and(|s| s.web),
+        web: t.about_selection.as_ref().is_some_and(|s| s.web) || crate::chat::pages::pick::has_element(&t.text),
         eyes,
         // What a look takes this turn: the window in front, asked out loud
         // from another app (`gates.rs`).

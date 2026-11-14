@@ -1085,7 +1085,7 @@ test('the Dev servers menu starts the workspace’s server from .claude/launch.j
   await expect(main.getByTestId('chat-page-new-servers').getByRole('button', { name: /garden/ })).toContainText(':43517');
   // The page's buttons in the panel's tab row, as the app has them; the address bar has its row to itself.
   await expect(main.getByTestId('chat-page-actions').getByTestId('chat-dev-servers')).toBeVisible();
-  await expect(main.getByTestId('chat-page').getByTestId('chat-page-shot')).toHaveCount(0);
+  await expect(main.getByTestId('chat-page').getByTestId('chat-dev-servers')).toHaveCount(0);
   await main.getByTestId('chat-dev-servers').click();
   const row = main.getByTestId('chat-dev-server').filter({ hasText: 'garden' });
   await expect(row).toHaveAttribute('data-state', 'stopped');

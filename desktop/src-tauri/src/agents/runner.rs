@@ -884,7 +884,9 @@ fn beside_context(agent: &Agent, n: u32, eyes: claude_live::eyes::Eyes, unattend
         .unwrap_or_default();
     // (Its workspace: the dev servers its Claude starts, `chat/pages/preview.rs`.)
     let workspace = (!agent.path.trim().is_empty()).then(|| agent.path.clone());
-    claude_live::turn::Context { question, conversation: agent.conversation, eyes, said, watched: true, unattended, workspace, ..Default::default() }
+    // An element picked on a page beside the chat: web content from the turn's start (`chat/pages/pick.rs`).
+    let web = crate::chat::pages::pick::has_element(&question);
+    claude_live::turn::Context { question, conversation: agent.conversation, eyes, said, watched: true, unattended, workspace, web, ..Default::default() }
 }
 
 /// **Its browser turn's web side**, as a plan chat's (`plan.rs` `web_side`):
