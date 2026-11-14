@@ -267,6 +267,15 @@ for(var i=0;i<all.length;i++){var ae2=all[i];if(!vis(ae2))continue;if(ae2.tagNam
 return {title:sq(D.title),url:location.href,text:main&&a.text?sq(shownText(main)).slice(0,a.text):'',headings:heads(),elements:els,forms:formsInfo(),password:!!q1('input[type=password]'),payment:takesCard(D),more:more,scroll:scrollAt()};}
 if(op==='describe')return base(find());
 if(op==='where'){var wh=find();if(!wh)return {r:'gone'};return {r:'ok',scroll:scrollAt(),inView:inView(),seen:shown(wh)};}
+if(op==='section'){var se=find();if(!se)return {r:'gone'};var hl=function(e){var t=tag(e),m=/^h([1-6])$/.exec(t);if(m)return +m[1];if((e.getAttribute('role')||'').toLowerCase()==='heading')return +(e.getAttribute('aria-level')||2)||2;return 0;};
+var lv=hl(se),dc=se.ownerDocument,stop=null;if(lv){var hs=dc.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]');for(var i=0;i<hs.length;i++){var h=hs[i];if(h===se||se.contains(h)||h.contains(se)||!(se.compareDocumentPosition(h)&4))continue;if(hl(h)<=lv){stop=h;break;}}}
+var from=Math.max(0,Number(a.offset)||0),cap=Math.max(1,Number(a.max)||5000),want=from+cap+1,root=lv?(dc.body||dc.documentElement):se,w=dc.createTreeWalker(root,4),bl=new Map(),parts=[],last=null,len=0,tx;
+var blockOf=function(e){for(var x=e;x&&x!==root.parentNode;x=x.parentElement){if(bl.has(x))return bl.get(x);var d=(win(x).getComputedStyle(x).display||'');if(d.indexOf('inline')!==0&&d!=='contents'){bl.set(x,x);return x;}}return root;};
+var skip=function(e){if(!e||e.closest('script,style,noscript,template'))return true;return e.checkVisibility?!e.checkVisibility({visibilityProperty:true}):false;};
+if(lv)w.currentNode=se;
+while((tx=w.nextNode())&&len<want){if(stop&&(stop===tx||stop.contains(tx)||(stop.compareDocumentPosition(tx)&4)))break;var p=tx.parentElement,s=(tx.nodeValue||'').replace(/\s+/g,' ');if(!s.trim()||skip(p))continue;var b=blockOf(p);if(b!==last&&parts.length){parts.push('\n');}else if(parts.length&&!/\s$/.test(parts[parts.length-1])&&!/^\s/.test(s)){parts.push(' ');}parts.push(s);last=b;len+=s.length;}
+var all=parts.join('').replace(/[ \t]*\n[ \t]*/g,'\n').replace(/\n{2,}/g,'\n').replace(/^\s+|\s+$/g,'');
+return {r:'ok',heading:lv?sq(se.innerText||se.textContent).slice(0,160):'',level:lv,text:all.slice(from,from+cap),more:all.length>from+cap};}
 if(op==='scroll'){if(a.ref){var s=find();if(!s)return {r:'gone'};into(s);return {r:'ok',scroll:scrollAt(),inView:inView(),seen:shown(s)};}
 var sc=scroller(),d=a.to||'down',n=Math.max(0.1,Math.min(10,Number(a.amount)||1)),step=Math.round((sc?sc.clientHeight:W.innerHeight)*0.85*n);
 if(d==='top')sTo(sc,0);else if(d==='bottom')sTo(sc,sc?sc.scrollHeight:D.documentElement.scrollHeight);else sBy(sc,(d==='up'?-1:1)*step);
@@ -276,8 +285,8 @@ var caretIn=(function(){var s=selIn(el);return !!(s&&s.rangeCount&&el.contains(s
 into(el);try{el.focus({preventScroll:true});}catch(e){}
 if(op==='click'){var tg=tag(el)==='a'?(el.getAttribute('target')||'').toLowerCase():'';
 if(tg&&tg!=='_self'&&tg!=='_parent'&&tg!=='_top'&&/^https?:/i.test(el.href)){location.assign(el.href);return {r:'ok',went:true};}
-if(!shown(el))into(el);var c1=rr(el),qx=c1.left+c1.width/2,qy=c1.top+c1.height/2,hq=ptAt(qx,qy);if(!hq||!holds(el,hq))hq=el;var q=loc(hq,qx,qy);
-pev(hq,'pointerdown',q.x,q.y,0,1);pev(hq,'mousedown',q.x,q.y,0,1,1);try{el.focus({preventScroll:true});}catch(e){}pev(hq,'pointerup',q.x,q.y,0,0);pev(hq,'mouseup',q.x,q.y,0,0,1);pev(hq,'click',q.x,q.y,0,0,1);return {r:'ok'};}
+if(!shown(el))into(el);var c1=rr(el),qx=c1.left+c1.width/2,qy=c1.top+c1.height/2,hq=ptAt(qx,qy),cv='';if(hq&&!holds(el,hq)){var co=hq.closest('dialog,[role=dialog],[role=alertdialog],[aria-modal=true]')||hq;cv=sq(co.getAttribute('aria-label')||co.innerText||co.textContent||'').slice(0,60);var cb=[].slice.call(co.querySelectorAll('button,[role=button],a[href]')).filter(function(b){return shown(b)&&sq(b.innerText||b.getAttribute('aria-label')||'');}).slice(0,4).map(function(b){return '['+refOf(b)+'] '+sq(b.innerText||b.getAttribute('aria-label')||'').slice(0,30);});if(cb.length)cv+=' — its buttons: '+cb.join(', ');}if(!hq||!holds(el,hq))hq=el;var q=loc(hq,qx,qy);
+pev(hq,'pointerdown',q.x,q.y,0,1);pev(hq,'mousedown',q.x,q.y,0,1,1);try{el.focus({preventScroll:true});}catch(e){}pev(hq,'pointerup',q.x,q.y,0,0);pev(hq,'mouseup',q.x,q.y,0,0,1);pev(hq,'click',q.x,q.y,0,0,1);return cv?{r:'ok',covered:cv}:{r:'ok'};}
 if(op==='choose'){var want=String(a.text).replace(/\s+/g,' ').trim().toLowerCase(),ct2=tag(el),cty=itype(el);
 var pk=function(list,txt){var i;for(i=0;i<list.length;i++){if(txt(list[i]).toLowerCase()===want)return list[i];}for(i=0;i<list.length;i++){if(txt(list[i]).toLowerCase().indexOf(want)>=0)return list[i];}return null;};
 if(ct2==='select'){var op2=[].slice.call(el.options),po2=pk(op2,function(x){return sq(x.text);})||pk(op2,function(x){return String(x.value);});if(!po2)return {r:'no-option'};el.value=po2.value;fire(el,'input');fire(el,'change');return {r:'ok',value:sq(po2.text)};}
@@ -373,6 +382,15 @@ pub fn pos() -> String {
 /// Whether element `r` is in view now (`seen`), with where the page is.
 pub fn where_is(r: u32) -> String {
     build("where", serde_json::json!({ "ref": r }))
+}
+
+/// **Just one part of the page** (`browser_read { ref }`): element `r`'s
+/// section when it's a heading — the heading and what follows it, up to the
+/// next heading at its level or above — else its own words; what the
+/// person sees of it (nothing hidden, no script or style), a line a block,
+/// from character `offset`, `max` of them, and whether there's `more`.
+pub fn section(r: u32, offset: usize, max: usize) -> String {
+    build("section", serde_json::json!({ "ref": r, "offset": offset, "max": max }))
 }
 
 /// Start watching the page for what an action changes (`changes` reads it).

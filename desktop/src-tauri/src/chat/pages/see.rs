@@ -654,7 +654,8 @@ pub async fn find(turn: &mut crate::web::Turn, args: &Value) -> Value {
     let note = if found.is_empty() {
         "Nothing on the page matches those words: try fewer or other words, or browser_read.".to_string()
     } else {
-        "Web content. browser_scroll_to takes a ref; the links, buttons and fields act by it.".to_string()
+        // (A heading found: browser_read with its ref reads just its section — 14 Nov 2026, said where a small model looks.)
+        "Web content. browser_scroll_to takes a ref; browser_read with a heading's ref reads just its section; the links, buttons and fields act by it.".to_string()
     };
     json!({ "success": true, "data": { "tab": t.tab, "matches": found.join("\n"), "count": found.len() }, "note": note, "displayText": display })
 }

@@ -1413,9 +1413,10 @@ characters are Yap's own.
   agents in the Agent panel walk with their Mode's tool (`sprites.js`
   `LEAD`, `prop: 'lead'`, not one of the Modes' `PROP_IDS`; `crew.css`
   `.pr-lead`). On the step it's on, in the spinner's place, at a pixel a
-  square (`size: 0.5`, 18 × 16 px), with how long it's worked this turn and
-  its tokens after the words, as Claude Code's own working line ("3m 44s ·
-  9.4k tokens": `core/agents.js` `workClock`); writing or between steps, on a
+  square (`size: 0.5`, 18 × 16 px), with how long it's worked this turn
+  after the words ("3m 44s": `core/agents.js` `workClock`; its tokens
+  aren't on the line — the maintainer: the context ring under the message box
+  has them); writing or between steps, on a
   line of its own at the thread's foot ("Writing", "Thinking";
   `AgentWork.svelte` `wlead`). Its turn over, it's gone: the answer is all
   there is. Never in the Agent panel's rows, nor in Chat's own chats.

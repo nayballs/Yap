@@ -883,6 +883,31 @@ impl Browser {
         if op == "key" {
             return self.keys(key, a, r);
         }
+        if op == "section" {
+            // One part (`browser_read { ref }`): a heading and its siblings up
+            // to the next heading at its level or above; else the element's words.
+            let tab = self.tab(key)?;
+            let doc = dom_query::Document::from(tab.html.as_str());
+            let page = Page::read(&doc, tab);
+            let Some(node) = page.node(r) else { return Ok(json!({ "r": "gone" })) };
+            let level = |n: &dom_query::NodeRef| n.node_name().and_then(|t| t.strip_prefix('h').and_then(|d| d.parse::<u8>().ok())).filter(|l| (1..=6).contains(l)).unwrap_or(0);
+            let lv = level(&node);
+            let mut parts = vec![Page::text_of(&node)];
+            let mut next = if lv > 0 { node.next_element_sibling() } else { None };
+            while let Some(n) = next {
+                let l = level(&n);
+                if l > 0 && l <= lv {
+                    break;
+                }
+                parts.push(Page::text_of(&n));
+                next = n.next_element_sibling();
+            }
+            let all = parts.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join("\n");
+            let (from, max) = (a["offset"].as_u64().unwrap_or(0) as usize, a["max"].as_u64().unwrap_or(5000) as usize);
+            let text: String = all.chars().skip(from).take(max).collect();
+            let heading = if lv > 0 { Page::text_of(&node) } else { String::new() };
+            return Ok(json!({ "r": "ok", "heading": heading, "level": lv, "text": text, "more": all.chars().count() > from + max }));
+        }
         if op == "where" {
             // In view: its line within the view, unless it never comes into
             // view (`data-sim-unseen`: inside a part that scrolls apart).

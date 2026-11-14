@@ -266,6 +266,8 @@ const CLICKS = [
   ...call(7, 'browser_find', { query: 'Buy the full guide' }),
   ...call(8, 'browser_click', { ref: REF.buy }),
   ...call(9, 'browser_read', {}),
+  // Just the opened section, by its heading's ref (one part of a long page: browser_read's ref).
+  ...call(10, 'browser_read', { ref: REF.order }),
   said('a99', [{ type: 'text', text: CLICKED }], 'end_turn'),
   result(CLICKED, 0.01),
   { _wait_user: true },
@@ -923,6 +925,10 @@ test('its session acts on the page as Claude Code’s own browser does: a collap
   const reads = dumps.filter((d) => d.tool === 'browser_read').map(text);
   expect(reads[0]).toContain('10 Moss Shield Rank 1');
   expect(reads[1]).toContain('Build: Damage');
+  // One part: the heading's section, its rows a line each, in the page's own script.
+  expect(reads[2]).toContain('"section":"Build Order"');
+  // (The result is JSON as Claude Code gets it: its line breaks written \n.)
+  expect(reads[2]).toMatch(/Build Order\\n10 Moss Shield Rank 1\\n11 Moss Shield Rank 2/);
   // Buying: asked, refused — nothing bought.
   expect(text(clicks[2])).toMatch(/didn't|not|refused|said no/i);
   expect(reads[1]).not.toContain('Bought');
