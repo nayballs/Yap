@@ -161,6 +161,13 @@ pub const LIVE_ARGS: &[&str] = &["write_section", "rewrite_section"];
 /// Who watches a stream.
 pub trait Sink: Send + Sync {
     fn send(&self, ev: Event);
+    /// **Nobody is asked here** (a Code chat's turn in Bypass permissions,
+    /// 14 Nov 2026; the maintainer: the buy card "must not appear in bypass
+    /// permissions"): a card that would ask first is answered yes by itself
+    /// (`act/confirm.rs`). What Yap never does stays refused: that asks no one.
+    fn unattended(&self) -> bool {
+        false
+    }
 }
 
 /// What a tool call is doing, for the chip shown while it runs.

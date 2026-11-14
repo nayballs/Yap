@@ -1041,12 +1041,34 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
    * chat. Another conversation's: nothing here (its answer has them).
    */
   function agentShown(p) {
+    const key = p?.id ? `${p.id}:${p.turn ?? 1}` : '';
+    // Its turn over (agents/runner.rs): Yap isn't using a page any more; a card still asking lapsed.
+    if (p?.ended) {
+      if (key && agentConfirms[key]) agentConfirms = { ...agentConfirms, [key]: agentConfirms[key].map((c) => (c.state === 'asking' ? { ...c, state: 'timedOut' } : c)) };
+      if (p.conversation != null && p.conversation === activeId) doc.turnEnded();
+      return;
+    }
+    const ev = p?.event;
+    // Acting on its pages (14 Nov 2026): a card before an action that would buy, send or sign in — kept by its
+    // turn for the thread (`agentConfirms`, under its work), whichever chat is open.
+    if (ev?.kind === 'confirm' && key) {
+      const have = agentConfirms[key] || [];
+      agentConfirms = { ...agentConfirms, [key]: have.some((c) => c.id === ev.id) ? have.map((c) => (c.id === ev.id ? ev : c)) : [...have, ev] };
+    }
     if (p?.conversation == null || p.conversation !== activeId) return;
-    const ev = p.event;
     if (ev?.kind === 'page' && (ev.page?.url || ev.page?.tabKey)) doc.showPage(ev.page);
     else if (ev?.kind === 'picture' && ev.picture?.id) doc.showPicture(ev.picture);
     else if (ev?.kind === 'screen') reloadActive();
+    // The page's tab: "Yap is using this page", its Stop stopping the session's turn; a tab switched or closed;
+    // the card's question in the tab's strip too (the panel may cover the thread).
+    else if (ev?.kind === 'acting') doc.setActing(ev.key, () => invoke('agent_stop', { id: p.id }).catch(() => {}));
+    else if (ev?.kind === 'switchTab') doc.showTab(ev.key);
+    else if (ev?.kind === 'closeTab') doc.closeTab(ev.key);
+    else if (ev?.kind === 'confirm') doc.setAsking(ev);
   }
+
+  /** **The cards a Code chat's own Claude asked** before acting on a page, by `agentId:turn` (`agentShown`): under its work in the thread. */
+  let agentConfirms = $state({});
 
   function followAssistantStream(p) {
     const id = p?.conversationId;
@@ -1780,6 +1802,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get answeringHere() { return here != null; },
     get assistantAnswering() { return assistantAnswering; },
     agentShown,
+    get agentConfirms() { return agentConfirms; },
     // `yap-assistant`'s payload, or `assistant_phase`'s.
     set assistantPhase(v) {
       phaseHeard += 1;

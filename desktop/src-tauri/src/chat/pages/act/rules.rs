@@ -402,6 +402,13 @@ fn form_signals(d: &Described, f: &Form) -> Option<&'static str> {
 /// card field or a payment provider's frame: a script's "Continue" there
 /// needs no form); a sign-in form's submit signs in. Pure.
 pub fn click_needs_ok(d: &Described, e: &Element) -> Option<&'static str> {
+    // A heading's words name a section, never an action (14 Nov 2026: a
+    // guide's collapsed "Build Order", opened by a click, asked "It may
+    // place an order"): clicking one opens or closes what's under it.
+    // (Its role as the page script says it: "heading", or its tag, h1–h6.)
+    if e.role == "heading" || matches!(e.role.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
+        return None;
+    }
     if e.submit {
         if let Some(f) = d.form.as_ref() {
             if f.password {
@@ -1297,6 +1304,11 @@ mod tests {
         let go_on = Element { role: "button".into(), name: "Continue".into(), form: -1, ..Default::default() };
         assert_eq!(click_needs_ok(&card_page, &go_on), Some("pay"));
         assert_eq!(click_needs_ok(&Described::default(), &go_on), None, "elsewhere it goes ahead");
+        // A heading names a section: a collapsed "Build Order" opens with a click, never "may place an order".
+        let section = Element { role: "heading".into(), name: "Build Order".into(), form: -1, ..Default::default() };
+        assert_eq!(click_needs_ok(&Described::default(), &section), None);
+        assert_eq!(click_needs_ok(&Described::default(), &Element { role: "h2".into(), ..section.clone() }), None, "its tag, as the page script says it");
+        assert_eq!(click_needs_ok(&Described::default(), &Element { role: "button".into(), name: "Order now".into(), ..section.clone() }), Some("place an order"), "a button that orders still asks");
         // A link there still goes by its words and its address.
         let help = Element { role: "link".into(), name: "Help".into(), href: "https://shop.example.com/help".into(), form: -1, ..Default::default() };
         assert_eq!(click_needs_ok(&card_page, &help), None);

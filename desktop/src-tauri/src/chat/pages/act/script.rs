@@ -276,7 +276,8 @@ var caretIn=(function(){var s=selIn(el);return !!(s&&s.rangeCount&&el.contains(s
 into(el);try{el.focus({preventScroll:true});}catch(e){}
 if(op==='click'){var tg=tag(el)==='a'?(el.getAttribute('target')||'').toLowerCase():'';
 if(tg&&tg!=='_self'&&tg!=='_parent'&&tg!=='_top'&&/^https?:/i.test(el.href)){location.assign(el.href);return {r:'ok',went:true};}
-el.click();return {r:'ok'};}
+if(!shown(el))into(el);var c1=rr(el),qx=c1.left+c1.width/2,qy=c1.top+c1.height/2,hq=ptAt(qx,qy);if(!hq||!holds(el,hq))hq=el;var q=loc(hq,qx,qy);
+pev(hq,'pointerdown',q.x,q.y,0,1);pev(hq,'mousedown',q.x,q.y,0,1,1);try{el.focus({preventScroll:true});}catch(e){}pev(hq,'pointerup',q.x,q.y,0,0);pev(hq,'mouseup',q.x,q.y,0,0,1);pev(hq,'click',q.x,q.y,0,0,1);return {r:'ok'};}
 if(op==='choose'){var want=String(a.text).replace(/\s+/g,' ').trim().toLowerCase(),ct2=tag(el),cty=itype(el);
 var pk=function(list,txt){var i;for(i=0;i<list.length;i++){if(txt(list[i]).toLowerCase()===want)return list[i];}for(i=0;i<list.length;i++){if(txt(list[i]).toLowerCase().indexOf(want)>=0)return list[i];}return null;};
 if(ct2==='select'){var op2=[].slice.call(el.options),po2=pk(op2,function(x){return sq(x.text);})||pk(op2,function(x){return String(x.value);});if(!po2)return {r:'no-option'};el.value=po2.value;fire(el,'input');fire(el,'change');return {r:'ok',value:sq(po2.text)};}
@@ -330,7 +331,13 @@ pub fn describe(r: u32) -> String {
     build("describe", serde_json::json!({ "ref": r }))
 }
 
-/// Click element `r`, if it's still `role` "`name`".
+/// Click element `r`, if it's still `role` "`name`" — **as a person's mouse
+/// does** (14 Nov 2026; before, the element's own `click()`, which a page's
+/// toggle laid over a heading never heard, and nor did a menu that opens on
+/// `mousedown`): scrolled into view, the element on top at its centre (one
+/// inside it: a heading's invisible toggle, a button's icon; else the
+/// element itself) gets pointerdown, mousedown, pointerup, mouseup and click
+/// there, as [`press`] sends them.
 pub fn click(r: u32, role: &str, name: &str) -> String {
     build("click", serde_json::json!({ "ref": r, "role": role, "name": name }))
 }

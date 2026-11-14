@@ -505,6 +505,8 @@ fn run_context(
         // What a look takes this turn: the window in front, asked out loud
         // from another app (`gates.rs`).
         takes: t.gates.screen_takes,
+        // A plan chat has no Mode: its page actions' cards ask, as Chat's own.
+        unattended: false,
     }
 }
 

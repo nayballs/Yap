@@ -1073,9 +1073,11 @@ no Local API (the bridge can be off), and it reaches the live UI.
   `approve` — meetings, notes, tasks, folders, the calendar — and, since
   2026-11-14, Yap's browser beside the chat and the screen look
   (`RunSpec::eyes`: the pages and the web's pictures with the web on, else
-  picture files; `look_at_screen` with the screen switch on; never acting
-  on a page — `server.rs` clears it for any agent's run, and everything
-  for one Chat sent — each call for the browser turn its runner opened,
+  picture files; `look_at_screen` with the screen switch on; acting on its
+  pages too since the same day's evening — click, type, keys, hover, drag,
+  a field set, under Chat's rules and cards (`RunSpec::eyes.act`, never a
+  phone's turn); `server.rs` clears everything for an agent Chat sent —
+  each call for the browser turn its runner opened,
   `eyes::call`); never
   `search_memory` or connectors'; an agent Chat sent out lists `approve`
   alone

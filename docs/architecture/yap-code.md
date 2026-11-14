@@ -437,10 +437,37 @@ workspace, word for word, and no model of Chat's is asked.
     and is kept with it (`chats::add_question_images`, never on an agent's
     report line; `chatState` reads the chat again on its `screen` event),
     and its line says "Looked at your screen" with the shots at its end.
-    **Never acting on a page** (no clicks or typing: Chat's browser stays at
-    open, read and look, 1 Nov), whatever a spec asks
-    (`claude_live/server.rs` holds an agent's run to it); never an agent
-    Chat sent out. In `--allowedTools`: nothing asks, in any Mode.
+    **Acting on its pages** (the same day; the maintainer, after his Code
+    chat's Claude couldn't open a guide's collapsed section: "get that
+    browser tool to work exactly like it does inside this claude-code
+    app"): `browser_click` (a ref or a point; the element on top at its
+    centre gets real pointer and mouse events, so a script's toggle laid
+    over a heading opens), `browser_type`, `browser_key`, `browser_hover`,
+    `browser_drag` and `browser_form_input`, with the pages on and the
+    model one that may act (`act::can_act`), never a phone's turn
+    (`runner::direct_eyes`). Every rule of Chat's holds (`act/rules.rs`:
+    never a password, card, bank or code field, nor a sign-in form), and an
+    action that would buy, pay, book, send, delete or sign in asks first —
+    except in **Bypass permissions**, where nothing asks (the maintainer: the
+    buy card "must not appear in bypass permissions"; `turn::Context::
+    unattended`, `stream::Sink::unattended`): there its instructions have
+    Claude ask in the chat first, what it is and its cost, as the rules of
+    Claude Code's own app's browser do (`rpc.rs` `ACT_UNATTENDED_INSTRUCTIONS`)
+    — its card, elsewhere, under the turn's work in the thread and in the page
+    tab's strip (`chatState` `agentConfirms`, `yap-agent-shown`'s
+    `confirm`; Allow once / Don't, no answer in two minutes a no; the turn
+    over, one still asking lapses: `ended`). While it acts, the page's tab
+    says "Yap is using this page", its Stop stopping the turn (`agent_stop`).
+    A heading's words never ask (`rules::click_needs_ok`: "Build Order"
+    opens, it doesn't order). Its lines say "Clicking on the page beside the
+    chat" and the like, never what it types; a stretch of them is said
+    action by action, as Claude Code's own line: "Opened a page, found on
+    page 2 times, clicked 2 times, read the page" (`core/agents.js`
+    `BROWSER_DONE`). A page brought up by its address alone takes its own
+    title once read (`web::Turn::opened`): its pill under the answer says
+    the page, not just the site. Never an agent Chat sent out
+    (`claude_live/server.rs`). In `--allowedTools`: Claude Code's own
+    prompt never asks, in any Mode; Yap's card is the one ask.
   - **How**: each turn opens a browser turn on its run (`run.begin_turn`,
     `runner::beside_context` / `beside_web`) before Claude Code can call
     it — the person's message and their earlier ones (an address they gave

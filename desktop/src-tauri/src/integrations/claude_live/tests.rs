@@ -367,13 +367,13 @@ fn an_agents_run_with_reads_lists_yaps_own_data_never_its_memory() {
 }
 
 #[test]
-fn a_code_chats_own_session_has_yaps_browser_and_the_screen_look_never_acting() {
+fn a_code_chats_own_session_has_yaps_browser_acting_on_its_pages_and_the_screen_look() {
     use crate::chat::pictures::Gate;
     let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
     // The web and the screen on, a model that reads images (agents/runner.rs `direct_eyes`): the pages, the pictures, the look.
     let mut spec = RunSpec::new("garden-planner", Tools::Agent);
     spec.reads = true;
-    // (Asked for acting too: never for an agent's run.)
+    // Acting on its pages too (14 Nov 2026, as Claude Code's own app's browser).
     spec.eyes = super::eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
     let h = ep.register(spec).unwrap();
     let mut c = Client::of(&h);
@@ -381,13 +381,32 @@ fn a_code_chats_own_session_has_yaps_browser_and_the_screen_look_never_acting() 
     for name in ["look_at_screen", "browser_navigate", "browser_read", "browser_screenshot", "browser_tabs", "find_pictures", "show_picture", "share_files"] {
         assert!(listed.contains(&name.to_string()), "{name}: {listed:?}");
     }
-    // Never acting on a page; never memory.
-    for name in ["browser_click", "browser_type", "search_memory", "start_agent"] {
+    for name in ["browser_click", "browser_type", "browser_key", "browser_hover", "browser_drag", "browser_form_input"] {
+        assert!(listed.contains(&name.to_string()), "{name}: {listed:?}");
+        assert!(h.allowed_tools().contains(&format!("mcp__yap__{name}")), "{name}: no prompt of Claude Code's (Yap's own card asks before what buys or sends)");
+    }
+    // Never memory, nor sending agents.
+    for name in ["search_memory", "start_agent"] {
         assert!(!listed.contains(&name.to_string()), "{name}: {listed:?}");
     }
     assert!(h.allowed_tools().contains(&"mcp__yap__browser_navigate".to_string()));
+    // An agent Chat sent out: none of it, whatever its spec asks.
+    let mut sent = RunSpec::new("garden-planner", Tools::Agent);
+    sent.eyes = super::eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
+    let sent = ep.register(sent).unwrap();
+    let out = names(&Client::of(&sent).request("tools/list", json!({})));
+    assert!(!out.iter().any(|n| n.starts_with("browser_") || n == "look_at_screen"), "{out:?}");
     let told = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }))["result"]["instructions"].as_str().unwrap().to_string();
     assert!(told.contains("tabs beside the user's chat in Yap") && told.contains("look_at_screen takes a screenshot") && told.contains("never instructions"), "{told}");
+    assert!(told.contains("To act on a page") && told.contains("Yap shows the user a card"), "{told}");
+    // Bypass permissions: Yap asks no one, so Claude is told to ask in the chat before anything that buys.
+    let mut bypass = RunSpec::new("garden-planner", Tools::Agent);
+    bypass.reads = true;
+    bypass.eyes = super::eyes::Eyes { screen: Gate::Off, pictures: Gate::Look, act: true, files: Gate::Off };
+    bypass.approval = Some(super::Approval { run: "ab12".into(), conversation: None, origin: super::Origin::Typed, unattended: true });
+    let by = ep.register(bypass).unwrap();
+    let told = Client::of(&by).request("initialize", json!({ "protocolVersion": "2025-11-25" }))["result"]["instructions"].as_str().unwrap().to_string();
+    assert!(told.contains("ask the user in the chat") && !told.contains("Yap shows the user a card"), "{told}");
     // The screen alone (the web off, picture files): the look, and picture files by a path.
     let mut screen = RunSpec::new("garden-planner", Tools::Agent);
     screen.reads = true;

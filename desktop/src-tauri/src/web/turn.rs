@@ -525,6 +525,15 @@ impl Turn {
                 s.title = title;
             }
         }
+        // A page brought up beside the chat by its address alone (its pill
+        // said only its site, 14 Nov 2026): its title, once it's been read.
+        let title = tidy(title, 120);
+        if !title.is_empty() {
+            let key = crate::web::normal_url(url);
+            if let Some(p) = self.pages.shown.iter_mut().find(|p| crate::web::normal_url(&p.url) == key && (p.title.is_empty() || p.title == p.site)) {
+                p.title = title;
+            }
+        }
         n
     }
 

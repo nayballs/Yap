@@ -854,28 +854,35 @@ fn closing(read_only: bool, direct: bool) -> &'static str {
 /// being a cloud model: refused, and the alert asking once, until "…with
 /// cloud models too" is on (`see_screen::execute`); never in a meeting or a
 /// call. As a plan Code chat's session has them (`chat/turn/plan.rs`
-/// `session_eyes`). Never acting on a page (clicks and typing: Chat's
-/// browser stays at open, read and look). Pure but for the model's image
-/// reading.
-fn direct_eyes(cfg: &crate::config::YapConfig, model: &str) -> claude_live::eyes::Eyes {
+/// `session_eyes`), acting on its pages too (below). Pure but for the
+/// model's image reading.
+fn direct_eyes(cfg: &crate::config::YapConfig, model: &str, phone: bool) -> claude_live::eyes::Eyes {
     use crate::chat::pictures::Gate;
     let provider = crate::ai::claude_plan::PROVIDER;
     let pictures = Gate::for_model(cfg.web_search, provider, model);
     let files = if pictures == Gate::Off { Gate::for_model(true, provider, model) } else { Gate::Off };
     let screen = crate::chat::see_screen::gate(cfg, true, provider, model);
-    claude_live::eyes::Eyes { screen, pictures, act: false, files }
+    // **Acting on the pages** (14 Nov 2026; the maintainer: "get that browser
+    // tool to work exactly like it does inside this claude-code app" — his
+    // Code chat's Claude couldn't open a page's collapsed section): click,
+    // type, keys, hover, drag and a field set, as a plan chat's Claude has
+    // them (`chat/pages/act.rs`, every rule and card of theirs), with the
+    // pages on — never a phone's turn (no panel there to watch), never in a
+    // meeting or a call (`eyes::refused`).
+    let act = pictures != Gate::Off && !phone && crate::chat::pages::act::can_act(provider, model);
+    claude_live::eyes::Eyes { screen, pictures, act, files }
 }
 
 /// **Its browser turn's context**: the person's message this turn, their
 /// earlier ones in the chat (an address they gave opens), the chat itself.
-fn beside_context(agent: &Agent, n: u32, eyes: claude_live::eyes::Eyes) -> claude_live::turn::Context {
+fn beside_context(agent: &Agent, n: u32, eyes: claude_live::eyes::Eyes, unattended: bool) -> claude_live::turn::Context {
     let question = agent.turn_list.iter().find(|t| t.n == n).map(|t| t.request.clone()).filter(|q| !q.trim().is_empty()).unwrap_or_else(|| agent.brief.clone());
     let said = agent
         .conversation
         .and_then(crate::chat::chats::get)
         .map(|c| c.messages.iter().filter(|m| m.role == "user" && m.kind.is_empty()).map(|m| m.text.clone()).collect())
         .unwrap_or_default();
-    claude_live::turn::Context { question, conversation: agent.conversation, eyes, said, watched: true, ..Default::default() }
+    claude_live::turn::Context { question, conversation: agent.conversation, eyes, said, watched: true, unattended, ..Default::default() }
 }
 
 /// **Its browser turn's web side**, as a plan chat's (`plan.rs` `web_side`):
@@ -1095,7 +1102,8 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     // whatever set its mode: its question asked for it, or the phone's own
     // action carried it on (`agents/remote.rs`). The last gate, here.
     let asked = agent.turn_list.iter().find(|t| t.n == n).and_then(|t| t.message_id.clone());
-    let mode = match super::remote::phone_of_turn(id, n, asked.as_deref()) {
+    let phone = super::remote::phone_of_turn(id, n, asked.as_deref());
+    let mode = match phone {
         Some(_) if mode > super::remote::PHONE_MAX => {
             tracing::info!(id, turn = n, was = mode.as_str(), "Agents: a phone's turn, run at Auto");
             super::remote::phone_mode(mode)
@@ -1118,8 +1126,9 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         // An agent Chat sent works with the person's own tools, never Yap's
         // screen or pages, nor Yap's connectors (its own Claude Code setup
         // has the person's). A Code chat's own session has Yap's browser
-        // beside the chat and the screen look (14 Nov 2026), never acting.
-        eyes: if direct { direct_eyes(&cfg, &agent.model) } else { Default::default() },
+        // beside the chat and the screen look (14 Nov 2026), acting on its
+        // pages too (the same day, as Claude Code's own app's browser).
+        eyes: if direct { direct_eyes(&cfg, &agent.model, phone.is_some()) } else { Default::default() },
         connectors: None,
         // A Code chat's own session (the person's message went straight to
         // it) reads Yap's meetings, notes, tasks and calendar on request, as
@@ -1134,9 +1143,10 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     // 2026): this turn's calls belong to it — the person's message and their
     // earlier ones (the pages it may open), the chat — and what they show
     // goes to the chat's panel (`yap-agent-shown`), its answer keeping it.
-    let eyes = if direct { direct_eyes(&cfg, &agent.model) } else { Default::default() };
+    let eyes = if direct { direct_eyes(&cfg, &agent.model, phone.is_some()) } else { Default::default() };
     let mut beside = (direct && eyes.any()).then(|| {
-        let ctx = beside_context(&agent, n, eyes);
+        // Bypass permissions: nobody is asked, a page action's card either (its instructions have Claude ask in the chat).
+        let ctx = beside_context(&agent, n, eyes, modes::unattended(mode));
         let web = beside_web(&cfg, &agent, &ctx);
         run.begin_turn(ctx, web)
     });
@@ -1270,6 +1280,10 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
             shown_beside(&agent, n, ev);
         }
         keep_beside(&agent.id, n, t.shown());
+        // Its turn over: the page's "Yap is using this page" goes, a card still asking lapses.
+        if let Some(app) = APP.get() {
+            let _ = app.emit(SHOWN_EVENT, serde_json::json!({ "id": agent.id, "turn": n, "conversation": agent.conversation, "ended": true }));
+        }
     }
     // Unregistered: a permission card still waiting is a no.
     drop(run);
@@ -3009,14 +3023,17 @@ mod tests {
         // Its first line: the chat thinking, for the person's own message; an agent sent out starts Claude Code.
         assert_eq!((start_line(true), start_line(false)), ("Thinking", "Starting Claude Code"));
         // Its browser beside the chat (a Code chat's own session): the pages with the web on, else picture
-        // files; the screen with "Let Yap's AI see your screen" on; never acting.
+        // files; the screen with "Let Yap's AI see your screen" on; acting on its pages with the web on,
+        // never a phone's turn.
         use crate::chat::pictures::Gate;
         let cfg = |web_search: bool, assistant_screen: bool| crate::config::YapConfig { web_search, assistant_screen, ..Default::default() };
-        let on = direct_eyes(&cfg(true, true), "claude-haiku-5-5");
-        assert_eq!((on.act, on.files), (false, Gate::Off), "never acting");
+        let on = direct_eyes(&cfg(true, true), "claude-haiku-5-5", false);
+        assert_eq!((on.act, on.files), (true, Gate::Off), "acting on its pages, as Claude Code's own browser");
         assert_ne!(on.pictures, Gate::Off);
         assert_ne!(on.screen, Gate::Off);
-        let off = direct_eyes(&cfg(false, false), "claude-haiku-5-5");
+        assert!(!direct_eyes(&cfg(true, true), "claude-haiku-5-5", true).act, "never a phone's turn");
+        let off = direct_eyes(&cfg(false, false), "claude-haiku-5-5", false);
+        assert!(!off.act, "no pages, nothing to act on");
         assert_eq!((off.pictures, off.screen), (Gate::Off, Gate::Off));
         assert_ne!(off.files, Gate::Off);
         // The pages its own searches found, numbered as found, each once, http(s) only.

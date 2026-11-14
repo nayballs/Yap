@@ -88,6 +88,10 @@ pub struct Context {
     /// connector's card can be shown. Not (an evaluation): what would ask
     /// is refused.
     pub watched: bool,
+    /// **Nobody is asked this turn** (a Code chat's own session in Bypass
+    /// permissions, `agents::runner`): an action on a page that would ask
+    /// first goes ahead (`stream::Sink::unattended`).
+    pub unattended: bool,
     /// The turn's part of Yap in the network receipts (Chat, the Voice
     /// Assistant): a connector's requests are counted as its.
     pub feature: Option<crate::privacy::net::Feature>,
