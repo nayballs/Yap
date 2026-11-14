@@ -610,10 +610,14 @@ pub struct Status {
     /// The first-use pointers still due (`bar/pointer.rs`), for someone
     /// who has never dictated.
     first_use: Option<pointer::Due>,
-    /// Agents not over yet (`agents/`: queued, running or asking): the bar says
-    /// "1 agent working" while it's idle, and a click opens the newest one
-    /// (`bar_action "agents"`).
+    /// Agents sent out not over yet (`agents/`: queued, running or asking):
+    /// the bar says "1 agent working" while it's idle, and a click opens the
+    /// newest (`bar_action "agents"`)…
     agents: usize,
+    /// …and the Code chats at work on the person's own words (14 Nov 2026,
+    /// `agents/direct.rs`): "Claude is working", never "an agent" — the
+    /// chat's own session, as Claude Code's own app has it.
+    chats: usize,
     /// A phone connected with Remote Control on (its name): the bar's small
     /// phone mark beside "1 agent working" (`link.rs` `remote_phone`).
     phone: Option<String>,
@@ -624,7 +628,7 @@ pub fn status() -> Status {
     let meeting = crate::meetings::meeting::state();
     let call = crate::calls::meeting_detect::tray_item().map(|(_, label)| label);
     let first_use = pointer::status();
-    let agents = crate::agents::store::live_ids().len();
+    let (agents, chats) = crate::agents::store::live_counts();
     let phone = crate::link::remote_phone();
     let now = now_ms();
     let s = lock();
@@ -656,6 +660,7 @@ pub fn status() -> Status {
             .collect(),
         first_use,
         agents,
+        chats,
         phone,
     }
 }
@@ -1519,7 +1524,7 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
             crate::notes::quick_note::toggle_soon(app);
         }
         // "1 agent working" (`agents/`): the main window on the newest agent's
-        // chat and its tab.
+        // chat and its tab ("Claude is working": the chat alone).
         "agents" => {
             if let Some(id) = crate::agents::store::live_ids().into_iter().next() {
                 crate::chat::turn::open_agent(app, &id);

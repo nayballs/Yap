@@ -45,6 +45,7 @@
   // below take 0 ms; app.css stops the CSS ones.
   import { motionMs, setBarChoice } from '../core/appearance.js';
   import { formatHotkeySpec } from '../core/hotkeys.js';
+  import { workingLine } from '../core/working.js';
   import { dictation, initDictation } from './dictation.svelte.js';
   import DictationCapsule from './DictationCapsule.svelte';
   import BarCard from './BarCard.svelte';
@@ -82,8 +83,10 @@
     dictationButtons: 'off',
     // The first-use pointers still due (bar/pointer.rs): { idle, recording, hold } | null.
     firstUse: null,
-    // Agents not over yet (agents/): "1 agent working" while the bar is idle.
+    // Agents sent out not over yet (agents/): "1 agent working" while the bar is idle…
     agents: 0,
+    // …and Code chats at work on the person's own words (agents/direct.rs): "Claude is working".
+    chats: 0,
     // A phone connected with Remote Control on (its name, link/code.rs): a
     // small phone mark beside "1 agent working".
     phone: null,
@@ -292,15 +295,14 @@
     }
   }
   const dictate = () => act('dictate');
-  // "1 agent working" (Yap Code): Chat on the newest one's chat and its tab.
+  // "1 agent working" (Yap Code): Chat on the newest one's chat and its tab. "Claude is working": a Code chat
+  // at work on the person's own words — the chat's own session, never called an agent (core/working.js).
   const openAgents = () => act('agents');
   // Shown beside the idle (or meeting) pill only, never over a dictation,
   // the reading card or a first-use pointer.
   const agentsLine = $derived(
-    bar.enabled && bar.shown && bar.agents > 0 && (mode === 'idle' || mode === 'meeting') && !reading.active && !pointerText
-      ? bar.agents === 1
-        ? '1 agent working'
-        : `${bar.agents} agents working`
+    bar.enabled && bar.shown && bar.agents + bar.chats > 0 && (mode === 'idle' || mode === 'meeting') && !reading.active && !pointerText
+      ? workingLine(bar.agents, bar.chats)
       : ''
   );
   const meetingNotes = () => act('meeting');

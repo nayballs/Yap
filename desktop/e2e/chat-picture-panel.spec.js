@@ -347,7 +347,10 @@ test('pictures under an answer open beside the chat: tabs, zoom and pan, the sou
   await picture(main).getByRole('button', { name: 'Back beside the chat' }).click();
   await expect(panel(main)).not.toHaveClass(/\bcover\b/);
 
-  // Another chat: the panel goes. Back: the pills, and the tabs with the panel.
+  // **A tab closed stays closed** (kept with the conversation: chats.rs `closed_tabs`) — before, every
+  // picture, page and document its answers had shown came back each time the chat was opened.
+  await expect.poll(async () => (await yap.invoke('chat_get', { id: 41 })).closedTabs ?? []).toEqual([`pic:${BEACH_ID}`]);
+  // Another chat: the panel goes. Back: the pills, and the tabs with the panel — less the one closed.
   await main.getByRole('button', { name: 'Show your chats' }).click();
   await main.getByRole('button', { name: 'New chat' }).click();
   await expect(panel(main)).toHaveCount(0);
@@ -355,7 +358,14 @@ test('pictures under an answer open beside the chat: tabs, zoom and pan, the sou
   await expect(pills(main)).toHaveCount(2);
   await expect(panel(main)).toHaveCount(0);
   await main.getByTestId('chat-doc-pill').click();
+  await expect(tabs(main)).toHaveText([DOC.title, MAP.caption]);
+  await expect(panel(main).locator('.doctitle')).toHaveText(DOC.title);
+  await shot(main, '02b-a-closed-tab-stays-closed');
+  // Its pill opens it again, and it's off the list: it comes back with the chat from now on.
+  await pills(main).nth(1).click();
   await expect(tabs(main)).toHaveText([DOC.title, MAP.caption, BEACH.caption]);
+  await expect.poll(async () => (await yap.invoke('chat_get', { id: 41 })).closedTabs ?? []).toEqual([]);
+  await tabs(main).filter({ hasText: DOC.title }).click();
   await expect(panel(main).locator('.doctitle')).toHaveText(DOC.title);
   await tabs(main).filter({ hasText: MAP.caption }).click();
   await expect(picture(main)).toBeVisible();

@@ -107,6 +107,7 @@ mod tests {
             note: None,
             archived_ts: 0,
             summary: None,
+            closed_tabs: Vec::new(),
         }
     }
 

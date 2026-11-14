@@ -53,7 +53,9 @@ import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat } from './support/code-chats.js';
 import { writePng } from './support/png.js';
-import { workingDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport } from '../src/lib/core/agents.js';
+import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine } from '../src/lib/core/agents.js';
+import { panelRows, panelGroups, panelTotals } from '../src/lib/core/agentPanel.js';
+import { workingLine } from '../src/lib/core/working.js';
 import { sayingOver, questionAnswers, questionsAnswered } from '../src/lib/core/agentNow.js';
 
 const HERE = path.join(RUNS, 'agents-direct-spec');
@@ -223,6 +225,32 @@ const toolDumps = () => (fs.existsSync(TOOLS) ? fs.readFileSync(TOOLS, 'utf8').s
 
 /** Says back the words it was given, exactly (the stand-in's `{{user_text}}`): a reply, no work. */
 const SAYS_BACK = [{ _wait_user: true }, { _dump_args: ARGS }, init(), said('b1', [{ type: 'text', text: 'Got: {{user_text}}' }], 'end_turn'), result('Got: {{user_text}}', 0.001), { _wait_user: true }];
+/** A line Claude Code's own helper (`Task`) says, under the call that sent it. */
+const under = (call, line) => ({ ...line, parent_tool_use_id: call });
+const HELPED = 'The notes are checked.';
+/**
+ * The chat's own Claude hands part of the work to a helper (Claude Code's `Task`), which reads a file
+ * (taking its time over it: it's seen at work) and edits one; then the session says it's done.
+ */
+const SENDS_A_HELPER = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  // (It thinks a moment first: its opening line is seen.)
+  { _sleep_ms: 2500 },
+  said('h1', [{ type: 'tool_use', id: 'toolu_task', name: 'Task', input: { description: 'Check the notes', prompt: 'Read notes.md and add a line.' } }]),
+  under('toolu_task', said('h2', [{ type: 'tool_use', id: 'toolu_hr', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }])),
+  { _sleep_ms: 5000 },
+  under('toolu_task', toolResult('toolu_hr', '1\tDraft notes')),
+  under('toolu_task', said('h3', [{ type: 'tool_use', id: 'toolu_he', name: 'Edit', input: { file_path: '{{cwd}}\\notes.md', old_string: 'Draft notes', new_string: 'Draft notes\nChecked' } }])),
+  { _hook: { event: 'PreToolUse', input: { tool_name: 'Edit', tool_use_id: 'toolu_he', tool_input: { file_path: 'notes.md' } } } },
+  { _write_file: { path: 'notes.md', text: 'Draft notes\nChecked\n' } },
+  under('toolu_task', toolResult('toolu_he', 'The file notes.md has been updated.')),
+  toolResult('toolu_task', 'The notes are in order.'),
+  said('h4', [{ type: 'text', text: HELPED }], 'end_turn'),
+  result(HELPED, 0.02),
+  { _wait_user: true },
+];
 
 function writeScript(name, lines) {
   fs.mkdirSync(SCRIPTS, { recursive: true });
@@ -343,8 +371,10 @@ test('a message typed in a Code chat on the plan goes straight to its session, a
   await expect(work.getByTestId('chat-agent-work-said')).toHaveText(["I'll add the watering schedule to notes.md."]);
   await expect(work.getByTestId('chat-agent-work-steps').locator('.wtext')).toHaveText([/^Edited notes\.md\s*\+1$/]);
   await expect(thread(main).getByTestId('chat-agent-report').locator('.jtitle')).toHaveText('Agent done · garden-planner');
-  // Its tab opened beside the chat as it started.
-  await expect(tab(main)).toBeVisible();
+  // **No tab opens by itself** (14 Nov 2026): that's the chat talking, as in Claude Code's own app — not an
+  // agent sent out. Nor is it in "Agents working" above the chats (its own row there has its dot).
+  await expect(tab(main)).toHaveCount(0);
+  await expect(main.getByTestId('chat-running-agents')).toHaveCount(0);
   await shot(main, '01-a-code-chat-works-directly');
 
   // The next message: the same session's next turn, on --resume.
@@ -364,8 +394,67 @@ test('a message typed in a Code chat on the plan goes straight to its session, a
   expect(then[5].text).toBe(DONE2);
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText([DONE1, DONE2]);
   await expect.poll(() => laidOut(main)).toEqual(['you', 'work', 'report', 'answer', 'you', 'work', 'report', 'answer']);
+  await expect(tab(main)).toHaveCount(0);
   await shot(main, '02-its-next-message-its-next-turn');
+
+  // A turn's line (one that changed a file has one) opens that turn in its timeline, its Undo there — never a
+  // row of the panel: the chat's own turns are no agents.
+  await thread(main).getByTestId('chat-agent-pill').nth(1).click();
+  await expect(tab(main)).toBeVisible();
+  await expect(tab(main).locator('.agentbody')).toHaveAttribute('data-view', 'timeline');
+  await expect(tab(main).locator('[data-testid="chat-agent-turn"][data-turn="2"]')).toHaveAttribute('data-open', 'true');
+  // Back: the panel lists the agents at work for the chat — none sent here yet; the header adds up all the chat used.
+  await tab(main).getByTestId('chat-agent-back').click();
+  await expect(tab(main).getByTestId('chat-agent-panel')).toBeVisible();
+  await expect(tab(main).getByTestId('chat-agent-row')).toHaveCount(0);
+  await expect(tab(main).getByTestId('chat-agent-panel-empty')).toHaveText('No agents yet. Claude sends one when part of the work needs it.');
+  await expect(tab(main).getByTestId('chat-agent-total-cost').locator('.tv')).toHaveText('≈ $0.05');
+  await shot(main, '03-no-agents-yet');
+  await tab(main).getByRole('button', { name: 'Close the panel' }).click();
 });
+
+test('the chat’s own Claude is no agent: “Thinking”, no tab, “Claude is working” on the bar — and the helpers it sends are the panel’s rows', async ({ yap, main, shot }) => {
+  await script(yap, SENDS_A_HELPER, 'sends-a-helper');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Check the notes for me.');
+  const agent = await newAgent(yap, before);
+  // Its first line is the chat thinking, as Chat's own turn says it — not "Starting Claude Code" on every message.
+  await expect(thread(main).getByTestId('chat-agent-work').locator('[data-busy="true"] .wtext')).toHaveText('Thinking', { timeout: 20_000 });
+  expect((await yap.invoke('agent_get', { id: agent.id })).log.some((e) => e.step === 'Starting Claude Code')).toBe(false);
+  // No tab of its own, nothing in "Agents working"; the bar: "Claude is working", never "1 agent working".
+  await expect(tab(main)).toHaveCount(0);
+  await expect(main.getByTestId('chat-running-agents')).toHaveCount(0);
+  await expect.poll(async () => (await yap.invoke('bar_status')).chats, { timeout: 20_000 }).toBe(1);
+  expect((await yap.invoke('bar_status')).agents).toBe(0);
+  await expect(yap.overlay.getByTestId('bar-agents')).toHaveText('Claude is working');
+  await shot(yap.overlay, '60-bar-claude-is-working');
+
+  const done = await ended(yap, agent.id);
+  await messagesOf(yap, done.conversation, 3);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText([HELPED]);
+  await expect.poll(async () => (await yap.invoke('bar_status')).chats).toBe(0);
+  await expect(tab(main)).toHaveCount(0);
+
+  // **The helper it sent is the agent**: in the panel, a row of its own — what it was asked, how many steps it
+  // took, opening to them. (Its turn changed a file: its line opens the turn's timeline; Back, the panel.)
+  await thread(main).getByTestId('chat-agent-pill').first().click();
+  await expect(tab(main).locator('.agentbody')).toHaveAttribute('data-view', 'timeline');
+  await tab(main).getByTestId('chat-agent-back').click();
+  const rows = tab(main).getByTestId('chat-agent-row');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toHaveAttribute('data-kind', 'helper');
+  await expect(rows.first()).toHaveAttribute('data-state', 'finished');
+  await expect(rows.first().getByTestId('chat-agent-row-title')).toHaveText('Check the notes');
+  await expect(rows.first().getByTestId('chat-agent-row-sub')).toHaveText('Helper');
+  await expect(rows.first().getByTestId('chat-agent-row-line')).toHaveText('2 steps');
+  await expect(rows.first().getByTestId('chat-agent-row-menu')).toHaveCount(0);
+  await rows.first().locator('button.rhead').click();
+  await expect(rows.first().getByTestId('chat-agent-row-steps').getByTestId('chat-agent-work-row').locator('.rtext')).toHaveText(['Read notes.md', 'Edited notes.md']);
+  await shot(main, '61-a-helper-is-the-panels-row');
+  await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+});
+
 
 test('a message while it works is handed to it at once: the same turn, one answer', async ({ yap, main }) => {
   await script(yap, SLOWISH, 'slowish');
@@ -606,6 +695,17 @@ test('just chatting: Claude Code gets the words as they are, and the thread is t
   await expect(thread(main).getByTestId('chat-agent-pill')).toHaveCount(0);
   await expect(thread(main).getByTestId('chat-agent-report')).toHaveCount(0);
   expect((await agents(yap)).length).toBe(before + 1);
+
+  // A reply that ends with a question ("What do you need?") is still just the reply: never "The agent has a question".
+  await setConfig(yap, main, { speakReplies: false });
+  const ASKS = 'Are you still there?';
+  await send(main, ASKS);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList[2]?.status, { timeout: 30_000 }).toBe('done');
+  expect((await agents(yap)).find((j) => j.id === agent.id).turnList[2].asks ?? false).toBe(false);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText([`Got: ${HELLO}`, `Got: ${THANKS}`, `Got: ${ASKS}`]);
+  await expect.poll(() => laidOut(main)).toEqual(['you', 'answer', 'you', 'answer', 'you', 'answer']);
+  await expect(thread(main).getByTestId('chat-agent-pill')).toHaveCount(0);
+  await expect(thread(main).getByTestId('chat-agent-report')).toHaveCount(0);
 });
 
 test('asked out loud with the Code chat in view: straight to its session, nothing said first, its own answer read aloud', async ({ yap, main }) => {
@@ -687,6 +787,63 @@ test('core/agents.js: the Code chat’s own session at work is what the message 
   expect(questionAnswers(qs, { 0: { labels: ['Hourly'], other: '   ' } })).toEqual({});
   expect(questionsAnswered([], {})).toBe(false);
 
+  // **The chat itself at work** (agents/store.rs `works_directly`): the turn it's on is the person's own message.
+  const t = (n, direct, status, startedTs) => ({ n, direct, status, startedTs });
+  expect(worksDirectly({ status: 'running', turnList: [t(1, false, 'done', 1), t(2, true, 'running', 9)] })).toBe(true);
+  expect(worksDirectly({ status: 'running', turnList: [t(1, true, 'running', 9), t(2, false, 'queued', 0)] })).toBe(true);
+  expect(worksDirectly({ status: 'running', turnList: [t(1, true, 'done', 1), t(2, false, 'running', 12)] })).toBe(false);
+  expect(worksDirectly({ status: 'done', turnList: [t(1, false, 'done', 1), t(2, true, 'done', 4)] })).toBe(true);
+  expect(worksDirectly({ status: 'done' })).toBe(false);
+  // The bar's line: agents sent out, and the chat's own Claude — never "an agent".
+  expect([workingLine(0, 0), workingLine(1, 0), workingLine(3, 0), workingLine(0, 1), workingLine(0, 2), workingLine(1, 1), workingLine(2, 1)]).toEqual([
+    '',
+    '1 agent working',
+    '3 agents working',
+    'Claude is working',
+    'Claude is working in 2 chats',
+    'Claude and 1 agent working',
+    'Claude and 2 agents working',
+  ]);
+  expect(runningLine(1)).toBe('1 agent working');
+  // **The panel's rows**: the chat's own turns are none; the helpers they sent are, newest first; a turn Chat sent
+  // its agent stays a row. The header still adds up all the chat used (`own`).
+  const helping = [
+    { id: 'a1', step: 'Handing part of it to a helper · Check the notes', call: 'toolu_1', turn: 2 },
+    { id: 'a1', step: 'Reading notes.md', call: 'toolu_r', under: 'toolu_1', turn: 2 },
+    { id: 'a1', helper: 'back', call: 'toolu_1', turn: 2 },
+    { id: 'a1', step: 'Handing part of it to a helper · List the folder', call: 'toolu_2', turn: 2 },
+    { id: 'a1', step: 'Running ls', command: 'ls', call: 'toolu_c', under: 'toolu_2', turn: 2 },
+  ];
+  const chat = {
+    id: 'a1',
+    folder: 'garden-planner',
+    status: 'running',
+    createdTs: 100,
+    mode: 'auto',
+    model: 'claude-haiku-5-5',
+    turnList: [
+      { n: 1, direct: false, title: 'Tidy the notes', status: 'done', startedTs: 100, endedTs: 110, cost: 0.02 },
+      { n: 2, direct: true, title: 'Check the notes for me', status: 'running', startedTs: 120, cost: 0.01 },
+    ],
+  };
+  const rows = panelRows([chat], { logs: { a1: helping }, now: 130 });
+  expect(rows.map((r) => [r.kind, r.title, r.state, r.status, r.line])).toEqual([
+    ['turn', 'Tidy the notes', 'finished', 'done', 'Done'],
+    ['helper', 'Check the notes', 'finished', 'done', '1 step'],
+    ['helper', 'List the folder', 'running', 'running', 'Running ls'],
+  ]);
+  expect(rows[2]).toMatchObject({ modeWord: 'Helper', pose: 'working', needs: null, cost: 0, turn: null, n: 2 });
+  expect(rows[2].helper.steps.map((st) => st.step)).toEqual(['Running ls']);
+  expect(panelGroups(rows).map((g) => [g.id, g.rows.map((r) => r.title)])).toEqual([
+    ['running', ['List the folder']],
+    ['finished', ['Check the notes', 'Tidy the notes']],
+  ]);
+  const all = panelRows([chat], { logs: { a1: helping }, now: 130, own: true });
+  expect(all.filter((r) => r.kind === 'turn').map((r) => r.n)).toEqual([1, 2]);
+  expect(panelTotals(all.filter((r) => r.kind === 'turn')).cost).toBeCloseTo(0.03);
+  // A chat's own turn with no helpers: nothing.
+  expect(panelRows([{ ...chat, turnList: [chat.turnList[1]] }], { logs: { a1: [] }, now: 130 })).toEqual([]);
+
   const own = (status, conversation = 4) => ({ id: 'a1', conversation, status, turnList: [{ n: 1, direct: true }] });
   for (const status of ['queued', 'running', 'asking']) expect(workingDirectly([own(status)], 4)?.id).toBe('a1');
   for (const status of ['done', 'failed', 'stopped', 'interrupted']) expect(workingDirectly([own(status)], 4)).toBeNull();
@@ -702,7 +859,9 @@ test('core/agents.js: the Code chat’s own session at work is what the message 
   expect(plainReply(reply)).toBe(true);
   expect(plainReply({ ...reply, files: ['notes.md'] })).toBe(false);
   expect(plainReply({ ...reply, denials: [{ tool: 'Bash' }] })).toBe(false);
-  for (const more of [{ plan: true }, { asks: true }, { error: 'It stopped.' }, { undone: true }, { direct: false }]) expect(plainReply({ ...reply, ...more })).toBe(false);
+  for (const more of [{ plan: true }, { error: 'It stopped.' }, { undone: true }, { direct: false }]) expect(plainReply({ ...reply, ...more })).toBe(false);
+  // A question at the end of its words ("What do you need?") is part of the reply (one saved as asking, before 14 Nov, too).
+  expect(plainReply({ ...reply, asks: true })).toBe(true);
   for (const status of ['running', 'queued', 'asking', 'failed', 'stopped', 'interrupted']) expect(plainReply({ ...reply, status })).toBe(false);
   expect(plainReply(null)).toBe(false);
   // Its own line (title and how it ended): only once it ended with something to report.

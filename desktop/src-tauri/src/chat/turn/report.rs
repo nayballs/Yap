@@ -472,6 +472,21 @@ pub fn card_buttons(id: &str, status: Status, plan: bool) -> (crate::bar::CardAc
     }
 }
 
+/// **The card's title**: "Agent done: garden-planner" — and for a Code chat's
+/// own reply to the person's message (`direct`, 14 Nov 2026), Claude's:
+/// "Claude replied: garden-planner", never an agent's. Pure.
+pub fn notice_title(folder: &str, status: Status, plan: bool, asks: bool, direct: bool) -> String {
+    let who = if direct { "Claude" } else { "Agent" };
+    match (status, plan, asks) {
+        (Status::Failed, _, _) => format!("{who} didn't finish: {folder}"),
+        (_, true, _) if direct => format!("Claude's plan is ready: {folder}"),
+        (_, true, _) => format!("The agent's plan is ready: {folder}"),
+        (_, _, true) if !direct => format!("Agent has a question: {folder}"),
+        _ if direct => format!("Claude replied: {folder}"),
+        _ => format!("Agent done: {folder}"),
+    }
+}
+
 /// **"Agent done"**: with no Yap window in front, a card on the Yap bar (else
 /// a Windows notification), **Open** bringing up its chat — and a plan's
 /// **Go ahead**. A plan already allowed says nothing here: it's carrying it
@@ -482,18 +497,14 @@ fn notice(agent: &Agent, reply: &str) {
     }
     let Some(app) = crate::agents::runner::app().cloned() else { return };
     let (id, folder, status, plan, asks) = (agent.id.clone(), agent.folder.clone(), agent.status, agent.plan, agent.asks);
+    let direct = agent.works_directly();
     let body = crate::agents::steps::clip(reply.trim(), 160);
     // Window getters wait on the main thread: off it.
     std::thread::spawn(move || {
         if crate::notices::notice::yap_in_front(&app) {
             return;
         }
-        let title = match (status, plan, asks) {
-            (Status::Failed, _, _) => format!("Agent didn't finish: {folder}"),
-            (_, true, _) => format!("The agent's plan is ready: {folder}"),
-            (_, _, true) => format!("Agent has a question: {folder}"),
-            _ => format!("Agent done: {folder}"),
-        };
+        let title = notice_title(&folder, status, plan, asks, direct);
         tracing::info!(id = %id, "Agents: said with no Yap window in front");
         let (primary, secondary) = card_buttons(&id, status, plan);
         let card = crate::bar::Card {
@@ -548,7 +559,9 @@ fn toast_action(app: &AppHandle, arg: &str) {
 }
 
 /// **Open**: the main window, on the agent's chat (and its tab, `yap-agent-open`)
-/// — the card's Open, and the Yap bar's "1 agent working" (`bar.rs`).
+/// — the card's Open, and the Yap bar's "1 agent working" (`bar.rs`). A Code
+/// chat at work on the person's own words (`direct`) is the chat alone: no
+/// tab, as Claude Code's own app opens a session (14 Nov 2026).
 pub(crate) fn open_agent(app: &AppHandle, id: &str) {
     let Some(agent) = store::get(id) else { return };
     if let Err(e) = crate::shell::window::show_settings(app) {
@@ -558,7 +571,7 @@ pub(crate) fn open_agent(app: &AppHandle, id: &str) {
     // Chat opens the conversation, as the Voice Assistant's Open in Chat
     // does; Yap Code's screens opens the agent's tab.
     let _ = app.emit("yap-assistant-turn", json!({ "phase": "open", "conversationId": agent.conversation, "show": true }));
-    let _ = app.emit("yap-agent-open", json!({ "id": agent.id, "conversation": agent.conversation }));
+    let _ = app.emit("yap-agent-open", json!({ "id": agent.id, "conversation": agent.conversation, "direct": agent.works_directly() }));
 }
 
 #[cfg(test)]
@@ -712,6 +725,20 @@ Its own words: Done.");
         assert!(!asked_by_voice(&old, 1, false, |_, _| Some(false)));
         // A paired phone's turn: said (on that phone), typed there or spoken.
         assert!(asked_by_voice(&typed_first, 1, true, |_, _| Some(false)));
+    }
+
+    #[test]
+    fn the_bar_card_says_the_chats_own_reply_is_claudes_never_an_agents() {
+        let t = |status, plan, asks, direct| notice_title("garden-planner", status, plan, asks, direct);
+        assert_eq!(t(Status::Done, false, false, false), "Agent done: garden-planner");
+        assert_eq!(t(Status::Done, false, true, false), "Agent has a question: garden-planner");
+        assert_eq!(t(Status::Done, true, false, false), "The agent's plan is ready: garden-planner");
+        assert_eq!(t(Status::Failed, false, false, false), "Agent didn't finish: garden-planner");
+        // The person's own message, straight to the chat's session: Claude replied, a question in it or not.
+        assert_eq!(t(Status::Done, false, false, true), "Claude replied: garden-planner");
+        assert_eq!(t(Status::Done, false, true, true), "Claude replied: garden-planner");
+        assert_eq!(t(Status::Done, true, false, true), "Claude's plan is ready: garden-planner");
+        assert_eq!(t(Status::Failed, false, false, true), "Claude didn't finish: garden-planner");
     }
 
     #[test]

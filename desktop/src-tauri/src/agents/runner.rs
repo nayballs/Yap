@@ -568,17 +568,23 @@ pub fn app() -> Option<&'static AppHandle> {
     APP.get()
 }
 
-/// How many agents weren't over when the Yap bar was last told.
+/// What wasn't over when the Yap bar was last told: agents sent out and Code
+/// chats at work on the person's own words, as one number ([`told`]).
 static LIVE_TOLD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
 
+/// `(agents sent, chats at work)` as one number, either changing it. Pure.
+fn told((sent, chats): (usize, usize)) -> usize {
+    (sent << 16) | chats.min(0xFFFF)
+}
+
 /// Send `ev` to the page and keep it in the agent's log; the Yap bar hears
-/// when the number of agents not over yet changes ("1 agent working").
+/// when what's at work changes ("1 agent working", "Claude is working").
 pub fn emit(ev: &AgentEvent) {
     let v = serde_json::to_value(ev).ok();
     let line = v.as_ref().and_then(|v| store::log_append(&ev.id, v));
     if let Some(app) = APP.get() {
         let _ = app.emit(EVENT, ev);
-        let live = store::live_ids().len();
+        let live = told(store::live_counts());
         if LIVE_TOLD.swap(live, std::sync::atomic::Ordering::Relaxed) != live {
             crate::bar::refresh(app);
             // Keeping the PC awake while agents work (Remote Control on).
@@ -838,6 +844,20 @@ fn closing(read_only: bool, direct: bool) -> &'static str {
     }
 }
 
+/// **The line a turn starts on** (its first step): "Starting Claude Code"
+/// for an agent sent out, and "Thinking" — as Chat's own turn says it
+/// (`chat/activity.rs`) — for the person's own message in a Code chat that
+/// works directly (14 Nov 2026). Each of its turns starts Claude Code again
+/// on the chat's session, but that's Yap's plumbing: "Starting Claude Code"
+/// on every message read as a new Claude spawned each time.
+pub(crate) fn start_line(direct: bool) -> &'static str {
+    if direct {
+        "Thinking"
+    } else {
+        "Starting Claude Code"
+    }
+}
+
 /// `text`, then `end` after a blank line when there is one.
 fn ended(text: &str, end: &str) -> String {
     if end.is_empty() {
@@ -1092,7 +1112,7 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         j.reported = false;
         j.error = None;
         j.problem = None;
-        j.step = "Starting Claude Code".into();
+        j.step = start_line(direct).into();
         let (model, effort) = (j.model.clone(), j.effort.clone());
         if let Some(t) = j.turn_mut(n) {
             t.status = Status::Running;
@@ -1115,7 +1135,7 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         return (Status::Failed, n);
     };
     tracing::info!(id, mode = mode.as_str(), pay = %agent.pay, resuming, turn = n, runs = agent.turns, "Agents: started");
-    emit(&AgentEvent { step: Some("Starting Claude Code".into()), ..AgentEvent::at(&agent, n) });
+    emit(&AgentEvent { step: Some(start_line(direct).into()), ..AgentEvent::at(&agent, n) });
 
     // The model's context window: as Claude Code said it for this turn (a
     // turn carried on) or an earlier one on the same model, else Yap's
@@ -1155,6 +1175,11 @@ struct Follow {
     /// A read-only turn: never a plan waiting for a go-ahead, whatever its
     /// mode ([`after_plan`]'s caller).
     read_only: bool,
+    /// The person's own message, straight to the chat's session
+    /// (`agents/direct.rs`): its final words are the chat's reply, so a
+    /// question in them ("What do you need?") is part of the conversation,
+    /// never "the agent has a question" (14 Nov 2026).
+    direct: bool,
     /// What the agent had cost before this process, and the turn.
     cost_before: f64,
     turn_cost_before: f64,
@@ -1268,6 +1293,7 @@ impl Follow {
             backup,
             mode,
             read_only: agent.turn_list.iter().find(|t| t.n == n).is_some_and(|t| t.read_only),
+            direct: agent.turn_list.iter().find(|t| t.n == n).is_some_and(|t| t.direct),
             cost_before: agent.cost,
             turn_cost_before: agent.turn_list.iter().find(|t| t.n == n).map_or(0.0, |t| t.cost),
             spent: 0.0,
@@ -1826,7 +1852,7 @@ impl Follow {
         // never a plan waiting for a go-ahead, whatever its mode.
         let allowed = with_state(|s| s.live.get(&self.id).is_some_and(|l| l.plan_allowed));
         let (plan, plan_allowed) = after_plan(self.mode == Mode::Plan && status == Status::Done && !self.read_only, allowed, self.edited);
-        let asks = status == Status::Done && !plan_allowed && super::consent::asks(&text);
+        let asks = status == Status::Done && !plan_allowed && !self.direct && super::consent::asks(&text);
         let n = self.n;
         let now = store::now_secs();
         let agent = store::update(&self.id, |j| {
@@ -2780,6 +2806,11 @@ mod tests {
         assert!(said.starts_with("Get caught up with the add-on in this folder.\n\nThis is read only: don't change, create or delete any files"), "{said}");
         assert!(said.ends_with("finish with a short summary of what you found."));
         assert!(!said.contains(SUMMARY_LINE));
+        // Its first line: the chat thinking, for the person's own message; an agent sent out starts Claude Code.
+        assert_eq!((start_line(true), start_line(false)), ("Thinking", "Starting Claude Code"));
+        // The bar hears either count change: an agent sent out, or the chat's own Claude at work.
+        assert_ne!(told((1, 0)), told((0, 1)));
+        assert_eq!(told((0, 0)), 0);
     }
 
     #[test]

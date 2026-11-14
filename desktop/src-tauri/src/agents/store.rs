@@ -436,6 +436,17 @@ impl Agent {
         }
     }
 
+    /// **The Code chat itself at work** (14 Nov 2026): the turn it's on (its
+    /// live one that started, else its latest) is the person's own message
+    /// sent straight to the chat's session ([`TurnNote::direct`]). That's the
+    /// chat talking, as Claude Code's own app has its session, not an agent
+    /// sent out: never "an agent working" (the Yap bar, Chat's list), nor a
+    /// tab opened by itself. Pure.
+    pub fn works_directly(&self) -> bool {
+        let list = &self.turn_list;
+        list.iter().rev().find(|t| t.started_ts > 0 && t.status.live()).or_else(|| list.last()).is_some_and(|t| t.direct)
+    }
+
     /// Turn `n`, to change.
     pub fn turn_mut(&mut self, n: u32) -> Option<&mut TurnNote> {
         self.turn_list.iter_mut().find(|t| t.n == n)
@@ -809,13 +820,27 @@ pub fn flush() {
 }
 
 /// The agents not over yet (queued, running or asking), newest first: their
-/// ids (the Yap bar's "1 agent working" and where its click goes).
+/// ids (where the Yap bar's "1 agent working" goes on a click).
 pub fn live_ids() -> Vec<String> {
+    with_store(|s| newest_live(&s.agents).into_iter().map(|j| j.id.clone()).collect())
+}
+
+/// **What's at work, told apart** (the Yap bar's line): how many agents
+/// were sent out, and how many Code chats are at work on the person's own
+/// words ([`Agent::works_directly`]: "Claude is working").
+pub fn live_counts() -> (usize, usize) {
     with_store(|s| {
-        let mut live: Vec<&Agent> = s.agents.iter().filter(|j| j.status.live()).collect();
-        live.sort_by(|a, b| b.created_ts.cmp(&a.created_ts).then_with(|| b.id.cmp(&a.id)));
-        live.into_iter().map(|j| j.id.clone()).collect()
+        let live = newest_live(&s.agents);
+        let chats = live.iter().filter(|j| j.works_directly()).count();
+        (live.len() - chats, chats)
     })
+}
+
+/// The agents not over yet, newest first. Pure.
+fn newest_live(agents: &[Agent]) -> Vec<&Agent> {
+    let mut live: Vec<&Agent> = agents.iter().filter(|j| j.status.live()).collect();
+    live.sort_by(|a, b| b.created_ts.cmp(&a.created_ts).then_with(|| b.id.cmp(&a.id)));
+    live
 }
 
 /// The agents a chat started, newest first.
@@ -1629,5 +1654,31 @@ mod tests {
         std::fs::create_dir_all(backup_dir("x1").unwrap()).unwrap();
         assert!(reset() >= 1);
         assert!(list().is_empty() && !bypass_confirmed() && !root().exists());
+    }
+
+    #[test]
+    fn a_code_chat_at_work_on_the_persons_own_words_is_the_chat_not_an_agent_sent() {
+        let turn = |n: u32, direct: bool, status: Status, started: u64| TurnNote { n, direct, status, started_ts: started, ..Default::default() };
+        let mut j = Agent { status: Status::Running, created_ts: 5, turn_list: vec![turn(1, false, Status::Done, 1), turn(2, true, Status::Running, 9)], ..Default::default() };
+        assert!(j.works_directly(), "its live turn is the person's own message");
+        // A brief Chat's model worded, queued behind it: still the chat at work until that one starts.
+        j.turn_list.push(turn(3, false, Status::Queued, 0));
+        assert!(j.works_directly());
+        j.turn_list[1].status = Status::Done;
+        j.turn_list[2] = turn(3, false, Status::Running, 12);
+        assert!(!j.works_directly(), "an agent Chat sent: its turn is at work now");
+        // Nothing at work: its latest turn says which it is.
+        let done = Agent { turn_list: vec![turn(1, false, Status::Done, 1), turn(2, true, Status::Done, 4)], ..Default::default() };
+        assert!(done.works_directly());
+        assert!(!Agent::default().works_directly(), "an agent from before turns were kept");
+        // Told apart, newest first: one sent out, one chat at work, one over.
+        let sent = Agent { id: "s1".into(), status: Status::Running, created_ts: 3, turn_list: vec![turn(1, false, Status::Running, 3)], ..Default::default() };
+        let over = Agent { id: "o1".into(), status: Status::Done, ..Default::default() };
+        let mut chat = j.clone();
+        chat.id = "c1".into();
+        chat.turn_list[2] = turn(3, true, Status::Running, 12);
+        let all = [sent, over, chat];
+        assert_eq!(newest_live(&all).iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["c1", "s1"]);
+        assert_eq!(newest_live(&all).iter().filter(|a| a.works_directly()).count(), 1);
     }
 }

@@ -30,9 +30,13 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   and a ^ menu (Open Yap, New meeting note, Paste last transcript, Settings,
   the microphone and the languages — `bar/menu.rs`, below —, Hide the bar
   for 1 hour, Turn off the bar — `bar_action`); **agents at work**
-  (2026-11-07, [yap-code.md](./yap-code.md)): `Status.agents`, how many agents are queued,
-  running or asking (`agents::store::live_ids`; the runner refreshes the bar
-  when the number changes), says **"1 agent working"** / "2 agents working" in a
+  (2026-11-07, [yap-code.md](./yap-code.md)): `Status.agents`, how many agents sent out are queued,
+  running or asking, and `Status.chats`, how many Code chats are at work on
+  the person's own words (2026-11-14: the chat's own session, never called an
+  agent; `agents::store::live_counts`; the runner refreshes the bar when
+  either changes), says **"1 agent working"** / "2 agents working" — **"Claude
+  is working"** for a chat, "Claude and 1 agent working" with both
+  (`core/working.js`) — in a
   small chip nearest the pill while the bar is idle or a meeting records, never
   during a dictation, the reading card or a first-use pointer (region
   `agents`, `data-testid="bar-agents"`); a click (`bar_action "agents"`) opens the

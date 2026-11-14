@@ -261,7 +261,7 @@ workspace, word for word, and no model of Chat's is asked.
   saying hello out loud: "it always said On it, then would send an agent to
   do something then report back with that… all I was doing was just testing
   yap"). A direct turn that ended well with nothing to report beyond its
-  words — no file changed, nothing refused, no plan or question waiting
+  words — no file changed, nothing refused, no plan waiting
   (`core/agents.js` `plainReply`) — shows as the message and the answer,
   as a reply in Claude Code's own app does:
   - **no line of its own** ("garden-planner · Hey, just testing… ● Done"):
@@ -280,6 +280,39 @@ workspace, word for word, and no model of Chat's is asked.
   cost](#what-a-turn-cost)). Chat no longer sizes these turns.
 - **Agents when it decides**: Claude Code's own subagents. Yap's
   `start_agent` isn't offered to the session.
+- **The chat itself is no agent** (2026-11-14; the maintainer: "Anytime I
+  speak it starts an agent on the right hand side that seems to spawn a
+  claude… right now I speak to you and you decide whether to pass work to
+  agents"). Its session is Yap's agent record underneath, but everywhere the
+  person looks it's the chat talking, as Claude Code's own app has its
+  session (`agents::store::Agent::works_directly`, `core/agents.js`
+  `worksDirectly`: the turn it's on is the person's own message):
+  - **no tab opens by itself**, typed or asked out loud. A turn's line (one
+    with something to report) and its report line open its tab on that turn's
+    timeline, with its Undo (`AgentTab`: a direct turn asked for goes to
+    the timeline), and the bar card's or a notification's Open shows the chat
+    alone (`yap-agent-open`'s `direct`);
+  - **no row in the Agent panel**: the panel lists the agents at work for
+    the chat — the helpers its Claude sends ([The panel](#the-panel)) and any
+    turn Chat's model handed over — and says "No agents yet. Claude sends one
+    when part of the work needs it." while there are none. Its header still
+    adds up all the chat used;
+  - **not in "Agents working"** above the chats (its own row there has its
+    dot), and the Yap bar says **"Claude is working"**, never "1 agent
+    working" (`bar.rs` `chats`, `core/working.js`);
+  - **its first line is "Thinking"**, as Chat's own turn says it
+    (`runner::start_line`), not "Starting Claude Code": each turn does start
+    Claude Code again on the chat's session, but that's Yap's plumbing, and
+    on every message it read as a new Claude spawned each time;
+  - **a question at the end of its reply is part of the reply** ("What do
+    you need?"): a direct turn never `asks` (`runner::Follow::direct`), so
+    it's a plain reply, never "The agent has a question" — a turn saved so
+    before is read the same (`plainReply` leaves `asks` aside). Claude Code's
+    own questions still come as their card;
+  - **with no Yap window in front**, its card on the bar (or the Windows
+    notification) says "Claude replied: garden-planner", "Claude didn't
+    finish: …", "Claude's plan is ready: …" (`report::notice_title`), never
+    "Agent done".
 - **The rule after outside content has nothing to guard here**: it's about
   a model wording a brief from what it read ([The safety
   rule](#the-safety-rule)). The instruction is the person's own typed words;
@@ -288,7 +321,8 @@ workspace, word for word, and no model of Chat's is asked.
   and its work ([Around the tab](#around-the-tab)) hang under the person's
   message, with no bubble of Chat's between, then — when there's something
   to report — its quiet line and report line, and the answer. The page keeps the question as saved when
-  `chat_send` answers `direct` (the session's tab opens beside it).
+  `chat_send` answers `direct` (no tab opens: the chat talking, not an
+  agent sent).
 - **With its screenshots** (2026-11-12): the ones the person put in the
   box (snipped, pasted, dropped) go to the session with their words, as
   Claude Code's own app sends a pasted picture. Before, a screenshot made
@@ -1058,7 +1092,9 @@ and each call runs the tool loop's own code and rules.
 `views/chat/AgentTab.svelte`: an `agent:<id>` tab in the panel beside the chat
 (`chatDoc.svelte.js`, `DocPanel.svelte`). It opens on the turn's agent event, a
 pill or the bar's Open, and is fed by `agent_get` (the agent and its log, to
-replay) and `yap-agent` (live). **Closing the tab never stops the agent.**
+replay) and `yap-agent` (live). **Closing the tab never stops the agent.** A
+Code chat's own session working on the person's words opens no tab by itself
+([The chat itself is no agent](#a-code-chat-that-works-directly)).
 
 Two views: **the panel**, what it opens on, and **the timeline**, a row's
 Open (Back returns to the panel). The footer (Stop, Continue, Undo, Open in
@@ -1112,7 +1148,19 @@ used. See [Yap's crew](#yaps-crew-the-rows-characters).
   dots, the rail and the switch agree (`core/chatStatus.js`, the same
   `planWaitsNow`), and so does the phone (its agents in brief carry
   `planUnused`); the Yap bar's "1 agent working" counts the agents at work,
-  as the panel's Running does.
+  as the panel's Running does (a Code chat's own session apart: "Claude is
+  working").
+- **The chat's own turns are no rows** (2026-11-14): a turn that's the
+  person's own message, straight to the chat's session (`direct`), is the
+  chat talking. Each helper it sent (Claude Code's own subagent: `helpersOf`)
+  is a row instead (`kind: 'helper'`, `agentPanel.js` `helperRow`): "Helper"
+  where the Mode is, what it was asked, the step it's on while it works
+  (Running), then how many it took (Finished), ✕ when it didn't finish; ▸
+  opens it to its own steps (StepRows: an edit to its diff, a command to
+  what it printed). No menu, no stats: its usage is its turn's, and the
+  header's tiles still add up all the chat used (`panelRows`'s `own`). A
+  turn Chat's model handed over (off the plan, a Skill, a selection) stays a
+  row as ever, its helpers entries under it.
 - **The answer, in the row**: a Needs you row has its card's own buttons
   inline, through the same commands the thread's cards use, so whichever is
   answered first, both close — **Allow once** / **Deny** with what it asks
@@ -1498,10 +1546,14 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
     (its own limit).
 - **Running agents** (`RunningAgents.svelte`) above the Code side's list: the
   folder, the line it's on (or "Waiting for you"), how long; a click opens its
-  chat and tab.
+  chat and tab. A Code chat's own session isn't one (2026-11-14): its row in
+  the list has its dot.
 - **The Yap bar** ([yap-bar.md](./yap-bar.md)): "1 agent working" (or "2 agents
-  running": every agent queued, running or asking) while the bar is idle or a
-  meeting records, never during a dictation; a click opens the newest agent.
+  working": every agent sent out queued, running or asking) while the bar is
+  idle or a meeting records, never during a dictation; a click opens the
+  newest agent. A Code chat's own session at work on the person's words says
+  "Claude is working" ("Claude and 1 agent working" with an agent sent too;
+  `core/working.js`), and its click opens the chat alone.
   With no Yap window in front, a running agent's prompt shows there too
   (`agents/approve_card.rs`: "Allow a step in garden-planner?", Allow once /
   Deny; a plan's "The plan is ready in garden-planner", its first line, Go

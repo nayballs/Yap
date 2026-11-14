@@ -186,7 +186,7 @@ export function initAgents() {
     refreshSoon();
   }).catch(() => {});
   listen('yap-agent-open', (e) => {
-    if (e.payload?.id) agents.openWanted = { id: e.payload.id, conversation: e.payload.conversation ?? null };
+    if (e.payload?.id) agents.openWanted = { id: e.payload.id, conversation: e.payload.conversation ?? null, direct: !!e.payload.direct };
   }).catch(() => {});
   listen('yap-claude-approve', (e) => {
     const p = e.payload;

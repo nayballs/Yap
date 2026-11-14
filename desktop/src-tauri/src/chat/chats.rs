@@ -363,7 +363,21 @@ pub struct Conversation {
     /// long turn writes it again).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<ChatSummary>,
+    /// **The panel's tabs closed** (14 Nov 2026): their keys (`page:<url>`,
+    /// `pic:<id>`, `doc:<id>`, `agent:<id>`: chatDoc.svelte.js), so a tab
+    /// closed stays closed when the chat opens again ([`set_closed_tabs`]).
+    /// Before, every page, picture and document its answers ever showed came
+    /// back each time. A tab shown again (its pill, a turn) leaves the list.
+    /// The page's own convenience: an older Yap's save drops it, and the
+    /// tabs come back once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub closed_tabs: Vec<String>,
 }
+
+/// The most tabs a conversation keeps closed ([`Conversation::closed_tabs`]): the newest.
+pub const CLOSED_TABS_MAX: usize = 200;
+/// The longest key kept (a page's address is most of one).
+const TAB_KEY_MAX: usize = 2048;
 
 /// A long conversation's summary of its older messages (`compact.rs`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -579,6 +593,36 @@ pub fn list_archived() -> Value {
     })
 }
 
+/// **The tabs closed in a conversation's panel** (Chat's `chat_tabs_closed`):
+/// kept as given, oldest first — each once, none empty or too long, the
+/// newest [`CLOSED_TABS_MAX`]. Its place in the list stays (`updated_ts`
+/// untouched). Returns whether it changed; a conversation gone: an error.
+pub fn set_closed_tabs(id: u64, keys: &[String]) -> Result<bool, String> {
+    let keys = closed_keys(keys);
+    with_store(|s| {
+        let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("Conversation not found")?;
+        if conv.closed_tabs == keys {
+            return Ok(false);
+        }
+        conv.closed_tabs = keys;
+        save_to_disk(s);
+        Ok(true)
+    })
+}
+
+/// [`set_closed_tabs`]'s list: trimmed, each once (its last place), none empty or longer than
+/// [`TAB_KEY_MAX`], the newest [`CLOSED_TABS_MAX`]. Pure.
+fn closed_keys(keys: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for k in keys.iter().map(|k| k.trim()).filter(|k| !k.is_empty() && k.len() <= TAB_KEY_MAX) {
+        out.retain(|o| o != k);
+        out.push(k.to_string());
+    }
+    let extra = out.len().saturating_sub(CLOSED_TABS_MAX);
+    out.drain(..extra);
+    out
+}
+
 /// Archive conversations (`on`) or bring them back, in one write; their
 /// place in the list stays theirs (`updated_ts` untouched). Returns how
 /// many changed.
@@ -658,6 +702,7 @@ fn create_with(title: &str, note: Option<u64>) -> Conversation {
             note,
             archived_ts: 0,
             summary: None,
+            closed_tabs: Vec::new(),
         };
         s.conversations.push(conv.clone());
         save_to_disk(s);
@@ -1544,6 +1589,28 @@ pub fn strip_unsourced_citations(reply: &str, sourced: &[usize]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_conversations_closed_tabs_are_kept_each_once_the_newest_and_an_older_file_reads_without_them() {
+        let k = |s: &str| s.to_string();
+        // Each once, at its last place; none empty or too long.
+        let long = format!("page:https://example.com/{}", "a".repeat(TAB_KEY_MAX));
+        assert_eq!(
+            closed_keys(&[k("page:https://example.com"), k("  "), k("pic:p1"), long, k(" page:https://example.com ")]),
+            [k("pic:p1"), k("page:https://example.com")]
+        );
+        // The newest kept.
+        let many: Vec<String> = (0..CLOSED_TABS_MAX + 5).map(|i| format!("pic:p{i}")).collect();
+        let kept = closed_keys(&many);
+        assert_eq!((kept.len(), kept[0].as_str(), kept.last().map(String::as_str)), (CLOSED_TABS_MAX, "pic:p5", Some("pic:p204")));
+        // Saved with the conversation, under its own name; an older file has none.
+        let conv = Conversation { id: 4, title: "Garden".into(), created_ts: 1, updated_ts: 1, messages: Vec::new(), scope: String::new(), note: None, archived_ts: 0, summary: None, closed_tabs: vec![k("doc:7")] };
+        let saved = serde_json::to_value(&conv).unwrap();
+        assert_eq!(saved["closedTabs"], json!(["doc:7"]));
+        let older: Conversation = serde_json::from_value(json!({ "id": 4, "title": "Garden", "createdTs": 1, "updatedTs": 1 })).unwrap();
+        assert!(older.closed_tabs.is_empty());
+        assert!(!serde_json::to_string(&older).unwrap().contains("closedTabs"), "none: not written");
+    }
 
     #[test]
     fn the_context_goes_with_the_question_never_alone() {

@@ -110,6 +110,7 @@ mod tests {
             "codeWire.js",
             "agents.js",
             "money.js",
+            "working.js",
             "codeChats.js",
             "chatStatus.js",
             "pageConfirm.js",
