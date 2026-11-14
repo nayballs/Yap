@@ -321,7 +321,21 @@ async fn report(id: &str, n: u32, held: bool) {
         }
     };
     let by_model = model.is_some();
-    let Ok(index) = chats::append(conv, "assistant", &reply, &[], model, false) else { return };
+    // What a Code chat's own Claude showed beside the chat (its browser, 14
+    // Nov 2026: `TurnNote::beside`): its answer keeps it, as a plan chat's
+    // does, so the pages and pictures come back with the chat.
+    let mut beside = crate::agents::store::Beside::default();
+    if direct {
+        for t in &covered {
+            beside.add(&t.beside);
+        }
+    }
+    let appended = if beside.is_empty() {
+        chats::append(conv, "assistant", &reply, &[], model, false)
+    } else {
+        chats::append_whole(conv, ChatMessage { role: "assistant".into(), text: reply.clone(), model, pages: beside.pages, pictures: beside.pictures, files: beside.files, ..Default::default() })
+    };
+    let Ok(index) = appended else { return };
     drop(stop);
     let message_id = format!("chat:{conv}:{index}");
     tracing::info!(id, turn = n, turns = covered.len(), by_model, "Agents: reported in its chat");

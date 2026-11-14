@@ -1070,9 +1070,13 @@ no Local API (the bridge can be off), and it reaches the live UI.
   picks each question's first option).
 - **An agent's run that reads** (`RunSpec::reads`, 2026-11-12): the session
   of a Code chat that works directly is listed Yap's read tools beside
-  `approve` — meetings, notes, tasks, folders, the calendar — never
-  `search_memory`, the screen's, the pages' or connectors'; an agent Chat
-  sent out lists `approve` alone
+  `approve` — meetings, notes, tasks, folders, the calendar — and, since
+  2026-11-14, Yap's browser beside the chat (`RunSpec::eyes`: the pages and
+  the web's pictures with the web on, else picture files; never the screen
+  or acting on a page — `server.rs` clears them for any agent's run — and
+  each call for the browser turn its runner opened, `eyes::call`); never
+  `search_memory` or connectors'; an agent Chat sent out lists `approve`
+  alone
   ([yap-code.md](./yap-code.md#a-code-chat-that-works-directly)).
 - **The backup hook** (`backup.rs`): before Claude Code edits or writes a
   file, an http `PreToolUse` hook on `Edit|Write|MultiEdit|NotebookEdit`

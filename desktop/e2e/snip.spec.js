@@ -174,8 +174,9 @@ test('a snip from the shortcut lands in a new chat: the screenshot in the box, t
   await expect(attachments(main)).toContainText('200 × 100');
   await expect(box(main)).toHaveAttribute('placeholder', 'Ask about this screenshot…');
   await expect(box(main)).toBeFocused();
+  // No one-tap prompts beside it (14 Nov 2026: not needed): the box asks.
   for (const p of ["What's this?", 'Explain this error', 'Summarise']) {
-    await expect(attachments(main).getByRole('button', { name: p })).toBeVisible();
+    await expect(attachments(main).getByRole('button', { name: p })).toHaveCount(0);
   }
   // Nothing was sent by itself.
   await main.waitForTimeout(300);
@@ -239,7 +240,8 @@ test('the three prompts ask in one tap; a snip on the 150 % monitor is exact too
   expect(worstError(readPng(fs.readFileSync(imageFile(yap, img.id))), RED)).toBeLessThanOrEqual(1);
   await inChat(main);
   const before = fakeLlm.requests.length;
-  await attachments(main).getByRole('button', { name: 'Explain this error' }).click();
+  await box(main).fill('Explain this error');
+  await box(main).press('Enter');
   await expect(main.locator('.cbubble.user').last()).toContainText('Explain this error');
   await expect.poll(() => fakeLlm.requests.slice(before).filter((r) => r.images?.length).length).toBe(1);
   const asked = fakeLlm.requests.slice(before).find((r) => r.images?.length);
@@ -297,13 +299,12 @@ test("a model that can't read images says so, with the switch to one that can", 
   await expect(visionLine(main)).toContainText("GPT-OSS 20B can't read images.");
   const use = visionLine(main).getByRole('button', { name: 'Use Qwen3.8 27B on Groq' });
   await expect(use).toBeVisible();
-  // Send waits; Enter does nothing; so do the prompts.
+  // Send waits; Enter does nothing.
   await expect(main.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
   const before = fakeLlm.requests.length;
   await box(main).press('Enter');
   await main.waitForTimeout(300);
   expect(fakeLlm.requests.length).toBe(before);
-  await expect(attachments(main).getByRole('button', { name: "What's this?" })).toBeDisabled();
   await shot(main, '03-cant-read-images');
   // One click: the Chat model reads images, the line goes, and it sends.
   await use.click();

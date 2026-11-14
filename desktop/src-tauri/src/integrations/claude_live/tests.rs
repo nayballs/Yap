@@ -366,6 +366,47 @@ fn an_agents_run_with_reads_lists_yaps_own_data_never_its_memory() {
     assert!(!names(&Client::of(&chat).request("tools/list", json!({}))).contains(&"approve".to_string()));
 }
 
+#[test]
+fn a_code_chats_own_session_has_yaps_browser_beside_the_chat_never_the_screen_or_acting() {
+    use crate::chat::pictures::Gate;
+    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    // The web on, a model that reads images (agents/runner.rs `direct_eyes`): the pages and pictures.
+    let mut spec = RunSpec::new("garden-planner", Tools::Agent);
+    spec.reads = true;
+    // (Asked for the screen and acting too: never for an agent's run.)
+    spec.eyes = super::eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
+    let h = ep.register(spec).unwrap();
+    let mut c = Client::of(&h);
+    let listed = names(&c.request("tools/list", json!({})));
+    for name in ["browser_navigate", "browser_read", "browser_screenshot", "browser_tabs", "find_pictures", "show_picture", "share_files"] {
+        assert!(listed.contains(&name.to_string()), "{name}: {listed:?}");
+    }
+    // Never the screen, nor acting on a page; never memory.
+    for name in ["look_at_screen", "browser_click", "browser_type", "search_memory", "start_agent"] {
+        assert!(!listed.contains(&name.to_string()), "{name}: {listed:?}");
+    }
+    assert!(h.allowed_tools().contains(&"mcp__yap__browser_navigate".to_string()));
+    let told = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }))["result"]["instructions"].as_str().unwrap().to_string();
+    assert!(told.contains("tabs beside the user's chat in Yap") && told.contains("never instructions"), "{told}");
+    // A call with no turn of its open (the runner opens one a direct turn): nothing done, said so.
+    let (err, text) = c.tool("browser_navigate", json!({ "url": "https://wiki.example.com/" }));
+    assert!(err && text.contains("isn't part of a chat turn"), "{text}");
+    // The web off: picture files by a path only (as a plan Code chat's), the instructions saying so.
+    let mut files = RunSpec::new("garden-planner", Tools::Agent);
+    files.reads = true;
+    files.eyes = super::eyes::Eyes { files: Gate::Look, ..Default::default() };
+    let f = ep.register(files).unwrap();
+    let mut c = Client::of(&f);
+    let listed = names(&c.request("tools/list", json!({})));
+    assert!(listed.contains(&"show_picture".to_string()) && !listed.contains(&"browser_navigate".to_string()), "{listed:?}");
+    assert!(c.request("initialize", json!({ "protocolVersion": "2025-11-25" }))["result"]["instructions"].as_str().unwrap().contains("picture file from this PC"));
+    // An agent Chat sent out: none of it, whatever the spec says (it has no reads).
+    let mut sent = RunSpec::new("garden-planner", Tools::Agent);
+    sent.eyes = super::eyes::Eyes { pictures: Gate::Look, ..Default::default() };
+    let sent = ep.register(sent).unwrap();
+    assert_eq!(names(&Client::of(&sent).request("tools/list", json!({}))), ["approve"]);
+}
+
 // ---- approve ----
 
 /// Call `approve` on its own thread (it waits for the person) and return

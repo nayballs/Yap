@@ -1,15 +1,12 @@
 // Chat's screenshots (Snip to Chat, desktop/src-tauri/src/snip.rs): their address
 // for an <img> — by id only: the yapsnip scheme serves
-// <data>/chat-images/<id>.png and nothing else — the one-tap prompts, how
+// <data>/chat-images/<id>.png and nothing else — what Enter asks, how
 // a removed one is said, a screenshot's right-click menu (Copy image, Save
 // image as…: snip/copy_save.rs), a picture pasted or dropped into the box
 // (snip/attach.rs), and a question whose screenshot went as its text
 // (snip/ocr.rs: the text after SCREEN_TEXT_MARK, folded in its bubble).
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { toast } from '../../ui/toast.svelte.js';
-
-/** The one-tap prompts above the message box while a screenshot waits. */
-export const SNIP_PROMPTS = ["What's this?", 'Explain this error', 'Summarise'];
 
 /** What Enter on an empty box sends with a screenshot. */
 export const DEFAULT_PROMPT = "What's this?";

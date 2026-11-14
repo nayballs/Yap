@@ -446,6 +446,8 @@
       // "Open in Chat").
       listen('yap-assistant-turn', (e) => chat.followAssistant(e.payload)),
       listen('yap-assistant-stream', (e) => chat.followAssistantStream(e.payload)),
+      // What a Code chat's own Claude opened in Yap's browser beside the chat (agents/runner.rs).
+      listen('yap-agent-shown', (e) => chat.agentShown(e.payload)),
       // Whether a spoken question is being listened for (Esc calls it off).
       listen('yap-assistant', (e) => {
         chat.assistantListening = e.payload?.phase === 'listening';

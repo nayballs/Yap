@@ -118,6 +118,34 @@ pub(crate) fn in_chat(cfg: &YapConfig, provider: &str, model: &str, base_url: &s
         && crate::web::Settings::for_chat(cfg, provider, model, base_url, api_key).native.is_some()
 }
 
+/// **Will this message go straight to its Code chat's session?**
+/// (`agents/direct.rs`), as far as can be told before a model is woken: a
+/// Code chat, the switch on, Chat's model on the plan, asked in Chat or with
+/// it in view, never across the meetings. Then Yap's own shortcuts — an app
+/// or a page it opens by itself, no model — never come first (14 Nov 2026:
+/// "Bring up <address>" opened the page with the session never told; its
+/// Claude has Yap's browser now, as Claude Code's own app has its pane).
+fn to_its_session(cfg: &YapConfig, conversation: Option<u64>, scope: Option<&str>) -> bool {
+    // (A new chat's first question: the workspace the page picked for it, before its conversation is made.)
+    let code_chat = match conversation {
+        Some(_) => crate::agents::code_chat::folder_of(conversation).is_some(),
+        None => crate::agents::code_chat::new_chat_folder().is_some(),
+    };
+    if !code_chat {
+        return false;
+    }
+    let on_plan = resolve_chat_endpoint(cfg).is_ok_and(|e| e.3 == crate::ai::claude_plan::PROVIDER);
+    let away = scope == Some("assistant") && !crate::chat::assistant::asked_in_chat();
+    crate::agents::direct::applies(crate::agents::direct::Message {
+        setting: cfg.agents_direct,
+        offered: crate::agents::offered(cfg),
+        code_chat,
+        on_plan,
+        away,
+        with_more: scope == Some("meetings"),
+    })
+}
+
 /// One chat turn, answered: what [`chat_turn`] returns.
 pub(crate) struct ChatTurn {
     pub conversation_id: u64,
@@ -364,8 +392,10 @@ async fn answer_turn(
     // (`assistant/selected.rs`): the selection is what it's about — never
     // an app to open, nor a search forced first.
     let about_selection = crate::chat::assistant::selected::current();
-    // (A Skill said aloud — "run my standup skill" — is never an app to open.)
-    if about_selection.is_none() && skill.is_none() {
+    // (A Skill said aloud — "run my standup skill" — is never an app to open.
+    // Nor anything typed in a Code chat that works directly: it all goes to
+    // its session, as in Claude Code's own app — `to_its_session`.)
+    if about_selection.is_none() && skill.is_none() && !to_its_session(&cfg, conversation_id, scope) {
         if let Some(plan) = crate::apps::plan_for(&text, &cfg, conversation_id).await {
             return fast::app_turn(conversation_id, &text, by_voice, asked, plan, stop).await;
         }
@@ -469,6 +499,7 @@ async fn answer_turn(
 /// (its brief, when it's the first), on the chat's own model and effort —
 /// the turn it is, with no answer. `None`: Chat's model answers, as ever.
 fn sent_directly(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, String> {
+    // (Its checks again, with everything known now: [`to_its_session`] told before.)
     let Some(folder) = opened.code.as_ref() else { return Ok(None) };
     // The person's own screenshots go with their words; a picture Yap took
     // of the screen by itself never does (that's Chat's, with its rules).

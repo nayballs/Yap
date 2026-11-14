@@ -26,7 +26,7 @@
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { formatHotkeySpec } from '../../core/hotkeys.js';
   import { modelName, providerName } from '../../core/aiModel.js';
-  import { SNIP_PROMPTS, sizeLine, imageItems, tilePlaced, shown } from './chatImages.js';
+  import { sizeLine, imageItems, tilePlaced, shown } from './chatImages.js';
   import { screenPixels } from './chatShots.svelte.js';
   import { tooLongLine } from './chatBudget.js';
   import { agents } from '../../stores/agents.svelte.js';
@@ -82,13 +82,6 @@
   function removeShot(id) {
     chat.removeShot(id);
     chat.inputEl?.focus();
-  }
-
-  /** One of the three prompts: asked at once, with the screenshot. */
-  function askAbout(prompt) {
-    if (chat.sending || chat.visionBlocked) return;
-    chat.input = prompt;
-    chat.send();
   }
 
   /** The suggested model that reads images, picked here (chat_set_model). */
@@ -304,17 +297,8 @@
             </button>
           </div>
         {/each}
-        <div class="prompts" role="group" aria-label="Ask about the screenshot">
-          {#each SNIP_PROMPTS as p (p)}
-            <button
-              type="button"
-              class="promptchip"
-              disabled={chat.sending || chat.visionBlocked}
-              title={chat.visionBlocked ? "This model can't read images" : `Ask “${p}”`}
-              onclick={() => askAbout(p)}>{p}</button
-            >
-          {/each}
-        </div>
+        <!-- (No one-tap prompts beside it since 14 Nov 2026, the maintainer: "It's not needed". The box asks
+             "Ask about this screenshot…", and Enter on it empty asks "What's this?".) -->
       </div>
       {#if chat.copiedShot && chat.attached.some((a) => a.id === chat.copiedShot)}
         <!-- "Copy every snip to the clipboard" (snip.rs): said once, quietly. -->
@@ -988,28 +972,6 @@
     .shotx {
       opacity: 1;
     }
-  }
-  .prompts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .promptchip {
-    padding: 5px 11px;
-    border: 1px solid var(--yap-primary-line);
-    border-radius: var(--yap-r-full, 999px);
-    background: var(--yap-primary-wash);
-    color: var(--yap-fg);
-    font-size: 12px;
-    font-weight: 550;
-    cursor: pointer;
-  }
-  .promptchip:hover:not(:disabled) {
-    background: var(--yap-primary-tint);
-  }
-  .promptchip:disabled {
-    opacity: 0.5;
-    cursor: default;
   }
   .visionline {
     display: flex;

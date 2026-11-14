@@ -140,11 +140,55 @@ pub fn of_tool(name: &str, input: &Value, folder: &Path) -> Seen {
         // first needed): its own plumbing, never a step of the work — the
         // call that follows is ("Using github · create issue").
         "ToolSearch" => Seen { step: "Finding a tool".into(), ..Default::default() },
+        // Yap's browser beside the chat (a Code chat's own session, 14 Nov 2026): its own words.
+        other if other.strip_prefix("mcp__yap__").and_then(|t| browser_line(t, input)).is_some() => {
+            Seen { step: other.strip_prefix("mcp__yap__").and_then(|t| browser_line(t, input)).unwrap_or_default(), ..Default::default() }
+        }
         other => match other.strip_prefix("mcp__").and_then(|r| r.split_once("__")) {
             Some((server, tool)) => Seen { step: format!("Using {server} · {}", tool.replace('_', " ")), ..Default::default() },
             None => Seen { step: format!("Using {}", one_line(other, 40)), ..Default::default() },
         },
     }
+}
+
+/// **A call to Yap's browser beside the chat, in words** (`tool`: its name
+/// without `mcp__yap__`): "Opening wiki.example.com/wiki/Fort_Joy beside the chat",
+/// "Reading the page beside the chat" — each ending "beside the chat" (the
+/// thread's web mark: `core/agents.js` `stepKind`), a search its own
+/// words. `None`: not one of the browser's. Pure.
+pub fn browser_line(tool: &str, input: &Value) -> Option<String> {
+    use crate::chat::{pages, pictures, shares};
+    let text = |k: &str| input[k].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    let beside = |doing: &str| format!("{doing} beside the chat");
+    Some(match tool {
+        pages::NAVIGATE => match (text("url"), text("search")) {
+            (Some(u), _) if u == "back" || u == "forward" => beside(&format!("Going {u} on the page")),
+            (Some(u), _) => beside(&format!("Opening {}", one_line(&crate::web::short_url(&u), WHAT_MAX))),
+            (None, Some(q)) => format!("Searching the web · {}", one_line(&q, WHAT_MAX)),
+            _ => beside("Opening a page"),
+        },
+        pages::READ => beside("Reading the page"),
+        pages::FIND => match text("query").or_else(|| text("text")) {
+            Some(q) => format!("Finding “{}” on the page beside the chat", one_line(&q, 40)),
+            None => beside("Finding words on the page"),
+        },
+        pages::SCROLL | pages::SCROLL_TO => beside("Scrolling the page"),
+        pages::SCREENSHOT => beside("Looking at the page"),
+        pages::ZOOM => beside("Zooming in on the page"),
+        pages::TABS => match text("action").as_deref() {
+            Some("new") => beside("Opening a tab"),
+            Some("switch") => beside("Switching tabs"),
+            Some("close") => beside("Closing a tab"),
+            _ => beside("Looking at the tabs"),
+        },
+        pages::WAIT => beside("Waiting for the page"),
+        pages::BATCH => beside("Using the page"),
+        pictures::FIND => beside("Looking for pictures"),
+        pictures::LOOK => beside("Looking at a picture"),
+        pictures::SHOW => beside("Showing a picture"),
+        shares::NAME => "Sharing files in the chat".to_string(),
+        _ => return None,
+    })
 }
 
 /// **The lines a Read asked for**, as its row says them: "424–503" (its
@@ -252,6 +296,17 @@ mod tests {
         assert_eq!(of_tool("Task", &json!({ "description": "Check the docs" }), &f).step, "Handing part of it to a helper · Check the docs");
         assert_eq!(of_tool("TodoWrite", &json!({}), &f).step, "Planning the steps");
         assert_eq!(of_tool("mcp__github__create_issue", &json!({}), &f).step, "Using github · create issue");
+        // Yap's browser beside the chat (a Code chat's own session): its own words, each "beside the chat".
+        assert_eq!(of_tool("mcp__yap__browser_navigate", &json!({ "url": "https://www.example.com/classic/" }), &f).step, "Opening example.com/classic beside the chat");
+        assert_eq!(of_tool("mcp__yap__browser_navigate", &json!({ "search": "tide tables" }), &f).step, "Searching the web · tide tables");
+        assert_eq!(of_tool("mcp__yap__browser_navigate", &json!({ "url": "back" }), &f).step, "Going back on the page beside the chat");
+        assert_eq!(of_tool("mcp__yap__browser_read", &json!({}), &f).step, "Reading the page beside the chat");
+        assert_eq!(of_tool("mcp__yap__browser_screenshot", &json!({}), &f).step, "Looking at the page beside the chat");
+        assert_eq!(of_tool("mcp__yap__browser_tabs", &json!({ "action": "new" }), &f).step, "Opening a tab beside the chat");
+        assert_eq!(of_tool("mcp__yap__show_picture", &json!({}), &f).step, "Showing a picture beside the chat");
+        assert_eq!(of_tool("mcp__yap__share_files", &json!({}), &f).step, "Sharing files in the chat");
+        // Its other tools: as any server's.
+        assert_eq!(of_tool("mcp__yap__list_tasks", &json!({}), &f).step, "Using yap · list tasks");
         assert_eq!(of_tool("Frobnicate", &json!({}), &f).step, "Using Frobnicate");
         // Claude Code's own plumbing has its own words (the thread never counts these as work).
         assert_eq!(of_tool("ToolSearch", &json!({ "query": "select:mcp__github__create_issue" }), &f).step, "Finding a tool");
