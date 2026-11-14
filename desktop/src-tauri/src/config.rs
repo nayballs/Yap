@@ -543,6 +543,13 @@ pub struct YapConfig {
     pub notify_feature_tips: bool,
     #[serde(default = "default_true")]
     pub notify_news: bool,
+    /// "Claude's replies and finished agents" (Settings → General →
+    /// Notifications, and Yap Code's Asking and reports; 14 Nov 2026): the
+    /// Yap bar's card when a Code chat's Claude replies or an agent finishes
+    /// while its chat isn't in view (`chat/turn/report.rs` `tells`). Off,
+    /// only its questions, plans waiting and failures show. On by default.
+    #[serde(default = "default_true")]
+    pub notify_agents: bool,
 
     /// Recording mode: "toggle" (press to start, press again to stop) or
     /// "pushToTalk" (hold to record, release to stop).
@@ -1625,6 +1632,7 @@ impl Default for YapConfig {
             notify_milestones: true,
             notify_feature_tips: true,
             notify_news: true,
+            notify_agents: true,
             recording_mode: default_recording_mode(),
             quiet_other_apps: false,
             pause_media: false,

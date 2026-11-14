@@ -311,7 +311,11 @@ on an element that also has a `settings.css` class (`set-note`,
   `notices/kinds.rs`, each at most a few a day): Suggestions
   (`notifySuggestions`), Feature tips (`notifyFeatureTips`, off with Show
   tips), Milestones (`notifyMilestones`), News (`notifyNews`: "Updated to
-  …" after an update).
+  …" after an update), and "Claude's replies and finished agents"
+  (`notifyAgents`, 2026-11-14: the Yap bar's "Claude replied" / "Agent done"
+  card; the same switch on Yap Code's page under Asking and reports, its
+  label and line in `core/codeChats.js`, found in Settings search by the
+  card's own words — the maintainer couldn't find it).
   **Links** (2026-11-01, `settings/OpenLinksIn.svelte`, its own chunk;
   `shell/browsers.rs`, [app-shell.md](./app-shell.md#stack)): "Open links in"
   — Windows' default or a registered browser, with their icons.

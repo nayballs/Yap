@@ -917,6 +917,44 @@ test('its session reads Yap’s own data on request: meetings, notes, tasks and 
   expect(log.some((e) => e.step === 'Using yap · list tasks')).toBe(true);
 });
 
+// The maintainer, 14 Nov 2026, of the bar's "Claude replied" card: "I have Yap open in full screen and I
+// see what is said… need to figure out what this is in settings and turn it off".
+test('the bar’s “Claude replied” card: none while its chat is in view beside the app in front, none once switched off, else it shows', async ({ yap, main }) => {
+  await script(yap, SAYS_BACK, 'says-back-cards');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  const cardNow = async () => (await yap.invoke('bar_status')).cards.find((c) => c.id === 'agentDone');
+  const turnDone = (id, n) => expect.poll(async () => (await agents(yap)).find((j) => j.id === id).turnList[n]?.status, { timeout: 30_000 }).toBe('done');
+  try {
+    // Yap full screen on another monitor, showing this chat, another app in front: no card.
+    await yap.invoke('e2e_focus', { focused: false, beside: true });
+    await send(main, 'First.');
+    const agent = await newAgent(yap, before);
+    await turnDone(agent.id, 0);
+    await main.waitForTimeout(1500);
+    expect(await cardNow()).toBeUndefined();
+
+    // Out of sight, the switch off: no card for a reply.
+    await setConfig(yap, main, { notifyAgents: false });
+    await yap.invoke('e2e_focus', { focused: false });
+    await send(main, 'Second.');
+    await turnDone(agent.id, 1);
+    await main.waitForTimeout(1500);
+    expect(await cardNow()).toBeUndefined();
+
+    // Switched on again: the card, in Claude's name, Open bringing up the chat.
+    await setConfig(yap, main, { notifyAgents: true });
+    await send(main, 'Third.');
+    await turnDone(agent.id, 2);
+    await expect.poll(cardNow, { timeout: 10_000 }).toMatchObject({ title: 'Claude replied: garden-planner', body: 'Got: Third.', icon: 'agent' });
+    const card = await cardNow();
+    expect(card.primary.label).toBe('Open');
+    await yap.invoke('bar_card_action', { id: 'agentDone', action: card.primary.id });
+  } finally {
+    await yap.invoke('e2e_focus', { focused: true });
+  }
+});
+
 test('core/agents.js: the Code chat’s own session at work is what the message box’s ■ stops', () => {
   // A question card's answers: each question's own words → the one label, the list picked, or the person's own words.
   const qs = [

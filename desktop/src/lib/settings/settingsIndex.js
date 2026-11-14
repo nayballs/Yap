@@ -13,7 +13,10 @@
 // there, so the index can't drift from the pages (a preview's entries:
 // connectors.spec.js, with it on).
 import { NAV_GROUPS, PAGE_LABELS } from './nav.js';
-import { FEATURE_NAME } from '../core/codeChats.js';
+import { FEATURE_NAME, AGENT_NOTICES_LABEL } from '../core/codeChats.js';
+
+/** The "Claude replied" / "Agent done" card's words people search with (both its rows). */
+const AGENT_NOTICES_WORDS = 'claude replied agent done finished reply replies notification notifications notice notices card cards popup pop-up toast alert bar yap code code chat agents turn off stop disable';
 
 /** @typedef {{ page: string, section: string, label: string, desc?: string, keywords?: string, anchor: string, fallback?: string, scope?: string, toggle?: string, preview?: string }} Entry */
 
@@ -42,6 +45,7 @@ export const SETTINGS_INDEX = [
   { page: 'general', section: 'Notifications', label: 'Feature tips', desc: 'What Yap just did for you, the first time', keywords: 'notifications tips features self-correction list email', anchor: 'notify-feature-tips', toggle: 'notifyFeatureTips' },
   { page: 'general', section: 'Notifications', label: 'Milestones', desc: 'Your dictation milestones', keywords: 'notifications milestones achievements', anchor: 'notify-milestones', toggle: 'notifyMilestones' },
   { page: 'general', section: 'Notifications', label: 'News', desc: "What's new after Yap updates", keywords: "notifications news what's new updates release notes", anchor: 'notify-news', toggle: 'notifyNews' },
+  { page: 'general', section: 'Notifications', label: AGENT_NOTICES_LABEL, desc: 'The "Claude replied" and "Agent done" cards on the Yap bar', keywords: AGENT_NOTICES_WORDS, anchor: 'notify-agents', toggle: 'notifyAgents' },
 
   // ---- Dictation ----
   { page: 'dictation', section: 'Start and stop', label: 'Hotkey', desc: 'Press it in any app to start and stop dictating', keywords: 'shortcut key keyboard f9 dictation start stop copilot key', anchor: 'hotkey' },
@@ -206,6 +210,7 @@ export const SETTINGS_INDEX = [
   { page: 'yap-code', section: 'Workspaces', label: 'Animate Code chats', desc: "A slow light along a Code chat's message box while its agent runs", keywords: 'code chat animation motion moving light border glow agent running', anchor: 'yap-code-animate', toggle: 'agentsAnimate' },
   { page: 'yap-code', section: 'Asking and reports', label: 'Ask before sending an agent', desc: 'When it matters (a new workspace, or after the web), always, or never', keywords: 'agents ask confirm before start send card approve', anchor: 'yap-code-ask' },
   { page: 'yap-code', section: 'Asking and reports', label: 'Read agent reports aloud', desc: 'When you asked by voice, always, or never', keywords: 'agents report read aloud speak voice spoken', anchor: 'yap-code-speak' },
+  { page: 'yap-code', section: 'Asking and reports', label: AGENT_NOTICES_LABEL, desc: 'The "Claude replied" and "Agent done" cards on the Yap bar', keywords: AGENT_NOTICES_WORDS, anchor: 'yap-code-notify', toggle: 'notifyAgents' },
   { page: 'yap-code', section: 'Asking and reports', label: 'Backups and limits', desc: 'Backups kept 7 days; one agent a workspace, 3 at once', keywords: 'agents backups undo limits at once concurrent', anchor: 'yap-code-limits' },
   { page: 'yap-code', section: 'History', label: 'History', desc: 'Every agent: its status, folder, when and cost', keywords: 'agents history past list cost undo open', anchor: 'yap-code-history' },
 

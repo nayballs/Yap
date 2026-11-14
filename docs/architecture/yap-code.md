@@ -312,7 +312,9 @@ workspace, word for word, and no model of Chat's is asked.
   - **with no Yap window in front**, its card on the bar (or the Windows
     notification) says "Claude replied: garden-planner", "Claude didn't
     finish: …", "Claude's plan is ready: …" (`report::notice_title`), never
-    "Agent done".
+    "Agent done" — none while that chat is in view beside the app in front,
+    and none for a reply with "Claude's replies and finished agents" off
+    (`report::tells`, below).
 - **The rule after outside content has nothing to guard here**: it's about
   a model wording a brief from what it read ([The safety
   rule](#the-safety-rule)). The instruction is the person's own typed words;
@@ -1944,7 +1946,13 @@ failed, or done with a question, with that turn's facts
   switches** the chat shown (the Voice Assistant's follow does).
 - **"Agent done: garden-planner"** (`agentDone`, Info, held over a dictation):
   with no Yap window in front, a card on the Yap bar with **Open**, else a
-  Windows notification. Its title says which: "Agent didn't finish", "The agent's
+  Windows notification — no card while Yap's main window is in front, nor while the chat it's
+  about is in view beside the app in front (Chat showing it, the window at
+  least half uncovered: full screen on another monitor, `report::tells`,
+  14 Nov 2026); a reply or a finished agent only while "Claude's replies and
+  finished agents" is on (`notifyAgents`, Settings → General → Notifications
+  and Yap Code's Asking and reports) — questions, plans waiting and failures
+  always. Its title says which: "Agent didn't finish", "The agent's
   plan is ready" (on the bar with **Go ahead** first, then Open), "The agent has a
   question"; a plan already allowed has none. Open brings up the main window on the
   agent's chat and its tab (`open_agent`: `yap-assistant-turn {phase: "open"}` and

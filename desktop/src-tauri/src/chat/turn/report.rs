@@ -501,10 +501,26 @@ pub fn notice_title(folder: &str, status: Status, plan: bool, asks: bool, direct
     }
 }
 
+/// **Does the card show?** Never with Yap's main window in front, nor while
+/// the chat it's about is in view — Chat showing it, the window at least half
+/// uncovered beside the app in front, on another monitor say (14 Nov 2026,
+/// the maintainer: "I have Yap open in full screen and I see what is said").
+/// A reply or a finished agent (`routine`) only while Settings → General →
+/// Notifications' "Claude's replies and finished agents" is on
+/// (`notify_agents`); a question, a plan waiting for its go-ahead and one
+/// that didn't finish always. Pure.
+pub fn tells(seen: crate::notices::notice::Seen, showing_its_chat: bool, switched_on: bool, routine: bool) -> bool {
+    use crate::notices::notice::Seen;
+    if seen == Seen::Front || (seen == Seen::Beside && showing_its_chat) {
+        return false;
+    }
+    !routine || switched_on
+}
+
 /// **"Agent done"**: with no Yap window in front, a card on the Yap bar (else
 /// a Windows notification), **Open** bringing up its chat — and a plan's
-/// **Go ahead**. A plan already allowed says nothing here: it's carrying it
-/// out, and its next turn's report says how that went.
+/// **Go ahead** ([`tells`] says when). A plan already allowed says nothing
+/// here: it's carrying it out, and its next turn's report says how that went.
 fn notice(agent: &Agent, reply: &str) {
     if agent.plan && agent.plan_allowed {
         return;
@@ -512,10 +528,17 @@ fn notice(agent: &Agent, reply: &str) {
     let Some(app) = crate::agents::runner::app().cloned() else { return };
     let (id, folder, status, plan, asks) = (agent.id.clone(), agent.folder.clone(), agent.status, agent.plan, agent.asks);
     let direct = agent.works_directly();
+    let conversation = agent.conversation;
+    let routine = status != Status::Failed && !plan && !asks;
     let body = crate::agents::steps::clip(reply.trim(), 160);
     // Window getters wait on the main thread: off it.
     std::thread::spawn(move || {
         if crate::notices::notice::yap_in_front(&app) {
+            return;
+        }
+        let showing_its_chat = conversation.is_some_and(|c| crate::chat::assistant::chat_viewing() == crate::chat::assistant::Viewing::Conversation(c));
+        if !tells(crate::notices::notice::window_seen(&app), showing_its_chat, crate::config::load().notify_agents, routine) {
+            tracing::info!(id = %id, routine, "Agents: no card (its chat in view, or switched off)");
             return;
         }
         let title = notice_title(&folder, status, plan, asks, direct);
@@ -753,6 +776,24 @@ Its own words: Done.");
         assert_eq!(t(Status::Done, false, true, true), "Claude replied: garden-planner");
         assert_eq!(t(Status::Done, true, false, true), "Claude's plan is ready: garden-planner");
         assert_eq!(t(Status::Failed, false, false, true), "Claude didn't finish: garden-planner");
+    }
+
+    #[test]
+    fn no_card_while_its_chat_is_in_view_and_none_for_a_reply_once_switched_off() {
+        use crate::notices::notice::Seen;
+        // Yap in front: never.
+        assert!(!tells(Seen::Front, false, true, true));
+        assert!(!tells(Seen::Front, false, true, false));
+        // Full screen on another monitor, showing that chat: the person sees it.
+        assert!(!tells(Seen::Beside, true, true, true));
+        assert!(!tells(Seen::Beside, true, true, false), "a question shows in the chat in view");
+        // Beside, on another chat or view; or out of sight: the card.
+        assert!(tells(Seen::Beside, false, true, true));
+        assert!(tells(Seen::No, false, true, true));
+        assert!(tells(Seen::No, true, true, true), "hidden: Chat's last view doesn't count");
+        // Switched off: no reply or finished agent; questions, plans and failures still.
+        assert!(!tells(Seen::No, false, false, true));
+        assert!(tells(Seen::No, false, false, false));
     }
 
     #[test]
