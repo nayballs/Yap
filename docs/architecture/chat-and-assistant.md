@@ -2968,8 +2968,16 @@ review (safely, for any user, in any language Yap speaks).
   (the result says what: "something was on top of it"); a right-click stays
   the script's (a real one would open the panel's own menu over the
   person's screen); a link with Ctrl, Shift or Meta held opens in a new tab,
-  as a middle click does. Typing stays the script's (the value's native
-  setter: it replaces what's there, picks options, takes dates). The same
+  as a middle click does. Typing by ref stays the script's (the value's
+  native setter: the field then holds those words, picks options, takes
+  dates); **typing with no ref goes in at the cursor** (later that night,
+  the maintainer: "type at the cursor like" Claude Code's own browser's
+  `type`): where the focus is, as real input (`Input.insertText`, the
+  trusted input events typing sends; `act::real_type` reads the field
+  before and after, `fieldNow`, and says `typed: "as keys"`), what was
+  there kept, the selection replaced; when the keys can't land, the page
+  script's insert at the caret (`script::type_at_caret`), never both. Its
+  Enter, with `submit`, as ever. Every rule of typing holds either way. The same
   evening, after Opus in Yap Lab compared the two browsers tool by tool:
   **`browser_key`** takes any key or combination as real keystrokes where the
   focus is (a letter, a digit, F1–F12, Backspace, Delete, with Ctrl, Alt,

@@ -1130,7 +1130,12 @@ impl Browser {
                         format!("{had}{}{text}", if had.ends_with(' ') { "" } else { " " })
                     }
                 } else if rules::takes_text(&el) {
-                    text.clone()
+                    // At the cursor (no ref): the words after what's there (the simulator's cursor is at the end).
+                    if a["caret"] == true {
+                        format!("{}{text}", el.value)
+                    } else {
+                        text.clone()
+                    }
                 } else {
                     return Ok(json!({ "r": "not-a-field" }));
                 };
@@ -1149,7 +1154,7 @@ impl Browser {
                     }
                 }
                 let shown = if rules::sensitive(&el).is_some() { String::new() } else { value };
-                Ok(json!({ "r": "ok", "value": shown, "inserted": el.editable }))
+                Ok(json!({ "r": "ok", "value": shown, "inserted": el.editable || (a["caret"] == true && tag != "select") }))
             }
             other => Err(format!("Unknown action {other}")),
         }

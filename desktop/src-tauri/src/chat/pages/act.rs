@@ -1020,9 +1020,14 @@ fn not_done(done: &Value, label: &str, doing: &str) -> Option<Value> {
     Some(failed(format!("‘{label}’: {why}."), format!("Couldn't {doing} ‘{label}’: {}", why.split(':').next().unwrap_or(why))))
 }
 
-/// **`browser_type`**: text into a field by its ref (no ref: the field with
-/// the focus; a select: the option with those words; an editable region: at
-/// its caret, or its end), Enter after with `submit` — never a password,
+/// **`browser_type`**: text into a field by its ref, which it then holds
+/// (a select: the option with those words; an editable region: at its
+/// caret, or its end) — or, with no ref, **typed at the cursor** where the
+/// focus is, as Claude Code's own browser types (14 Nov 2026, the
+/// maintainer's "type at the cursor like mine"): real input (DevTools'
+/// `Input.insertText`, what typing sends a page), what was in the field
+/// kept, else the page script's insert at the caret; Enter after with
+/// `submit` — never a password,
 /// card, bank or code field, nor a card number, an IBAN or a card's code
 /// wherever it goes, never a sign-in form; words from nowhere the person
 /// can see, and an Enter that would buy, pay, send…, ask first.
@@ -1043,6 +1048,7 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
         return e;
     }
     let mut busy = backend::busy(&t.key).await;
+    let at_cursor = ref_of(&args["ref"]).is_none();
     let (d, el) = match ref_of(&args["ref"]) {
         Some(r) => match element(&t, Some(r), "type").await {
             Ok(x) => x,
@@ -1120,10 +1126,30 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
     }
     let mark = backend::mark(&t.key).await;
     let at = turn.pages.acts;
-    let done = match backend::act(&t.key, "type", &json!({ "ref": el.r, "role": el.role, "name": el.name, "text": text, "submit": submit })).await {
-        Ok(v) => v,
-        Err(e) => return failed(e.clone(), format!("Couldn't type in ‘{label}’: {}", crate::web::short(&e))),
+    // At the cursor: real keys first (the script's insert only when they can't land, never both).
+    let typed_real = if at_cursor && !text.is_empty() { real_type(&t, &el, &text).await } else { None };
+    let how = if typed_real.is_some() {
+        // (Its Enter, when asked, the script's: the words are in.)
+        json!({ "ref": el.r, "role": el.role, "name": el.name, "text": "", "submit": submit, "caret": true })
+    } else {
+        json!({ "ref": el.r, "role": el.role, "name": el.name, "text": text, "submit": submit, "caret": at_cursor })
     };
+    let mut done = if typed_real.is_some() && !submit {
+        typed_real.clone().unwrap_or_default()
+    } else {
+        match backend::act(&t.key, "type", &how).await {
+            Ok(v) => v,
+            Err(e) => return failed(e.clone(), format!("Couldn't type in ‘{label}’: {}", crate::web::short(&e))),
+        }
+    };
+    if let Some(real) = &typed_real {
+        done["real"] = json!(true);
+        if submit {
+            done["inserted"] = json!(true);
+        } else {
+            done["value"] = real["value"].clone();
+        }
+    }
     drop(busy);
     if let Some(r) = not_done(&done, &label, "type in") {
         return r;
@@ -1139,7 +1165,10 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
     data["field"] = json!(now);
     let mut note = NOTE.to_string();
     if done["inserted"] == json!(true) {
-        note = format!("The words went in at the cursor: what was in the field stays (field says all it holds now). {NOTE}");
+        note = format!("The words went in at the cursor, in place of any selection; the rest of what was there stays (field says all it holds now). {NOTE}");
+        if done["real"] == json!(true) {
+            data["typed"] = json!("as keys");
+        }
     } else if !text.trim().is_empty() && now.trim().is_empty() {
         note = format!("The field didn't take it (it may want another format, like 2026-11-02 for a date). {NOTE}");
     }
@@ -1149,12 +1178,35 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
     }
     let display = if submit {
         format!("Typed in ‘{label}’ on {site} and sent it")
-    } else if !el.options.is_empty() {
-        format!("Chose ‘{}’ in ‘{label}’ on {site}", rules::clip(&now, 60))
     } else {
+        // (A box with suggestions, a combobox, was typed in, not chosen from — Yap Lab, 14 Nov 2026: Opus read
+        // "Chose ‘light’" as a suggestion picked. A dropdown's choice is `choose`'s, never here.)
         format!("Typed in ‘{label}’ on {site}")
     };
     json!({ "success": true, "data": data, "note": note, "displayText": display })
+}
+
+/// **Text typed as real input** at the focus in `el` (DevTools'
+/// `Input.insertText`: the page gets the input events typing sends, trusted).
+/// What the field holds before and after says whether it arrived: `Some`
+/// with the field's words now, else `None` (the panel out of sight, the
+/// simulator, the focus gone elsewhere) — the script's insert then.
+async fn real_type(t: &OpenTab, el: &rules::Element, text: &str) -> Option<Value> {
+    if !backend::real_input() {
+        return None;
+    }
+    let before = backend::act(&t.key, "fieldNow", &json!({ "ref": el.r, "role": el.role, "name": el.name })).await.ok()?;
+    if before["r"] != "ok" || before["focused"] != true {
+        return None;
+    }
+    backend::input(&t.key, &[("Input.insertText", json!({ "text": text }))]).await.ok()?;
+    let after = backend::act(&t.key, "fieldNow", &json!({ "ref": el.r, "role": el.role, "name": el.name })).await.ok()?;
+    let arrived = after["r"] == "ok" && (after["n"] != before["n"] || after["v"] != before["v"]);
+    if !arrived {
+        return None;
+    }
+    let now: String = after["v"].as_str().unwrap_or("").chars().take(200).collect();
+    Some(json!({ "r": "ok", "value": now, "inserted": true }))
 }
 
 /// **Enter in `el` asked first** when it would buy, pay, book, send… (a

@@ -113,7 +113,8 @@ const PAGES = {
   // A guide whose sections open in a script (agents-direct.spec.js, acting on a page): "Build Order" is a
   // heading under an invisible toggle laid over it — only a click on the toggle opens it, and its rows are
   // made then (a click on the heading itself does nothing) — and two builds are tabs, not links. Wider than
-  // the view (a strip at the end, not on a phone's layout), to scroll sideways.
+  // the view (a strip at the end, not on a phone's layout), to scroll sideways; a notes field with the focus,
+  // to type at the cursor.
   'wiki.example.com/guide/leveling': `<!doctype html><html><head><title>Leveling guide - Example Wiki</title><meta name="viewport" content="width=device-width">
     <style>.order{position:relative;margin:24px 0;padding:8px;border:1px solid #888}.order h2{margin:0}.toggle{position:absolute;inset:0}#rows[hidden]{display:none}@media (max-width:400px){.wide{display:none}}</style></head><body>
     <article><h1>Leveling guide</h1>
@@ -122,6 +123,7 @@ const PAGES = {
     <div class="order"><h2>Build Order<a class="toggle" href="javascript:"></a></h2><ol id="rows" hidden></ol></div>
     <button id="buy" onclick="document.getElementById('bought').textContent='Bought'">Buy the full guide</button><p id="bought"></p><p id="keys">Keys:</p>
     <div class="wide" style="width:2400px;height:4px"></div>
+    <input id="notes" aria-label="Notes" autofocus>
     </article>
     <script>
       // (For the developer's tools: a line in its console, a request with a secret in its address.)
