@@ -2913,6 +2913,51 @@ review (safely, for any user, in any language Yap speaks).
   A link with a `target` (a new window: a script's click has no user
   gesture, so the new-window rule would drop it as a pop-up) goes to its
   address in the same tab instead.
+- **Real input** (14 Nov 2026; the maintainer: Yap Code's browser to "match
+  1-1" Claude Code's own): a left click (once, twice, three times, by ref or
+  at a point, with Ctrl, Shift, Alt or Meta held: `modifiers`), a hover and
+  a key go to the page as a person's mouse and keyboard send them —
+  WebView2's DevTools protocol (`view::devtools`, `backend::input`:
+  `Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`), `isTrusted` events,
+  what a few sites wait for. The page script aims first (`act/script.rs`
+  `aim`: the point, what's on top of it, a listener for the real events;
+  `listen` for a key, the focus set), then asks whether they came (`aimed`;
+  -1: the page went, a link followed). Nothing came (a panel out of sight,
+  the simulator: `backend::real_input`): the script's own events instead —
+  never both. A real click lands on whatever is on top, as a person's would
+  (the result says what: "something was on top of it"); a right-click stays
+  the script's (a real one would open the panel's own menu over the
+  person's screen); a link with Ctrl, Shift or Meta held opens in a new tab,
+  as a middle click does. Typing stays the script's (the value's native
+  setter: it replaces what's there, picks options, takes dates). The same
+  evening, after Opus in Yap Lab compared the two browsers tool by tool:
+  **`browser_key`** takes any key or combination as real keystrokes where the
+  focus is (a letter, a digit, F1–F12, Backspace, Delete, with Ctrl, Alt,
+  Shift or Meta: "ctrl+a", `act::combo_name`, `key_events`; the keys Yap
+  always pressed still fall back to the script's; a combination with Enter
+  judged as Enter), and **`browser_scroll`** and **`browser_hover`** take a
+  point of the latest shot (`x`, `y`): the mouse wheel there, so a part that
+  scrolls by itself (a list, a panel, a map) scrolls, and the pointer there.
+  What's still apart from Claude Code's own browser: its accessibility tree
+  with a depth (Yap lists the links, buttons and fields by ref — for one
+  part too, with a ref — and reads a heading's section), and a zoom by
+  pixel rectangle (Yap's takes a named part or fractions).
+- **The developer's tools** (14 Nov 2026, `pages/dev.rs`; a Claude Code
+  session's only — a plan chat's turn, a Code chat's own session: listed by
+  `claude_live/eyes.rs`, never Chat's own loop): `browser_console` (what
+  the page logged and threw, newest last; `errors`, `pattern`, `clear`),
+  `browser_network` (its requests: method, address — a token, key,
+  signature or session in its query shown "REDACTED" — status or why it
+  failed; `id` a response's body), `browser_javascript` (DevTools'
+  `Runtime.evaluate`: top-level `await`, the last expression's value;
+  **asked first** — card act "script", "A script can do anything you could
+  on the page" — but in Bypass permissions, never in a meeting or a call),
+  `browser_view` (a phone's 375 × 812 or a tablet's 768 × 1024 with touch,
+  a size of its own, the desktop again; light, dark or the system's
+  colours: `Emulation.*`). The console and the network are kept from the
+  moment a page opens (`view.rs` `watch_devtools`: DevTools' Runtime, Log
+  and Network domains), 500 of each, in memory only, gone with the page
+  (`dev::forget`). What they read is web content.
 - **Web components: inside open shadow roots as in the light DOM** (8 Nov
   2026; Yap Lab on MDN, whose header search is `<mdn-search-button>` with its
   button, dialog and box in its shadow root: a click at the button's point hit

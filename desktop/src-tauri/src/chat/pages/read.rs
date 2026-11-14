@@ -41,7 +41,7 @@ pub const TABLE_CHARS: usize = 8000;
 /// **[`view::PAGE_TEXT_SCRIPT`] with room for a long page**: the same read,
 /// its text up to [`TEXT_FULL`] characters, 400 headings, 600 links. Pure.
 pub fn long_text_script() -> String {
-    view::PAGE_TEXT_SCRIPT.replace(".slice(0,40)", ".slice(0,400)").replace(".slice(0,120);return", ".slice(0,600);return").replace(".slice(0,24000)", &format!(".slice(0,{TEXT_FULL})"))
+    view::PAGE_TEXT_SCRIPT.replace(".slice(0,40)", ".slice(0,400)").replace(".slice(0,120);return", ".slice(0,600);return").replace(".slice(0,60000)", &format!(".slice(0,{TEXT_FULL})"))
 }
 
 /// An offset as models send it (`5000`, `"5000"`, `5000.0`). Pure.
@@ -225,12 +225,20 @@ pub fn folded(heading: &str, text: &str) -> bool {
 /// **`browser_read { mode: "elements", offset }`**: the page's links,
 /// buttons and fields from element `offset` on ([`super::act::rules::MAX_ELEMENTS`] of them).
 pub async fn elements_from(turn: &mut crate::web::Turn, tab: &OpenTab, offset: usize, act: bool) -> Value {
+    elements_in(turn, tab, offset, act, None).await
+}
+
+/// **[`elements_from`] of one part** (`browser_read { mode: "elements", ref }`,
+/// 14 Nov 2026, as Claude Code's own browser reads one element's tree by its
+/// ref): the links, buttons and fields inside a heading's section, or inside
+/// the element; `next` keeps the ref.
+pub async fn elements_in(turn: &mut crate::web::Turn, tab: &OpenTab, offset: usize, act: bool, within: Option<u32>) -> Value {
     use super::act::rules::{element_lines, MAX_ELEMENTS};
     let shown = crate::web::short_url(&tab.url);
     if offset >= ELEMENTS_FULL {
         return failed(format!("Yap lists a page's first {ELEMENTS_FULL} elements: browser_find finds the one you want."), format!("Didn't read {shown}: past its elements"));
     }
-    let mut s = match backend::snapshot(&tab.key, 0, (offset + MAX_ELEMENTS).min(ELEMENTS_FULL)).await {
+    let mut s = match backend::snapshot_within(&tab.key, 0, (offset + MAX_ELEMENTS).min(ELEMENTS_FULL), within).await {
         Ok(s) => s,
         Err(e) => return failed(e.clone(), format!("Couldn't read {shown}: {}", crate::web::short(&e))),
     };
@@ -253,7 +261,10 @@ pub async fn elements_from(turn: &mut crate::web::Turn, tab: &OpenTab, offset: u
     };
     let mut data = json!({ "tab": tab.tab, "n": n, "title": title, "url": tab.url, "offset": offset, "elements": element_lines(&s), "more": more });
     if more {
-        data["next"] = json!({ "mode": "elements", "offset": offset + s.elements.len() });
+        data["next"] = match within {
+            Some(r) => json!({ "mode": "elements", "ref": r, "offset": offset + s.elements.len() }),
+            None => json!({ "mode": "elements", "offset": offset + s.elements.len() }),
+        };
     }
     tracing::info!(tab = tab.tab, offset, elements = s.elements.len(), more, "Chat: the page beside the chat's elements read from an offset");
     json!({ "success": true, "data": data, "note": format!("{} {how}", web_note(n, tab, already)), "displayText": format!("Read {shown} beside the chat (from element {offset})") })
@@ -439,7 +450,7 @@ mod tests {
     fn the_long_read_is_the_page_text_script_with_more_room() {
         let long = long_text_script();
         assert_ne!(long, view::PAGE_TEXT_SCRIPT);
-        for (short, room) in [(".slice(0,40)", ".slice(0,400)"), (".slice(0,120);return", ".slice(0,600);return"), (".slice(0,24000)", ".slice(0,200000)")] {
+        for (short, room) in [(".slice(0,40)", ".slice(0,400)"), (".slice(0,120);return", ".slice(0,600);return"), (".slice(0,60000)", ".slice(0,200000)")] {
             assert!(view::PAGE_TEXT_SCRIPT.contains(short) && long.contains(room) && !long.contains(short), "{short}");
         }
         assert_eq!(offset_of(&json!(5000)), Some(5000));

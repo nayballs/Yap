@@ -14,7 +14,7 @@ fn the_tools_are_the_tool_loops_with_the_same_schemas() {
     assert_eq!(listed[1..=pages::ALL.len()], *pages::ALL);
     // The tool loop's own words and schemas, each one.
     let mut loop_defs: Vec<Value> = Vec::new();
-    for v in [see_screen::definitions(Gate::Look, see_screen::Takes::Screen), pages::definitions(Gate::Look, true), pictures::definitions(Gate::Look, true), shares::definitions(Offer::Web)] {
+    for v in [see_screen::definitions(Gate::Look, see_screen::Takes::Screen), pages::definitions(Gate::Look, true), pages::dev::definitions(Gate::Look, true), pictures::definitions(Gate::Look, true), shares::definitions(Offer::Web)] {
         loop_defs.extend(v.as_array().cloned().unwrap());
     }
     for d in &defs {

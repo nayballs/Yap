@@ -618,6 +618,19 @@ pub fn pick_tab(tabs: &[OpenTab], tab: Option<usize>) -> Result<&OpenTab, String
     }
 }
 
+/// **A DevTools protocol call on page `key`** (`Input.dispatchMouseEvent`,
+/// `Input.dispatchKeyEvent`, `Input.insertText`: **real input**, the events
+/// a page gets from a person's mouse and keyboard, `isTrusted` — as Claude
+/// Code's own browser sends them; 14 Nov 2026): its result as JSON, or an
+/// error after [`SCRIPT_TIMEOUT`]. Yap's own calls only, never a model's.
+pub async fn devtools(key: &str, method: &str, params: &serde_json::Value) -> Result<String, String> {
+    let app = APP.get().cloned().ok_or("Yap's window isn't ready.")?;
+    match tokio::time::timeout(SCRIPT_TIMEOUT, imp::devtools(app, key.to_string(), method.to_string(), params.to_string())).await {
+        Ok(r) => r,
+        Err(_) => Err("The page didn't take the input in time.".into()),
+    }
+}
+
 /// **Run `script` in page `key`** (Yap's own script, never one a page or a
 /// model wrote): its result as JSON — or an error after [`SCRIPT_TIMEOUT`]
 /// (a page stuck in a loop, or waiting on a dialog).
@@ -640,7 +653,7 @@ pub async fn run_script(key: &str, script: String) -> Result<String, String> {
 /// closed menu), then the page's navigation, header, footer and asides, a
 /// language link (`hreflang`, or another `lang` than the page's) last; each
 /// address once, at its best place. Read only.
-pub const PAGE_TEXT_SCRIPT: &str = concat!("(function(){", deep_js!(), r#"var t=function(s){return (s||'').replace(/\s+/g,' ').trim();};var m=mainEl();if(!m)return {title:document.title,headings:[],text:'',links:[]};var hs=[].slice.call(qa('h1,h2,h3',m)).slice(0,40).map(function(h){return t(h.innerText);}).filter(Boolean);var seen={};var dl=(document.documentElement.lang||'').toLowerCase().split('-')[0];var nav='nav,header,footer,aside,[role=navigation],[role=banner],[role=contentinfo],[role=complementary],[role=menu],[role=menubar],[role=tablist]';var rk=function(a){var lg=(a.getAttribute('lang')||'').toLowerCase().split('-')[0];if(a.getAttribute('hreflang')||(lg&&dl&&lg!==dl))return 3;if(up(a,nav))return 2;if(!a.getClientRects().length)return 1;return 0;};var ls=[].slice.call(qa('a[href]',m)).map(function(a,i){return {text:t(a.innerText||a.getAttribute('aria-label')||a.title).slice(0,100),href:a.href,k:rk(a),i:i};}).sort(function(x,y){return x.k-y.k||x.i-y.i;}).filter(function(l){if(!/^https?:/i.test(l.href)||!l.text||seen[l.href])return false;seen[l.href]=1;return true;}).map(function(l){return {text:l.text,href:l.href};}).slice(0,120);return {title:t(document.title),headings:hs,text:t(shownText(m)).slice(0,24000),links:ls,frames:foreignFrames(m,5)};})()"#);
+pub const PAGE_TEXT_SCRIPT: &str = concat!("(function(){", deep_js!(), r#"var t=function(s){return (s||'').replace(/\s+/g,' ').trim();};var m=mainEl();if(!m)return {title:document.title,headings:[],text:'',links:[]};var hs=[].slice.call(qa('h1,h2,h3',m)).slice(0,40).map(function(h){return t(h.innerText);}).filter(Boolean);var seen={};var dl=(document.documentElement.lang||'').toLowerCase().split('-')[0];var nav='nav,header,footer,aside,[role=navigation],[role=banner],[role=contentinfo],[role=complementary],[role=menu],[role=menubar],[role=tablist]';var rk=function(a){var lg=(a.getAttribute('lang')||'').toLowerCase().split('-')[0];if(a.getAttribute('hreflang')||(lg&&dl&&lg!==dl))return 3;if(up(a,nav))return 2;if(!a.getClientRects().length)return 1;return 0;};var ls=[].slice.call(qa('a[href]',m)).map(function(a,i){return {text:t(a.innerText||a.getAttribute('aria-label')||a.title).slice(0,100),href:a.href,k:rk(a),i:i};}).sort(function(x,y){return x.k-y.k||x.i-y.i;}).filter(function(l){if(!/^https?:/i.test(l.href)||!l.text||seen[l.href])return false;seen[l.href]=1;return true;}).map(function(l){return {text:l.text,href:l.href};}).slice(0,120);return {title:t(document.title),headings:hs,text:t(shownText(m)).slice(0,60000),links:ls,frames:foreignFrames(m,5)};})()"#);
 
 /// A page's words, read by [`PAGE_TEXT_SCRIPT`].
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -949,6 +962,9 @@ mod imp {
     pub async fn eval(_: AppHandle, _: String, _: String) -> Result<String, String> {
         Err(NO.into())
     }
+    pub async fn devtools(_: AppHandle, _: String, _: String, _: String) -> Result<String, String> {
+        Err(NO.into())
+    }
     pub async fn tabs(_: AppHandle) -> Result<Vec<super::OpenTab>, String> {
         Ok(Vec::new())
     }
@@ -986,7 +1002,7 @@ mod win {
     use tauri::{AppHandle, Emitter, Manager};
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use webview2_com::{
-        take_pwstr, AcceleratorKeyPressedEventHandler, CapturePreviewCompletedHandler, ClearBrowsingDataCompletedHandler, ContextMenuRequestedEventHandler, CreateCoreWebView2ControllerCompletedHandler,
+        take_pwstr, AcceleratorKeyPressedEventHandler, CallDevToolsProtocolMethodCompletedHandler, CapturePreviewCompletedHandler, DevToolsProtocolEventReceivedEventHandler, ClearBrowsingDataCompletedHandler, ContextMenuRequestedEventHandler, CreateCoreWebView2ControllerCompletedHandler,
         CustomItemSelectedEventHandler, DocumentTitleChangedEventHandler, DownloadStartingEventHandler, ExecuteScriptCompletedHandler, FocusChangedEventHandler,
         HistoryChangedEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler, NewWindowRequestedEventHandler,
         PermissionRequestedEventHandler, ProcessFailedEventHandler, ScriptDialogOpeningEventHandler, WebResourceRequestedEventHandler, ZoomFactorChangedEventHandler,
@@ -1843,6 +1859,12 @@ mod win {
                 })),
                 &mut token,
             )?;
+            // Its console and network, kept for the developer's tools (`dev.rs`).
+            if !snap {
+                if let Err(e) = watch_devtools(core, key) {
+                    tracing::info!("Chat: a page's console and network won't be kept ({})", e.message());
+                }
+            }
             let (a, k) = (app.clone(), key.to_string());
             core.add_ProcessFailed(
                 &ProcessFailedEventHandler::create(Box::new(move |_, _| {
@@ -2103,6 +2125,8 @@ mod win {
             let i = v.iter().position(|x| x.key == key)?;
             Some(v.remove(i))
         });
+        // Its console and network kept for the developer's tools: gone with it.
+        crate::chat::pages::dev::forget(key);
         if let Some(view) = gone {
             unsafe {
                 if let Some(c) = &view.controller {
@@ -2660,6 +2684,62 @@ mod win {
                 core.ExecuteScript(
                     &HSTRING::from(script),
                     &ExecuteScriptCompletedHandler::create(Box::new(move |res, json| {
+                        if let Some(tx) = tx.take() {
+                            let _ = tx.send(res.map(|()| json).map_err(|e| e.message()));
+                        }
+                        Ok(())
+                    })),
+                )
+            }
+            .map_err(|e| e.message())
+        })
+        .await??;
+        rx.await.map_err(|_| "The page didn't answer.".to_string())?
+    }
+
+    /// **Page `key`'s console and network, kept** (`dev::record`): DevTools'
+    /// Runtime, Log and Network domains on, their events into its log.
+    fn watch_devtools(core: &ICoreWebView2, key: &str) -> windows::core::Result<()> {
+        const EVENTS: [&str; 6] = ["Runtime.consoleAPICalled", "Runtime.exceptionThrown", "Log.entryAdded", "Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFailed"];
+        for event in EVENTS {
+            let receiver = unsafe { core.GetDevToolsProtocolEventReceiver(&HSTRING::from(event))? };
+            let k = key.to_string();
+            let mut token = 0i64;
+            unsafe {
+                receiver.add_DevToolsProtocolEventReceived(
+                    &DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, args| {
+                        if let Some(args) = args {
+                            let mut p = PWSTR::null();
+                            if args.ParameterObjectAsJson(&mut p).is_ok() {
+                                crate::chat::pages::dev::record(&k, event, &take_pwstr(p));
+                            }
+                        }
+                        Ok(())
+                    })),
+                    &mut token,
+                )?
+            };
+        }
+        for method in ["Runtime.enable", "Log.enable", "Network.enable"] {
+            unsafe { core.CallDevToolsProtocolMethod(&HSTRING::from(method), &HSTRING::from("{}"), &CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|_, _| Ok(()))))? };
+        }
+        Ok(())
+    }
+
+    /// **A DevTools protocol call on page `key`** (`method`, its `params` as
+    /// JSON): its result as JSON. Real input — `Input.dispatchMouseEvent`,
+    /// `Input.dispatchKeyEvent`, `Input.insertText` — as Claude Code's own
+    /// browser sends it.
+    pub async fn devtools(app: AppHandle, key: String, method: String, params: String) -> Result<String, String> {
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+        main_thread(&app, move |_| {
+            let Some((_, _, Some(core))) = handles(&key) else { return Err("That page isn't open (yet).".to_string()) };
+            let mut tx = Some(tx);
+            unsafe {
+                core.CallDevToolsProtocolMethod(
+                    &HSTRING::from(method),
+                    &HSTRING::from(params),
+                    &CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |res, json| {
                         if let Some(tx) = tx.take() {
                             let _ = tx.send(res.map(|()| json).map_err(|e| e.message()));
                         }

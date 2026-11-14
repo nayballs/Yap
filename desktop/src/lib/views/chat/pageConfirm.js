@@ -19,6 +19,7 @@ const WHY = {
   delete: 'It may delete something.',
   agree: 'It agrees to terms for you.',
   'sign in': 'It signs in to the site.',
+  'run a script': 'A script can do anything you could on the page: type, send, buy.',
 };
 
 /**
@@ -34,6 +35,9 @@ export function questionParts(c) {
       return { lead: 'Yap wants to open', quoted: c.label, then: '' };
     case 'enter':
       return { lead: 'Yap wants to press Enter in', quoted: c.label, then: '' };
+    case 'script':
+      // A script Claude wants to run on the page (chat/pages/dev.rs): its first words.
+      return { lead: 'Yap wants to run a script on', quoted: c.site || '', then: c.text ? `: ${c.text}` : '' };
     case 'drag':
       // What's dragged, onto what (`text`).
       return { lead: 'Yap wants to drag', quoted: c.label, then: c.text ? ` onto ‘${c.text}’` : '' };
@@ -61,7 +65,7 @@ export function whyOf(c) {
 
 /** What a card says once answered (`state`: allowed, refused, timedOut). */
 export function doneWords(c, state) {
-  const verb = c?.act === 'type' ? 'type' : c?.act === 'open' ? 'open' : c?.act === 'agent' ? 'send' : c?.act === 'drag' ? 'drag' : 'press';
+  const verb = c?.act === 'type' ? 'type' : c?.act === 'open' ? 'open' : c?.act === 'agent' ? 'send' : c?.act === 'drag' ? 'drag' : c?.act === 'script' ? 'run' : 'press';
   if (state === 'allowed') return 'Allowed once.';
   if (state === 'timedOut') return `No answer in time, so Yap didn’t ${verb} it.`;
   return `Yap didn’t ${verb} it.`;

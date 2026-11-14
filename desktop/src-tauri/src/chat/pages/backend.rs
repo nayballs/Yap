@@ -139,9 +139,16 @@ pub async fn tables(key: &str) -> Result<super::read::Tables, String> {
 /// text cut at `text_max`, at most `max` elements; addresses as the page's
 /// own (a test run's stand-in's turned back).
 pub async fn snapshot(key: &str, text_max: usize, max: usize) -> Result<Snapshot, String> {
+    snapshot_within(key, text_max, max, None).await
+}
+
+/// **[`snapshot`] of one part** (`within`: an element's ref — a heading's
+/// section, or the element; `browser_read { mode: "elements", ref }`). The
+/// simulator lists the whole page.
+pub async fn snapshot_within(key: &str, text_max: usize, max: usize, within: Option<u32>) -> Result<Snapshot, String> {
     sim!(|b| b.snapshot(key, text_max, max));
     wait_loaded(key).await;
-    let raw = view::run_script(key, super::act::script::snap(text_max, max)).await?;
+    let raw = view::run_script(key, super::act::script::snap_within(text_max, max, within)).await?;
     let mut s: Snapshot = serde_json::from_str(&raw).map_err(|_| "The page couldn't be read.".to_string())?;
     s.url = view::shown(&s.url);
     for e in &mut s.elements {
@@ -330,6 +337,17 @@ pub async fn act(key: &str, op: &str, a: &Value) -> Result<Value, String> {
         }
         "dragMove" => super::act::script::drag_move(num("f")),
         "dragEnd" => super::act::script::drag_end(),
+        "aim" => {
+            let at = a["at"].as_bool().unwrap_or(false).then(|| (num("x"), num("y")));
+            let kinds: Vec<&str> = a["kinds"].as_array().map(|k| k.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+            super::act::script::aim(r, role, name, at, &kinds, a["on"].as_bool().unwrap_or(false))
+        }
+        "aimed" => super::act::script::aimed(r, a["id"].as_str().unwrap_or(""), a["count"].as_u64().unwrap_or(1) as u8, a["hover"].as_bool().unwrap_or(false)),
+        "unhover" => super::act::script::unhover(),
+        "listen" => {
+            let kinds: Vec<&str> = a["kinds"].as_array().map(|k| k.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+            super::act::script::listen((r > 0).then_some((r, role, name)), &kinds)
+        }
         "section" => super::act::script::section(r, a["offset"].as_u64().unwrap_or(0) as usize, a["max"].as_u64().unwrap_or(super::READ_MAX as u64) as usize),
         "hover" => super::act::script::hover(r, role, name),
         "check" => super::act::script::check(r, role, name, a["on"].as_bool().unwrap_or(true)),
@@ -341,6 +359,39 @@ pub async fn act(key: &str, op: &str, a: &Value) -> Result<Value, String> {
     };
     let raw = view::run_script(key, script).await?;
     serde_json::from_str(&raw).map_err(|_| "The page didn't answer.".to_string())
+}
+
+/// **A DevTools call on page `key`** (the developer's tools, `dev.rs`:
+/// `Runtime.evaluate`, `Network.getResponseBody`, `Emulation.*`): its
+/// result as JSON. None in the simulator.
+pub async fn devtools_call(key: &str, method: &str, params: &Value) -> Result<String, String> {
+    sim!(|_| Err("Not in the simulator.".to_string()));
+    wait_loaded(key).await;
+    view::devtools(key, method, params).await
+}
+
+/// **Whether real input may go to the pages** (not in the simulator: its
+/// pages take the script's own events).
+pub fn real_input() -> bool {
+    #[cfg(any(test, debug_assertions))]
+    {
+        if super::sim::with(|_| ()).is_some() {
+            return false;
+        }
+    }
+    cfg!(windows)
+}
+
+/// **Real input on page `key`** (`view::devtools`: the DevTools `Input`
+/// domain's calls, each `(method, params)`, in turn) — the mouse and the
+/// keyboard as a person's, `isTrusted`. The simulator has none: its pages
+/// take the script's events (`act.rs` falls back to them).
+pub async fn input(key: &str, calls: &[(&str, Value)]) -> Result<(), String> {
+    sim!(|_| Err("No real input in the simulator.".to_string()));
+    for (method, params) in calls {
+        view::devtools(key, method, params).await?;
+    }
+    Ok(())
 }
 
 /// **Tab `key` goes to `url`** (a checked address: `go_to`).

@@ -113,24 +113,30 @@ const PAGES = {
   // A guide whose sections open in a script (agents-direct.spec.js, acting on a page): "Build Order" is a
   // heading under an invisible toggle laid over it — only a click on the toggle opens it, and its rows are
   // made then (a click on the heading itself does nothing) — and two builds are tabs, not links.
-  'wiki.example.com/guide/leveling': `<!doctype html><html><head><title>Leveling guide - Example Wiki</title>
+  'wiki.example.com/guide/leveling': `<!doctype html><html><head><title>Leveling guide - Example Wiki</title><meta name="viewport" content="width=device-width">
     <style>.order{position:relative;margin:24px 0;padding:8px;border:1px solid #888}.order h2{margin:0}.toggle{position:absolute;inset:0}#rows[hidden]{display:none}</style></head><body>
     <article><h1>Leveling guide</h1>
     <div role="tablist"><button role="tab" aria-selected="true" id="tab-heal">Healing</button><button role="tab" aria-selected="false" id="tab-dmg">Damage</button></div>
     <p id="build">Build: Healing</p>
     <div class="order"><h2>Build Order<a class="toggle" href="javascript:"></a></h2><ol id="rows" hidden></ol></div>
-    <button id="buy" onclick="document.getElementById('bought').textContent='Bought'">Buy the full guide</button><p id="bought"></p>
+    <button id="buy" onclick="document.getElementById('bought').textContent='Bought'">Buy the full guide</button><p id="bought"></p><p id="keys">Keys:</p>
     </article>
     <script>
+      // (For the developer's tools: a line in its console, a request with a secret in its address.)
+      console.log('Guide loaded');
+      fetch('/api/progress?token=abc123&level=20').catch(() => {});
+      // The keys it got (real keystrokes, or a script's own: said so).
+      document.addEventListener('keydown', (e) => { document.getElementById('keys').textContent += ' ' + (e.ctrlKey ? 'Ctrl+' : '') + e.key + (e.isTrusted ? '' : '(script)'); });
       const rows = document.getElementById('rows');
       document.querySelector('.toggle').addEventListener('click', (e) => {
         e.preventDefault();
         if (!rows.children.length) rows.innerHTML = ['10 Moss Shield Rank 1', '11 Moss Shield Rank 2', '12 River Song Rank 1'].map((t) => '<li>' + t + '</li>').join('');
         rows.hidden = !rows.hidden;
       });
-      for (const t of document.querySelectorAll('[role=tab]')) t.addEventListener('click', () => {
+      for (const t of document.querySelectorAll('[role=tab]')) t.addEventListener('click', (e) => {
         for (const o of document.querySelectorAll('[role=tab]')) o.setAttribute('aria-selected', String(o === t));
-        document.getElementById('build').textContent = 'Build: ' + t.textContent;
+        // (A person's click, or Yap's real input: isTrusted. A script's own events: said so.)
+        document.getElementById('build').textContent = 'Build: ' + t.textContent + (e.isTrusted ? ' (real click)' : ' (script click)');
       });
     </script></body></html>`,
 };

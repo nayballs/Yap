@@ -148,6 +148,7 @@ const DONE = [
   [/^Pointing\b/, 'Pointed'],
   [/^Dragging\b/, 'Dragged'],
   [/^Setting\b/, 'Set'],
+  [/^Resizing\b/, 'Resized'],
 ];
 const doneLine = (step) => DONE.reduce((s, [was, now]) => (was.test(s) ? s.replace(was, now) : s), String(step || ''));
 
@@ -381,6 +382,10 @@ const BROWSER_DONE = [
   [/^Scrolling the page beside the chat$/, 'scrolled', 'scrolled {n} times'],
   [/^(Looking at|Zooming in on) the page beside the chat$/, 'captured page', 'captured page {n} times'],
   [/^Waiting for the page beside the chat$/, 'waited for the page', 'waited for the page {n} times'],
+  [/^Reading the page's console beside the chat$/, 'read the console', 'read the console {n} times'],
+  [/^Reading the page's network requests beside the chat$/, 'read the network', 'read the network {n} times'],
+  [/^Running a script on the page beside the chat$/, 'ran a script', 'ran {n} scripts'],
+  [/^Resizing the page beside the chat$/, 'resized the page', 'resized the page {n} times'],
 ];
 
 export function workSummary(group, busy = false) {

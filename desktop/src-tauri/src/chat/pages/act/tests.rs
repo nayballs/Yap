@@ -911,3 +911,39 @@ fn a_button_a_count_and_a_drags_ends_are_read_as_models_send_them() {
     assert_eq!(end_of(&json!({ "x": 120 })), None);
     assert_eq!(end_of(&Value::Null), None);
 }
+
+/// **As Claude Code's own browser takes them** (14 Nov 2026): keys held with a click, and any key or
+/// combination pressed as real keystrokes, each as DevTools sends it.
+#[test]
+fn modifiers_and_any_key_or_combination_as_devtools_sends_them() {
+    use super::{combo_name, combos_of, key_events, mods_of, Mods};
+    // Keys held with a click: their DevTools bits (Alt 1, Ctrl 2, Meta 4, Shift 8), however written.
+    assert_eq!(mods_of(&json!("ctrl+shift")).map(Mods::bits), Some(10));
+    assert_eq!(mods_of(&json!(["cmd", "alt"])).map(Mods::bits), Some(5));
+    assert_eq!(mods_of(&Value::Null).map(Mods::bits), Some(0));
+    assert_eq!(mods_of(&json!("hyper")), None);
+    // Any key or combination, named one way.
+    assert_eq!(combo_name("ctrl+a").as_deref(), Some("Ctrl+A"));
+    assert_eq!(combo_name("Shift + ArrowDown".replace(" + ", "+").as_str()).as_deref(), Some("Shift+ArrowDown"));
+    assert_eq!(combo_name("f5").as_deref(), Some("F5"));
+    assert_eq!(combo_name("Backspace").as_deref(), Some("Backspace"));
+    assert_eq!(combo_name("hello"), None);
+    assert_eq!(combo_name("super+duper+a"), None);
+    // The browser's own shortcuts, never: closing, printing, DevTools.
+    for never in ["ctrl+w", "ctrl+p", "cmd+s", "F12", "ctrl+shift+i"] {
+        assert_eq!(combo_name(never), None, "{never}");
+    }
+    assert_eq!(combos_of(&json!("ctrl+a Backspace x")), Some(vec!["Ctrl+A".to_string(), "Backspace".into(), "X".into()]));
+    // As DevTools sends them: a shortcut types nothing; a letter alone types itself; a held key on a named one.
+    let ca = key_events("Ctrl+A").unwrap();
+    assert_eq!((ca[0]["type"].clone(), ca[0]["code"].clone(), ca[0]["modifiers"].clone(), ca[0].get("text").is_none()), (json!("rawKeyDown"), json!("KeyA"), json!(2), true));
+    let x = key_events("X").unwrap();
+    assert_eq!((x[0]["type"].clone(), x[0]["text"].clone(), x[0]["windowsVirtualKeyCode"].clone()), (json!("keyDown"), json!("x"), json!(88)));
+    let sd = key_events("Shift+ArrowDown").unwrap();
+    assert_eq!((sd[0]["key"].clone(), sd[0]["modifiers"].clone()), (json!("ArrowDown"), json!(8)));
+    let ce = key_events("Ctrl+Enter").unwrap();
+    assert_eq!((ce[0]["type"].clone(), ce[0].get("text").is_none(), ce[0]["modifiers"].clone()), (json!("rawKeyDown"), true, json!(2)));
+    assert_eq!(key_events("F5").unwrap()[0]["windowsVirtualKeyCode"], json!(116));
+    // The keys Yap always pressed, as before.
+    assert_eq!(key_events("Enter").unwrap()[0]["text"], json!("\r"));
+}
