@@ -3,15 +3,18 @@
   // stores/agents.svelte.js): a row each — the folder, what it's doing now
   // (or "Waiting for you" while a step waits to be allowed), and how long it
   // has run; a click opens its chat and its Agent tab. Nothing while none run.
+  // A Code chat at work on the person's own words (agents/direct.rs) is the
+  // chat itself, not an agent sent (14 Nov 2026): its row in the list has
+  // its dot, as a session's does in Claude Code's own app.
   import { onMount } from 'svelte';
   import { agents } from '../../stores/agents.svelte.js';
-  import { isLive, statusWord, statusTone, elapsed, turnNow } from '../../core/agents.js';
+  import { isLive, statusWord, statusTone, elapsed, turnNow, worksDirectly } from '../../core/agents.js';
 
   /** `chat`: the view's state (its conversations and the panel). */
   let { chat } = $props();
 
   let now = $state(Date.now() / 1000);
-  const running = $derived(agents.list.filter((j) => isLive(j.status)));
+  const running = $derived(agents.list.filter((j) => isLive(j.status) && !worksDirectly(j)));
 
   onMount(() => {
     const t = setInterval(() => (now = Date.now() / 1000), 1000);

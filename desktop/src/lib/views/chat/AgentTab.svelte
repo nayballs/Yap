@@ -199,7 +199,10 @@
     const at = ref?.view;
     const auto = ref?.auto;
     untrack(() => {
-      if (at === 'timeline') {
+      // (A turn that's the person's own message, straight to the chat's session, has no row in the panel —
+      // the chat talking, not an agent sent: its line or report opens its timeline, with its Undo.)
+      const asked = turn == null ? null : agentsStore.list.find((a) => a.id === id)?.turnList?.find((t) => t.n === turn);
+      if (at === 'timeline' || asked?.direct) {
         showTimeline(turn);
         return;
       }

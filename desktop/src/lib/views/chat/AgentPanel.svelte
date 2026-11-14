@@ -42,6 +42,14 @@
   //   steps it took (✕: it didn't finish). An entry opens to the helper's
   //   own steps, rows as the thread's (StepRows: an edit to its diff, a
   //   command to what it printed). core/agents.js `helpersOf`.
+  // - **The chat itself is no row** (14 Nov 2026, the maintainer: "Anytime I
+  //   speak it starts an agent on the right hand side… right now I speak to
+  //   you and you decide whether to pass work to agents"): a Code chat that
+  //   works directly sends the person's message to its own session — the
+  //   chat talking, as in Claude Code's own app — so that turn has no row,
+  //   and the helpers its Claude sends are rows of their own (Helper · what
+  //   it was asked · the step it's on), opening to their steps. The header
+  //   still adds up all the chat used. Nothing sent yet: "No agents yet".
   // Live from the `yap-agent` events the tab and stores/agents.svelte.js
   // hear: nothing polled.
   import { invoke } from '@tauri-apps/api/core';
@@ -75,7 +83,10 @@
   const dismissedCount = $derived(every.filter((r) => r.dismissed).length);
   const rows = $derived(showDismissed ? every : every.filter((r) => !r.dismissed));
   const groups = $derived(panelGroups(rows));
-  const totals = $derived(panelTotals(every.filter((r) => r.kind === 'turn')));
+  // (What the chat used in all: its own turns too, though they're no rows.)
+  const totals = $derived(panelTotals(panelRows(agents, { logs, steps, now, approvals, dismissed: true, own: true }).filter((r) => r.kind === 'turn')));
+  /** A Code chat that works directly: the person's own messages go to its session (no rows of their own). */
+  const talks = $derived(agents.some((a) => (a?.turnList || []).some((t) => t.direct)));
   const cost = $derived(costWords(totals.cost, { pay: agent?.pay, estimated: totals.approx && agent?.pay === 'key' }));
 
   let rootEl = $state(null);
@@ -401,6 +412,20 @@
                   {/each}
                 </ul>
               {/if}
+              {#if isOpen && r.kind === 'helper'}
+                <!-- A helper's own steps, rows as the thread's (an edit to its diff, a command to what it printed). -->
+                <div class="rmore" id="more-{r.key}" data-testid="chat-agent-row-more">
+                  {#if r.helper.steps.length}
+                    <div class="rwork" data-testid="chat-agent-row-steps">
+                      {#await import('./StepRows.svelte') then { default: StepRows }}
+                        <StepRows steps={r.helper.steps} busy={r.status === 'running'} onview={onpicture} />
+                      {/await}
+                    </div>
+                  {:else}
+                    <p class="rsizing">No steps yet.</p>
+                  {/if}
+                </div>
+              {/if}
               {#if isOpen && r.kind === 'turn'}
                 <div class="rmore" id="more-{r.key}" data-testid="chat-agent-row-more">
                   {#if r.sizing}
@@ -445,7 +470,8 @@
       {/if}
     </section>
   {:else}
-    <p class="pempty">Nothing yet.</p>
+    <!-- (A Code chat that works directly: its own Claude sends agents — helpers — when part of the work needs one.) -->
+    <p class="pempty" data-testid="chat-agent-panel-empty">{talks ? 'No agents yet. Claude sends one when part of the work needs it.' : 'Nothing yet.'}</p>
   {/each}
   {#if !groups.some((g) => g.id === 'finished')}{@render dismissedFoot()}{/if}
 </div>

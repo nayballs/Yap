@@ -137,7 +137,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   let messages = $state([]); // { role, text, tools?, model?, voice?, id }
   // The panel beside the conversation (chat/documents.rs, chatDoc.svelte.js):
   // a tab per document and picture of this conversation.
-  const doc = createDocPanel({ onopennote });
+  // The tabs closed in the open conversation's panel: kept with it (chats.rs `closed_tabs`), so they stay closed.
+  const doc = createDocPanel({
+    onopennote,
+    onclosed: (keys) => {
+      if (activeId != null) invoke('chat_tabs_closed', { id: activeId, keys }).catch(() => {});
+    },
+  });
   // This chat's connectors (the + menu's Connectors ▸, chatConnectors.svelte.js).
   const connectors = createChatConnectors(() => activeId);
 
@@ -272,8 +278,22 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     assistantConv = v.conversationId ?? null;
   }
   /** Where the Voice Assistant is now, read again (its question's conversation, once it's chosen). */
+  // **A read of the phase never overwrites a newer event** (14 Nov 2026): each `yap-assistant` event heard
+  // counts (the `assistantPhase` setter); a read begun before one is stale, and its answer is dropped.
+  // A question asked out loud that went straight to a Code chat's session goes idle at once: the read
+  // began while it was thinking, came back after the idle event, and left ■ "Stop the answer" in the box
+  // for good — Send gone, nothing typed could go.
+  let phaseHeard = 0;
+  /** The phase as Rust has it now: taken unless an event came meanwhile; the answer either way. */
+  function readAssistant() {
+    const at = phaseHeard;
+    return invoke('assistant_phase').then((v) => {
+      if (at === phaseHeard) setAssistant(v);
+      return v;
+    });
+  }
   function refreshAssistant() {
-    invoke('assistant_phase').then(setAssistant).catch(() => {});
+    readAssistant().catch(() => {});
   }
   let inputEl = $state(null);
   let threadEl = $state(null);
@@ -723,8 +743,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (answering && !turns[String(id)]) conv = await invoke('chat_get', { id });
       stopReading();
       // Another conversation: its documents and pictures are its own (their
-      // pills reopen the panel, its tabs with it).
-      doc.reset();
+      // pills reopen the panel, its tabs with it — less the ones closed in it).
+      doc.reset(conv.closedTabs);
       quote = null;
       activeId = id;
       scope = conv.scope || null;
@@ -1102,8 +1122,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       }
       const switched = activeId !== id;
       if (switched) {
-        // Another conversation: the panel's documents and pictures were the last one's.
-        if (activeId != null) doc.reset();
+        // Another conversation: the panel's documents and pictures were the last one's
+        // (its tabs closed before stay closed; a new chat it became keeps what it shows).
+        if (activeId != null) doc.reset(conv.closedTabs);
+        else doc.takeClosed(conv.closedTabs);
         activeId = id;
         scope = conv.scope || null;
       }
@@ -1147,10 +1169,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         const answer = messages.at(-1);
         if (answer?.role === 'assistant') for (const pg of answer.pages || []) if (pg?.url && !pagesShown.has(pg.url)) doc.showPage(pg);
       }
-      // Asked out loud in a Code chat that works directly (agents/direct.rs):
-      // it went straight to its session — no answer of Chat's; its session's
-      // tab opens beside it, as a typed message's does.
-      if (phase === 'answered' && p.direct) doc.showAgent({ ...p.direct, auto: true });
+      // (Asked out loud in a Code chat that works directly, agents/direct.rs: it went straight to its
+      // session — the chat talking, no answer of Chat's and no tab opened, as a typed message's.)
       refreshList();
       // The question asked out loud (the person's own), another conversation
       // brought up, the bar's Open in Chat: at its newest. Its answer
@@ -1459,8 +1479,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       }
       // A Code chat that works directly (agents/direct.rs): the message
       // went straight to its session — no answer of Chat's. The question
-      // stays as saved (its id is what its session's work hangs under), the
-      // agent's tab opens beside it, and its own words come as its report.
+      // stays as saved (its id is what its session's work hangs under), and
+      // its own words come as its report. No tab opens (14 Nov 2026): that's
+      // the chat talking, as in Claude Code's own app, not an agent sent —
+      // the panel shows the agents (helpers) its Claude sends.
       if (res.direct) {
         messages = messages
           .filter((m) => !(m.role === 'assistant' && m.streaming && m.turn === turn))
@@ -1468,7 +1490,6 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         refreshList();
         followThread();
         contextStamp += 1;
-        doc.showAgent({ ...res.direct, auto: true });
         return;
       }
       const qi = questionAt(rec);
@@ -1677,8 +1698,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
    */
   async function stopSpoken(conv) {
     if (conv == null) return;
-    const now = await invoke('assistant_phase').catch(() => null);
-    setAssistant(now);
+    const now = await readAssistant().catch(() => null);
     const its = (now?.phase === 'thinking' || now?.phase === 'speaking') && now?.conversationId === conv;
     if (its) invoke('assistant_stop').catch(() => {});
     else invoke('stream_stop_conversation', { conversation: conv }).catch(() => {});
@@ -1741,7 +1761,11 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get answeringHere() { return here != null; },
     get assistantAnswering() { return assistantAnswering; },
     // `yap-assistant`'s payload, or `assistant_phase`'s.
-    set assistantPhase(v) { setAssistant(v); },
+    set assistantPhase(v) {
+      phaseHeard += 1;
+      setAssistant(v);
+    },
+    refreshAssistant,
     get stopping() { return stopping; },
     get streaming() { return streaming; },
     get inputEl() { return inputEl; },

@@ -22,6 +22,8 @@ const LINK_SHARED: &[(&str, &str)] = &[
     // (What an agent is doing now, split out of agents.js for the main chunk.)
     ("core/agentNow.js", "../src/lib/core/agentNow.js"),
     ("core/money.js", "../src/lib/core/money.js"),
+    // (What's at work in a few words — "Claude is working" — split out for the Yap bar's chunk.)
+    ("core/working.js", "../src/lib/core/working.js"),
     ("core/codeChats.js", "../src/lib/core/codeChats.js"),
     ("core/chatStatus.js", "../src/lib/core/chatStatus.js"),
     ("core/pageConfirm.js", "../src/lib/views/chat/pageConfirm.js"),

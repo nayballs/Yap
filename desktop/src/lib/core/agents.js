@@ -7,6 +7,7 @@
 // answer that started it, a problem in plain words with its one button —
 // and the Mode chip's keys. No Svelte state: pure, tested by
 // desktop/e2e/agents-ui.spec.js.
+import { workingLine } from './working.js';
 import { dollars } from './money.js';
 import { FEATURE_NAME } from './codeChats.js';
 // What the main window's chunk needs at start-up (stores/agents.svelte.js)
@@ -408,7 +409,7 @@ export function stepRow(s, live = false) {
 }
 
 /** Yap's and Claude Code's own plumbing among a stretch's steps: no row of its own once it's past. */
-const PLUMBING = /^(Starting Claude Code|Picking up your request|Picking up where it left off|Finding a tool|Using yap · approve)$/;
+const PLUMBING = /^(Starting Claude Code|Thinking|Picking up your request|Picking up where it left off|Finding a tool|Using yap · approve)$/;
 
 /**
  * **The rows of a stretch opened**: `[{ step, i, now }]` — its steps in
@@ -702,8 +703,10 @@ export function helpersOf(events, live = false) {
  * sent out: "garden-planner · Hey, just testing… ● Done", "Agent done ·
  * garden-planner".) Pure.
  */
+// (A question at the end of its words — "What do you need?" — is part of the reply, not "the agent has a
+// question": a direct turn never asks so since 14 Nov 2026, and one saved before that is read the same.)
 export const plainReply = (turn) =>
-  !!turn?.direct && turn.status === 'done' && !turn.files?.length && !turn.denials?.length && !turn.plan && !turn.asks && !turn.error && !turn.undone;
+  !!turn?.direct && turn.status === 'done' && !turn.files?.length && !turn.denials?.length && !turn.plan && !turn.error && !turn.undone;
 
 /**
  * **Does a direct turn have a line of its own in the thread** (its title
@@ -759,6 +762,19 @@ export function answeredAfter(messages, i, startsTurn = () => false) {
     if (m?.role === 'assistant' && !m.kind && !m.streaming) return true;
   }
   return false;
+}
+
+/**
+ * **The Code chat itself at work** (14 Nov 2026; agents/store.rs
+ * `works_directly`): the turn `agent` is on (its live one that started,
+ * else its latest) is the person's own message sent straight to its session
+ * — the chat talking, as Claude Code's own app has its session, not an agent
+ * sent out. Never in "Agents working", never a tab opened by itself. Pure.
+ */
+export function worksDirectly(agent) {
+  const list = agent?.turnList || [];
+  const on = [...list].reverse().find((t) => Number(t.startedTs) > 0 && isLive(t.status)) ?? list.at(-1);
+  return !!on?.direct;
 }
 
 /**
@@ -1015,5 +1031,5 @@ export function modeForKey(modes, key) {
   return i >= 0 && modes?.[i] ? modes[i].mode : null;
 }
 
-/** "1 agent working", "2 agents working". */
-export const runningLine = (n) => (n === 1 ? '1 agent working' : `${n} agents working`);
+/** "1 agent working", "2 agents working" — "Claude is working" for a Code chat at work on the person's own words (`chats`: core/working.js). */
+export const runningLine = (n, chats = 0) => workingLine(n, chats);

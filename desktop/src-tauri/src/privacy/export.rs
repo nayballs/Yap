@@ -1133,7 +1133,7 @@ mod tests {
         let notes = SharedFile { name: "notes.md".into(), path: "C:\\Projects\\garden-planner\\notes.md".into(), kind: "markdown".into(), ..Default::default() };
         let web = SharedFile { name: "Fort Joy map".into(), id: "img_fedcba9876543210".into(), image_url: "https://wiki.example.com/map.png".into(), ..Default::default() };
         let answer = crate::chat::chats::ChatMessage { role: "assistant".into(), text: "Here they are.".into(), ts: 1, files: vec![Share { caption: "Garden".into(), items: vec![picture, notes, web], ..Default::default() }], ..Default::default() };
-        let conv = crate::chat::chats::Conversation { id: 3, title: "Garden".into(), created_ts: 1, updated_ts: 1, messages: vec![answer], scope: String::new(), note: None, archived_ts: 0, summary: None };
+        let conv = crate::chat::chats::Conversation { id: 3, title: "Garden".into(), created_ts: 1, updated_ts: 1, messages: vec![answer], scope: String::new(), note: None, archived_ts: 0, summary: None, closed_tabs: Vec::new() };
         let md = chat_markdown(&conv, &when);
         assert!(md.contains("\nShared files: C:\\Projects\\garden-planner\\docs\\concept.png, C:\\Projects\\garden-planner\\notes.md\n"), "{md}");
         // Never a picture's copy, nor a web address: paths on this PC only.

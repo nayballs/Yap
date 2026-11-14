@@ -142,7 +142,7 @@ at); any other model that calls tools picks from Yap's ranked list. Unit-tested
 loop end to end, the room), e2e-tested (`chat-pictures.spec.js`: the stored
 picture, `chats.json`, the receipts, the event, the look's picture part;
 `chat-picture-panel.spec.js`: tabs, zoom and pan, the source, Copy / Save,
-dark, the live event) and evaluated on a stand-in web (`--tag pictures`):
+dark, the live event, a tab closed staying closed when the chat opens again) and evaluated on a stand-in web (`--tag pictures`):
 Claude Haiku 5.5 4/4; the on-device Qwen3.5-4B 3/6 with its projector or
 without — it found the map every time, but with no map there it showed another
 picture anyway ([model-evals.md](../model-evals.md#find-and-show-pictures-31-oct-2026)).

@@ -145,7 +145,9 @@
   const code = createCodeChats(chat, { opensettings: () => onopensettings });
 
   // **Yap Code** (stores/agents.svelte.js): the bar card's or a notification's
-  // Open (`yap-agent-open`) shows the agent's chat and its tab; a report landing
+  // Open (`yap-agent-open`) shows the agent's chat and its tab (a Code chat at
+  // work on the person's own words: the chat alone, as Claude Code's app opens
+  // a session — 14 Nov 2026); a report landing
   // in the chat shown (`yap-agent-report`) is read in, never switching chats.
   initAgents();
   $effect(() => {
@@ -154,6 +156,7 @@
     agents.openWanted = null;
     untrack(async () => {
       if (want.conversation != null && want.conversation !== chat.activeId) await chat.selectConversation(want.conversation);
+      if (want.direct) return;
       const j = agentById(want.id);
       doc.showAgent(j ?? { id: want.id, conversation: want.conversation });
     });
@@ -413,7 +416,7 @@
     chat.refreshLimits();
     // Opened while the Voice Assistant thinks or speaks: its ■ shows here too
     // (on its question's conversation).
-    invoke('assistant_phase').then((p) => (chat.assistantPhase = p)).catch(() => {});
+    chat.refreshAssistant();
     setTimeout(() => chat.inputEl?.focus(), 0);
     const uns = [
       // A snip landed while Chat is open (snip.rs).

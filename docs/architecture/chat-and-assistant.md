@@ -1591,6 +1591,12 @@ one side.
   there only; Chat's ■ asks it too, and stops a spoken answer the assistant
   has moved on from (or a phone's) by its conversation instead
   (`stream_stop_conversation`).
+  **A read never overwrites a newer event** (2026-11-14, `chatState`'s
+  `readAssistant`): a read of `assistant_phase` begun before a
+  `yap-assistant` event is stale, and its answer is dropped. A question
+  that went straight to a Code chat's session goes idle at once: the read
+  began while it was thinking, came back after the idle event, and left ■
+  "Stop the answer" in the box for good (nothing typed could go).
   The bar's capsule shows while `phase != Idle`, the bar on or off.
   Debug-only `e2e_assistant_ask {text, listenMs}` (`Robot::ask_assistant`:
   the press's own steps — barge-in, the target, "recording" for
@@ -2115,7 +2121,16 @@ last), plus any a turn opened before its answer was kept (`chatDoc`'s
 looks as it always did). A click (or ← / → / Home / End on the row) shows
 one; **×** (shown on hover and on the tab showing; Delete, a middle click)
 closes it until its pill opens it again — the one showing gives way to the
-next tab, else the one before, and the last closes the panel; a document
+next tab, else the one before, and the last closes the panel. **Closed stays
+closed** (2026-11-14; the maintainer: it "always open[s] the same tabs each
+time"): the tabs closed are kept with the conversation (`chat_tabs_closed`,
+`chats.rs` `closed_tabs`: their keys, the newest 200) and left out when it
+opens again (`chatDoc`'s `reset(closed)`; a new chat the Voice Assistant
+carried on takes them too, `takeClosed`). Before, they lasted only until
+another chat was opened, and every page, picture and document its answers
+had ever shown came back. A tab shown again (its pill, a turn) leaves the
+list, and that's kept too. An older Yap's save drops the list: the tabs come
+back once; a document
 being written has a pulsing dot on its tab. **The document stays as it was
 behind a picture**: its part of the panel is hidden, not unmounted (its
 view, its editor and its undo history, find, the flow of a section still

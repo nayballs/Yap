@@ -33,6 +33,13 @@
 //   loaded here, or `picture`, a chat-images picture Chat found online:
 //   DocPanel's picture tab). A tab closed (`closeTab`) leaves the row until
 //   its pill opens it again; another conversation starts it afresh (`reset`).
+// - **Closed stays closed** (14 Nov 2026, the maintainer: the tabs "always
+//   open the same tabs each time"): the keys of the tabs closed are kept
+//   with the conversation (`onclosed` → `chat_tabs_closed`, chats.rs
+//   `closed_tabs`) and come back with it (`reset(closed)`). Before, they
+//   lasted only until another chat was opened, and every page, picture and
+//   document its answers ever showed was back in the row. A tab shown again
+//   (its pill, a turn) leaves the list, and that's kept too.
 // - **An agent's tab** (Yap Code, 2026-11-07): an agent Chat started (`agent` event,
 //   its pill, the bar card's Open) shows in a `agent:<id>` tab (AgentTab.svelte):
 //   what it's doing as it does it, and Stop, Continue, Undo. Closing the tab
@@ -105,6 +112,9 @@ export const pageKey = (url) => `page:${String(url || '').trim().replace(/#.*$/,
 /** A page tab's key: a new tab's own (`page:new:1`), else its page's. */
 export const tabKeyOf = (p) => p?.tabKey || pageKey(p?.url);
 
+/** A conversation's `closedTabs` as the row takes them: its keys, each once. Pure. */
+export const closedKeys = (keys) => [...new Set((Array.isArray(keys) ? keys : []).filter((k) => typeof k === 'string' && k))];
+
 /** `key` among `keys`, as documents.rs matches a section's key (case aside). */
 const hasKey = (keys, key) => keys.some((k) => k.trim().toLowerCase() === String(key).trim().toLowerCase());
 
@@ -112,7 +122,7 @@ const hasKey = (keys, key) => keys.some((k) => k.trim().toLowerCase() === String
  * The panel's state. `onopennote({id})`: ControlPanel's Open in Notes, as
  * the view has it now.
  */
-export function createDocPanel({ onopennote = () => null } = {}) {
+export function createDocPanel({ onopennote = () => null, onclosed = null } = {}) {
   let open = $state(false);
   // What shows: 'doc' (the document loaded here, `id`), 'picture' or 'page'.
   let showing = $state('doc');
@@ -197,8 +207,16 @@ export function createDocPanel({ onopennote = () => null } = {}) {
    * have it yet: a turn's, before its answer is kept).
    */
   function inRow(item) {
-    if (hidden.includes(item.key)) hidden = hidden.filter((k) => k !== item.key);
+    if (hidden.includes(item.key)) {
+      hidden = hidden.filter((k) => k !== item.key);
+      keepClosed();
+    }
     if (!extra.some((t) => t.key === item.key)) extra = [...extra, item];
+  }
+
+  /** The tabs closed changed: kept with the conversation, so they stay closed when it opens again. */
+  function keepClosed() {
+    onclosed?.([...hidden]);
   }
 
   /** Nothing on its way to the page any more (another document, the panel closed). */
@@ -441,6 +459,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   function closeTab(key, next = null) {
     if (!key || hidden.includes(key)) return;
     hidden = [...hidden, key];
+    keepClosed();
     // A page closes with its tab (its webview goes).
     if (key.startsWith('page:')) {
       invoke('page_view_close', { key }).catch(() => {});
@@ -524,8 +543,11 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     stopFlow();
   }
 
-  /** Another conversation: the panel closes, and its row starts afresh. */
-  function reset() {
+  /**
+   * Another conversation: the panel closes, and its row starts afresh — less
+   * the tabs closed in it before (`closed`: its `closedTabs`, chats.rs).
+   */
+  function reset(closed = []) {
     close();
     showing = 'doc';
     picture = null;
@@ -533,9 +555,18 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     if (page || Object.keys(pageNow).length) closePages();
     page = null;
     pageNow = {};
-    hidden = [];
+    hidden = closedKeys(closed);
     extra = [];
     asking = null;
+  }
+
+  /**
+   * The conversation a new chat became (the Voice Assistant carried on one):
+   * its tabs closed before stay closed — the ones shown since aside.
+   */
+  function takeClosed(closed = []) {
+    const shown = new Set(extra.map((t) => t.key));
+    hidden = [...new Set([...hidden, ...closedKeys(closed).filter((k) => !shown.has(k))])];
   }
 
   /** Preview (the page) or Source (the markdown, editable). */
@@ -696,6 +727,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     openTab,
     closeTab,
     reset,
+    takeClosed,
     fromTurn,
     onSection,
     onTool,

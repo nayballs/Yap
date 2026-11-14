@@ -1,7 +1,10 @@
 // **The Agent panel's rows, groups and numbers** (views/chat/AgentPanel.svelte,
 // the face of an agent's tab; Yap Code: desktop/src-tauri/src/agents/), and the
-// thread's to-do card (views/chat/AgentTodoCard.svelte). One row a turn of the
-// Code chat's agent (core/agents.js `turnsOf`), in groups — Needs you,
+// thread's to-do card (views/chat/AgentTodoCard.svelte). One row an agent at
+// work for the Code chat — a turn Chat sent its agent (core/agents.js
+// `turnsOf`), or a helper the chat's own Claude sent (14 Nov 2026: the
+// person's own message, straight to its session, is the chat talking, as in
+// Claude Code's own app: no row of its own; its helpers are the agents) — in groups — Needs you,
 // Running, Finished, Queued — each row its title, its Mode · model · effort,
 // "3/7 · the to-do in progress" (else the line it's on), its context's fill,
 // tokens, cost and time, and a thin bar: its to-dos done, else its context's
@@ -228,16 +231,74 @@ export function rowPose(state, turn, unused = false) {
 }
 
 /**
+ * **A helper's row** (14 Nov 2026): a part the chat's own Claude handed to a
+ * helper (Claude Code's own subagent: core/agents.js `helpersOf`) on turn
+ * `t`, the person's own message — an agent at work for the chat, as Claude
+ * Code's own app lists a session's subagents. What it was asked, the step
+ * it's on (then how many it took), its steps when opened. Its usage is its
+ * turn's: no stats of its own. `seq`: its place among its turn's helpers.
+ */
+function helperRow(agent, t, h, seq) {
+  const status = h.status === 'working' ? 'running' : h.status === 'failed' ? 'failed' : 'done';
+  const tone = modeTone(t.mode || agent.mode);
+  return {
+    key: `${agent.id}:${t.n}:${h.key}`,
+    kind: 'helper',
+    agentId: agent.id,
+    agent,
+    turn: null,
+    n: t.n,
+    seq,
+    helper: h,
+    title: h.title,
+    request: h.title,
+    state: status === 'running' ? 'running' : 'finished',
+    needs: null,
+    unused: false,
+    dismissed: false,
+    status,
+    statusWord: statusWord(status),
+    pose: poseOf(status),
+    mode: t.mode || agent.mode || '',
+    modeWord: 'Helper',
+    modeTone: tone,
+    model: '',
+    modelWord: '',
+    effortWord: '',
+    sizing: '',
+    todos: [],
+    line: h.line,
+    progress: status === 'done' ? { value: 1, kind: 'done' } : { value: 0, kind: 'context' },
+    ctx: null,
+    context: 0,
+    tokens: 0,
+    cost: 0,
+    estimated: false,
+    pay: agent.pay || 'plan',
+    secs: 0,
+    events: [],
+    helpers: [],
+    files: 0,
+    commands: commandCount(h.steps),
+    createdTs: Number(agent.createdTs) || 0,
+  };
+}
+
+/**
  * **The panel's rows**: one a turn of each of `agents` (the Code chat's: its
  * agent, and any other it has), each with what the panel shows of it, and
- * one an ask-first card waiting in its chat (`cards`: Send / Don't).
+ * one an ask-first card waiting in its chat (`cards`: Send / Don't). A turn
+ * that's the person's own message, straight to the chat's session
+ * (`direct`), is the chat talking: no row, and a row for each helper it
+ * sent instead (`helperRow`) — unless `own` (the header's totals: what
+ * the chat used in all).
  * `logs`: agent id → its log (`yap-agent` events; none read yet: its turns'
  * own notes); `steps`: agent id → the line it's on now (stores/agents.svelte.js);
  * `approvals`: the permission prompts waiting (`{id, run, tool, summary,
  * detail}`: stores/agents.svelte.js), the live truth of a step to allow;
  * `dismissed`: show the rows dismissed too (each marked `dismissed`).
  */
-export function panelRows(agents, { logs = {}, steps = {}, now = Date.now() / 1000, approvals = [], cards = [], dismissed = false } = {}) {
+export function panelRows(agents, { logs = {}, steps = {}, now = Date.now() / 1000, approvals = [], cards = [], dismissed = false, own = false } = {}) {
   const rows = [];
   for (const card of cards || []) {
     if (card?.id == null || card.state !== 'asking') continue;
@@ -289,6 +350,10 @@ export function panelRows(agents, { logs = {}, steps = {}, now = Date.now() / 10
     const newest = [...turns].reverse().find((t) => Number(t.startedTs) > 0)?.n ?? turns.at(-1)?.n;
     const asked = (approvals || []).find((a) => a?.run === agent.id) ?? null;
     for (const t of turns) {
+      if (t.direct && !own) {
+        helpersOf(t.events, isLive(t.status)).forEach((h, i) => rows.push(helperRow(agent, t, h, i)));
+        continue;
+      }
       if (t.dismissed && !dismissed) continue;
       const live = isLive(t.status);
       const heard = todosOf(t.events);
@@ -358,9 +423,9 @@ export const GROUPS = [
 /** The group a row shows in: its state's, a dismissed one shown again in Finished. */
 export const groupOf = (r) => (r.dismissed ? 'finished' : r.state);
 
-/** **The rows in their groups**, newest first in each; groups with none left out: `[{id, label, rows}]`. */
+/** **The rows in their groups**, newest first in each (a turn's helpers too); groups with none left out: `[{id, label, rows}]`. */
 export function panelGroups(rows) {
-  const newestFirst = [...(rows || [])].sort((a, b) => b.createdTs - a.createdTs || (b.n ?? 0) - (a.n ?? 0));
+  const newestFirst = [...(rows || [])].sort((a, b) => b.createdTs - a.createdTs || (b.n ?? 0) - (a.n ?? 0) || (b.seq ?? 0) - (a.seq ?? 0));
   return GROUPS.map(([id, label]) => ({ id, label, rows: newestFirst.filter((r) => groupOf(r) === id) })).filter((g) => g.rows.length);
 }
 

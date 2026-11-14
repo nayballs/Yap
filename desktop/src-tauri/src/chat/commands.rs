@@ -65,6 +65,16 @@ pub fn chat_archive(ids: Vec<u64>, archived: Option<bool>) -> Result<usize, Stri
     Ok(changed)
 }
 
+/// **The tabs closed in a conversation's panel** (14 Nov 2026): kept with
+/// it, so they stay closed when it opens again (`chats::set_closed_tabs`).
+#[tauri::command]
+pub fn chat_tabs_closed(id: u64, keys: Vec<String>) -> Result<(), String> {
+    if crate::chat::chats::set_closed_tabs(id, &keys)? {
+        crate::chat::chats::saved()?;
+    }
+    Ok(())
+}
+
 /// Rename a conversation (the Chat sidebar's Rename, in place): the title as
 /// stored (one line, trimmed, ≤ 80 characters). Its place in the list stays.
 /// A connected phone hears it (Yap Link's drawer and header).

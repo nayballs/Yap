@@ -250,7 +250,7 @@ fn an_older_yaps_save_loses_no_share() {
     use crate::chat::chats::{ChatMessage, Conversation};
     let share = Share { caption: "Garden".into(), items: vec![SharedFile { name: "notes.md".into(), path: "C:\\Projects\\garden-planner\\notes.md".into(), kind: "markdown".into(), ..Default::default() }], ..Default::default() };
     let msg = |role: &str, ts: u64, files: Vec<Share>| ChatMessage { role: role.into(), text: "x".into(), ts, files, ..Default::default() };
-    let conv = |messages: Vec<ChatMessage>| Conversation { id: 5, title: "Garden".into(), created_ts: 1, updated_ts: 1, messages, scope: String::new(), note: None, archived_ts: 0, summary: None };
+    let conv = |messages: Vec<ChatMessage>| Conversation { id: 5, title: "Garden".into(), created_ts: 1, updated_ts: 1, messages, scope: String::new(), note: None, archived_ts: 0, summary: None, closed_tabs: Vec::new() };
     let ours = vec![conv(vec![msg("user", 100, vec![]), msg("assistant", 101, vec![share.clone()])])];
     let mirror = mirror_of(&ours);
     assert_eq!(mirror.messages.len(), 1);
