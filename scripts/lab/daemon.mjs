@@ -93,6 +93,9 @@ const lastSeq = () => (items.length ? items[items.length - 1].seq : 0);
 
 // ---------------------------------------------------------------- turns
 
+/** How long a Code chat's session's answer may take to land once its turn is over (its report, chat/turn/report.rs). */
+const SESSION_GRACE_MS = 20_000;
+
 /** The turn going now, or the last one. */
 let turn = null;
 let turns = 0;
@@ -144,8 +147,11 @@ async function tick() {
   try {
     t.conversation ??= conversationOf(t.items);
     const end = endOf(t.items, { spoken: t.spoken });
-    if (end.done) {
-      t.status = end.status;
+    // A Code chat's own session (turns.mjs directOf): over with its answer in the chat — or, its turn over and
+    // no answer SESSION_GRACE_MS on, over anyway.
+    const late = !end.done && end.session && end.ended && Date.now() - end.ended > SESSION_GRACE_MS;
+    if (end.done || late) {
+      t.status = end.done ? end.status : end.endedStatus === 'done' ? 'answered' : end.endedStatus;
       t.error = end.error;
       t.endedAt = Date.now();
       await finalize(t);

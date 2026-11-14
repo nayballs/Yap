@@ -136,6 +136,8 @@ mod imp {
         "yap-claude-approve-done",
         "yap-agent",
         "yap-agent-report",
+        // A Code chat's own session: the pages it opened, a card before an action that buys.
+        "yap-agent-shown",
         "yap-alert",
     ];
     /// The stream events whose words aren't kept (the answer is in
