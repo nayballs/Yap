@@ -421,8 +421,8 @@ pub fn run() {
             notes::commands::note_update,
             notes::commands::note_delete,
             notes::commands::note_enhance,
-            notes::note_edits::transcript_line_edit,
-            notes::note_edits::note_summary_update,
+            notes::edits::transcript_line_edit,
+            notes::edits::note_summary_update,
             notes::transcript_edits::transcript_line_revert,
             notes::transcript_edits::transcript_line_delete,
             notes::transcript_edits::transcript_line_restore,
@@ -499,8 +499,6 @@ pub fn run() {
             ai::chatgpt::chatgpt_sign_out,
             ai::chatgpt::chatgpt_notice_seen,
             ai::chatgpt::chatgpt_e2e_opened,
-            ai::claude_code::claude_code_status,
-            ai::claude_code::claude_code_sign_in,
             ai::claude_plan::claude_plan_status,
             ai::claude_plan::claude_plan_sign_in,
             ai::claude_plan::usage::claude_plan_usage,
@@ -631,25 +629,25 @@ pub fn run() {
             calls::app_icons::meeting_app_icons,
             apps::apps_list,
             apps::apps_icons,
-            meetings::meeting_end::meeting_end,
-            meetings::meeting_end::meeting_pause,
-            meetings::meeting_end::meeting_summarise,
-            meetings::meeting_end::meeting_summary_status,
-            meetings::meeting_end::meeting_discard,
-            meetings::meeting_end::meeting_delete,
-            meetings::meeting_audio::meeting_audio_status,
-            meetings::meeting_audio::meeting_audio_clear,
-            meetings::meeting_audio::meeting_audio_note,
-            meetings::meeting_audio::meeting_audio_clip,
-            meetings::meeting_audio::export::meeting_audio_export,
-            meetings::meeting_audio::meeting_transcribe_again,
-            meetings::meeting_audio::meeting_recover,
-            meetings::meeting_audio::meeting_retry_chunk,
-            meetings::meeting_audio::meeting_job_cancel,
-            meetings::meeting_assist::meeting_catch_up,
-            meetings::meeting_assist::meeting_assist,
-            meetings::meeting_assist::meeting_skill,
-            meetings::meeting_assist::meeting_longer,
+            meetings::end::meeting_end,
+            meetings::end::meeting_pause,
+            meetings::end::meeting_summarise,
+            meetings::end::meeting_summary_status,
+            meetings::end::meeting_discard,
+            meetings::end::meeting_delete,
+            meetings::audio::meeting_audio_status,
+            meetings::audio::meeting_audio_clear,
+            meetings::audio::meeting_audio_note,
+            meetings::audio::meeting_audio_clip,
+            meetings::audio::export::meeting_audio_export,
+            meetings::audio::meeting_transcribe_again,
+            meetings::audio::meeting_recover,
+            meetings::audio::meeting_retry_chunk,
+            meetings::audio::meeting_job_cancel,
+            meetings::assist::meeting_catch_up,
+            meetings::assist::meeting_assist,
+            meetings::assist::meeting_skill,
+            meetings::assist::meeting_longer,
             meetings::coach_marks::notepad_coach_marks,
             meetings::coach_marks::notepad_coach_mark_shown,
             chat::skills::skills_list,
@@ -660,9 +658,9 @@ pub fn run() {
             chat::note_chats::note_chat_open,
             chat::note_chats::note_chat_add,
             chat::note_chats::note_chat_rename,
-            notes::note_edits::note_summary_restore,
-            notes::note_edits::note_summary_put_back,
-            notes::note_edits::note_summary_rate,
+            notes::edits::note_summary_restore,
+            notes::edits::note_summary_put_back,
+            notes::edits::note_summary_rate,
             // Pinned notes, version history, transforms in notes.
             notes::pins::note_pin,
             notes::versions::note_versions,
@@ -684,12 +682,10 @@ pub fn run() {
             meetings::notepad::notepad_split,
             meetings::notepad::notepad_split_preview,
             meetings::notepad::notepad_consent_message,
-            notes::quick_note::quick_note_toggle,
             notes::quick_note::quick_note_open,
             notes::quick_note::quick_note_hide,
             notes::quick_note::quick_note_state,
             notes::quick_note::quick_note_save,
-            notes::quick_note::quick_note_new,
             notes::quick_note::quick_note_dictate,
             notes::quick_note::quick_note_bar_button,
             notes::quick_note::key::quick_note_key,
@@ -736,7 +732,6 @@ pub fn run() {
             calendar::filing::companies::company_folder_remove,
             search::commands::search_status,
             search::commands::search_install,
-            search::commands::search_set_enabled,
             search::commands::search_rebuild,
             search::commands::search_delete,
             search::commands::search_moments,
@@ -754,7 +749,7 @@ pub fn run() {
             dictionary::snippet_offer::snippet_suggestion_respond,
             dictionary::snippet_offer::snippet_suggestions_enabled,
             dictionary::snippet_offer::snippet_suggestions_set,
-            dictionary::dict_usage::dictionary_usage,
+            dictionary::usage::dictionary_usage,
             dictionary::files::dictionary_import_pick,
             dictionary::files::dictionary_export_save,
             notices::alert::alert_action,
@@ -811,13 +806,13 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_meeting_start_twice,
             #[cfg(debug_assertions)]
-            meetings::meeting_audio::e2e_meeting_recovery_offer,
+            meetings::audio::e2e_meeting_recovery_offer,
             #[cfg(debug_assertions)]
             meetings::disk_watch::e2e_disk_space,
             #[cfg(debug_assertions)]
             meetings::import::e2e_transcript_files,
             #[cfg(debug_assertions)]
-            meetings::meeting_audio::export::e2e_audio_export_file,
+            meetings::audio::export::e2e_audio_export_file,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_main_on_screen,
             #[cfg(debug_assertions)]
@@ -919,11 +914,11 @@ pub fn run() {
             #[cfg(debug_assertions)]
             ai::local_llm::vision::e2e_local_vision,
             #[cfg(debug_assertions)]
-            notices::notice::e2e_notice_reset,
+            notices::policy::e2e_notice_reset,
             #[cfg(debug_assertions)]
-            notices::notice::e2e_notice,
+            notices::policy::e2e_notice,
             #[cfg(debug_assertions)]
-            notices::notice::e2e_focus,
+            notices::policy::e2e_focus,
             #[cfg(debug_assertions)]
             dictionary::learn::e2e_learn_correction,
             #[cfg(debug_assertions)]
@@ -937,7 +932,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             calls::meeting_guard::e2e_meeting_checkins,
             #[cfg(debug_assertions)]
-            calls::call_audio::e2e_call_audio,
+            calls::audio::e2e_call_audio,
             #[cfg(debug_assertions)]
             meetings::sleep::e2e_sleep,
             #[cfg(debug_assertions)]
@@ -1163,8 +1158,8 @@ pub fn run() {
             // (history/keep.rs).
             dictation::history::keep::init(&handle);
             // Meeting audio past its days goes, and what a crash left of a
-            // meeting is offered to transcribe (meeting_audio.rs).
-            meetings::meeting_audio::init(&handle);
+            // meeting is offered to transcribe (meetings/audio.rs).
+            meetings::audio::init(&handle);
             // Meeting transcripts past "Delete meeting transcripts after"
             // go, their notes and summaries kept (notes/retention.rs).
             notes::retention::init(&handle);
@@ -1239,7 +1234,7 @@ pub fn run() {
             // top, never focused, following the cursor's monitor (bar.rs).
             bar::init(&handle);
             // Yap's notice policy reads "Show tips" from Settings.
-            notices::notice::sync(&config::load());
+            notices::policy::sync(&config::load());
 
             // Dev builds: show Settings on launch. Every Yap window is hidden
             // at startup by design (tray-first UX), which leaves dev runs — and
@@ -1412,7 +1407,7 @@ pub fn run() {
                 let state = event.payload().trim_matches('"'); // payload is a JSON string
                 let generation = STATE_GEN.fetch_add(1, Ordering::Relaxed) + 1;
                 let show = matches!(state, "recording" | "processing" | "processing-slow" | "error");
-                notices::notice::on_pipeline_state(state);
+                notices::policy::on_pipeline_state(state);
                 bar::on_pipeline_state(&overlay_handle, state);
                 OVERLAY_ACTIVE.store(show, Ordering::Relaxed);
                 // Keep the tray icon + menu in sync with the recording state.
@@ -1490,7 +1485,7 @@ pub fn run() {
                             api.prevent_close();
                             let _ = w.hide();
                             if !main {
-                                notices::notice::on_onboarding(false);
+                                notices::policy::on_onboarding(false);
                                 // The bar's first-use pointers may show now.
                                 bar::refresh(w.app_handle());
                                 // A mic quiz there stops listening on every
@@ -1512,7 +1507,7 @@ pub fn run() {
                         tauri::WindowEvent::Focused(true) if main => {
                             updates::on_main_window_focused(&focus_handle);
                             // …and a pending call prompt or calendar card
-                            // moves into the window (one place: notice.rs).
+                            // moves into the window (one place: notices/policy.rs).
                             calls::meeting_detect::on_main_window_focused(&focus_handle);
                             calendar::on_main_window_focused();
                             // Files dragged in from Explorer: any input window
@@ -1554,7 +1549,7 @@ pub fn run() {
             // meeting (pause or end, "Started by mistake?", the action plan
             // written in Rust): both follow the recorder's events.
             meetings::notepad::init(&handle);
-            meetings::meeting_end::init(&handle);
+            meetings::end::init(&handle);
             // The quick note: closing it hides it (notes/quick_note.rs).
             notes::quick_note::init(&handle);
             // Memory: its events, and reading quiet chats for what to
@@ -1591,7 +1586,7 @@ pub fn run() {
             calls::capture::init(&handle);
             // The call's own audio while it's recorded (its microphone,
             // muted or not), and the PC going to sleep mid-meeting.
-            calls::call_audio::init(&handle);
+            calls::audio::init(&handle);
             meetings::sleep::init(&handle);
 
             // Other apps' sound a crash left silenced mid-dictation comes back.

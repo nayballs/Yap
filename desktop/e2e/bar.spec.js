@@ -275,7 +275,7 @@ test('Settings → General → Yap bar, and Dictation → While you dictate', as
 test('a call prompt is a "Meeting detected" card, in one place: the bar while you\'re in another app', async ({ yap, main, shot }) => {
   const bar = yap.overlay;
   // You're in another app (the call): the prompt goes on the bar, and only
-  // there — not in the main window's toasts as well (notices/notice.rs).
+  // there — not in the main window's toasts as well (notices/policy.rs).
   await inAnotherApp(yap);
   await callSim(yap, 'discord', true); // not asked about by default…
   await expect.poll(() => yap.invoke('meeting_detect_status').then((s) => s.calls.length)).toBe(1);

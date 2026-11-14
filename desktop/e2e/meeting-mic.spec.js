@@ -1,4 +1,4 @@
-// A meeting's microphone unplugged mid-recording (meetings/meeting.rs,
+// A meeting's microphone unplugged mid-recording (meetings/recorder.rs,
 // "Following the microphone"; dictation/mics.rs): "You" moves to the next
 // microphone in the order (else Windows' default) and the recording goes
 // on — the gap silent, a "Your mic was disconnected" marker in the

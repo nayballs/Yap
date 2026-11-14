@@ -329,8 +329,8 @@
       {/await}
     {/if}
     {#if pages.length}
-      {#await import('./PagePills.svelte') then { default: PagePills }}
-        <PagePills {pages} {onpage} thumbFor={pagethumb} />
+      {#await import('./PageCards.svelte') then { default: PageCards }}
+        <PageCards {pages} {onpage} thumbFor={pagethumb} />
       {/await}
     {/if}
   </div>

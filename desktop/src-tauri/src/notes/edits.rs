@@ -8,7 +8,7 @@
 //!   keeps its side, voice, date and place on the recording's clock, so ▶
 //!   still plays what was said. It's marked `edited`, with what Yap heard
 //!   kept in `original` (an edit back to that clears both). Transcribe again
-//!   keeps it (`meeting_audio/redo.rs`) and the voice separation never splits
+//!   keeps it (`meetings/audio/redo.rs`) and the voice separation never splits
 //!   it (`speakers::split_line`). When the edit fixed a misheard word or name
 //!   ("cube and eighties" → "Kubernetes"), "Suggest words from your
 //!   corrections" offers it for the dictionary, by its own rules
@@ -44,7 +44,7 @@ use tauri::{AppHandle, Emitter};
 use crate::notes::{Note, TranscriptSegment};
 
 /// What a summary run says when it left the person's edited summary alone
-/// (`meeting_end.rs` reports it as the job's "kept" state).
+/// (`meetings/end.rs` reports it as the job's "kept" state).
 pub const SUMMARY_KEPT: &str = "Your edited summary was kept: Yap didn't write over it.";
 
 /// A line is one line of talk: a paste of a whole document isn't.
@@ -429,7 +429,7 @@ pub fn write_summary(id: u64, text: &str, at_hash: &str, read_ms: u64, heard_to:
 
 // ---- A summary rewritten, and its Undo (2026-10-29) -------------------------------------
 //
-// "Make notes longer" (`meeting_assist::meeting_longer`) writes Yap's summary
+// "Make notes longer" (`meetings::assist::meeting_longer`) writes Yap's summary
 // again through `write_summary`; what was there before goes back with the
 // window's Undo (`note_summary_put_back`): its words, Yap's own version
 // beside them, and whether they were the person's — the ticks made since

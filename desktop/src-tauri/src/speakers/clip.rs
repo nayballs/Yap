@@ -14,7 +14,7 @@
 
 use super::voices::{self, ClipLine};
 use super::{resolve, Note};
-use crate::meetings::meeting_audio::{self, Meta};
+use crate::meetings::audio::{self, Meta};
 use crate::notes::TranscriptSegment;
 
 /// Padding each side of the clip.
@@ -43,7 +43,7 @@ fn candidate(note: &Note, metas: &[Meta], seg: &TranscriptSegment) -> Option<(us
 pub fn clip(note_id: u64, voice: &str) -> Result<Vec<u8>, String> {
     let note = crate::notes::get(note_id).ok_or("Note not found")?;
     let voice = resolve(&note.speakers, voice).to_string();
-    let metas = meeting_audio::recordings(note_id);
+    let metas = audio::recordings(note_id);
     if metas.is_empty() {
         return Err("This meeting's audio isn't kept any more".to_string());
     }
@@ -62,7 +62,7 @@ pub fn clip(note_id: u64, voice: &str) -> Result<Vec<u8>, String> {
     for &i in order.iter().take(LEVEL_CHECKS) {
         let (r, seg, c) = &cands[i];
         let n = (c.end_ms.saturating_sub(c.start_ms).min(voices::CLIP_MAX_MS) * 16) as usize;
-        if let Ok(a) = meeting_audio::read_side(note_id, metas[*r].recording, &seg.source, c.start_ms * 16, n) {
+        if let Ok(a) = audio::read_side(note_id, metas[*r].recording, &seg.source, c.start_ms * 16, n) {
             let rms = (a.iter().map(|s| (*s as f64).powi(2)).sum::<f64>() / a.len().max(1) as f64).sqrt();
             cands[i].2.level = Some(rms as f32);
         }
@@ -79,7 +79,7 @@ pub fn clip(note_id: u64, voice: &str) -> Result<Vec<u8>, String> {
     let (r, seg, _) = &cands[pool[best]];
     let from = start.saturating_sub(PAD_MS);
     let n = ((end + PAD_MS - from) * 16) as usize;
-    let audio = meeting_audio::read_side(note_id, metas[*r].recording, &seg.source, from * 16, n)?;
+    let audio = audio::read_side(note_id, metas[*r].recording, &seg.source, from * 16, n)?;
     if audio.is_empty() {
         return Err("Their audio isn't there".to_string());
     }

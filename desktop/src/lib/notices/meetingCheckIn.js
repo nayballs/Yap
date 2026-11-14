@@ -13,7 +13,7 @@
 //     summarise (primary) / Keep recording. Its ✕ is Keep recording.
 //   - the meeting's other questions, the same way (✕ answers "keep"):
 //     "mic" — "Teams is using Contoso H2 but Yap is using Northwind Audio",
-//     Use Contoso H2 / Not now (calls/call_audio.rs); "asleep" — "Your PC was
+//     Use Contoso H2 / Not now (calls/audio.rs); "asleep" — "Your PC was
 //     asleep", Resume / Summarise (meetings/sleep.rs); "autostart" — "Start
 //     notes automatically for Teams calls?" (calls/meeting_detect.rs).
 //   Answers go back as `meeting_checkin_respond { id, answer }`; Rust takes

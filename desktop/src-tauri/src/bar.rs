@@ -40,7 +40,7 @@
 //!   "update ready" from `updates.rs`), instead of a Windows notification.
 //!   They return `false` when the bar is off or hidden for an hour, and
 //!   callers fall back to the notification. **One card at a time**, picked
-//!   by Yap's notice policy (`notice.rs`: a question before an alert before
+//!   by Yap's notice policy (`notices/policy.rs`: a question before an alert before
 //!   a notice before a tip; tips and notices wait out a dictation; stale
 //!   ones and repeats within a cooldown dropped); the rest wait their turn.
 //!
@@ -399,7 +399,7 @@ struct State {
     pending: Option<Pending>,
     /// When the auto-hidden-taskbar check last ran (unix ms).
     autohide_at: u64,
-    /// Every card asked for, on screen or waiting its turn (`notice.rs`
+    /// Every card asked for, on screen or waiting its turn (`notices/policy.rs`
     /// decides which one shows: one at a time).
     cards: Vec<Card>,
     handlers: HashMap<String, OnAction>,
@@ -593,7 +593,7 @@ pub struct Status {
     quick_note: bool,
     /// …and its shortcut spec, if one is set, for its tooltip.
     quick_note_hotkey: Option<String>,
-    /// `meeting::state()`: `{ recording, noteId, elapsedSecs }`.
+    /// `meetings::recorder::state()`: `{ recording, noteId, elapsedSecs }`.
     meeting: serde_json::Value,
     /// A live call ◉ would record ("Record this Teams call").
     call: Option<String>,
@@ -602,7 +602,7 @@ pub struct Status {
     assistant: crate::chat::assistant::Phase,
     /// The reading card is up (its content: `yap-read`, `read_aloud.rs`).
     reading: bool,
-    /// The card on screen (none or one: `notice.rs` shows them one at a
+    /// The card on screen (none or one: `notices/policy.rs` shows them one at a
     /// time)…
     cards: Vec<Card>,
     /// …and the ids of those waiting their turn.
@@ -625,7 +625,7 @@ pub struct Status {
 
 pub fn status() -> Status {
     // Other modules' state first: never with this module's lock held.
-    let meeting = crate::meetings::meeting::state();
+    let meeting = crate::meetings::recorder::state();
     let call = crate::calls::meeting_detect::tray_item().map(|(_, label)| label);
     let first_use = pointer::status();
     let (agents, chats) = crate::agents::store::live_counts();
@@ -1032,7 +1032,7 @@ pub fn init(app: &AppHandle) {
     {
         let mut s = lock();
         read_config(&mut s, &cfg);
-        s.meeting = crate::meetings::meeting::is_recording();
+        s.meeting = crate::meetings::recorder::is_recording();
     }
     if let Some(w) = window(app) {
         #[cfg(windows)]
@@ -1065,7 +1065,7 @@ pub fn init(app: &AppHandle) {
             .and_then(|v| v["recording"].as_bool())
             .unwrap_or(false);
         lock().meeting = recording;
-        crate::notices::notice::on_meeting(recording);
+        crate::notices::policy::on_meeting(recording);
         if !repick(&h) {
             emit(&h);
         }
@@ -1194,7 +1194,7 @@ pub fn on_pipeline_state(app: &AppHandle, state: &str) {
     }
     #[cfg(not(windows))]
     let _ = starting;
-    // Tips and notices wait out a dictation (`notice.rs`): one on screen
+    // Tips and notices wait out a dictation (`notices/policy.rs`): one on screen
     // steps back now; after it, the poller brings them back.
     repick(app);
     apply(app);
@@ -1238,14 +1238,14 @@ pub fn card_on_screen(id: &str) -> bool {
 
 /// Show `card` above the pill, replacing one with the same id (which keeps
 /// its place); its answers go to `on_action`. One card shows at a time:
-/// `notice.rs` picks which — a call before a tip; tips and notices wait
+/// `notices/policy.rs` picks which — a call before a tip; tips and notices wait
 /// while a dictation runs — and the rest wait their turn. The same notice
 /// again within its cooldown is dropped (`true`: it was said). `false` when
 /// the bar is off or hidden: the caller falls back to a Windows
 /// notification.
 ///
 /// A card of a kind with a daily cap (`notices/kinds.rs`: a tip, a
-/// suggestion, a milestone) only ever comes through `notice::place_tip`,
+/// suggestion, a milestone) only ever comes through `notices::policy::place_tip`,
 /// which counted it: one that never shows — dropped for its cooldown,
 /// replaced while it still waited, or dropped unseen ([`repick`]) — gives
 /// its count back (`kinds::give_back`).
@@ -1253,7 +1253,7 @@ pub fn show_card(app: &AppHandle, card: Card, on_action: OnAction) -> bool {
     if !cards_available() {
         return false;
     }
-    if !crate::notices::notice::admit(&card.id, &card.title, &card.body) {
+    if !crate::notices::policy::admit(&card.id, &card.title, &card.body) {
         crate::notices::kinds::give_back(&card.id);
         return true;
     }
@@ -1292,15 +1292,15 @@ pub fn show_card(app: &AppHandle, card: Card, on_action: OnAction) -> bool {
     true
 }
 
-/// Which card shows now (`notice::pick`); `true` if that changed (the page
+/// Which card shows now (`notices::policy::pick`); `true` if that changed (the page
 /// has been told then). Cards that waited too long unseen are dropped, their
 /// handlers told as if they had faded (`expire_action`), and a capped kind's
 /// count given back (`kinds::give_back`).
 fn repick(app: &AppHandle) -> bool {
-    let moment = crate::notices::notice::moment();
+    let moment = crate::notices::policy::moment();
     let (changed, stale, unseen, first_seen) = {
         let mut s = lock();
-        let m = crate::notices::notice::Moment {
+        let m = crate::notices::policy::Moment {
             meeting: s.meeting || moment.meeting,
             dictating: moment.dictating
                 || matches!(s.dictation, Dictation::Recording | Dictation::Processing),
@@ -1309,14 +1309,14 @@ fn repick(app: &AppHandle) -> bool {
         let ids: Vec<String> = s.cards.iter().map(|c| c.id.clone()).collect();
         let current = s.front.as_ref().and_then(|f| ids.iter().position(|id| id == f));
         let pinned = current.is_some_and(|i| s.pointer.as_deref() == Some(format!("card:{}", ids[i]).as_str()));
-        let list: Vec<crate::notices::notice::Waiting> = ids
+        let list: Vec<crate::notices::policy::Waiting> = ids
             .iter()
             .map(|id| {
                 let (since, seen) = s.queued.get(id).copied().unwrap_or((m.now, false));
-                crate::notices::notice::Waiting { kind: id, since, seen }
+                crate::notices::policy::Waiting { kind: id, since, seen }
             })
             .collect();
-        let pick = crate::notices::notice::pick(&list, current, pinned, &m);
+        let pick = crate::notices::policy::pick(&list, current, pinned, &m);
         let front = pick.front.map(|i| ids[i].clone());
         let mut stale = Vec::new();
         let mut unseen = Vec::new();
@@ -1543,9 +1543,9 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         }
         // ■ on the recording pill: end the meeting, which writes the action
         // plan in Rust (or asks "Started by mistake?").
-        "stop-meeting" => crate::meetings::meeting_end::end(app, Some(overlay::LABEL))?,
+        "stop-meeting" => crate::meetings::end::end(app, Some(overlay::LABEL))?,
         // The recording pill: its notes, in the meeting notepad.
-        "open-note" => match crate::meetings::meeting::recording_note() {
+        "open-note" => match crate::meetings::recorder::recording_note() {
             Some(note_id) => crate::meetings::notepad::open(app, note_id),
             None => crate::shell::window::show_settings(app)?,
         },

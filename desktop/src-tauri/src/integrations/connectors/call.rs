@@ -18,7 +18,6 @@
 //! Chat's tool loop calls through here (`chat/tools/connectors.rs`, after
 //! its consent, `connectors::call_for_chat`), and a debug build's
 //! `connector_call_tool`.
-#![cfg_attr(not(debug_assertions), allow(dead_code))]
 
 use std::time::Duration;
 

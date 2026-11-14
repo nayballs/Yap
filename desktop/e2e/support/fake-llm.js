@@ -10,7 +10,7 @@
 // the FOLLOW-UP email — in markdown, with a preamble, for Yap to clean up —
 // and BLIND SPOTS, "Gaps and risks"). Replies are built from the trigger
 // phrases the specs put in their synthetic meetings — and, to prove Yap's
-// checks (meetings/meeting_summary.rs), the digests slip in a task for someone nobody
+// checks (meetings/summary.rs), the digests slip in a task for someone nobody
 // mentioned ("Zed", due "Tuesday"), and the action plan invents an owner
 // ("Mallory") and drops one real task. A spec can make the next calls of a
 // kind fail (`failNext`) or answer slowly (`delay`), to see Yap's progress
@@ -168,7 +168,7 @@ function listBody(provider, models) {
   return { object: 'list', data: models };
 }
 
-/** Yap's own token estimate (meeting_summary::estimate_tokens). */
+/** Yap's own token estimate (meetings::summary::estimate_tokens). */
 /**
  * Anthropic's Messages API request (desktop/src-tauri/src/ai/llm/anthropic.rs, a
  * strong Claude's Chat steps) as the OpenAI-shaped messages the rest of
@@ -470,7 +470,7 @@ const BRIEF = 'You write a short brief for someone about to go into a meeting';
 // "- " lines from the messages it's given (each "User: …" line's first
 // words) unless a spec scripts it (`reply('chatSummary', fn)`).
 const CHAT_SUMMARY = 'You keep the notes of a long chat';
-// The notepad's newer chips and Skills (meetings/meeting_assist.rs, ai/llm.rs):
+// The notepad's newer chips and Skills (meetings/assist.rs, ai/llm.rs):
 // "Make me sound smart" (SMART), a Skill run on one meeting (SKILL, its
 // name in the system prompt) and "Make notes longer" (LONGER). The first
 // two cite the numbered passages they're given — and one made-up number,
@@ -578,7 +578,7 @@ function chatSummaryReply(user) {
 /**
  * A transcript line as Yap's meeting prompts write it: "You: …", "Them: …",
  * or the speaker's name once the note's speaker map has one ("Priya Shah: …",
- * "Speaker 2: …"; meeting_summary::transcript_lines). Not the headers.
+ * "Speaker 2: …"; meetings::summary::transcript_lines). Not the headers.
  */
 const SPOKEN = /^(?!(?:Attendees|Speakers besides You|Question|Meeting|Subject|Notes|Latest)\b)[A-Z][\w.' -]{0,40}: /;
 const isSpoken = (l) => SPOKEN.test(l);
@@ -626,7 +626,7 @@ function questionsReply(user) {
 
 /**
  * "Follow-up email": markdown and a preamble a small model might add, which
- * Yap must take out (meeting_summary::clean_email).
+ * Yap must take out (meetings::summary::clean_email).
  */
 function followUpReply(user) {
   const planned = /Yap's notes on the meeting/.test(user);

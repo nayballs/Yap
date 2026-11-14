@@ -22,7 +22,7 @@ use super::{
 /// cache shared by its slots): room for the structured cleanup prompt +
 /// one-shots (~2.1k tokens) plus a long dictation, and for a Chat turn's
 /// tools, notes and history. What the meeting notes' budgets assume
-/// (meeting_summary.rs).
+/// (meetings/summary.rs).
 pub const DEFAULT_CONTEXT: u32 = 8192;
 /// The least the sidecar is started with (the cleanup's prompt alone is
 /// ~2.1k tokens) — unless the model itself was trained for less.

@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn the_memory_tools_stay_light_and_act_only_when_asked() {
-        let est = crate::meetings::meeting_summary::estimate_tokens;
+        let est = crate::meetings::summary::estimate_tokens;
         let all = Extra { memory: true, search_chats: true, ..Default::default() };
         let (s, t) = (
             est(&format!("{} {}", MEMORY_TOOL_INSTRUCTIONS.join(" "), CHATS_TOOL_INSTRUCTIONS.join(" "))),

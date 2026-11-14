@@ -350,7 +350,7 @@ test('Meetings: a past meeting and one from the calendar; a calendar connection'
   // A past meeting: Open, Generate summary (it has none), File this meeting
   // in ▸ (calendar.md, folder rules), Copy as Markdown,
   // Find speakers (the engine again over its audio), Delete….
-  // (Its audio is kept: Export audio… once the view knows, meetings/meeting_audio/export.rs.)
+  // (Its audio is kept: Export audio… once the view knows, meetings/audio/export.rs.)
   await expect(async () => {
     await main.keyboard.press('Escape');
     await budget.click({ button: 'right' });

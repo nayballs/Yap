@@ -10,7 +10,7 @@ use crate::config;
 use crate::dictation::stt::{self, SttAdapter};
 
 /// The shared warm-engine slot. The pipeline owns it; the meeting recorder
-/// (`meeting.rs`), Upload, Run again and a meeting transcribed again take
+/// (`meetings/recorder.rs`), Upload, Run again and a meeting transcribed again take
 /// the engine out for one transcription at a time ([`EngineCell::take`])
 /// and give it back, so they and dictation take turns on one copy of the
 /// model instead of loading a second.

@@ -5,10 +5,10 @@
 //! a settings file Yap couldn't read and set aside (`config.rs`), a save
 //! that failed by itself ("Couldn't save your dictation history", with Try
 //! again: `saving.rs`)
-//! — put in **one place** (`notice::place`): a toast in the main window
+//! — put in **one place** (`policy::place`): a toast in the main window
 //! while the person is looking at it, else a card on the Yap bar, else a
 //! Windows notification, else the window if it's on screen. Yap's notice
-//! policy (`notice.rs`) applies on each: an alert about a dictation is
+//! policy (`policy.rs`) applies on each: an alert about a dictation is
 //! never held back behind it, and the same one again within its kind's
 //! cooldown isn't shown. (coaching.rs and learn.rs place their tips the
 //! same way, minus the Windows notification: a tip can go unsaid, these
@@ -84,7 +84,7 @@ pub struct Alert {
     /// and its model is a cloud one, asked once) | "lastTranscript" (`last.rs`: "Copied your last dictation",
     /// shown with [`confirm`]):
     /// the bar card's id, the Windows notification's tag (a newer one
-    /// replaces it) and its rule in `notice.rs`.
+    /// replaces it) and its rule in `policy.rs`.
     pub kind: &'static str,
     /// The chip's glyph: "clipboard" | "mic" | "call" | "assistant" | "commands" |
     /// "settings" | "save".
@@ -96,8 +96,8 @@ pub struct Alert {
     pub timeout_ms: u64,
 }
 
-/// Where an alert went (`notice::Place`).
-pub use crate::notices::notice::Place as Surface;
+/// Where an alert went (`policy::Place`).
+pub use crate::notices::policy::Place as Surface;
 
 /// Show `alert` where it'll be seen; returns where. Blocking (window
 /// queries): call it off the pipeline's locks — [`show_soon`] does.
@@ -123,11 +123,11 @@ fn show_at(app: &AppHandle, alert: Alert, notification: bool) -> Surface {
         timeout_ms: Some(alert.timeout_ms),
         ..Default::default()
     };
-    let mut place = crate::notices::notice::place(app, notification);
-    // The same alert again within its cooldown (`notice.rs`: the mic
+    let mut place = crate::notices::policy::place(app, notification);
+    // The same alert again within its cooldown (`policy.rs`: the mic
     // privacy one is said once per ten minutes; the overlay's line says it
     // on every press). The bar and Windows check for themselves.
-    if place == Surface::Window && !crate::notices::notice::admit(alert.kind, &alert.title, &alert.body) {
+    if place == Surface::Window && !crate::notices::policy::admit(alert.kind, &alert.title, &alert.body) {
         tracing::info!(kind = alert.kind, "alert: said a moment ago; not again");
         return Surface::Nowhere;
     }
@@ -135,7 +135,7 @@ fn show_at(app: &AppHandle, alert: Alert, notification: bool) -> Surface {
         place = Surface::Bar;
     }
     if place == Surface::Bar && !crate::bar::show_card(app, card(), Box::new(act)) {
-        place = if notification && crate::notices::notice::notifications_allowed() { Surface::Notification } else { Surface::Nowhere };
+        place = if notification && crate::notices::policy::notifications_allowed() { Surface::Notification } else { Surface::Nowhere };
     }
     if place == Surface::Notification {
         #[cfg(windows)]
@@ -233,7 +233,7 @@ pub fn act(app: &AppHandle, action: &str) {
         OPEN_MIC_SETTINGS => open_uri(app, crate::dictation::mic_privacy::SETTINGS_URI),
         OPEN_SOUND_SETTINGS => open_uri(app, SOUND_SETTINGS_URI),
         STOP_ASKING_CALLS => crate::calls::meeting_detect::set_detection(app, false),
-        crate::meetings::meeting_audio::RECOVER_ACTION => crate::meetings::meeting_audio::recover_all(app),
+        crate::meetings::audio::RECOVER_ACTION => crate::meetings::audio::recover_all(app),
         crate::dictation::cap::RECOVER => crate::dictation::cap::recover(app),
         ASK_ABOUT_CALLS => crate::calls::meeting_detect::set_detection(app, true),
         OPEN_AI_SETTINGS | OPEN_VOICE_SETTINGS | OPEN_MIC_ORDER => {

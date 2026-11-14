@@ -3,7 +3,7 @@
 // the on-device model (or with that model already here), once they've done
 // a few dictations. A tip in the main window — only while they're looking at
 // it, never during a dictation, a meeting or the first-run setup (Rust asks
-// the notice policy, notices/notice.rs) — with "Set it up" (Settings → Language
+// the notice policy, notices/policy.rs) — with "Set it up" (Settings → Language
 // Models → Dictation cleanup) and "Not now". Shown once, whatever the
 // answer: Rust remembers it (`cleanup_offer_seen`); "Show tips" off, never.
 import { invoke } from '@tauri-apps/api/core';

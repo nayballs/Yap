@@ -236,7 +236,7 @@
   );
 
   // Meeting audio's days: its own, or the transcripts' when that's sooner
-  // (meetings/meeting_audio.rs `keep_days`).
+  // (meetings/audio.rs `keep_days`).
   const audioDays = $derived(
     cfg.meetingTranscriptDays ? Math.min(cfg.meetingAudioDays || 14, cfg.meetingTranscriptDays) : cfg.meetingAudioDays || 14
   );
@@ -254,7 +254,7 @@
       page: 'privacy#recent-audio',
     },
     {
-      // meetings/meeting_audio.rs: each meeting's audio, on this PC only.
+      // meetings/audio.rs: each meeting's audio, on this PC only.
       what: 'Meeting audio',
       where:
         cfg.meetingKeepAudio !== false

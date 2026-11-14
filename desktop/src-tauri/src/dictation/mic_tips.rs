@@ -63,7 +63,7 @@ pub const MIN_GAP_MS: u64 = 24 * 3_600_000;
 
 /// The main window's event: a [`Shown`].
 const EVENT: &str = "yap-mic-tip";
-/// The bar card's id and its rule in `notice.rs`.
+/// The bar card's id and its rule in `notices/policy.rs`.
 pub const KIND: &str = "micTip";
 const CARD_MS: u64 = 12_000;
 
@@ -351,7 +351,7 @@ fn judging() -> bool {
 /// told once it's done (transcribed and pasted: never mid-dictation),
 /// within a minute. Off the pipeline's locks: a thread of its own.
 pub fn after_dictation(app: &AppHandle, audio: &[f32], mic: Option<MicInfo>, order: Vec<crate::dictation::mics::MicChoice>) {
-    if !judging() || crate::notices::notice::tips_off() {
+    if !judging() || crate::notices::policy::tips_off() {
         return;
     }
     let signal = measure(audio);
@@ -387,7 +387,7 @@ pub fn after_dictation(app: &AppHandle, audio: &[f32], mic: Option<MicInfo>, ord
     let _ = std::thread::Builder::new().name("dictation-mic-tip".into()).spawn(move || {
         let started = std::time::Instant::now();
         std::thread::sleep(std::time::Duration::from_millis(500));
-        while crate::notices::notice::moment().dictating && started.elapsed() < std::time::Duration::from_secs(60) {
+        while crate::notices::policy::moment().dictating && started.elapsed() < std::time::Duration::from_secs(60) {
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
         let mut present = crate::dictation::mics::present().unwrap_or_default();
@@ -406,14 +406,14 @@ pub fn after_dictation(app: &AppHandle, audio: &[f32], mic: Option<MicInfo>, ord
 /// at it, else a Yap bar card; nowhere else (a tip can go unsaid). Counted
 /// only when shown.
 fn offer(app: &AppHandle, tip: Tip) {
-    let now = crate::notices::notice::now_ms();
-    if crate::notices::notice::tips_off() {
+    let now = crate::notices::policy::now_ms();
+    if crate::notices::policy::tips_off() {
         return;
     }
     // Never over a meeting (the main window's toast doesn't wait one out,
     // and a bar card would wait unseen and be dropped): not shown, not
     // counted.
-    if crate::notices::notice::moment().meeting {
+    if crate::notices::policy::moment().meeting {
         tracing::debug!(kind = ?tip.kind, "Mic tips: a meeting is recording; not now");
         return;
     }
@@ -422,10 +422,10 @@ fn offer(app: &AppHandle, tip: Tip) {
         tracing::debug!(kind = ?tip.kind, "Mic tips: not now");
         return;
     }
-    let place = crate::notices::notice::place_tip(app, KIND);
+    let place = crate::notices::policy::place_tip(app, KIND);
     let shown_now = match place {
-        crate::notices::notice::Place::Window => app.emit(EVENT, &tip).is_ok(),
-        crate::notices::notice::Place::Bar => {
+        crate::notices::policy::Place::Window => app.emit(EVENT, &tip).is_ok(),
+        crate::notices::policy::Place::Bar => {
             let card = crate::bar::Card {
                 id: KIND.into(),
                 icon: "mic",
@@ -440,8 +440,8 @@ fn offer(app: &AppHandle, tip: Tip) {
         _ => false,
     };
     // Not shown after all: the day's count back.
-    if crate::notices::notice::tip_shown(KIND, place, shown_now) {
-        tracing::info!(kind = ?tip.kind, window = place == crate::notices::notice::Place::Window, "Mic tips: shown");
+    if crate::notices::policy::tip_shown(KIND, place, shown_now) {
+        tracing::info!(kind = ?tip.kind, window = place == crate::notices::policy::Place::Window, "Mic tips: shown");
         update_record(|r| shown(r, tip.kind, now));
     } else {
         tracing::debug!(kind = ?tip.kind, "Mic tips: nowhere to show it");

@@ -1,13 +1,13 @@
 <script>
   // The note's own chat (OpenWhispr's embedded "Ask anything…" bar,
   // useEmbeddedChat port): answers grounded in this note (note_ask, the
-  // Chat scope), a meeting note's one-tap helpers (meetings/meeting_assist.rs:
+  // Chat scope), a meeting note's one-tap helpers (meetings/assist.rs:
   // Questions to ask while it records, Follow-up email and Gaps and risks
   // after; "What did I miss?" stays the notepad's: it knows what you have
   // seen), ▶ Read aloud and the model under each answer; the bar's mic
   // dictates the question, and at its right the action picker. On a
   // meeting note, "/" lists the Skills that run on one meeting
-  // (chat/skills.rs, meeting_assist.rs `meeting_skill`); their answers, and
+  // (chat/skills.rs, meetings/assist.rs `meeting_skill`); their answers, and
   // Make me sound smart's, cite the meeting's lines (a pill opens the line).
   import { invoke } from '@tauri-apps/api/core';
   import { renderMarkdown } from '../../core/markdown.js';
@@ -90,7 +90,7 @@
     }
   }
 
-  // A meeting note's one-tap helpers (meetings/meeting_assist.rs), as chips over the
+  // A meeting note's one-tap helpers (meetings/assist.rs), as chips over the
   // bar: Questions to ask while it records, Follow-up email and Gaps and
   // risks after. ("What did I miss?" stays the notepad's: it knows what you
   // have seen.)

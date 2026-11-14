@@ -8,13 +8,13 @@
 //! ("Long dictation? Try meeting notes", naming the meeting shortcut: shown
 //! once, ever — [`max_shows`]).
 //!
-//! Where: one place (`notice::place`): a toast in the main window while the
+//! Where: one place (`notices::policy::place`): a toast in the main window while the
 //! person is looking at it, else a card on the Yap bar, else the window's
 //! toast if it's on screen. Neither (the bar off or hidden for an hour, the
 //! window in the tray): nothing, and nothing counted — no Windows
 //! notification for a tip. "Show tips" off (Settings → General →
 //! Notifications): none at all. On the bar a hint waits out a dictation or
-//! a meeting, and is dropped if it can't show within 10 s (`notice.rs`). The hotkey's name is
+//! a meeting, and is dropped if it can't show within 10 s (`notices/policy.rs`). The hotkey's name is
 //! written by the page, with `lib/core/hotkeys.js` (`formatHotkeySpec`): the
 //! texts say `{key}` and carry the spec.
 //!
@@ -224,7 +224,7 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
 /// of its own.
 pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
     let now = now_ms();
-    if crate::notices::notice::tips_off() {
+    if crate::notices::policy::tips_off() {
         tracing::debug!(?hint, "coaching: tips are switched off");
         return;
     }
@@ -235,7 +235,7 @@ pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
     // Never over a meeting: the main window's toast would land on it, and a
     // bar card would wait unseen and be dropped — yet count as one of the
     // hint's three. Not shown, not counted: a later one comes.
-    if crate::notices::notice::moment().meeting {
+    if crate::notices::policy::moment().meeting {
         tracing::debug!(?hint, "coaching: a meeting is recording; not now");
         return;
     }
@@ -243,10 +243,10 @@ pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
     if hint == Hint::LongDictation && hotkey.trim().is_empty() {
         body = LONG_DICTATION_NO_KEY;
     }
-    // One place (`notice.rs`): the main window while the person is looking
+    // One place (`notices/policy.rs`): the main window while the person is looking
     // at it, else the Yap bar; never a Windows notification for a tip.
-    let place = crate::notices::notice::place_tip(app, "hint");
-    let in_window = place == crate::notices::notice::Place::Window;
+    let place = crate::notices::policy::place_tip(app, "hint");
+    let in_window = place == crate::notices::policy::Place::Window;
     let shown_now = if in_window {
         let kind = match hint {
             Hint::Tap => "tap",
@@ -255,7 +255,7 @@ pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
             Hint::LongDictation => "longDictation",
         };
         app.emit(EVENT, HintToast { kind, title, body, hotkey: hotkey.to_string() }).is_ok()
-    } else if place == crate::notices::notice::Place::Bar {
+    } else if place == crate::notices::policy::Place::Bar {
         let card = crate::bar::Card {
             id: CARD.into(),
             icon: "tip",
@@ -270,7 +270,7 @@ pub fn offer(app: &AppHandle, hint: Hint, hotkey: &str) {
         false
     };
     // Not shown after all: the day's count back.
-    let shown_now = crate::notices::notice::tip_shown(CARD, place, shown_now);
+    let shown_now = crate::notices::policy::tip_shown(CARD, place, shown_now);
     if shown_now {
         tracing::info!(?hint, in_window, "coaching: hint shown");
         update_record(|r| shown(r, hint, now));

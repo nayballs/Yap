@@ -55,7 +55,7 @@ pub fn slug(name: &str, taken: &[&str]) -> String {
 
 /// Whether `name` is a connector's wire name (Yap's own never have `__`):
 /// the tool loop's dispatch (wave 4).
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub fn is_connector_tool(name: &str) -> bool {
     name.contains(SEP)
 }
@@ -130,7 +130,7 @@ impl Map {
 
     /// The connector and tool a wire name stands for (the tool loop's way
     /// back, wave 4).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn resolve(&self, wire: &str) -> Option<(&str, &str)> {
         self.back.get(wire).map(|(id, tool)| (id.as_str(), tool.as_str()))
     }
@@ -143,7 +143,7 @@ impl Map {
 
 /// Whether every provider takes `name` as a tool's name: `[A-Za-z0-9_-]`,
 /// a letter first, at most [`MAX`]. Pure.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub fn provider_safe(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= MAX

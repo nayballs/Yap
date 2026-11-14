@@ -426,7 +426,7 @@ mod tests {
         let m = crate::dictation::pipeline::commands_model(&cfg);
         assert_eq!((m.base_url.as_str(), m.api_key.as_str(), m.model.as_str(), m.provider.as_str()), ("claude-code://plan/commands", PLAN_KEY, "claude-haiku-5-5", PROVIDER));
         // Note Formatting.
-        let ep = crate::meetings::meeting_summary::resolve_endpoint(&cfg).unwrap();
+        let ep = crate::meetings::summary::resolve_endpoint(&cfg).unwrap();
         assert_eq!((ep.base_url.as_str(), ep.model.as_str(), ep.provider.as_str()), ("claude-code://plan/notes", "claude-sonnet-5-5", PROVIDER));
         // Chat, as before.
         let (url, _, model, provider, _, _) = crate::chat::turn::resolve_chat_endpoint(&cfg).unwrap();
@@ -458,7 +458,7 @@ mod tests {
             assert!(cfg.llm_scopes[k].api_key.is_empty(), "{k}");
         }
         // Commands and the meeting notes now say what's missing, never call.
-        assert!(crate::meetings::meeting_summary::resolve_endpoint(&cfg).is_err());
+        assert!(crate::meetings::summary::resolve_endpoint(&cfg).is_err());
         assert!(crate::dictation::pipeline::commands_model(&cfg).api_key.is_empty());
         // Signed in again: every scope's marker back.
         crate::ai::ai_model::set_provider_key(&mut cfg, PROVIDER, PLAN_KEY).unwrap();
@@ -499,7 +499,7 @@ mod tests {
         assert_eq!((key.as_str(), model.as_str(), provider.as_str()), ("sk-ant-example-0002", "claude-haiku-5-5", "anthropic"));
         assert_eq!(url, anthropic_url());
         assert_eq!(crate::dictation::pipeline::commands_model(&cfg).provider, "anthropic");
-        assert!(crate::meetings::meeting_summary::resolve_endpoint(&cfg).is_err(), "Note Formatting's switch is off: it says to sign in");
+        assert!(crate::meetings::summary::resolve_endpoint(&cfg).is_err(), "Note Formatting's switch is off: it says to sign in");
         let chat = crate::chat::turn::resolve_chat_endpoint(&cfg);
         assert!(chat.is_err(), "Chat as before: Claude Code isn't signed in");
         cfg.pp_plan_fallback = false;

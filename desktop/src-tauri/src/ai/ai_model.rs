@@ -6,7 +6,7 @@
 //! Resolution is the calls' own: the Chat scope through
 //! `turn::resolve_chat_endpoint` (the scope when it's on, else the
 //! global cleanup endpoint), meeting notes through
-//! `meeting_summary::resolve_endpoint`. One addition for chat: a Chat scope
+//! `meetings::summary::resolve_endpoint`. One addition for chat: a Chat scope
 //! on Yap's on-device model starts the sidecar before the call
 //! (`wake_on_device`, also in `chat_send` and `note_ask`) instead of falling
 //! back to whatever endpoint is configured underneath, so "On this PC" means
@@ -293,7 +293,7 @@ pub fn target(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Result<Tar
             }
         }
         Scope::Notes => {
-            let ep = crate::meetings::meeting_summary::resolve_endpoint(cfg)?;
+            let ep = crate::meetings::summary::resolve_endpoint(cfg)?;
             (ep.provider, ep.model, ep.base_url)
         }
     };

@@ -1,7 +1,7 @@
 // Meeting guard rails in the main window (calls/meeting_guard.rs, calls/capture.rs).
 // Rust decides; this shows what it says:
 //
-// Rust puts each in one place (notices/notice.rs): this window only gets what it's
+// Rust puts each in one place (notices/policy.rs): this window only gets what it's
 // meant to show.
 // `yap-meeting-limit` { warning: { noteId, stopAt, title, body, inApp } | null }:
 //   the maximum-length warning ("Notes stop in 5 minutes") as a sticky toast
@@ -15,7 +15,7 @@
 //   notes show up in screen shares and screenshots", with Update settings →
 //   `settings`), a stop Yap made itself (the length limit, a call ending),
 //   "Taking notes" from the meeting shortcut, or something about the
-//   recording itself (kind "warning", meetings/meeting.rs: transcription falling
+//   recording itself (kind "warning", meetings/recorder.rs: transcription falling
 //   behind; "Yap can't hear the call" when one side went quiet; "Yap
 //   couldn't transcribe part of this meeting", once per meeting).
 //   A notice addressed to another window (`surface`: "notepad") isn't

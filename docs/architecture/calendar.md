@@ -45,9 +45,9 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   (`meeting_reminder`: "15s" default | "1min" | "2min" | "never"): "Design
   review · In 1 min", Join & take notes / Start notes / Snooze 2 min / ✕,
   until 5 min after the start, one at a time; while another meeting records,
-  a **switch** card (ends it via `meeting_end::end`, then starts the next).
+  a **switch** card (ends it via `meetings::end::end`, then starts the next).
   It goes on screen through **`present_card`/`withdraw_card` only**, in
-  **one place** (`notices/notice.rs`): the in-app toast while the main window is
+  **one place** (`notices/policy.rs`): the in-app toast while the main window is
   focused (the snapshot's `card` with `inApp`), else the **Yap bar**
   (`bar::show_card`, id "calendar": a call-style card
   — the call app's mark or a calendar, the meeting over "● In 1 min · with
@@ -65,7 +65,7 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   after the one other invitee as a guess (`notes::link_event` →
   `speakers::calendar_guess`) — and `note_changed`s every window;
   `claims_call` / `on_call_started` for call detection (above);
-  `meeting::with_attendees` puts a meeting note's participants (and the
+  `meetings::recorder::with_attendees` puts a meeting note's participants (and the
   speaker map's names) into Whisper's prompt. Commands `calendar_status`/`_sync`/`_connect_google`/
   `_cancel_google`/`_add_link`/`_disconnect`/`_event(key, open|join|start|
   joinStart|switch|joinSwitch)`/`_card(id, join|start|snooze|dismiss)`/
@@ -183,10 +183,7 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   `note_for` makes the note in `folder_for_meeting(key, emails)` (the
   series', else the company's, else Meetings) and keeps its companies
   (`companies::remember`); `on_meeting_started` → `file_linked(noteId, key,
-  emails)` (keeps them, files when `may_file`); **an imported transcript**
-  with attendee emails → `filing::file_imported(noteId, emails)` (the
-  import's hook: keeps them, files by company when the note sits in
-  Personal or Meetings; emits nothing, no network, any thread). **The
+  emails)` (keeps them, files when `may_file`). **The
   offer** (`companies::after_move`, off the command's thread): a meeting
   note filed by hand in a folder of the person's own (not Personal or
   Meetings) — `meeting_file` with `series` false, `note_update` with a new
@@ -195,7 +192,7 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   "File every meeting with example.com in Clients? (3 past ones too)":
   `may_offer` (no rule for it, not Never, not asked for this folder, none
   shown in `OFFER_GAP_SECS` — a day; a company that may not be asked gives
-  way to the invite's next), `notice::place_tip(KIND)` ("company-folder", a
+  way to the invite's next), `notices::policy::place_tip(KIND)` ("company-folder", a
   suggestion: `kinds.rs`' switch and cap) → the main window's
   `yap-company-folder-offer {id, domain, folder, past, title, body}`
   (`notices/companyFolders.js`: **Yes** / **Just this one** / a "Never for
@@ -286,7 +283,7 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   notes or memory (`privacy/reset.rs`, Reset app too; `forget_briefs`) moves `briefs_epoch` on: a brief made or written from
   the notes and memory before it is never kept (`store_brief` refuses it;
   made again from what's left). `BriefAi::of`
-  = the meeting's endpoint (`meeting_summary::resolve_endpoint`), or why
+  = the meeting's endpoint (`meetings::summary::resolve_endpoint`), or why
   not (no model, the on-device model stopped — never started for a brief —,
   too small). `tick_briefs` (each scheduler turn): meetings from
   `BRIEF_AHEAD` (15 min) before their start until 5 min after, with no brief

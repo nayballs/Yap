@@ -3,8 +3,7 @@
 //! go in Clients" — every meeting note whose calendar invite has someone
 //! from that company on it goes to that folder: each new one as the
 //! calendar makes it or a recording ties it to its meeting
-//! (`filing::folder_for_meeting`, `filing::file_linked`), an imported
-//! transcript with attendee emails ([`super::file_imported`]), and the past
+//! (`filing::folder_for_meeting`, `filing::file_linked`), and the past
 //! ones when the person says Yes.
 //!
 //! **The company** is an attendee's email domain ([`domain_of`]), never
@@ -25,7 +24,7 @@
 //! with example.com in Clients? (3 past ones too)" — **Yes** (the rule, and
 //! the past ones moved, with Undo), **Just this one**, **Never for
 //! example.com**. Once per domain and folder, never after Never, at most
-//! one a day ([`may_offer`]), through the notice policy (`notice::place_tip`,
+//! one a day ([`may_offer`]), through the notice policy (`notices::policy::place_tip`,
 //! kind [`KIND`]: a suggestion, under Settings → General → Notifications'
 //! switch): a toast in the main window, else a card on the Yap bar.
 //!
@@ -55,7 +54,7 @@ use tauri::{AppHandle, Emitter};
 use super::{save, with_rules, Rule, Rules, SAVER};
 use crate::notes::Note;
 
-/// The notice kind (`notice::rule`, `kinds::category`: a suggestion) and
+/// The notice kind (`notices::policy::rule`, `kinds::category`: a suggestion) and
 /// the bar card's id.
 pub const KIND: &str = "company-folder";
 /// The main window's offer: `{ id, domain, folder, past, title, body }`.
@@ -526,11 +525,11 @@ fn offer(app: &AppHandle, note_id: u64, folder: &str) -> Result<(), &'static str
     }
     let domain = domain.ok_or(why)?;
     let past = past_now(&rules, &crate::notes::all(), &domain, &folder, note_id, &own).len();
-    let place = crate::notices::notice::place_tip(app, KIND);
-    if place == crate::notices::notice::Place::Nowhere {
+    let place = crate::notices::policy::place_tip(app, KIND);
+    if place == crate::notices::policy::Place::Nowhere {
         return Err("nowhere to show it");
     }
-    let in_window = place == crate::notices::notice::Place::Window;
+    let in_window = place == crate::notices::policy::Place::Window;
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
     let (title, body) = offer_text(&domain, &folder, past);
     *PENDING.lock().unwrap_or_else(|p| p.into_inner()) =
@@ -562,7 +561,7 @@ fn offer(app: &AppHandle, note_id: u64, folder: &str) -> Result<(), &'static str
             }),
         )
     };
-    let shown = crate::notices::notice::tip_shown(KIND, place, shown);
+    let shown = crate::notices::policy::tip_shown(KIND, place, shown);
     if !shown {
         let mut p = PENDING.lock().unwrap_or_else(|p| p.into_inner());
         if p.as_ref().is_some_and(|p| p.id == id) {
@@ -709,7 +708,7 @@ fn undo_now(app: &AppHandle, undo: u64) -> Result<usize, String> {
     Ok(back.len())
 }
 
-/// Test mode only (`notice::e2e_notice_reset`, before every test): the
+/// Test mode only (`notices::policy::e2e_notice_reset`, before every test): the
 /// day's offer forgotten, like the notice policy's other cooldowns.
 #[cfg(debug_assertions)]
 pub fn e2e_reset() {

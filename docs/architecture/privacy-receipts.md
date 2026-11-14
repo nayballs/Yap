@@ -81,7 +81,7 @@ requests to Yap's own endpoint on 127.0.0.1 (`integrations/claude_live.rs`).
   the window in front · …" when it was a screenshot instead; its "does it
   need the screen?" yes/no carries only the words, "Commands · …"),
   "Notes · …" (Enhance, a note's Ask), "Meeting notes · …"
-  (meetings/meeting_summary.rs), "Meeting brief · …" (calendar/brief.rs, around the
+  (meetings/summary.rs), "Meeting brief · …" (calendar/brief.rs, around the
   meeting helpers), "Memory · …" (memory/learn.rs: learning, Tell, a pasted
   import; a file import — Claude's memory export, Yap's own,
   `memory/import.rs` — and Copy for Claude make no request at all, so they
@@ -508,7 +508,7 @@ a tick box per **kind** of data. "Clear everything and keep my settings"
   kind at a time.
 - **Each store is emptied through its own module, under its own lock**
   (`history::clear`, `recent_audio::clear`, `stats::clear`, `notes::reset` /
-  `remove_where`, `versions::reset`, `pins::reset`, `meeting_audio::clear` /
+  `remove_where`, `versions::reset`, `pins::reset`, `meetings::audio::clear` /
   `forget`, `task_store::reset` / `forget_where`, `chats::reset` /
   `delete_where`, `memory::reset` — its Undo batches dropped —,
   `search::index::forget`, `ai::usage::store::reset` — what this Yap had

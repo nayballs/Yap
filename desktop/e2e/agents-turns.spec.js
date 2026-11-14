@@ -58,7 +58,7 @@
 //   printed plain; each token a text node, never markup.
 // - Where a line was changed rather than taken out, the part that was
 //   replaced is marked in a stronger red and what replaced it in a stronger
-//   green (core/diffWords.js), as Claude Code's transcript marks them.
+//   green (core/intralineDiff.js), as Claude Code's transcript marks them.
 // - A part handed to a helper (Claude Code's own subagent): the helper's
 //   steps fold behind its row ("Handed part of it to a helper · Check the
 //   docs") as rows of their own, never among the session's own steps, and
@@ -99,7 +99,7 @@ import {
 } from '../src/lib/core/agents.js';
 import { LANGUAGES, languageOf, fenceLanguage, shellOf, kindOf, tokensOf, lineTokens, colourLines, colourDiff } from '../src/lib/core/codeColours.js';
 import hljs from '../src/lib/core/codeColours.hljs.js';
-import { wordChanges, pairChanges, linePieces } from '../src/lib/core/diffWords.js';
+import { wordChanges, pairChanges, linePieces } from '../src/lib/core/intralineDiff.js';
 
 const HERE = path.join(RUNS, 'agents-turns-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -922,7 +922,7 @@ test('core/codeColours.js: a file’s language, a command’s shell, the highlig
   expect(colourDiff(null, rows, 'javascript').every((r) => r.tokens === undefined)).toBe(true);
 });
 
-test('core/diffWords.js: the part of a line that was replaced, which lines go together, a line as pieces', () => {
+test('core/intralineDiff.js: the part of a line that was replaced, which lines go together, a line as pieces', () => {
   const show = (t, r) => (r ? `${t.slice(0, r[0])}[${t.slice(r[0], r[1])}]${t.slice(r[1])}` : t);
   const marked = (a, b) => {
     const c = wordChanges(a, b);

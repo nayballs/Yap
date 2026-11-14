@@ -524,7 +524,7 @@ pub fn finish(note_id: u64) {
     all.retain(|w| w.note_id != note_id);
 }
 
-/// A recording into `note_id` started (`meeting::start`, `session`: its
+/// A recording into `note_id` started (`meetings::recorder::start`, `session`: its
 /// speaker-engine session, `base`: its first line). With "read who's
 /// talking from the call app" on (config, experimental), a thread reads
 /// the live call's window while it records.
@@ -553,7 +553,7 @@ fn poll(note_id: u64, stop: Arc<AtomicBool>) {
     let mut every = READ_EVERY;
     let (mut reads, mut found) = (0u64, 0u64);
     tracing::info!(note_id, "Call names: reading the call app's window while the meeting records (experimental)");
-    while !stop.load(Ordering::SeqCst) && crate::meetings::meeting::recording_note() == Some(note_id) {
+    while !stop.load(Ordering::SeqCst) && crate::meetings::recorder::recording_note() == Some(note_id) {
         if window.is_none() && looked.elapsed() >= Duration::from_secs(10) {
             looked = Instant::now();
             window = crate::calls::meeting_detect::call_window_exes().and_then(|(app, _)| {
@@ -567,7 +567,7 @@ fn poll(note_id: u64, stop: Arc<AtomicBool>) {
             match win::snapshot(*hwnd) {
                 Ok(Some(root)) => {
                     let reading = read(&root, rules);
-                    if let Some(clock) = crate::meetings::meeting::them_clock_ms(note_id) {
+                    if let Some(clock) = crate::meetings::recorder::them_clock_ms(note_id) {
                         record(note_id, clock, &reading);
                     }
                     reads += 1;
@@ -600,7 +600,7 @@ pub fn e2e_call_readings(spans: Vec<Span>, self_name: Option<String>) -> Result<
     if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
-    let note_id = crate::meetings::meeting::recording_note().ok_or("No meeting is being recorded")?;
+    let note_id = crate::meetings::recorder::recording_note().ok_or("No meeting is being recorded")?;
     let mut all = watches();
     let w = all.iter_mut().find(|w| w.note_id == note_id).ok_or("The recording isn't watched")?;
     w.spans = spans;
@@ -699,7 +699,7 @@ pub mod win {
         }
     }
 
-    /// The names of window `hwnd`'s buttons (`calls/call_audio.rs` reads its
+    /// The names of window `hwnd`'s buttons (`calls/audio.rs` reads its
     /// mute button from them): one cached search, done in the app's own
     /// process, only names read, nothing invoked. `Ok(None)`: minimised.
     pub fn button_names(hwnd: isize) -> Result<Option<Vec<String>>, String> {

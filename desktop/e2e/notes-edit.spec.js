@@ -1,4 +1,4 @@
-// Meeting notes you can fix (desktop/src-tauri/src/notes/note_edits.rs, notes/tasks.rs;
+// Meeting notes you can fix (desktop/src-tauri/src/notes/edits.rs, notes/tasks.rs;
 // desktop/src/lib/core/noteEdits.js, TasksView.svelte), end to end:
 // - a transcript line's words fixed in the notepad (double-click, Enter):
 //   saved and marked edited with what Yap heard kept, shown in the Notes
@@ -729,7 +729,7 @@ audioTest.describe('with the meeting audio kept', () => {
     await expect(log.locator('.bubble.them').nth(1)).toContainText(wordsA.slice(1).join(' '));
   });
 
-  /** The latest transcription job's state on a note (meeting_audio.rs). */
+  /** The latest transcription job's state on a note (meetings/audio.rs). */
   async function meetingAudioJob(yap, noteId) {
     const a = await yap.invoke('meeting_audio_note', { noteId });
     return a?.job?.state ?? null;

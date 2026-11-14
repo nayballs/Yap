@@ -8,7 +8,7 @@
 <script>
   // The bar at the bottom of the notepad: Stop / Resume, and "Ask anything",
   // which opens a bottom sheet chat grounded in the meeting
-  // (meetings/meeting_assist.rs; "What did I miss?" answers from what was said since
+  // (meetings/assist.rs; "What did I miss?" answers from what was said since
   // you last looked: the transcript on screen at its newest line, or the last
   // answer). One-tap helpers sit in the sheet (the lead one in the pill while
   // it's down): What did I miss? and Questions to ask while recording,
@@ -19,7 +19,7 @@
   // when the note opens, here or in Notes, each turn saved as it's shown;
   // New chat starts another, Past chats reopens an earlier one (and renames
   // the one shown). Since 2026-10-29: Make me sound smart while recording
-  // and Make notes longer after (meeting_assist.rs), and Skills — "/" lists
+  // and Make notes longer after (meetings/assist.rs), and Skills — "/" lists
   // them (stores/skills.svelte.js), each run on this meeting — whose answers
   // cite the meeting's lines: a pill opens the line (`onsource`).
   import { tick, onMount } from 'svelte';
@@ -271,9 +271,9 @@
   }
 
   /**
-   * "Make notes longer" (meeting_assist.rs `meeting_longer`): Yap's summary
+   * "Make notes longer" (meetings/assist.rs `meeting_longer`): Yap's summary
    * written again in more detail; the Summary tab shows it, and the toast's
-   * Undo puts the one before back (notes/note_edits.rs). An edited summary
+   * Undo puts the one before back (notes/edits.rs). An edited summary
    * goes only when the person says so.
    */
   function makeLonger() {

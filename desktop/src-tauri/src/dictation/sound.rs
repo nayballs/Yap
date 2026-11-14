@@ -143,7 +143,7 @@ pub fn meeting_allows(cue: Cue, meeting_recording: bool) -> bool {
 /// it has played — or at once (on a thread) when it's off.
 pub fn play(cue: Cue, played: Option<Played>) {
     let s = settings();
-    match s.wants(cue).filter(|_| meeting_allows(cue, crate::meetings::meeting::is_recording())) {
+    match s.wants(cue).filter(|_| meeting_allows(cue, crate::meetings::recorder::is_recording())) {
         Some((pack, peak)) => {
             note_playing(Duration::ZERO, pack.length(cue));
             spawn(pack, cue, peak, s.device, Duration::ZERO, played);
@@ -162,7 +162,7 @@ pub fn play(cue: Cue, played: Option<Played>) {
 pub fn cue(cue: Cue) {
     let s = settings();
     let Some((pack, peak)) = s.wants(cue) else { return };
-    if !meeting_allows(cue, crate::meetings::meeting::is_recording()) {
+    if !meeting_allows(cue, crate::meetings::recorder::is_recording()) {
         tracing::debug!(cue = cue.id(), "Sound: not while a meeting records");
         return;
     }
@@ -174,7 +174,7 @@ pub fn cue(cue: Cue) {
     spawn(pack, cue, peak, s.device, delay, None);
 }
 
-/// Meeting notes are starting (`meeting::start`, the slot claimed, before
+/// Meeting notes are starting (`meetings::recorder::start`, the slot claimed, before
 /// the capture opens): their sound, if it's on, played to the end before
 /// this returns (a moment), so the loopback never hears it.
 pub fn meeting_started() {
@@ -190,15 +190,15 @@ pub fn meeting_started() {
     output(pack.render(Cue::MeetingStart, peak), s.device.as_deref(), len + Duration::from_millis(500), &|| false);
 }
 
-/// Meeting notes were asked to stop (`meeting::stop`): their sound, if
+/// Meeting notes were asked to stop (`meetings::recorder::stop`): their sound, if
 /// it's on, once the capture has closed its streams (the loopback with
-/// them: `meeting::capturing`, a fraction of a second).
+/// them: `meetings::recorder::capturing`, a fraction of a second).
 pub fn meeting_stopped() {
     let s = settings();
     let Some((pack, peak)) = s.wants(Cue::MeetingStop) else { return };
     let _ = thread::Builder::new().name("sound-meeting-stop".into()).spawn(move || {
         let asked = Instant::now();
-        while crate::meetings::meeting::capturing() {
+        while crate::meetings::recorder::capturing() {
             if asked.elapsed() > Duration::from_secs(3) {
                 tracing::info!("Sound: the meeting's capture didn't close; no stop sound");
                 return;
@@ -346,7 +346,7 @@ fn preview_set(pack: Pack, cues: Option<Vec<Cue>>) -> (Vec<Cue>, Duration) {
 /// (ms).
 #[tauri::command]
 pub fn sound_preview(pack: String, cues: Option<Vec<String>>, volume: Option<f32>) -> Result<u64, String> {
-    if crate::meetings::meeting::is_recording() {
+    if crate::meetings::recorder::is_recording() {
         return Err("Yap plays no sounds while it records a meeting".into());
     }
     let s = settings();

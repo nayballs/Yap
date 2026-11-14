@@ -463,7 +463,7 @@ fn run(name: &str, args: &Value) -> Value {
                     let transcript = if n.transcript.is_empty() {
                         String::new()
                     } else {
-                        crate::meetings::meeting_summary::ask_context(&n, 3_000)
+                        crate::meetings::summary::ask_context(&n, 3_000)
                     };
                     let display = format!("Retrieved note: \"{}\"", n.title);
                     let mut data = json!({
@@ -1037,7 +1037,7 @@ mod tests {
         let got = call("get_note", json!({ "id": id }));
         assert_eq!(got["data"]["cut"], json!(["content"]));
         let shown = got["data"]["content"].as_str().unwrap();
-        assert!(crate::meetings::meeting_summary::estimate_tokens(shown) <= GET_NOTE_TOKENS);
+        assert!(crate::meetings::summary::estimate_tokens(shown) <= GET_NOTE_TOKENS);
         assert!(long.starts_with(shown));
 
         let first = call("read_note", json!({ "note_id": id, "field": "content" }));

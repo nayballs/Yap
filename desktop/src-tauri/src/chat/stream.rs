@@ -567,7 +567,7 @@ pub trait Dictations: Send + Sync {
     /// A dictation is recording or being transcribed / cleaned up.
     fn busy(&self) -> bool;
     /// Wait for one to be done before the first call (the notepad's helpers,
-    /// `meeting_summary::chat_beside_dictation`), not only during it.
+    /// `meetings::summary::chat_beside_dictation`), not only during it.
     fn waits_first(&self) -> bool;
 }
 
@@ -584,7 +584,7 @@ impl Dictations for NewDictations {
         crate::dictation::pipeline::dictation_state().0 != mark
     }
     fn busy(&self) -> bool {
-        crate::meetings::meeting_summary::dictation_busy(&self.0)
+        crate::meetings::summary::dictation_busy(&self.0)
     }
     fn waits_first(&self) -> bool {
         false
@@ -600,10 +600,10 @@ impl Dictations for AnyDictation {
         0
     }
     fn must_yield(&self, _: u64) -> bool {
-        crate::meetings::meeting_summary::dictation_busy(&self.0)
+        crate::meetings::summary::dictation_busy(&self.0)
     }
     fn busy(&self) -> bool {
-        crate::meetings::meeting_summary::dictation_busy(&self.0)
+        crate::meetings::summary::dictation_busy(&self.0)
     }
     fn waits_first(&self) -> bool {
         true
@@ -649,7 +649,7 @@ pub async fn call(live: Live<'_>, req: &crate::ai::llm::ChatRequest, tools_offer
             if waiting && !yielded {
                 live.sink.send(Event::Waiting { waiting: true });
             }
-            crate::meetings::meeting_summary::wait_idle(|| beside.busy(), || true).await;
+            crate::meetings::summary::wait_idle(|| beside.busy(), || true).await;
             if waiting {
                 live.sink.send(Event::Waiting { waiting: false });
             }
@@ -658,7 +658,7 @@ pub async fn call(live: Live<'_>, req: &crate::ai::llm::ChatRequest, tools_offer
         let out = {
             let mut on = |d: Delta<'_>| step.on(d);
             let request = crate::ai::llm::post_chat_streamed(req, &mut on);
-            crate::meetings::meeting_summary::unless_busy(request, || beside.must_yield(mark)).await
+            crate::meetings::summary::unless_busy(request, || beside.must_yield(mark)).await
         };
         match out {
             Some(out) => {

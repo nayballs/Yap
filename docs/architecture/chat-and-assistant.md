@@ -1360,7 +1360,7 @@ one side.
   count moved — not one under way when the step began, which is the Voice
   Assistant's own question being finished), the page told it's waiting
   ("Waiting for your dictation to finish…"), and the step asked again once
-  the dictation is done (`meeting_summary::wait_idle`, ≤ 5 times) — unless
+  the dictation is done (`meetings::summary::wait_idle`, ≤ 5 times) — unless
   that dictation was a newer question to the same conversation, which
   supersedes the turn while it waits (above); the
   notepad's helpers keep their rule (`AnyDictation`, as
@@ -1443,7 +1443,7 @@ one side.
   Mode and old "Hey Flow"; Wispr has no spoken-answer assistant). **Off
   during meetings** (the maintainer: Bella talking over a meeting "would be too
   much"): while a meeting records or a call is on (`tts::meeting_quiet` =
-  `meeting::is_recording` || `meeting_detect::call_live`), a press doesn't
+  `meetings::recorder::is_recording` || `meeting_detect::call_live`), a press doesn't
   listen — `off_for_meeting` shows "The Voice Assistant is off during
   meetings" (alert `assistantMeetingOff`, over the meeting, every press) —
   and nothing in Yap talks: `tts::say` refuses, Chat's auto-speak stays
@@ -1532,7 +1532,7 @@ one side.
   fails —, shown before the voice starts; it goes when the
   voice ends (`on_tts_state`), or after `read_ms` when shown only. **In
   view** (`answer_in_view(seen, viewing, conversation)`, pure, 30 Oct
-  2026): the main window in front (`notice::window_seen` = `Front`: Chat
+  2026): the main window in front (`notices::policy::window_seen` = `Front`: Chat
   comes up there with the question), or on screen beside the app in front
   (`Beside`: another monitor, at least half of it uncovered) with the Chat
   view on the question's conversation (or a new chat, which follows it);
@@ -1550,7 +1550,7 @@ one side.
   answer's there and no voice says it either. **The assistant's alerts**
   ("The Voice Assistant couldn't answer", "Pick an AI model…", "The Voice
   Assistant is off during meetings", "can't read images") keep the notice
-  policy's one place (`notice::place`: the window's toast while it's in
+  policy's one place (`notices::policy::place`: the window's toast while it's in
   front, else the bar): they ask for something (Open settings), and Chat
   beside another app doesn't show them. E2e: `voice-assistant.spec.js`
   ("the answer's card shows only when Chat isn't in view…": beside on that
@@ -2373,7 +2373,7 @@ of sight. What they share is said once, in the line.
   Page tab** (`pages::open`, as `browser_tabs { action: "new" }`):
   `stream::Event::Page {page: ShownPage}` opens it mid-turn; the answer keeps
   it, `ChatMessage.pages`, so its tab comes back with the conversation; a
-  card under the answer, `PagePills.svelte` (below) — a page from this turn's results
+  card under the answer, `PageCards.svelte` (below) — a page from this turn's results
   or the person's messages (opened at the address the turn holds for it,
   `Turn::stored`, never the model's copy with a fragment or `utm_…` added),
   **the home page of a site the person named**
@@ -2385,7 +2385,7 @@ of sight. What they share is said once, in the line.
   new tab as a tab navigating (`rules::needs_ok`). Nothing of the page goes
   to the model by opening it; going somewhere in a tab tells the page after
   (`act::after`, web content). Four new tabs a turn.
-  - **Its card under the answer** (14 Nov 2026, `PagePills.svelte` with
+  - **Its card under the answer** (14 Nov 2026, `PageCards.svelte` with
     `chat/pages/thumb.rs`; the maintainer, from the Claude Code app, where a
     page Claude opens shows as a card with a small picture of it). Where the
     pill was, a card: the top of the page as it looked once loaded, its
@@ -4185,7 +4185,7 @@ copyable. Yap's, in `chat/skills.rs`:
   section a ticket, the 4B made one section every time). On one meeting
   (its Ask box) and on a model without tools they answer in the thread.
 - **On one meeting, an aid** (`skills::meeting_aid`: through
-  `meeting_assist::skill_input_for`, after the meeting's passages, in its
+  `meetings::assist::skill_input_for`, after the meeting's passages, in its
   Ask box; in `Found::about` when a Chat run reads one meeting): Yap's own
   list of what the Skill goes through. /open-questions: each question asked,
   numbered (Q1, Q2…), in order, with what was said next, and the ones the
@@ -4204,7 +4204,7 @@ copyable. Yap's, in `chat/skills.rs`:
   without the fields it doesn't know: a Skill stored there would come back
   in its action picker as an action that writes over the summary. So
   Skills have their own file, which an older Yap never opens.
-- **On one meeting**: `meeting_assist::meeting_skill` ([meetings.md](./meetings.md)):
+- **On one meeting**: `meetings::assist::meeting_skill` ([meetings.md](./meetings.md)):
   fixed guardrails, the meeting as numbered passages, then the
   instructions last, the answer cited and checked as Ask across meetings'
   are.
@@ -4296,7 +4296,7 @@ copyable. Yap's, in `chat/skills.rs`:
   Skill's request within an 8k model; `config.rs`: v7 keeps the six for a
   config from v5 on, not for an older one or a new install, and never
   again once saved; `documents.rs` `name_citations`; `search/ask.rs` the
-  `about` line and a calendar passage; `meeting_summary/chips.rs`:
+  `about` line and a calendar passage; `meetings/summary/chips.rs`:
   passages, checks), e2e `meeting-chips.spec.js` (the menu, Enter / Tab /
   Esc, the core and your own, one off the menu typed in full, Settings,
   Chat's prompts and "/", the Meetings view), `skills.spec.js` (a new

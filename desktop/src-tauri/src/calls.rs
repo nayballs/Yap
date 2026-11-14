@@ -4,7 +4,7 @@
 //! docs/architecture/call-detection-and-guards.md.
 
 pub mod app_icons;
-pub mod call_audio;
+pub mod audio;
 pub mod capture;
 pub mod meeting_detect;
 pub mod meeting_guard;

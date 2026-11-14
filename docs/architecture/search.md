@@ -46,7 +46,7 @@ it borrows is the on-device model's ([ai-models.md](./ai-models.md)).
   (`notes_for`), `search_chats` (`find_chats` / `chats_for`) and memory's
   items for a question (`memory_relevant` / `memory_block`).
 - **`search/commands.rs`** — `search_status`, `search_install`,
-  `search_set_enabled`, `search_rebuild`, `search_delete`, the Meetings
+  `search_rebuild`, `search_delete`, the Meetings
   view's `search_moments(query, limit)` → `{moments, semantic, range}`,
   the Notes view's `notes_search(query, meaning?, limit?)` and the Chat
   sidebar's `chats_search(query, meaning?, limit?)` → `{hits, semantic}`.
@@ -202,8 +202,8 @@ minutes. A chat turn costs a passage or two (the question's, then with its
 answer).
 
 **Never in a dictation's way**: a pass waits while a dictation or a meeting
-recording runs (`meeting_summary::wait_idle`), and a batch under way is
-dropped the moment one starts (`meeting_summary::unless_busy`: the
+recording runs (`meetings::summary::wait_idle`), and a batch under way is
+dropped the moment one starts (`meetings::summary::unless_busy`: the
 connection closes) and read again after. Batches of 16 on the card, 4 on
 the processor (a few seconds at most). Passages already read are kept, so
 a pass cut off loses nothing.

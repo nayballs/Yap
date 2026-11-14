@@ -127,7 +127,7 @@ test('"Record notes" records the call into a meeting note; the call ending offer
   await expect(main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Notes', exact: true }))
     .toHaveAttribute('aria-current', 'page');
   await expect(main.getByRole('button', { name: 'End meeting & summarise' })).toBeVisible();
-  // The open note says it's recording: no success toast on top (notices/notice.rs).
+  // The open note says it's recording: no success toast on top (notices/policy.rs).
   await expect(toast(main, 'Recording notes')).toHaveCount(0);
   const notes = meetingNotes(yap);
   expect(notes).toHaveLength(1);
@@ -147,7 +147,7 @@ test('"Record notes" records the call into a meeting note; the call ending offer
   await shot(main, '04-prompt-call-ended');
 
   // Stopping ends the meeting as "End meeting & summarise" does (Rust writes
-  // the action plan; meetings/meeting_end.rs) and keeps the note open here. The test
+  // the action plan; meetings/end.rs) and keeps the note open here. The test
   // recording being silent, it asks — in this window, where it was answered —
   // whether it was started by mistake instead of writing a summary.
   await ended.getByRole('button', { name: 'Stop and summarise' }).click();

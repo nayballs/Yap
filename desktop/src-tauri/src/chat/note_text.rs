@@ -23,7 +23,7 @@
 
 use serde::Serialize;
 
-use crate::meetings::meeting_summary::estimate_tokens;
+use crate::meetings::summary::estimate_tokens;
 use crate::notes::Note;
 
 fn now_ms() -> u64 {
@@ -51,7 +51,7 @@ const CONTEXT_CHARS: usize = 160;
 pub const DEFAULT_PAGE_LINES: usize = 200;
 pub const MAX_PAGE_LINES: usize = 400;
 /// …and at most this many tokens, the bound `get_note` already puts on a
-/// meeting (`meeting_summary::ask_context`), so one page can't fill a
+/// meeting (`meetings::summary::ask_context`), so one page can't fill a
 /// small model's context.
 pub const PAGE_TOKENS: usize = 3_000;
 /// Lines of an edit shown back to the model, around the change.
@@ -136,7 +136,7 @@ fn transcript_text(note: &Note) -> String {
             let text = s.text.split_whitespace().collect::<Vec<_>>().join(" ");
             format!(
                 "[{}] {who}: {text}",
-                crate::meetings::meeting_summary::clock(s.ts.saturating_sub(t0))
+                crate::meetings::summary::clock(s.ts.saturating_sub(t0))
             )
         })
         .collect::<Vec<_>>()
@@ -798,7 +798,7 @@ impl EditError {
 /// meeting title keeps off it), a content edit leaves the summary to show as
 /// stale, a summary written into an empty field counts as made from the
 /// notes as they are now (one emptied is no summary at all), and a summary
-/// edit is the person's (`note_edits::apply_summary_edit`: Yap never writes
+/// edit is the person's (`notes::edits::apply_summary_edit`: Yap never writes
 /// over it unasked). Changes nothing on an error. `updated_ts` is the
 /// caller's (`notes::modify`).
 pub fn apply_edit(note: &mut Note, field: Field, old: &str, new: &str) -> Result<Edit, EditError> {
@@ -826,8 +826,8 @@ pub fn apply_edit(note: &mut Note, field: Field, old: &str, new: &str) -> Result
                     note.summary_ts = 0;
                 } else {
                     // Changed on the person's say-so (they asked Chat): theirs
-                    // now, so Yap never writes over it unasked (note_edits.rs).
-                    crate::notes::note_edits::apply_summary_edit(note, &r.text, now_ms());
+                    // now, so Yap never writes over it unasked (notes/edits.rs).
+                    crate::notes::edits::apply_summary_edit(note, &r.text, now_ms());
                 }
             }
             Field::Transcript => {} // refused above

@@ -32,7 +32,6 @@ pub const PARTS: usize = 8;
 /// Credential Manager blobs top out at 2,560 bytes of UTF-16.
 pub const PART_CHARS: usize = 1_100;
 /// Yap's own credentials' service (`<user>.com.yap.dictation`).
-#[cfg_attr(test, allow(dead_code))]
 pub const SERVICE: &str = "com.yap.dictation";
 
 /// One connector's secrets.

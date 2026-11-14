@@ -68,7 +68,7 @@ pub fn redirect_uris(port: u16) -> Vec<String> {
 /// URL), with the website's address and logo when there are ones. Pure.
 /// (Nothing in Yap serves it: it's the file the maintainer hosts, held to
 /// this by its test.)
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub fn metadata_document(client_id: &str, client_uri: Option<&str>, logo_uri: Option<&str>) -> Value {
     let mut doc = json!({
         "client_id": client_id,

@@ -19,7 +19,7 @@
 //!   more ([`flush`], `lib.rs shutdown_cleanup`);
 //! - **is said once** when no command said it (history after a dictation,
 //!   memory learning, calendar sync, usage counts): [`TELL_AFTER`] later, one
-//!   alert through the notice policy (`alert.rs` → `notice.rs`, kind
+//!   alert through the notice policy (`alert.rs` → `notices/policy.rs`, kind
 //!   [`KIND`]: never over a dictation, never dropped, not twice in ten
 //!   minutes) names the first store and says if others failed too, with
 //!   **Try again**. Not again for that store until a save of it has worked.
@@ -67,7 +67,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::AppHandle;
 
-/// The alert's kind (its rule in `notice.rs`, the bar card's id).
+/// The alert's kind (its rule in `notices/policy.rs`, the bar card's id).
 pub const KIND: &str = "saveFailed";
 /// The alert's **Try again** ([`crate::notices::alert::act`]).
 pub const RETRY: &str = "retrySaves";

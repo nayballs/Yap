@@ -1,14 +1,14 @@
 //! **The refined transcript, by itself** (2026-10-24, after Wispr Flow's
 //! "refined transcript"): when a meeting ends, Yap transcribes it again in
-//! the background from its audio on disk (`meeting_audio.rs`) when that
+//! the background from its audio on disk (`audio.rs`) when that
 //! helps — and puts the new lines in through the same replacement as
-//! "Transcribe again" (`meeting_audio::transcribe_again` → `redo::rebuild`:
+//! "Transcribe again" (`audio::transcribe_again` → `redo::rebuild`:
 //! My thoughts, the names on lines that still match and the summary kept).
 //!
 //! **When** ([`decide`], pure; Settings → Meetings → "Improve the
 //! transcript after the meeting", `meeting_refine`):
 //! - **Automatically when it helps** (`auto`, the default): a chunk of the
-//!   live transcript couldn't be transcribed (`meeting.rs`, "Failed
+//!   live transcript couldn't be transcribed (`recorder.rs`, "Failed
 //!   chunks"), or a more accurate speech model than the live one is
 //!   installed for the meeting's language ([`best_model`]);
 //! - **Always**: every meeting, on the best model installed (the one in
@@ -49,7 +49,7 @@
 //! **How it runs** — never in the way:
 //! - after the summary (above), never beside a meeting that records (it
 //!   waits, "after the meeting that's recording"), and between chunks it
-//!   waits for a hotkey dictation and 3 s after one (`meeting::replay`'s
+//!   waits for a hotkey dictation and 3 s after one (`recorder::replay`'s
 //!   `give_way`): a dictation's transcription always finds the engine free;
 //! - on the model in use, it shares the warm engine a chunk at a time
 //!   (`pipeline::EngineCell`: a dictation that ends mid-chunk waits that
@@ -63,11 +63,11 @@
 //!   (between chunks: the live transcript stays).
 //!
 //! The audio of a meeting whose audio isn't kept ("Keep meeting audio" off)
-//! is held until this is done (`meeting_audio::release`), a day at most.
+//! is held until this is done (`audio::release`), a day at most.
 
 use tauri::AppHandle;
 
-use crate::meetings::meeting_audio::redo::Redone;
+use crate::meetings::audio::redo::Redone;
 use crate::notes::TranscriptSegment;
 
 /// The setting's choices (`YapConfig::meeting_refine`).
@@ -204,7 +204,7 @@ pub fn may_refine(cfg: &crate::config::YapConfig) -> bool {
 pub fn plan(note_id: u64) -> Option<Plan> {
     let cfg = crate::config::load();
     let note = crate::notes::get(note_id)?;
-    let recordings = crate::meetings::meeting_audio::recordings(note_id);
+    let recordings = crate::meetings::audio::recordings(note_id);
     // The live pass's model: its least accurate recording's (a model
     // switched between a pause and a resume), else the one in use.
     let live = recordings
@@ -225,8 +225,8 @@ pub fn plan(note_id: u64) -> Option<Plan> {
 }
 
 /// Start `plan` for note `note_id` (published at once; it waits its turn:
-/// `meeting_audio::start_refine`). With `plan.first`, the end-of-meeting
-/// steps (`meeting_end::end_steps`, from the window `origin`) follow it,
+/// `audio::start_refine`). With `plan.first`, the end-of-meeting
+/// steps (`end::end_steps`, from the window `origin`) follow it,
 /// however it ends. `false`: it couldn't start (and nothing follows).
 pub fn start(app: &AppHandle, note_id: u64, plan: &Plan, origin: Option<String>) -> bool {
     let (first, reason) = (plan.first, plan.reason);
@@ -234,15 +234,15 @@ pub fn start(app: &AppHandle, note_id: u64, plan: &Plan, origin: Option<String>)
     // cancelled then) and its id given to a new note, the end-of-meeting
     // steps never run on that one ("Started by mistake?" with Discard).
     let created = crate::notes::get(note_id).map(|n| n.created_ts);
-    let started = crate::meetings::meeting_audio::start_refine(app, note_id, &plan.model, first, move |app, result| {
+    let started = crate::meetings::audio::start_refine(app, note_id, &plan.model, first, move |app, result| {
         tracing::info!(note_id, ?reason, ok = result.is_ok(), "Meeting refine: ended");
         let app = app.clone();
         // (Window queries wait on the main thread: not from this task.)
         std::thread::spawn(move || {
             if first && created.is_some_and(|c| crate::notes::still_the_note(note_id, c)) {
-                crate::meetings::meeting_end::end_steps(&app, note_id, origin.as_deref());
+                crate::meetings::end::end_steps(&app, note_id, origin.as_deref());
             }
-            crate::meetings::meeting_audio::release(&app, note_id);
+            crate::meetings::audio::release(&app, note_id);
         });
     });
     match started {
@@ -300,7 +300,7 @@ pub fn agrees(old: &[TranscriptSegment], redone: &[Redone]) -> Result<(), String
 }
 
 /// The calling thread at the lowest priority until dropped (Windows): a
-/// refine's transcription calls (`meeting::transcribe_chunk`). The
+/// refine's transcription calls (`recorder::transcribe_chunk`). The
 /// runtimes' own worker threads keep theirs; what keeps a refine out of a
 /// dictation's way is when it runs (see "How it runs").
 pub struct LowPriority {

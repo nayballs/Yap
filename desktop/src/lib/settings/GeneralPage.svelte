@@ -120,7 +120,7 @@
   </Row>
 </Group>
 
-<!-- Yap's notice policy (notices/notice.rs): one notice at a time, held while you
+<!-- Yap's notice policy (notices/policy.rs): one notice at a time, held while you
      dictate. Tips, and each kind of nice-to-know notice (notices/kinds.rs,
      each at most a few a day), can be switched off. -->
 <Group title="Notifications" id="settings-notifications">

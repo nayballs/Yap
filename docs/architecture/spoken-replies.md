@@ -66,7 +66,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, ElevenLabs on the 
   utterance replaces the old; it checks before every sentence and while one
   plays that no dictation records (`pipeline::dictation_state`), refuses to
   start over one, and refuses while a meeting records (the loopback would
-  put Yap in "Them"; `meeting::start` stops it). Each sentence is
+  put Yap in "Them"; `meetings::recorder::start` stops it). Each sentence is
   `stream`ed into the player piece by piece (each piece checked: stopped, or
   a dictation started → the stream ends). **A streamed answer's job**
   (`Job.feed`, `speak_streamed` → a `Feed`; the Voice Assistant,

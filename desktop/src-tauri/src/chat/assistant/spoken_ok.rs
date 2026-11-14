@@ -44,7 +44,7 @@ use std::time::{Duration, Instant};
 
 use crate::chat::pages::act::confirm::{AgentCard, Card};
 
-/// The bar card's id (its rule in `notices/notice.rs`).
+/// The bar card's id (its rule in `notices/policy.rs`).
 pub const CARD: &str = "askFirst";
 /// How long a spoken answer may come: the card's own wait.
 pub const WAIT: Duration = crate::chat::pages::act::confirm::WAIT;

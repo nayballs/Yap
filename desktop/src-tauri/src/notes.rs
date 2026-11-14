@@ -12,7 +12,7 @@
 
 pub mod commands;
 pub mod md_file;
-pub mod note_edits;
+pub mod edits;
 pub mod pins;
 pub mod quick_note;
 pub mod retention;
@@ -71,25 +71,25 @@ pub struct TranscriptSegment {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub words: Vec<[u32; 2]>,
     /// Not speech: a stretch of its side (`start_ms`..`end_ms`) the speech
-    /// model couldn't transcribe (`meeting.rs`, "Failed chunks"). No
+    /// model couldn't transcribe (`meetings/recorder.rs`, "Failed chunks"). No
     /// `text`; the views show "Couldn't transcribe 0:42–1:12 · Try again"
-    /// (`meeting_audio::retry`), and summaries skip it.
+    /// (`meetings::audio::retry`), and summaries skip it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub failed: bool,
     /// A "you" segment that was the call audio leaking from the speakers into
-    /// the mic (`meeting::is_echo`). Kept, but left out of the summary and
+    /// the mic (`meetings::recorder::is_echo`). Kept, but left out of the summary and
     /// hidden in the transcript view.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub echo: bool,
     /// Not speech: a marker where the person dictated with the hotkey
     /// mid-meeting (`source` "you", no `text`, `ts` when the dictation began,
     /// its pre-roll included). The recorder left that audio out of "You"
-    /// (`meeting.rs`); the transcript views show "You dictated here", and
+    /// (`meetings/recorder.rs`); the transcript views show "You dictated here", and
     /// digests, the action plan, "What did I miss?" and the Ask context skip
     /// it, like echo.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dictated: bool,
-    /// The person corrected this line's text (`note_edits.rs`): it keeps its
+    /// The person corrected this line's text (`edits.rs`): it keeps its
     /// time, voice and audio, Transcribe again never replaces it, and the
     /// voice separation never splits it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -98,7 +98,7 @@ pub struct TranscriptSegment {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub original: String,
     /// Not speech: a marker where the meeting's microphone was disconnected
-    /// and "You" moved to the next one in the order (`meeting.rs`; `source`
+    /// and "You" moved to the next one in the order (`meetings/recorder.rs`; `source`
     /// "you", no `text`, `ts` when): the name of the one it moved to, or
     /// empty when none was left. The views show "Your mic was disconnected";
     /// summaries skip it.
@@ -187,7 +187,7 @@ pub struct DigestAction {
     pub due: String,
 }
 
-/// A rolling summary of one stretch of a meeting (`meeting_summary.rs`),
+/// A rolling summary of one stretch of a meeting (`meetings/summary.rs`),
 /// written while the meeting is still going so the end-of-meeting summary
 /// merges a few of these instead of re-reading hours of transcript.
 /// Covers `transcript[from_seg..to_seg]`.
@@ -242,7 +242,7 @@ pub struct Note {
     #[serde(default)]
     pub title: String,
     /// The title is one Yap made up ("Teams call · 5 Oct, 14:30"), so the AI
-    /// meeting title may replace it (`meeting_assist.rs`). Cleared for good
+    /// meeting title may replace it (`meetings/assist.rs`). Cleared for good
     /// once the person edits the title or the AI names the meeting: a title
     /// the person typed is never overwritten.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -258,7 +258,7 @@ pub struct Note {
     pub enhanced_at_hash: String,
     /// When the person last changed the summary's words (unix ms; 0 = as
     /// Yap wrote it). An edited summary is never written over unless the
-    /// person says so (`note_edits.rs`); ticking a task isn't an edit.
+    /// person says so (`edits.rs`); ticking a task isn't an edit.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub summary_edited_ms: u64,
     /// When the summary's input was read (unix seconds; 0 = not known, as on
@@ -266,7 +266,7 @@ pub struct Note {
     #[serde(default, skip_serializing_if = "is_zero")]
     pub summary_ts: u64,
     /// Yap's summary as it last wrote it, kept beside one the person edited:
-    /// "Back to Yap's summary" (`note_edits.rs`). Empty: Yap hasn't written
+    /// "Back to Yap's summary" (`edits.rs`). Empty: Yap hasn't written
     /// one since 2026-10-25.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub summary_ai: String,
@@ -274,7 +274,7 @@ pub struct Note {
     /// wrong): kept in this note on this PC only, never sent anywhere — for
     /// the model evaluations later. A new summary clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary_rating: Option<note_edits::SummaryRating>,
+    pub summary_rating: Option<edits::SummaryRating>,
     #[serde(default = "default_note_type")]
     pub note_type: String,
     /// Folder name (OpenWhispr seeds Personal + Meetings; user-creatable).
@@ -294,13 +294,13 @@ pub struct Note {
     #[serde(default)]
     pub participants: Vec<String>,
     /// Rolling meeting digests, in transcript order, each picking up where
-    /// the last one stopped (`meeting_summary.rs`). Empty for short meetings
+    /// the last one stopped (`meetings/summary.rs`). Empty for short meetings
     /// and personal notes.
     #[serde(default)]
     pub digests: Vec<MeetingDigest>,
     /// Where recordings of this meeting stopped (a pause, or the end): the
     /// transcript's length at each stop, in order. The meeting notepad draws
-    /// its paused divider there (`meeting_end.rs` adds them).
+    /// its paused divider there (`meetings/end.rs` adds them).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub breaks: Vec<usize>,
     /// Where the note came from ("manual" | "upload" | "meeting" | "calendar").
@@ -1386,7 +1386,7 @@ fn set_if_changed<T: PartialEq>(slot: &mut T, value: T) -> bool {
 
 /// Append meeting-recorder segments to a note's transcript and mark it a
 /// meeting note (the recorder persists every drain; what a crash keeps it
-/// from transcribing is on disk, `meeting_audio.rs`).
+/// from transcribing is on disk, `meetings/audio.rs`).
 pub fn append_transcript(id: u64, segments: &[TranscriptSegment]) -> Result<(), String> {
     if segments.is_empty() {
         return Ok(());
@@ -1405,7 +1405,7 @@ pub fn append_transcript(id: u64, segments: &[TranscriptSegment]) -> Result<(), 
     })
 }
 
-/// Lines transcribed after the fact (`meeting_audio.rs`: the part of a
+/// Lines transcribed after the fact (`meetings/audio.rs`: the part of a
 /// meeting a crash left), put where they belong by time — normally at the
 /// end; before a later recording's lines if the meeting was resumed since,
 /// with a stop mark after them. Digests and stop marks after them move
@@ -1561,7 +1561,7 @@ fn push_digest(note: &mut Note, mut digest: MeetingDigest, last: Option<(&str, u
 /// Store an enhancement result + the staleness hash of the content it was
 /// computed from (pass the hash captured BEFORE the LLM call, so edits made
 /// while the model ran correctly show as stale). The app's own runs go
-/// through `note_edits::write_summary` (never over the person's edits);
+/// through `edits::write_summary` (never over the person's edits);
 /// this is the evaluations' and the tests'.
 #[cfg(any(test, debug_assertions))]
 pub fn set_enhanced(id: u64, enhanced: &str, at_hash: &str) -> Result<(), String> {
@@ -1659,10 +1659,10 @@ fn forget_extras(id: u64) {
     // Tasks added in its Tasks tab, and its archive marks, go with it (note
     // ids come round again: tasks.json, task_store.rs).
     task_store::forget_notes(&[id]);
-    // Its meeting audio goes with it (meeting_audio.rs), its Ask threads
+    // Its meeting audio goes with it (meetings/audio.rs), its Ask threads
     // (chat/note_chats.rs) and its vectors in the search index
     // (search/index.rs).
-    crate::meetings::meeting_audio::forget(id);
+    crate::meetings::audio::forget(id);
     crate::chat::chats::delete_for_notes(&[id]);
     crate::search::removed();
     forget_own(&[id]);
@@ -1675,7 +1675,7 @@ fn forget_extras(id: u64) {
 /// your data (`privacy/reset.rs`, which clears the other stores its own way).
 pub fn forget_own(ids: &[u64]) {
     for &id in ids {
-        crate::meetings::meeting_end::forget(id);
+        crate::meetings::end::forget(id);
         versions::forget(id);
         // Its attendees' companies, kept for the folder rules by company.
         crate::calendar::filing::forget_note(id);

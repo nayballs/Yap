@@ -15,12 +15,12 @@ static BROUGHT_FORWARD_MS: AtomicU64 = AtomicU64::new(0);
 
 /// A Yap window was just brought to the front.
 pub fn brought_forward() {
-    BROUGHT_FORWARD_MS.store(crate::notices::notice::now_ms(), Ordering::Relaxed);
+    BROUGHT_FORWARD_MS.store(crate::notices::policy::now_ms(), Ordering::Relaxed);
 }
 
 /// Whether one was within the last `ms`.
 pub fn brought_forward_within(ms: u64) -> bool {
-    crate::notices::notice::now_ms().saturating_sub(BROUGHT_FORWARD_MS.load(Ordering::Relaxed)) <= ms
+    crate::notices::policy::now_ms().saturating_sub(BROUGHT_FORWARD_MS.load(Ordering::Relaxed)) <= ms
 }
 
 /// Show the settings window (defined hidden in tauri.conf.json). Shared by the
@@ -436,7 +436,7 @@ pub fn show_onboarding(app: &AppHandle) -> Result<(), String> {
     focus(&w);
     // Tips and notices wait while the first-run setup is on screen (the
     // bar's first-use pointers too: it's told).
-    crate::notices::notice::on_onboarding(true);
+    crate::notices::policy::on_onboarding(true);
     crate::bar::refresh(app);
     let _ = w.eval("window.location.reload()");
     // Compositor nudge: a 1px resize round-trip forces DWM to recomposite the
@@ -460,7 +460,7 @@ pub fn close_onboarding(app: AppHandle) {
     if let Some(w) = app.get_webview_window("onboarding") {
         let _ = w.hide();
     }
-    crate::notices::notice::on_onboarding(false);
+    crate::notices::policy::on_onboarding(false);
     // The bar's first-use pointers may show now (`bar/pointer.rs`).
     crate::bar::refresh(&app);
 }

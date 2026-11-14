@@ -52,24 +52,3 @@ pub fn init() {
     });
 }
 
-/// Claude Code on this PC (Settings' plan card): installed, its version,
-/// too old, signed in. Cached 30 s; `refresh` probes again.
-#[tauri::command]
-pub async fn claude_code_status(refresh: Option<bool>) -> cli::Status {
-    let refresh = refresh.unwrap_or(false);
-    tauri::async_runtime::spawn_blocking(move || if refresh { cli::refresh() } else { cli::status() })
-        .await
-        .unwrap_or_else(|_| cli::Status {
-            min_version: cli::MIN_VERSION.to_string(),
-            error: Some("Couldn't check Claude Code.".into()),
-            ..Default::default()
-        })
-}
-
-/// "Sign in": Windows Terminal (or PowerShell) on `claude auth login`.
-#[tauri::command]
-pub async fn claude_code_sign_in() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(cli::open_sign_in)
-        .await
-        .unwrap_or_else(|_| Err("Couldn't open the sign-in.".into()))
-}

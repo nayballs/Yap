@@ -319,7 +319,7 @@ attendees, typed notes, Yap's summary, `[side, words]` lines) and what's
 asked of it: `smart` (the notepad's Make me sound smart), `skill` (a
 built-in Skill's command and the person's `words` with it) or `longer`
 (Make notes longer). Each goes through the app's own inputs and checks
-(`meeting_summary/chips.rs`: the numbered passages, `checked`,
+(`meetings/summary/chips.rs`: the numbered passages, `checked`,
 `clean_longer`, the action plan's checks) on the meeting's reply cap and
 temperature, and is judged as the app shows it: `contains_any` (it's
 about what was said), `contains_all` (every one: both unanswered
@@ -673,7 +673,7 @@ invented owner). Each is written twice through the action plan's own call
 `postcheck_action_plan`, as `notes::commands::run_enhance` sends it):
 **before** — `ACTION_PLAN_EARLIER_FRAGMENTS[0]` and the input alone, the call
 every meeting made until 25 Oct 2026 — and **after** — today's layout and
-`meeting_summary::final_request` (the language line after the input). Both
+`meetings::summary::final_request` (the language line after the input). Both
 go through today's checks. Judged on the notes as shown: **language** (the
 prose's little words, `language::detect`, or for notes too terse to be sure
 of, `language::leading`), **tasks** (`notes::tasks::parse`, as the Tasks view
@@ -1172,7 +1172,7 @@ first after loading):
 A longer context costs memory, not speed, until it's used: a long prompt still takes its
 prompt-processing time. What uses it: the meeting notes' final call and the Notes view's Ask
 read 2× / 4× more of the meeting raw at 16K / 32K (`local_llm::context::budget_factor`,
-`meeting_summary::FinalBudget`); the live digests and the notepad's helpers keep the 8K
+`meetings::summary::FinalBudget`); the live digests and the notepad's helpers keep the 8K
 budgets.
 
 ## Honest web answers (21 Oct 2026)
@@ -2992,7 +2992,7 @@ What the first run showed, and what changed:
 - **A Skill's instructions in the system prompt** were half ignored: "/decisions about the
   dates only" over a meeting that agreed Lisbon and May got "No decisions were made". The
   instructions (and the person's words) now come last, after the meeting's passages
-  (`meeting_assist::skill_messages`): 8/8.
+  (`meetings::assist::skill_messages`): 8/8.
 - **Make notes longer** with the notes first and the meeting after: the 4B copied the whole
   input back (headings, transcript) and wrote only a recap — a "pass" the judge then learnt
   to catch (an echoed meeting, a lost heading). The meeting now comes first in `<meeting>`
@@ -3304,7 +3304,7 @@ providers get the same messages.
   cases in `evals/chips/cases.json` — a catch-up for someone who missed it, a pricing sync's
   open questions (two put off, two answered), a bug triage's tickets (two agreed, dark mode
   put off), an offline-mode discussion's requirements — beside the four from 29 Oct, through
-  `meeting_assist::skill_input_for` and `skill_messages` as the app sends them. The judge
+  `meetings::assist::skill_input_for` and `skill_messages` as the app sends them. The judge
   gained `contains_all` (both unanswered questions, not one of them).
 - **Across the meetings** (Chat: `npm run eval -- --tag skills`): nine scenarios
   (`evals/scenarios/skills-*.json`, a turn's `skill` runs it as Chat's `/` menu does, a seed

@@ -121,7 +121,7 @@ test('a quiet meeting counts down in the notepad, then stops and says why', asyn
   await expect(countdown).toHaveCount(0);
   expect(await prompt(yap)).toBeNull();
   await shot(yap.notepad, '02-stopped-because-quiet');
-  // One at a time (notices/notice.rs): the question waits until the reason has
+  // One at a time (notices/policy.rs): the question waits until the reason has
   // been on screen, then takes its place.
   await expect(toast(yap.notepad, ENDED)).toBeVisible({ timeout: 20_000 });
   await expect(stopped).toHaveCount(0);

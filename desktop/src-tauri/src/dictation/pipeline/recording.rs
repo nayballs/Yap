@@ -523,7 +523,7 @@ impl Shared {
             Action::TripleTap => {
                 // A meeting being recorded already: the press stops the
                 // dictation as ever (never the meeting).
-                if crate::meetings::meeting::is_recording() {
+                if crate::meetings::recorder::is_recording() {
                     tracing::info!("Push-to-talk: a triple-tap during a meeting stops the dictation");
                     self.stop_and_transcribe();
                 } else {
@@ -557,7 +557,7 @@ impl Shared {
         let _ = std::thread::Builder::new().name("dictation-meeting-tip".into()).spawn(move || {
             let started = Instant::now();
             std::thread::sleep(Duration::from_millis(500));
-            while crate::notices::notice::moment().dictating && started.elapsed() < Duration::from_secs(60) {
+            while crate::notices::policy::moment().dictating && started.elapsed() < Duration::from_secs(60) {
                 std::thread::sleep(Duration::from_millis(250));
             }
             tracing::info!("Dictation: a long one; meeting notes suggested if it's due");

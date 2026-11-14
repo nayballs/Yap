@@ -344,7 +344,7 @@ global hook never sees keys while a Yap window has the focus.
   (`chatRequest.pending = {snip}`), or ChatView takes it itself while it's
   open (`takeSnip`). **Which conversation**: the one Chat shows, when the
   main window was on screen on one at the snip (`assistant::chat_viewing`
-  + `notice::window_view`); else a new chat.
+  + `notices::policy::window_view`); else a new chat.
 - The composer: the screenshot's 120 px tile (its size and ✕ on hover:
   "How a screenshot looks", below), "Ask about this screenshot…" in the
   box, the caret there (dictating into it works: Chat's mic, or the hotkey's

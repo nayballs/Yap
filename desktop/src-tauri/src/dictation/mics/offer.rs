@@ -4,7 +4,7 @@
 //! - **new to Yap** — "Contoso H2 connected · Use it for dictation?" with
 //!   **Use it** (first in the order from now on) and **Not now** (never
 //!   asked about again; Settings can still add it). One quiet notice in one
-//!   place (`notice::place`: the main window's toast while the person is
+//!   place (`notices::policy::place`: the main window's toast while the person is
 //!   looking at it, else a card on the Yap bar; never a Windows
 //!   notification), at most once per [`mics::ASK_GAP_MS`] and once per
 //!   microphone a run (`mics::Gate`);
@@ -14,7 +14,7 @@
 //!   twice in ten minutes).
 //!
 //! Never during a dictation: an arrival waits until it's over (and the
-//! notice policy's settle after it, `notice::moment`), and is dropped if
+//! notice policy's settle after it, `notices::policy::moment`), and is dropped if
 //! the microphone has gone again meanwhile.
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -28,9 +28,9 @@ use super::{Arrival, Endpoint, Gate, MicChoice};
 
 /// The main window's event: an [`Offer`].
 const EVENT: &str = "yap-mic-offer";
-/// The bar card's id and its rule in `notice.rs`.
+/// The bar card's id and its rule in `notices/policy.rs`.
 pub const CARD: &str = "micOffer";
-/// "Using … for dictation" (an alert's kind; its rule in `notice.rs`).
+/// "Using … for dictation" (an alert's kind; its rule in `notices/policy.rs`).
 pub const SWITCHED: &str = "micSwitched";
 /// How long the question stays up.
 const CARD_MS: u64 = 30_000;
@@ -99,7 +99,7 @@ pub fn arrived(app: &AppHandle, mic: Endpoint) {
                 tracing::debug!("Microphone offer: it went again; nothing to say");
                 return;
             }
-            if !crate::notices::notice::moment().dictating {
+            if !crate::notices::policy::moment().dictating {
                 break;
             }
             if since.elapsed() > WAIT_MAX {
@@ -112,7 +112,7 @@ pub fn arrived(app: &AppHandle, mic: Endpoint) {
         let Some(mic) = present.iter().find(|e| e.id == mic.id).cloned() else { return };
         match super::on_arrival(&mic, &cfg.mic_order, &cfg.mic_not_now, &present) {
             Arrival::Ask => {
-                let now = crate::notices::notice::now_ms();
+                let now = crate::notices::policy::now_ms();
                 let admitted = GATE.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(Gate::default).admit(&mic.id, now);
                 if admitted {
                     ask(&app, mic);
@@ -137,13 +137,13 @@ pub fn arrived(app: &AppHandle, mic: Endpoint) {
 fn ask(app: &AppHandle, mic: Endpoint) {
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
     let (title, body) = ask_text(&mic);
-    let place = crate::notices::notice::place(app, false);
-    if place == crate::notices::notice::Place::Nowhere {
+    let place = crate::notices::policy::place(app, false);
+    if place == crate::notices::policy::Place::Nowhere {
         tracing::info!("Microphone offer: nowhere to ask");
         return;
     }
     *pending() = Some(Pending { id, mic });
-    let shown = if place == crate::notices::notice::Place::Window {
+    let shown = if place == crate::notices::policy::Place::Window {
         app.emit(EVENT, Offer { id, title, body }).is_ok()
     } else {
         use crate::bar::{Card, CardAction};
@@ -170,7 +170,7 @@ fn ask(app: &AppHandle, mic: Endpoint) {
         )
     };
     if shown {
-        tracing::info!(on_bar = place != crate::notices::notice::Place::Window, "Microphone offer: asked about a new microphone");
+        tracing::info!(on_bar = place != crate::notices::policy::Place::Window, "Microphone offer: asked about a new microphone");
     } else {
         let mut p = pending();
         if p.as_ref().is_some_and(|p| p.id == id) {

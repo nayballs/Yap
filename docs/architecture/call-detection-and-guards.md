@@ -28,7 +28,7 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   are still tracked but get no prompt (start or end) and no tray item. Asks
   **once per call**, never while already recording, in one of two styles
   (`config.meeting_detect_style`): **"popup"** (default) — in **one place**
-  (`notice::place_for`): a sticky in-app toast while the main window is
+  (`notices::policy::place_for`): a sticky in-app toast while the main window is
   focused, else a card on the **Yap bar** (`native::bar_card`: Wispr's
   "Meeting detected" card — the app's icon (its own as installed,
   `calls/app_icons.rs`, else its mark), "Teams call" over "● Now", split button
@@ -56,9 +56,9 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   the prompt view; Start now / Not now / Esc cancel), then runs "Record notes"
   (`auto_start_later`, after any dictation); the same app's call again within
   10 min (a rejoin, a reload) is asked about without one. In a test run the
-  suite says whether the main window counts as focused (`notice::window_view`:
+  suite says whether the main window counts as focused (`notices::policy::window_view`:
   by default while it's on screen; `e2e_focus`). **Call-prompt fatigue**
-  (`notice::Fatigue`, Wispr's by behaviour; `<data>/notices.json`): three
+  (`notices::policy::Fatigue`, Wispr's by behaviour; `<data>/notices.json`): three
   "Not now"s in a row, or five start prompts left to fade, and "Stop asking
   about calls?" is offered once (`offer_to_stop`, an alert with **Stop
   asking**); 35 start prompts with no meeting ever recorded and call
@@ -79,7 +79,7 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   **Call ended** while recording it → "Stop and summarise?" — by default never
   an auto-stop (OpenWhispr doesn't, and the mic can't tell an ended call from
   a rejoin, breakout room or phone hand-off): `stop_and_summarise` ends the
-  meeting (`meeting_end::end` — Rust writes the Action Plan) and shows it
+  meeting (`meetings::end::end` — Rust writes the Action Plan) and shows it
   where the person looks: the notepad if it's on screen, the note in Notes
   (`yap-meeting-open-note {noteId, stop: false}`) if the main window is, else
   the main window comes up on it. Opt-in **"When a call
@@ -113,7 +113,7 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   **Smarter about the call itself** (2026-10-29, Wispr Flow's Notetaker by
   behaviour): **sure about the ending** — a recorded call 15 s off the mic
   gets a second opinion before anything stops (`on_edges` → `still_on`, read
-  before the lock: `call_audio::still_on`, the app still playing sound or a
+  before the lock: `calls::audio::still_on`, the app still playing sound or a
   window still showing the meeting); still on → **"Stop taking notes?"**
   (`PromptKind::Unsure`, "Teams let go of your microphone, but the call
   still looks open", Stop and summarise / Keep recording) instead of the
@@ -140,7 +140,7 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   Zoom?"** (`PromptKind::Switch`, Switch / Keep recording, fades after 30 s
   as Keep recording; `switch_due`, shown by `tick`), unless the calendar's
   switch card asks (`calendar::on_call_started` returns whether it did);
-  Switch → `switch_to`: `meeting_end::end` (the action plan as ever), waits
+  Switch → `switch_to`: `meetings::end::end` (the action plan as ever), waits
   for the last chunk (≤ 60 s), then "Record notes" on the new call. A
   recording started by hand is the person's: no switch. The snapshot's
   prompt carries its `answers` (`[accept, decline]`) for the window.
@@ -158,11 +158,11 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   next call not taken for a rejoin; Settings → Meetings → Ask about calls
   in → "Start notes automatically" turns it off). Debug-only
   `meeting_detect_simulate`'s `recorded` sets an app's count. `call_for(note)`
-  / `CallInfo` hand `call_audio.rs` the call a recording is of;
+  / `CallInfo` hand `calls/audio.rs` the call a recording is of;
   `window_shows_call` (a browser's meeting tab in front, Zoom's "Zoom
   Meeting" window: `CALL_WINDOWS`; Teams' windows all say "Microsoft
   Teams", so its sound decides).
-- **`calls/call_audio.rs`** — **the call's own audio while it's recorded**
+- **`calls/audio.rs`** — **the call's own audio while it's recorded**
   (2026-10-29): Windows' audio sessions per device (`IAudioSessionManager2`
   on every active capture endpoint, `IAudioEndpointVolume::GetMute`, the
   process's exe from `procs::exe_names`; Yap's own and system sounds left
@@ -172,10 +172,10 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   exes — its own, a helper "ms-teams_modulehost.exe", or the browser a
   meeting tab is in; a software device (enumerator ROOT: Krisp, NVIDIA
   Broadcast) or two at once: none) against the one "You" records from
-  (`meeting::mic_in_use`; its id looked up by name when it was opened as
+  (`meetings::recorder::mic_in_use`; its id looked up by name when it was opened as
   Windows' default) → **"Teams is using Contoso H2 but Yap is using
   Northwind Audio"** once per call and pair (`Said`), where the check-ins go
-  (kind `mic`), **Use Contoso H2** (`meeting::use_mic`: "You" moves to it for
+  (kind `mic`), **Use Contoso H2** (`meetings::recorder::use_mic`: "You" moves to it for
   this meeting, the gap silence, the order untouched; a device that won't
   open leaves "You" where it was, "Couldn't switch microphones") / Not now.
   **Muted in the call**, read only while "You" has heard nothing for 20 s:
@@ -184,7 +184,7 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   cached FindAll of the buttons' names, nothing invoked; `mute_from_buttons`:
   "Unmute (Ctrl+Shift+M)" in Teams, "Unmute my audio" in Zoom, "Turn on
   microphone" in Meet; English, a window that isn't minimised, Meet's tab
-  in front) → `muted_in_call`, which keeps `meeting.rs`'s "Yap can't hear
+  in front) → `muted_in_call`, which keeps `meetings/recorder.rs`'s "Yap can't hear
   your mic" quiet (asked again once unmuted). The sessions can't tell mute:
   Teams, Zoom and Meet keep the mic open while you're muted. `still_on`:
   the call app still plays (an active output session) or a window still
@@ -227,14 +227,14 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   recording does (but the auto-start offer), a stop takes the mic one; and
   `stop_automatically`: Yap's own stops — the length limit, a quiet
   meeting, a call that ended, a full disk — through
-  `meeting_end::end_automatically`, so call detection tells them from the
+  `meetings::end::end_automatically`, so call detection tells them from the
   person's) guard rails around a meeting recording (Phase 8,
   Wispr Flow's Notetaker settings) + their notices. **Maximum recording
   length** (`config.meeting_max_minutes`: 60/120/180/240, 0 = no limit,
   default **120**, as Wispr): a watcher thread per recording (follows
   `yap-meeting-state`; Settings re-read every second) warns 5 min before —
   "Notes stop in 5 minutes" + **Keep going** (another hour;
-  `meeting_keep_going`), in one place (`notice::place`): a sticky in-app
+  `meeting_keep_going`), in one place (`notices::policy::place`): a sticky in-app
   toast while the main window is focused (`yap-meeting-limit` with `inApp`,
   `meeting_limit_status` after a reload), else a Yap bar card, else a
   Windows notification — then stops and writes the action plan. A
@@ -246,7 +246,7 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   last speech) "Ending notes in 30 s…" counts down — **Keep going** (another
   10 min) / **Stop now**; anyone speaking or the setting going off cancels
   it — then `stop_and_summarise` + a notice that says why ("Stopped: the
-  meeting went quiet"). Speech = `meeting::activity()`'s talk counter (audio
+  meeting went quiet"). Speech = `meetings::recorder::activity()`'s talk counter (audio
   above the recorder's silence gate on either side, a dictation's blanked
   span not; plus transcribed talk segments, the e2e feed's too); quiet time
   runs on the **meeting's audio clock** (`clock_ms`: captured audio, so a PC
@@ -279,12 +279,12 @@ Noticing a call and offering to take notes, the call apps' own icons, the guard 
   `notice` (`yap-meeting-notice` `{kind, title, body, icon, variant,
   settings, noteId}`) carries the screen-share tip, "Stopped at 2 hours",
   "Teams call ended · writing your action plan", "Taking notes" and the
-  recorder's warnings (kind `warning`) in **one place** (`notice::place`:
+  recorder's warnings (kind `warning`) in **one place** (`notices::policy::place`:
   the main window while it's focused, else the Yap bar via `notice_native`,
   else a Windows notification, else the window on screen); one addressed to
   a window (`surface`) shows there; the same one again within 10 min isn't
-  shown (`notices/notice.rs`). **Every stop goes through
-  `stop_and_summarise`** = `meeting_end::end` (Rust writes the action plan;
+  shown (`notices/policy.rs`). **Every stop goes through
+  `stop_and_summarise`** = `meetings::end::end` (Rust writes the action plan;
   no window comes up — the notepad shows it when open). Debug-only `e2e_meeting_limit
   {limitMs, warnMs, keepGoingMs}` and `e2e_meeting_checkins {quietMs,
   countdownMs, recentMs, afterEndMs, hourMs, fadeMs, marginMs}` (which also

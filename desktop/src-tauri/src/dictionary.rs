@@ -4,7 +4,7 @@
 //! you use often, and the Dictionary view's import and export files. How
 //! it works: docs/architecture/dictionary.md.
 
-pub mod dict_usage;
+pub mod usage;
 pub mod files;
 pub mod fuzzy;
 pub mod learn;

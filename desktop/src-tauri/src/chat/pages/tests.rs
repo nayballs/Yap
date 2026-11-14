@@ -193,7 +193,7 @@ fn one_toolset_for_every_model_with_pages_acting_and_shots_only_where_they_may()
     assert_eq!(instructions(Gate::Off, true), "");
     assert!(!line.to_lowercase().contains("game"));
     // Short enough for the small on-device model: every step sends them.
-    let est = crate::meetings::meeting_summary::estimate_tokens;
+    let est = crate::meetings::summary::estimate_tokens;
     let small = est(&instructions(Gate::Show, false)) + est(&definitions(Gate::Show, false).to_string());
     let seeing = est(&instructions(Gate::Look, false)) + est(&definitions(Gate::Look, false).to_string());
     let all = est(&instructions(Gate::Look, true)) + est(&definitions(Gate::Look, true).to_string());

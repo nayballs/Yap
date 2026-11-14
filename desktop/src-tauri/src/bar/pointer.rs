@@ -70,13 +70,13 @@ fn ever_dictated() -> bool {
 /// The pointers due now, for the bar's status. Never with the bar's lock
 /// held (it reads hints.json and, once, the history).
 pub fn status() -> Option<Due> {
-    if crate::notices::notice::tips_off() || !crate::notices::kinds::on("bar-pointer") {
+    if crate::notices::policy::tips_off() || !crate::notices::kinds::on("bar-pointer") {
         return None;
     }
     // A feature tip: it waits out the first-run setup, as tips do (no
     // speech model yet, and shown there it would be spent before it's of
     // use). The bar is told again as the setup goes (`shell/window.rs`).
-    if crate::notices::notice::onboarding_up() {
+    if crate::notices::policy::onboarding_up() {
         return None;
     }
     #[cfg(debug_assertions)]
@@ -114,7 +114,7 @@ pub fn bar_pointer_shown(kind: String) -> Result<(), String> {
         other => return Err(format!("No such pointer: {other}")),
     };
     tracing::info!(kind, "bar: first-use pointer shown");
-    let now = crate::notices::notice::now_ms();
+    let now = crate::notices::policy::now_ms();
     crate::dictation::coaching::update_record(|mut r| {
         r.pointers.entry(kind.to_string()).or_insert(now);
         r

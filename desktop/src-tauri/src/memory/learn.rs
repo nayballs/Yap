@@ -69,7 +69,7 @@ pub const DEFERRED: &str = "Memory: put off for now";
 /// A dictation recording or transcribing (or an Upload): a model on this PC
 /// must be free then.
 fn dictation_busy(app: &AppHandle) -> bool {
-    crate::meetings::meeting_summary::dictation_busy(app)
+    crate::meetings::summary::dictation_busy(app)
 }
 
 /// One call to the Chat model for a pass: low temperature, a reply cap and
@@ -151,8 +151,8 @@ where
     };
     let tries = if background { 2 } else { 5 };
     for _ in 0..tries {
-        crate::meetings::meeting_summary::wait_idle(|| dictation_busy(app), || true).await;
-        match crate::meetings::meeting_summary::unless_busy(make(), || dictation_busy(app)).await {
+        crate::meetings::summary::wait_idle(|| dictation_busy(app), || true).await;
+        match crate::meetings::summary::unless_busy(make(), || dictation_busy(app)).await {
             Some(out) => return out,
             None => tracing::info!("Memory pass set aside for a dictation"),
         }
@@ -558,7 +558,7 @@ pub async fn learn_from_meeting(note_id: u64) -> Result<Applied, String> {
     Ok(applied)
 }
 
-/// A meeting's action plan is written (`meeting_end.rs`): learn from it,
+/// A meeting's action plan is written (`meetings/end.rs`): learn from it,
 /// once, when "Learn from meetings" is on.
 pub fn meeting_ended(note_id: u64) {
     let cfg = crate::config::load();
@@ -798,7 +798,7 @@ fn parts(text: &str, budget: usize) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     for line in text.lines() {
-        if !cur.is_empty() && crate::meetings::meeting_summary::estimate_tokens(&cur) + crate::meetings::meeting_summary::estimate_tokens(line) > budget {
+        if !cur.is_empty() && crate::meetings::summary::estimate_tokens(&cur) + crate::meetings::summary::estimate_tokens(line) > budget {
             out.push(std::mem::take(&mut cur));
         }
         cur.push_str(line);
@@ -1342,7 +1342,7 @@ mod tests {
         let text = (0..400).map(|i| format!("- Memory line number {i} about the user\n")).collect::<String>();
         let p = parts(&text, 1_600);
         assert!(p.len() > 1);
-        assert!(p.iter().all(|c| crate::meetings::meeting_summary::estimate_tokens(c) <= 1_700));
+        assert!(p.iter().all(|c| crate::meetings::summary::estimate_tokens(c) <= 1_700));
         assert_eq!(p.concat().lines().count(), 400);
     }
 }

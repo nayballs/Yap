@@ -10,7 +10,7 @@
 //!   (`dictation_stats.json`'s `milestone`, `stats.rs`). Steps passed
 //!   before Yap counted them — the history already there, dictations an
 //!   older Yap made — are marked passed without a word.
-//! - **Through the notice policy** (`notices/notice.rs`, kind `milestone`):
+//! - **Through the notice policy** (`notices/policy.rs`, kind `milestone`):
 //!   a tip, so "Show tips" switches it off; never while a dictation records
 //!   or transcribes, nor during a meeting; dropped if it waited unseen a
 //!   minute. One place: the main window's toast while the person is looking
@@ -113,14 +113,14 @@ pub fn celebrate(app: &AppHandle, step: u64, before: u64, minutes_saved: f64) {
     let _ = std::thread::Builder::new().name("milestone".into()).spawn(move || {
         // Never over a dictation (the one that passed it is still pasting).
         let waited = std::time::Instant::now();
-        while crate::notices::notice::moment().dictating {
+        while crate::notices::policy::moment().dictating {
             if waited.elapsed() > Duration::from_millis(WAIT_MS) {
                 tracing::debug!(step, "Milestone: a dictation went on too long; not said");
                 return;
             }
             std::thread::sleep(Duration::from_millis(250));
         }
-        if crate::notices::notice::tips_off() {
+        if crate::notices::policy::tips_off() {
             tracing::info!(step, "Milestone passed; tips are switched off");
             return;
         }
@@ -128,16 +128,16 @@ pub fn celebrate(app: &AppHandle, step: u64, before: u64, minutes_saved: f64) {
         // a bar card would wait unseen and be dropped — yet it was marked
         // said, so it never came. Unsaid, the next dictation after the
         // meeting says it.
-        if crate::notices::notice::moment().meeting {
+        if crate::notices::policy::moment().meeting {
             tracing::info!(step, "Milestone passed during a meeting; said after it");
             crate::dictation::stats::milestone_unsaid(step, before);
             return;
         }
         let (title, body) = text(step, minutes_saved);
-        let place = crate::notices::notice::place_tip(&app, CARD);
+        let place = crate::notices::policy::place_tip(&app, CARD);
         let shown = match place {
-            crate::notices::notice::Place::Window => app.emit(EVENT, Moment { words: step, title, body }).is_ok(),
-            crate::notices::notice::Place::Bar => {
+            crate::notices::policy::Place::Window => app.emit(EVENT, Moment { words: step, title, body }).is_ok(),
+            crate::notices::policy::Place::Bar => {
                 use crate::bar::{Card, CardAction};
                 let card = Card {
                     id: CARD.into(),
@@ -162,7 +162,7 @@ pub fn celebrate(app: &AppHandle, step: u64, before: u64, minutes_saved: f64) {
             _ => false,
         };
         // Not shown after all: the day's count back.
-        let shown = crate::notices::notice::tip_shown(CARD, place, shown);
+        let shown = crate::notices::policy::tip_shown(CARD, place, shown);
         tracing::info!(step, shown, ?place, "Milestone passed");
     });
 }

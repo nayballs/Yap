@@ -90,7 +90,7 @@ export function initCalendar(opts = {}) {
     }
     toast({ title: "Couldn't connect your calendar", description: String(e.payload || ''), variant: 'destructive' });
   });
-  // A meeting ended (not paused; meetings/meeting_end.rs): maybe the nudge.
+  // A meeting ended (not paused; meetings/end.rs): maybe the nudge.
   listen('yap-meeting-ended', (e) => onMeetingEnded(e.payload));
   window.addEventListener('keydown', onKeydown);
 }
@@ -98,7 +98,7 @@ export function initCalendar(opts = {}) {
 function apply(s) {
   if (!s) return;
   Object.assign(calendar, s, { loaded: true });
-  // One place at a time (notices/notice.rs): the card is this window's toast only
+  // One place at a time (notices/policy.rs): the card is this window's toast only
   // while Rust says so (`inApp`: the person is looking here); otherwise
   // it's on the Yap bar or a Windows notification.
   const c = s.card?.inApp ? s.card : null;

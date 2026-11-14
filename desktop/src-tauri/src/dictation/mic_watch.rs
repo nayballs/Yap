@@ -18,7 +18,7 @@
 //! Only the start of a recording is watched: once a sample that isn't zero
 //! has arrived the mic works, and the watcher stops. Dictation only: a
 //! meeting records through its own capture and has its own quiet-side
-//! watch (`meeting.rs`).
+//! watch (`meetings/recorder.rs`).
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 

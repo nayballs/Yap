@@ -1138,7 +1138,7 @@ pub fn offer(cfg: &YapConfig, fits: bool, dictations: usize) -> bool {
 }
 
 /// Should the main window offer AI cleanup now? Only as the notice policy
-/// allows a tip there (`notice.rs`): the person looking at the main window,
+/// allows a tip there (`notices/policy.rs`): the person looking at the main window,
 /// no dictation, meeting or first-run setup under way. With what it'd run
 /// on (the graphics card's name).
 #[tauri::command]
@@ -1148,8 +1148,8 @@ pub async fn cleanup_offer_status(app: tauri::AppHandle) -> Value {
     let capable = crate::ai::gpu::can_run_big_model(gpu.as_ref());
     let installed = crate::ai::local_llm::is_installed(&cfg);
     let dictations = crate::dictation::history::recent_dictation_secs(OFFER_AFTER).len();
-    let (_, focused) = crate::notices::notice::window_view(&app);
-    let m = crate::notices::notice::moment();
+    let (_, focused) = crate::notices::policy::window_view(&app);
+    let m = crate::notices::policy::moment();
     // A test run offers it only when the spec asks (the rest of the suite
     // never meets a tip it didn't expect).
     let test_ok = !crate::shell::e2e::active() || std::env::var_os("YAP_E2E_CLEANUP_OFFER").is_some();

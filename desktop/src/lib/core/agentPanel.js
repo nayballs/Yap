@@ -39,11 +39,9 @@
 //   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 //   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 //   DEALINGS IN THE SOFTWARE.
-import { isLive, turnsOf, todosOf, helpersOf, statusWord, turnStatusWord, planWaitsNow, planNotUsed, PLAN_NOT_USED, PLAN_WAITS_S, money, modeLabel, modelLabel, titleOf } from './agents.js';
+import { isLive, turnsOf, todosOf, helpersOf, statusWord, turnStatusWord, planWaitsNow, planNotUsed, PLAN_NOT_USED, money, modeLabel, modelLabel, titleOf } from './agents.js';
 import { effortLabel } from './effort.js';
 
-/** A plan still waits on the person this long after its turn ended (as Chat's status dots: core/chatStatus.js). */
-export const WAITS_FOR_S = PLAN_WAITS_S;
 /** Tokens as the panel says them: "980", "12k", "1.2M". */
 export function fmtTokens(n) {
   const v = Math.max(0, Number(n) || 0);

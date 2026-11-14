@@ -1848,10 +1848,10 @@ const ASK_REPLY_TOKENS: u32 = 120;
 /// answer checked by Rust ([`check_answer`]) before it counts as one more
 /// cue. On a model on this PC the answer comes under its JSON schema as
 /// llama.cpp's grammar, inside the sidecar's Busy guard, never during a
-/// dictation (`meeting_summary::chat_beside_dictation_with`). Best-effort:
+/// dictation (`meetings::summary::chat_beside_dictation_with`). Best-effort:
 /// a failure leaves the Rust names. Returns how many answers counted.
 pub async fn ask_model(app: &tauri::AppHandle, note_id: u64) -> usize {
-    let Ok(ep) = crate::meetings::meeting_summary::resolve_endpoint(&crate::config::load()) else {
+    let Ok(ep) = crate::meetings::summary::resolve_endpoint(&crate::config::load()) else {
         return 0;
     };
     // Only a model big enough to call tools (a cloud one, or ≥ 4B on this
@@ -1882,7 +1882,7 @@ pub async fn ask_model(app: &tauri::AppHandle, note_id: u64) -> usize {
                 json!({ "type": "json_schema", "json_schema": { "name": "speaker", "schema": ask_schema(ask) } }),
             );
         }
-        let asked = crate::meetings::meeting_summary::chat_beside_dictation_with(app, &ep, ask_messages(ask), &opts, extra);
+        let asked = crate::meetings::summary::chat_beside_dictation_with(app, &ep, ask_messages(ask), &opts, extra);
         // Counted as speaker naming (the AI usage tracker), not meeting notes.
         match crate::ai::usage::within(crate::ai::usage::Feature::Speakers, asked).await {
             Ok(reply) => {

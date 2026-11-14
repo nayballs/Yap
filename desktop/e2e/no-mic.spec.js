@@ -17,7 +17,7 @@ test('starts without a microphone and says so when asked to record', async ({ ya
 
   await pressHotkey(main);
   // A dictation's own error is said where the dictation is — the overlay —
-  // and only there (notices/notice.rs: one place; no toast in the main window).
+  // and only there (notices/policy.rs: one place; no toast in the main window).
   await expect(yap.overlay.getByText('No microphone found')).toBeVisible();
   await shot(yap.overlay, '02-overlay-no-microphone');
   await expect(main.getByRole('status').filter({ hasText: 'No microphone found' })).toHaveCount(0);

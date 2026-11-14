@@ -98,7 +98,7 @@
         <span class="tabspacer"></span>
         {#if !(notes.tab === 'tasks' && isMeeting)}
           {#if notes.tab === 'enhanced'}
-            <!-- Fix the summary's words in place (notes/note_edits.rs). -->
+            <!-- Fix the summary's words in place (notes/edits.rs). -->
             <button
               class="copy"
               aria-pressed={notes.summaryEditing}

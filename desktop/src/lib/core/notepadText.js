@@ -294,7 +294,7 @@ export function mailtoUrl(note) {
  * `speakers` map), a paused divider wherever a recording stopped (`breaks`:
  * the transcript's length at each stop), and a marker where the person
  * dictated mid-meeting (a `dictated` segment), and a "Couldn't transcribe
- * 0:42–1:12" line where a chunk failed (a `failed` segment, meetings/meeting.rs; line
+ * 0:42–1:12" line where a chunk failed (a `failed` segment, meetings/recorder.rs; line
  * `i` of the transcript), and "Your mic was disconnected" where the
  * meeting's microphone went and "You" moved to the next one (a `mic`
  * segment: its name, or "" with none left), and "Your PC was asleep for 12 min" where a
@@ -406,7 +406,7 @@ export function consentToSave(text) {
 }
 
 /**
- * The one-tap AI helpers on a meeting (meetings/meeting_assist.rs): the chip's label
+ * The one-tap AI helpers on a meeting (meetings/assist.rs): the chip's label
  * (also the question bubble) and the line shown while it works. `catchUp` is
  * "What did I miss?" (`meeting_catch_up`); the others go to `meeting_assist`
  * with their key as the `kind`.
@@ -434,7 +434,7 @@ export function meetingHelpers(note, recording) {
   return note.enhancedContent?.trim() ? ['followUpEmail', 'blindSpots', 'longer'] : ['followUpEmail', 'blindSpots'];
 }
 
-// ---- fixing notes by hand (noteEdits.js, desktop/src-tauri/src/notes/note_edits.rs, notes/tasks.rs) ----
+// ---- fixing notes by hand (noteEdits.js, desktop/src-tauri/src/notes/edits.rs, notes/tasks.rs) ----
 
 /** Line `i` of a transcript as `transcript_line_edit` finds it again (`LineRef`). */
 export function lineRef(transcript, i) {

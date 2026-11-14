@@ -24,9 +24,9 @@
 //! captured) go through the correction dictionary exactly as a dictation
 //! does (`pipeline::apply_corrections`), then are emitted live
 //! (`yap-meeting-segment`), persisted to the note's `transcript` as they come,
-//! and handed to the rolling digests (`meeting_summary.rs`) that keep the
+//! and handed to the rolling digests (`summary.rs`) that keep the
 //! end-of-meeting action plan fast for meetings of any length. Both sides'
-//! audio is also written to disk as it's captured (`meeting_audio.rs`), so
+//! audio is also written to disk as it's captured (`audio.rs`), so
 //! a crash loses nothing: the next start transcribes what never became
 //! lines ([`replay`]), and so can "Transcribe again".
 //!
@@ -227,7 +227,7 @@ pub(crate) struct Captured {
     /// device's audio and the silence filled in) also goes to the engine,
     /// so its clock is this one (`diarize.rs`).
     tee: Option<crate::speakers::diarize::Tee>,
-    /// The audio on its way to disk (`meeting_audio.rs`): everything
+    /// The audio on its way to disk (`audio.rs`): everything
     /// appended here — dictations blanked, gaps filled — that its writer
     /// hasn't taken yet, so the file is this side's session clock exactly.
     /// `None` while no audio is kept.
@@ -805,7 +805,7 @@ pub(crate) fn keep_in_step(a: &AudioBuf, b: &AudioBuf) {
 
 // ---- Keeping the audio on disk ----
 //
-// `meeting_audio.rs` writes each side to a file as it's captured. The push
+// `audio.rs` writes each side to a file as it's captured. The push
 // path above copies every sample it appends (dictations blanked, gaps
 // filled) to the side's `disk` queue; the writer takes it from there every
 // half second. It holds the mic's newest [`DICTATION_LOOKBACK`] back, so a
@@ -1165,7 +1165,7 @@ fn default_output_name() -> String {
 
 // ---- The meeting's microphone, as call detection sees it ----
 //
-// `calls/call_audio.rs` compares the microphone "You" records from with the
+// `calls/audio.rs` compares the microphone "You" records from with the
 // one the call app uses ("Teams is using Contoso H2 but Yap is using
 // Northwind Audio"), and "Use Contoso H2" moves "You" to it for this
 // meeting. The capture thread (or the test player) says which one it has
@@ -1257,7 +1257,7 @@ pub(crate) fn clear_mic_in_use(capture: u64) {
 
 /// How long "You" has heard nothing above the silence gate (ms of meeting
 /// audio), while a meeting records: the call's mute state is read only
-/// then (`call_audio.rs`).
+/// then (`calls/audio.rs`).
 pub fn you_quiet_ms() -> Option<u64> {
     let you = {
         let guard = slot();
@@ -1560,7 +1560,7 @@ enum Transcribed {
 #[derive(Clone, Default)]
 pub(crate) struct Ctl {
     /// A background job (the refine after a meeting): its transcriptions
-    /// run on a below-normal-priority thread (`meeting_refine::LowPriority`).
+    /// run on a below-normal-priority thread (`refine::LowPriority`).
     pub background: bool,
     /// Set to stop a replay between chunks (Cancel).
     pub cancel: Option<Arc<AtomicBool>>,
@@ -1605,14 +1605,14 @@ async fn transcribe_chunk(engine_slot: &EngineSlot, samples: Vec<f32>, note_id: 
     };
     let translate = cfg.translate_to_english;
     let dict_prompt =
-        crate::config::dictionary_prompt(&with_attendees(note_id, &crate::dictionary::dict_usage::ranked(&crate::memory::with_names(&cfg.dictionary, &cfg.about_name))));
+        crate::config::dictionary_prompt(&with_attendees(note_id, &crate::dictionary::usage::ranked(&crate::memory::with_names(&cfg.dictionary, &cfg.about_name))));
 
     let background = ctl.background;
     let outcome = tokio::task::spawn_blocking(move || {
-        let _low = background.then(crate::meetings::meeting_refine::LowPriority::now);
+        let _low = background.then(crate::meetings::refine::LowPriority::now);
         #[cfg(debug_assertions)]
         if background {
-            crate::meetings::meeting_refine::e2e_slow_chunk();
+            crate::meetings::refine::e2e_slow_chunk();
         }
         let result = match lease.engine() {
             Some(engine) => engine.transcribe_timed(&samples, language.as_deref(), translate, dict_prompt.as_deref()),
@@ -1776,9 +1776,9 @@ impl Heard {
 // marker in the transcript (`TranscriptSegment::failed`, "Couldn't
 // transcribe 0:42–1:12 · Try again"), which summaries skip, and the person
 // is told once per meeting, in one place (`meeting_guard::notice`). Its
-// audio is on disk (`meeting_audio.rs`): **Try again** transcribes just that
+// audio is on disk (`audio.rs`): **Try again** transcribes just that
 // stretch into its place, and a meeting with failed chunks is transcribed
-// again when it ends (`meeting_refine.rs`) unless Settings says Never.
+// again when it ends (`refine.rs`) unless Settings says Never.
 
 /// The meetings told about a failed chunk since Yap started (once each).
 static TOLD_FAILED: Mutex<std::collections::BTreeSet<u64>> = Mutex::new(std::collections::BTreeSet::new());
@@ -1796,7 +1796,7 @@ fn tell_failed(app: &AppHandle, note_id: u64) {
         return;
     }
     tracing::info!(note_id, "Meeting: telling the person part of it couldn't be transcribed");
-    let body = if crate::config::load().meeting_refine == crate::meetings::meeting_refine::NEVER {
+    let body = if crate::config::load().meeting_refine == crate::meetings::refine::NEVER {
         "Its audio is kept: use Try again on the transcript once the meeting ends."
     } else {
         "Its audio is kept: Yap transcribes that part again when the meeting ends."
@@ -2052,9 +2052,9 @@ fn watch_quiet(app: &AppHandle, note_id: u64, watch: &mut QuietWatch, you: &Audi
     let Some(side) = watch.check(levels(you), levels(them), t) else {
         return;
     };
-    // Muted in the call (`call_audio.rs`): of course "You" is quiet. Asked
+    // Muted in the call (`calls/audio.rs`): of course "You" is quiet. Asked
     // again on a later turn, so a mic still silent once unmuted is said.
-    if side == Side::You && crate::calls::call_audio::muted_in_call() {
+    if side == Side::You && crate::calls::audio::muted_in_call() {
         watch.unwarn(Side::You);
         return;
     }
@@ -2111,7 +2111,7 @@ pub(crate) fn ingest(
     }
     // Lines the speaker labels already cover get their voices now.
     crate::speakers::labels::after_ingest(app, note_id);
-    crate::meetings::meeting_summary::kick(app, note_id);
+    crate::meetings::summary::kick(app, note_id);
     Ok(())
 }
 
@@ -2152,9 +2152,9 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
     let stop = Arc::new(AtomicBool::new(false));
     let overflow = Arc::new(AtomicBool::new(false));
     // Both sides' audio kept on disk from their first sample
-    // (meeting_audio.rs): a crash loses nothing, and the meeting can be
+    // (audio.rs): a crash loses nothing, and the meeting can be
     // transcribed again later. `None`: it couldn't be (logged).
-    let recorder = crate::meetings::meeting_audio::Recorder::start(&app, note_id, &mic_buf, &sys_buf);
+    let recorder = crate::meetings::audio::Recorder::start(&app, note_id, &mic_buf, &sys_buf);
 
     let bufs = (Arc::clone(&mic_buf), Arc::clone(&sys_buf));
     let flags = (Arc::clone(&stop), Arc::clone(&overflow));
@@ -2343,12 +2343,12 @@ pub fn start(app: AppHandle, engine_slot: EngineSlot, note_id: u64) -> Result<()
         // The audio's files closed: kept for the days Settings says, or
         // deleted now that the transcript is done ("Keep meeting audio"
         // off) — unless a chunk failed (Try again needs it) or the meeting
-        // may be transcribed again when it ends (`meeting_refine.rs`): then
+        // may be transcribed again when it ends (`refine.rs`): then
         // it goes once that's done.
         if let Some(r) = recorder {
-            let hold = failed > 0 || crate::meetings::meeting_refine::may_refine(&crate::config::load());
+            let hold = failed > 0 || crate::meetings::refine::may_refine(&crate::config::load());
             let _ = tauri::async_runtime::spawn_blocking(move || r.finish(hold)).await;
-            crate::meetings::meeting_audio::changed(&app, note_id);
+            crate::meetings::audio::changed(&app, note_id);
         }
 
         ACTIVE_NOTE.store(0, Ordering::SeqCst);
@@ -2380,7 +2380,7 @@ pub fn stop() -> Result<(), String> {
 
 // ---- Transcribing a recording again from its audio on disk ----
 //
-// `meeting_audio.rs` keeps each recording's two sides on disk. Crash
+// `audio.rs` keeps each recording's two sides on disk. Crash
 // recovery (the part that never became lines) and "Transcribe again" (all
 // of it, on the speech model in use now) hand that audio back here, to the
 // live worker's own steps: the same cuts at quiet moments, the same engine

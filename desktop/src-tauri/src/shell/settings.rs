@@ -110,7 +110,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     // hours" applied now (dictation/history/keep.rs).
     crate::dictation::history::keep::on_config_saved(&app, prev, &cfg);
     if cfg.meeting_transcript_days != prev.meeting_transcript_days && cfg.meeting_transcript_days > 0 {
-        std::thread::spawn(|| crate::meetings::meeting_audio::prune(None));
+        std::thread::spawn(|| crate::meetings::audio::prune(None));
     }
     // Settings → Speech-to-Text → Runs on (stt_speed.rs): the warm engine
     // moves to the device chosen now, at a quiet moment.
@@ -149,7 +149,7 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     // …and the Yap bar (on/off, fullscreen, position, the tooltips' hotkeys).
     crate::bar::sync(&app, &cfg);
     // …and "Show tips" (the notice policy).
-    crate::notices::notice::sync(&cfg);
+    crate::notices::policy::sync(&cfg);
     // …and "Search my meetings by meaning" (search.rs).
     crate::search::on_config_saved(prev, &cfg);
     // …and the theme: the opaque windows' webview backgrounds (theme.rs; the

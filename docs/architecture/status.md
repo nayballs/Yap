@@ -932,13 +932,13 @@ download, outlives its view: leave mid-job and come back to its progress,
 Cancel and result — e2e `upload.spec.js`), an **AI Notepad** (`notes.rs` — folders/actions/
 participants/transcripts, an Actions engine, ActionPicker/ActionManager, attendee +
 folder management, markdown export, an embedded per-note chat), a **meeting
-recorder** (`meetings/meeting.rs` — mic + WASAPI loopback → You/Them transcript, cut in
+recorder** (`meetings/recorder.rs` — mic + WASAPI loopback → You/Them transcript, cut in
 pauses, speaker echo flagged, corrected with the dictionary like a dictation;
 hotkey dictations kept out of "You" with a "You dictated here" marker; "Them"
 follows Windows' default output device, both sides kept on one clock; a side
 quiet for 3 minutes while the other talks gets a warning — all e2e-tested in
 `meeting-audio.spec.js`, the real device switch only through a simulation
-hook so far; `meetings/meeting_summary.rs` — rolling ~10-minute digests
+hook so far; `meetings/summary.rs` — rolling ~10-minute digests
 while it records, then **End meeting & summarise** → an **action plan** with a
 section per person + Decisions / Open questions / Unassigned, every AI call
 within an 8k local context whatever the length; e2e-tested with a two-hour
@@ -973,7 +973,7 @@ local Share (copy, .md, email), delete, an editable consent message, split
 screen with the call now or when joining (a glass preview on hover); every
 stop, Yap's own included, writes the action plan in Rust without bringing up
 the main window; e2e-tested in `notepad.spec.js`, split screen and its
-preview unit-tested only), **meeting audio kept on disk** (`meetings/meeting_audio.rs`,
+preview unit-tested only), **meeting audio kept on disk** (`meetings/audio.rs`,
 2026-10-23: both sides as lossless FLAC from Yap's own small encoder,
 written as they're captured, dictations blanked, 14 days by default — a
 crash loses nothing: the next start offers to transcribe what never became
@@ -982,7 +982,7 @@ notes, the summary and names on matching lines; ▶ plays a line; Settings →
 Meetings keeps, ages and deletes it; unit-tested, e2e-tested with a killed
 and restarted test instance, the sizes measured on Windows TTS speech
 — not yet with a real call, a power cut, or hours of audio), **meeting notes
-you can fix** (`notes/note_edits.rs`, `notes/tasks.rs`, 2026-10-24: a transcript line's
+you can fix** (`notes/edits.rs`, `notes/tasks.rs`, 2026-10-24: a transcript line's
 words fixed in the notepad or the Notes view — marked edited, what Yap heard
 kept, ▶ still plays it, kept through Transcribe again, offered to the
 dictionary by "Suggest words from your corrections"; the summary edited in
@@ -1010,11 +1010,11 @@ Outlook or Gmail),
 and since
 2026-10-24 a **transcript you can trust**: a chunk that fails to transcribe
 is a marker with Try again, never silence, the person told once
-(`meetings/meeting.rs`); one recorder however many starts at once, the note being
+(`meetings/recorder.rs`); one recorder however many starts at once, the note being
 recorded never deleted (the local API included); the warm engine lent in
 turns, so a dictation during a meeting's chunk waits for it instead of
 loading a second copy (`pipeline::EngineCell`); and the **refined
-transcript** when a meeting ends (`meetings/meeting_refine.rs`: when chunks failed
+transcript** when a meeting ends (`meetings/refine.rs`: when chunks failed
 or a more accurate model is installed for its language, or always; the
 summary first unless the transcript has holes, then "Update summary"; low
 priority, cancellable) — unit-tested (the races and the engine lease fail
@@ -1212,7 +1212,7 @@ case in `browser.real.js`); a real elevated window and a privacy switch
 really flipped in Windows are still untried (a UAC prompt; the test
 PC's settings).
 **Calmer notices** (2026-10-17, after Wispr Flow's rules by behaviour):
-one notice policy in Rust and on the page (`notices/notice.rs`,
+one notice policy in Rust and on the page (`notices/policy.rs`,
 `ui/noticePolicy.js`): one place per notice (the window while it's focused,
 else the bar), one card on the bar and one notice + one answer in a window
 at a time, by priority; tips and notices held while dictating; stale ones

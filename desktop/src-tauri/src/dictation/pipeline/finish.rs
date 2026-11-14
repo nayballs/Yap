@@ -13,10 +13,10 @@ use crate::dictation::stt;
 /// opted out of the fuzzy pass (`DictionaryEntry::fuzzy`) are exact-only.
 /// Snippets aren't corrections and are left alone (a dictation expands them
 /// afterwards, [`finish_dictation`]). The dictionary words in the result
-/// count as used, for the Whisper prompt's ranking (`dict_usage`).
+/// count as used, for the Whisper prompt's ranking (`dictionary::usage`).
 pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
     let corrected = corrections(text, cfg);
-    crate::dictionary::dict_usage::record(&crate::memory::with_names(&cfg.dictionary, &cfg.about_name), &corrected);
+    crate::dictionary::usage::record(&crate::memory::with_names(&cfg.dictionary, &cfg.about_name), &corrected);
     corrected
 }
 

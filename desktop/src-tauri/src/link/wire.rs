@@ -693,7 +693,7 @@ const KNOWN: &[&str] = &[
 /// The Code side's messages, phone → PC (Remote Control), as the shared
 /// definition the page imports lists them (`desktop/src/lib/core/codeWire.js`,
 /// served at `core/codeWire.js`; the tests hold the two together).
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub const CODE_IN: &[&str] = &[
     "code_list",
     "code_new",
@@ -711,7 +711,7 @@ pub const CODE_IN: &[&str] = &[
     "set_mode",
 ];
 /// …and PC → phone.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub const CODE_OUT: &[&str] = &[
     "code_list",
     "code_status",

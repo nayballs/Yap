@@ -417,7 +417,7 @@ pub(crate) fn ask_once(app: &AppHandle, provider: &str) {
     );
 }
 
-/// The ask's alert kind (its rule in `notice.rs`).
+/// The ask's alert kind (its rule in `notices/policy.rs`).
 pub const KIND: &str = "assistantScreen";
 
 /// Was the ask already shown (`assistant_screen_asked`)?

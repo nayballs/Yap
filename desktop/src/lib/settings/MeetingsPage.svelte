@@ -2,7 +2,7 @@
   // Settings → Meetings (2026-10-22 review, out of General; Wispr Flow's
   // Notetaker page and its order): Call detection (calls/meeting_detect.rs), While
   // a meeting records (calls/meeting_guard.rs, calls/capture.rs, speakers/diarize.rs), Meeting
-  // audio (meetings/meeting_audio.rs), Notepad (meetings/notepad.rs), Calendar
+  // audio (meetings/audio.rs), Notepad (meetings/notepad.rs), Calendar
   // (calendar.rs) and Folders by company (calendar/filing/companies.rs:
   // CompanyFolders.svelte). The 12 call apps' switches live one level down, behind
   // "Ask about calls in · 8 of 12 apps ›".
@@ -102,7 +102,7 @@
     meetingDetect.apps.length ? `${asking.length} of ${meetingDetect.apps.length} apps` : ''
   );
 
-  // The refined transcript (meetings/meeting_refine.rs): when a meeting ends, it's
+  // The refined transcript (meetings/refine.rs): when a meeting ends, it's
   // transcribed again in the background from its audio.
   const REFINE = [
     { value: 'auto', label: 'Automatically when it helps' },
@@ -115,7 +115,7 @@
     never: 'You can still transcribe a meeting again from its menu',
   };
 
-  // Meeting audio kept on disk (meetings/meeting_audio.rs): { meetings, recordings, bytes }.
+  // Meeting audio kept on disk (meetings/audio.rs): { meetings, recordings, bytes }.
   const AUDIO_DAYS = [
     { value: 1, label: '1 day' },
     { value: 7, label: '7 days' },
@@ -138,7 +138,7 @@
   }
   onMount(() => {
     loadAudio();
-    // A recording kept, a note deleted, old audio gone (meetings/meeting_audio.rs).
+    // A recording kept, a note deleted, old audio gone (meetings/audio.rs).
     const un = listen('yap-meeting-audio', loadAudio);
     return () => un.then((f) => f());
   });
@@ -321,7 +321,7 @@
     </Row>
   </Group>
 
-  <!-- Meeting audio kept on disk (meetings/meeting_audio.rs): written as a meeting
+  <!-- Meeting audio kept on disk (meetings/audio.rs): written as a meeting
        records, so a crash loses nothing; kept to transcribe again and play. -->
   <Group title="Meeting audio" id="settings-meeting-audio">
     <Row setting="meeting-audio">
@@ -342,7 +342,7 @@
     >
       <Select bind:value={cfg.meetingAudioDays} options={daysOptions} ariaLabel="Keep meeting audio for" disabled={!cfg.meetingKeepAudio} />
     </Row>
-    <!-- The refined transcript when a meeting ends (meetings/meeting_refine.rs). -->
+    <!-- The refined transcript when a meeting ends (meetings/refine.rs). -->
     <Row label="Improve the transcript after the meeting" desc={REFINE_DESC[cfg.meetingRefine] ?? REFINE_DESC.auto} setting="meeting-refine">
       <Select bind:value={cfg.meetingRefine} options={REFINE} ariaLabel="Improve the transcript after the meeting" />
     </Row>

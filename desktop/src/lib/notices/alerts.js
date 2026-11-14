@@ -20,7 +20,7 @@
 //   "lastTranscript" — "Copied your last dictation", "Nothing to paste
 //     yet" (pasting/last.rs: Paste / Copy last transcript's shortcuts).
 // A button's id goes back to Rust (`alert_action`), which does it. Rust has
-// already applied the cooldowns (notices/notice.rs); here they're toasts of kind
+// already applied the cooldowns (notices/policy.rs); here they're toasts of kind
 // "alert" (ui/noticePolicy.js): never held behind a dictation.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -30,7 +30,7 @@ import { toast } from '../ui/toast.svelte.js';
 // (chat/assistant.rs), with Open settings → Language Models.
 // "commands": "Let Commands read the window in front?", with Allow
 // (dictation/command_screen.rs).
-// "notes": Yap closed during a meeting, with Transcribe it (meetings/meeting_audio.rs).
+// "notes": Yap closed during a meeting, with Transcribe it (meetings/audio.rs).
 // "snip": Snip to Chat couldn't start or save (snip.rs).
 // "save": a save that failed by itself, with Try again, and "Saved" after it
 // (shell/saving.rs; a command's failed save is saveErrors.js's toast).

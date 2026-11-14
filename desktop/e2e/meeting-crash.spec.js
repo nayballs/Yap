@@ -1,13 +1,13 @@
-// A crash mid-meeting (desktop/src-tauri/src/meetings/meeting_audio.rs): the meeting's audio
+// A crash mid-meeting (desktop/src-tauri/src/meetings/audio.rs): the meeting's audio
 // is on disk as it's recorded, so when the test instance is killed outright
 // mid-meeting — no exit hooks, the last chunks never transcribed — the next
 // start finds it:
 // - the note says so ("Yap closed while this meeting was recording…") with
-//   Transcribe it, and Yap offers it in one place (notices/notice.rs: a toast in the
+//   Transcribe it, and Yap offers it in one place (notices/policy.rs: a toast in the
 //   main window while it's looked at);
 // - Transcribe it puts the part that never became lines into the note, where
 //   it belongs, then the end of the meeting runs as a stop would have
-//   (meetings/meeting_end.rs: its stop mark, the action plan — no AI set up here,
+//   (meetings/end.rs: its stop mark, the action plan — no AI set up here,
 //   so "needsAi");
 // - "Transcribe again" (the Notes view's menu) afterwards keeps the summary
 //   and the name on a line.

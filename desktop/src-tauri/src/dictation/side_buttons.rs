@@ -650,7 +650,7 @@ pub fn forget_tip() {
 /// within [`LISTEN_MS`].
 #[tauri::command]
 pub async fn side_buttons_listen(app: AppHandle, on: bool) {
-    let on = on && crate::notices::notice::window_view(&app).0;
+    let on = on && crate::notices::policy::window_view(&app).0;
     tracing::debug!(on, "Side buttons: listening");
     crate::dictation::input_hook::listen_side_buttons(if on { LISTEN_MS } else { 0 });
 }

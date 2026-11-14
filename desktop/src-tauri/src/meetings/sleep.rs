@@ -6,7 +6,7 @@
 //!
 //! - **On sleep** (Windows' suspend notification,
 //!   `PowerRegisterSuspendResumeNotification`, a callback, no window): a
-//!   meeting recording is paused cleanly (`meeting_end::pause_automatically`:
+//!   meeting recording is paused cleanly (`end::pause_automatically`:
 //!   the last chunk transcribed, the audio closed, a stop mark, no
 //!   summary). One already stopping (Stop pressed, then the lid shut)
 //!   finishes as asked: no line, no question.
@@ -24,7 +24,7 @@
 //! Network loss mid-meeting needs no line: speech is transcribed on this
 //! PC, so the transcript has no gap; only a cloud model's digests wait
 //! (retried after a couple of minutes, and caught up before the summary,
-//! `meeting_summary.rs`), and a summary written while offline fails with
+//! `summary.rs`), and a summary written while offline fails with
 //! Retry.
 //!
 //! Test mode registers nothing: `e2e_sleep` pretends a sleep.
@@ -89,7 +89,7 @@ pub fn init(app: &AppHandle) {
 
 /// The PC is going to sleep: a meeting recording pauses cleanly.
 pub fn suspending() {
-    let Some(note_id) = crate::meetings::meeting::recording_note() else {
+    let Some(note_id) = crate::meetings::recorder::recording_note() else {
         return;
     };
     // Already ending or pausing (Stop and summarise, then the lid shut at
@@ -97,13 +97,13 @@ pub fn suspending() {
     // here instead, an ended meeting got no summary, a "Your PC was asleep"
     // line and Resume, and its call's app back on the mic after the wake
     // carried on in it.
-    if crate::meetings::meeting::stopping() {
+    if crate::meetings::recorder::stopping() {
         tracing::info!(note_id, "Sleep: the PC is going to sleep as a meeting's notes finish; left to finish as asked");
         return;
     }
     tracing::info!(note_id, "Sleep: the PC is going to sleep mid-meeting; pausing the notes");
     *SLEPT.lock().unwrap_or_else(|p| p.into_inner()) = Some(Slept { note_id, at_ms: now_ms() });
-    if let Err(e) = crate::meetings::meeting_end::pause_automatically() {
+    if let Err(e) = crate::meetings::end::pause_automatically() {
         tracing::info!("Sleep: nothing to pause ({e})");
         *SLEPT.lock().unwrap_or_else(|p| p.into_inner()) = None;
     }
@@ -122,12 +122,12 @@ pub fn woke(app: &AppHandle, asleep_ms: Option<u64>) {
         // The paused recording's last chunk first (it may still be on its
         // way): the line goes after it.
         let until = Instant::now() + DRAIN_WAIT;
-        while crate::meetings::meeting::recording_note() == Some(slept.note_id) && Instant::now() < until {
+        while crate::meetings::recorder::recording_note() == Some(slept.note_id) && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(200));
         }
         mark(&app, slept, ms);
         // Back on the call already (`meeting_detect::on_wake`): nothing to ask.
-        if crate::meetings::meeting::recording_note() == Some(slept.note_id) {
+        if crate::meetings::recorder::recording_note() == Some(slept.note_id) {
             return;
         }
         ask_resume(&app, slept.note_id, ms);

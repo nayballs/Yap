@@ -839,10 +839,10 @@ pub fn measure(
 
 /// Why the PC isn't free for a measurement now, if it isn't.
 fn busy(app: &AppHandle) -> Option<&'static str> {
-    if crate::meetings::meeting::is_recording() {
+    if crate::meetings::recorder::is_recording() {
         return Some("a meeting is recording");
     }
-    if crate::meetings::meeting_audio::any_job_running() {
+    if crate::meetings::audio::any_job_running() {
         return Some("a meeting is being transcribed again");
     }
     if crate::dictation::commands::model_download_in_flight() {

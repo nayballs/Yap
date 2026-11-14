@@ -42,7 +42,7 @@
 //!   Deleted with the note ([`forget`]).
 //! - **Restore** ([`restore`]): the version's text back in its field — a
 //!   summary keeps the tasks ticked in it now (`tasks::carry_ticks`) and is
-//!   the person's unless it's Yap's own (`note_edits::apply_summary_edit`) —
+//!   the person's unless it's Yap's own (`edits::apply_summary_edit`) —
 //!   as a new version ([`kind::RESTORED`]), so a restore can be undone like
 //!   anything else ([`undo_target`]).
 //! - **Transcript retention** (`retention.rs`): when a meeting's transcript
@@ -281,7 +281,7 @@ thread_local! {
 /// Run `f`; the note changes it makes are recorded as `how` (a transform,
 /// an Action, Chat…). The call another part of Yap makes to have its change
 /// marked: `versions::by(How::named(kind::ACTION, "Make it longer"), ||
-/// note_edits::write_summary(…))`. Changes made outside it are marked by
+/// edits::write_summary(…))`. Changes made outside it are marked by
 /// the entry point (see the module notes).
 pub fn by<R>(how: How, f: impl FnOnce() -> R) -> R {
     struct Reset(Option<How>);
@@ -778,7 +778,7 @@ pub fn restore_by(id: u64, n: u64, label: &str) -> Result<Restored, String> {
                     } else {
                         super::tasks::carry_ticks(&note.enhanced_content, &v.text)
                     };
-                    super::note_edits::apply_summary_edit(note, &text, now)
+                    super::edits::apply_summary_edit(note, &text, now)
                 }
             };
             Ok(((v.field.of(note).to_string(), changed), changed))
@@ -911,7 +911,7 @@ pub fn note_version_restore(app: AppHandle, id: u64, n: u64, origin: Option<Stri
     let origin = origin.as_deref().unwrap_or("history");
     match restored.field {
         Field::Notes => super::commands::note_changed(&app, id, origin),
-        Field::Summary => super::note_edits::summary_changed(&app, id, origin),
+        Field::Summary => super::edits::summary_changed(&app, id, origin),
     }
     super::saved()?;
     Ok(restored)
@@ -1246,8 +1246,8 @@ mod tests {
     #[test]
     fn a_summary_restored_keeps_its_ticks_and_retention_takes_the_summarys_versions() {
         let id = super::super::create("Sync", "notes", "manual", "").id;
-        by(How::new(kind::SUMMARY), || super::super::note_edits::write_summary(id, "- [ ] Book the room\n- [ ] Send the deck", "h", 1, 0, false)).unwrap();
-        super::super::modify(id, |n| Ok(((), super::super::note_edits::apply_summary_edit(n, "- [ ] Book the room", 2)))).unwrap();
+        by(How::new(kind::SUMMARY), || super::super::edits::write_summary(id, "- [ ] Book the room\n- [ ] Send the deck", "h", 1, 0, false)).unwrap();
+        super::super::modify(id, |n| Ok(((), super::super::edits::apply_summary_edit(n, "- [ ] Book the room", 2)))).unwrap();
         super::super::modify(id, |n| {
             n.enhanced_content = "- [x] Book the room".into();
             Ok(((), true))

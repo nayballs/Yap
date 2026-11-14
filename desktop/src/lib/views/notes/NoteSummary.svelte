@@ -1,7 +1,7 @@
 <script>
   // The open note's summary (the Summary tab): rendered markdown whose tasks
   // tick in place (notes/tasks.rs), or its markdown while it's edited (Edit
-  // summary, notes/note_edits.rs); over it, what's new since it (Update),
+  // summary, notes/edits.rs); over it, what's new since it (Update),
   // whether it's the person's ("Edited") and "Back to Yap's summary"; Ctrl+F
   // finds in it (SummaryFind); under it, 👍 / 👎 (SummaryRating, on this PC
   // only).

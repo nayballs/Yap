@@ -382,7 +382,7 @@ pub(crate) fn now_secs() -> u64 {
 /// What Yap must never touch right now.
 pub(crate) fn calls_now() -> Calls {
     let (names, live_browsers) = crate::calls::meeting_detect::call_audio();
-    Calls { names, live_browsers, meeting: crate::meetings::meeting::is_recording() }
+    Calls { names, live_browsers, meeting: crate::meetings::recorder::is_recording() }
 }
 
 /// `h` turns down what the rules allow now (Windows' sessions; with the

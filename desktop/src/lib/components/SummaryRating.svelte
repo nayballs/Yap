@@ -1,7 +1,7 @@
 <script>
   // 👍 / 👎 under a meeting's summary (the notepad's Summary tab and the Notes
   // view's), Wispr Flow's "Was this summary useful?": kept in the note on
-  // this PC only, never sent (notes/note_edits.rs `note_summary_rate`) — for
+  // this PC only, never sent (notes/edits.rs `note_summary_rate`) — for
   // the model evaluations later. A 👎 offers "What was wrong?", a short note
   // the person may skip. Pressing the same thumb again takes it back. A new
   // summary from Yap starts unrated.

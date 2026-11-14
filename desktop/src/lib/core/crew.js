@@ -103,8 +103,6 @@ export function propOf(mode) {
  * (faint), unused (a plan nobody went ahead with: stands still in its own
  * colours, no badge — neither ✓ nor failed).
  */
-export const POSES = ['working', 'needs', 'done', 'stopped', 'failed', 'queued', 'unused'];
-
 const POSE_WORDS = { working: 'working', needs: 'needs you', done: 'done', stopped: 'stopped', failed: "didn't finish", queued: 'queued', unused: 'plan not used' };
 
 /** **An avatar's label**: "Opus, working, Auto mode". */

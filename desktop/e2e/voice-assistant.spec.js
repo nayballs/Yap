@@ -357,7 +357,7 @@ test('asked while Yap is in front: Chat comes up with the question and the answe
 // The card is for someone who can't see Chat (30 Oct 2026: it came up on the
 // bar over Chat, maximised, with the answer streaming in front of the
 // maintainer). Rust decides on the window's real state as the answer comes
-// (notice::window_seen; a test run says where the person is with e2e_focus).
+// (notices::policy::window_seen; a test run says where the person is with e2e_focus).
 test("the answer's card shows only when Chat isn't in view: beside the app in front on that chat, none", async ({
   yap,
   main,

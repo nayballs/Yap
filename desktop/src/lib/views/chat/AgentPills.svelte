@@ -46,7 +46,7 @@
     gap: 6px;
     max-width: 78%;
   }
-  /* PagePills' look. */
+  /* A pill: page links' look before they became cards (PageCards.svelte). */
   .agentpill {
     display: inline-flex;
     align-items: center;

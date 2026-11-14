@@ -1900,7 +1900,7 @@ something that matches that?").
     numbered from 1. Without a record (an older Claude Code, the tests'
     stand-in) the lines come from the call's input, as before, with no
     numbers.
-  - **What was replaced inside a line** (`core/diffWords.js`, 2026-11-12,
+  - **What was replaced inside a line** (`core/intralineDiff.js`, 2026-11-12,
     as Claude Code's transcript marks it; the maintainer: "it highlights it
     in green then shows… what was replaced? can we have that as well?"):
     where a line was changed rather than taken out, the part that was
@@ -2535,7 +2535,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 `codeChats.svelte.js`, `WorkspacePicker`, `CodeChips`, `CodeEdge`,
 `codeChat.css`, `CodeEmpty`, `ModeChip`, `AgentTab`, `AgentPanel`, `AgentTimeline`, `AgentFiles`,
 `AgentPills`, `AgentTodoCard`, `AgentWork`, `StepRows`, `StepPictures`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`),
-`core/codeChats.js`, `core/agents.js`, `core/codeColours.js` (+ `codeColours.hljs.js`), `core/diffWords.js`, `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
+`core/codeChats.js`, `core/agents.js`, `core/codeColours.js` (+ `codeColours.hljs.js`), `core/intralineDiff.js`, `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
 `stores/agents.svelte.js`, `settings/YapCodePage.svelte`,
 `settings/ClaudeCodeStatus.svelte`.
 
@@ -2585,7 +2585,6 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 | `chat_send {…, codeFolder?}` | (Chat's) a new chat's first question, made a Code chat in that workspace |
 | `claude_approve_answer {id, allow}` / `claude_approve_pending` | a permission prompt's answer; the prompts waiting (`integrations/claude_live.rs`) |
 | `claude_approve_reply {id, answers}` | a question card's answers (`AskUserQuestion`): each question's text → the label picked, a list of labels, or the person's own words; `true` when it was still waiting and something was answered |
-| `claude_code_status {refresh?}` / `claude_code_sign_in` | Claude Code on this PC; its sign-in terminal (`ai/claude_code.rs`) |
 
 Debug builds, test mode only: `e2e_claude_script {script?}` (Claude Code is
 the build's own stand-in replaying `script` from now on),

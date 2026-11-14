@@ -668,7 +668,7 @@ pub fn fit_history(history: &[(String, String)], budget: usize) -> Vec<(String, 
     let mut used = 0;
     let mut kept: Vec<(String, String)> = Vec::new();
     for (role, text) in history.iter().rev() {
-        let t = crate::meetings::meeting_summary::estimate_tokens(text) + 4;
+        let t = crate::meetings::summary::estimate_tokens(text) + 4;
         if used + t > budget {
             break;
         }
@@ -1193,7 +1193,7 @@ mod tests {
         let kept = fit_history(&history, 200);
         assert!(!kept.is_empty() && kept.len() < 10);
         assert_eq!(kept.last(), history.last());
-        assert!(kept.iter().map(|(_, t)| crate::meetings::meeting_summary::estimate_tokens(t) + 4).sum::<usize>() <= 200);
+        assert!(kept.iter().map(|(_, t)| crate::meetings::summary::estimate_tokens(t) + 4).sum::<usize>() <= 200);
     }
 
     /// The real keyless lookup, read-only, no key: Wikipedia and bg3.wiki.

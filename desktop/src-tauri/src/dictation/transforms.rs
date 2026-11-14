@@ -365,17 +365,11 @@ pub fn for_dictation(cfg: &YapConfig, kind: crate::ai::cleanup_styles::Category,
 /// scope's model, as a dictation's AI call: the result, or why not (no
 /// model set up, the AI failed or wrote nothing) — the caller pastes `text`
 /// then. The log says which transform and lengths, never the text.
-// Kept for callers without a kind of app (a note's transform): the
-// pipeline's own goes through `run_on_dictation_in`.
-#[allow(dead_code)]
-pub async fn run_on_dictation(cfg: &YapConfig, t: &Transform, text: &str) -> Result<String, String> {
-    run_on_dictation_in(cfg, t, text, None).await
-}
-
-/// [`run_on_dictation`] for a dictation into `category` (its kind of app):
-/// a transform that rewords takes the person's writing samples for it
-/// (`ai/writing_samples.rs`); `None`, or no samples: as ever.
-pub async fn run_on_dictation_in(
+///
+/// Into `category` (its kind of app): a transform that rewords takes the
+/// person's writing samples for it (`ai/writing_samples.rs`); `None`, or no
+/// samples: as ever.
+pub async fn run_on_dictation(
     cfg: &YapConfig,
     t: &Transform,
     text: &str,

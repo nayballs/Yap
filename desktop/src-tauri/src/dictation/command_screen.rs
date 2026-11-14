@@ -591,7 +591,7 @@ fn placeholder(line: &str) -> bool {
 
 // ---- asked first ------------------------------------------------------------------------------
 
-/// The ask's alert kind (its rule in `notice.rs`).
+/// The ask's alert kind (its rule in `notices/policy.rs`).
 pub const KIND: &str = "commandsScreen";
 
 /// A Command waiting for the ask's **Allow**.

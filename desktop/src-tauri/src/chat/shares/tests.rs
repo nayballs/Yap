@@ -234,7 +234,7 @@ fn the_tool_is_offered_where_show_picture_takes_a_path() {
         assert_eq!(d["parameters"]["properties"]["display"]["enum"], json!(["render", "attach"]));
     }
     // Small: every step sends it.
-    let est = crate::meetings::meeting_summary::estimate_tokens;
+    let est = crate::meetings::summary::estimate_tokens;
     let weight = est(&definitions(Offer::Web).to_string());
     assert!(weight <= 220, "{weight} tokens");
     // Its words in the summary.

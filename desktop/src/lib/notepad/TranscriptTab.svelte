@@ -38,7 +38,7 @@
     const t = (note?.transcript || []).filter((s) => !s.dictated);
     return t.length > 1 ? t[t.length - 1].ts - t[0].ts : 0;
   });
-  // The meeting's audio kept on disk (meetings/meeting_audio.rs): ▶ on its lines,
+  // The meeting's audio kept on disk (meetings/audio.rs): ▶ on its lines,
   // what a crash left of it.
   const audio = $derived(note ? meetingAudio.byNote[note.id] : null);
 
@@ -102,7 +102,7 @@
 </div>
 {/if}
 {#if note && jobState(note.id)}
-  <!-- Its audio being transcribed (meetings/meeting_audio.rs), with Cancel; a refine's "Update summary". -->
+  <!-- Its audio being transcribed (meetings/audio.rs), with Cancel; a refine's "Update summary". -->
   <MeetingJob noteId={note.id} look="paper" />
 {:else if audio?.recoverableSecs && !recordingThis}
   <!-- What a crash left of it: the audio is kept. -->

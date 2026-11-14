@@ -249,7 +249,7 @@ impl Shared {
         let Ok(cfg) = self.config.read().map(|c| c.clone()) else { return text };
         let kind = crate::ai::cleanup_styles::category(&cfg, target);
         let Some(t) = crate::dictation::transforms::for_dictation(&cfg, kind, target.is_terminal()) else { return text };
-        let call = crate::dictation::transforms::run_on_dictation_in(&cfg, &t, &text, Some(kind));
+        let call = crate::dictation::transforms::run_on_dictation(&cfg, &t, &text, Some(kind));
         let result = if watch {
             let m = super::commands_model(&cfg);
             let key = format!("transform:{}", crate::dictation::slow::cleanup_key(&m.provider, &m.base_url, &m.model));

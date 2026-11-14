@@ -45,7 +45,7 @@ export const test = base.extend({
     await mainOnScreen(yap);
     // Yap's notice policy starts fresh: no cooldowns or fatigue counts from
     // the last test, and the person counts as looking at the main window
-    // while it's on screen (notices/notice.rs; a test that wants them in another
+    // while it's on screen (notices/policy.rs; a test that wants them in another
     // app calls `inAnotherApp`).
     await yap.invoke('e2e_notice_reset').catch(() => {});
     await resetUi(yap.main, { keepToasts });
@@ -88,7 +88,7 @@ export const test = base.extend({
 
 /**
  * The person is in another app (the call, an editor): Yap's notices go to
- * the Yap bar instead of the main window's toasts (notices/notice.rs: one place).
+ * the Yap bar instead of the main window's toasts (notices/policy.rs: one place).
  * A test run can't move the real focus; this says where it is. Back to
  * "looking at Yap" before every test.
  */

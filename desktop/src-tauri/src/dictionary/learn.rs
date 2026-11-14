@@ -47,7 +47,7 @@
 //!    way, is offered as another way it's heard ("Add another way you say
 //!    “Kubernetes”?", `variants.rs`). One per spelling, terms with a capital
 //!    first, at most [`MAX_SUGGESTIONS`].
-//! 3. **The prompt** ([`offer`]), in one place (`notice::place`): a toast in
+//! 3. **The prompt** ([`offer`]), in one place (`notices::policy::place`): a toast in
 //!    the main window while it's focused, else a card on the Yap bar
 //!    (`bar::show_card`; it waits out a dictation, up to a minute), else the
 //!    window's toast if it's on screen; neither → not shown, nothing
@@ -1474,14 +1474,14 @@ fn offer(app: &AppHandle, words: Vec<Suggestion>, ignore_gap: bool) -> bool {
     }
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
     let (title, body, never) = prompt_text_with(&words, &crate::config::load().dictionary);
-    // One place (`notice.rs`): the main window while the person is looking
+    // One place (`notices/policy.rs`): the main window while the person is looking
     // at it, else the Yap bar (else the window, on screen after all).
-    let place = crate::notices::notice::place_tip(app, "word-suggestion");
-    if place == crate::notices::notice::Place::Nowhere {
+    let place = crate::notices::policy::place_tip(app, "word-suggestion");
+    if place == crate::notices::policy::Place::Nowhere {
         tracing::debug!("learn: nowhere to show the suggestion");
         return false;
     }
-    let in_window = place == crate::notices::notice::Place::Window;
+    let in_window = place == crate::notices::policy::Place::Window;
     *pending() = Some(Pending {
         id,
         words: words.clone(),
@@ -1522,7 +1522,7 @@ fn offer(app: &AppHandle, words: Vec<Suggestion>, ignore_gap: bool) -> bool {
         )
     };
     // Not shown after all: the day's count back.
-    let shown = crate::notices::notice::tip_shown(CARD, place, shown);
+    let shown = crate::notices::policy::tip_shown(CARD, place, shown);
     if shown {
         tracing::info!(count = words.len(), in_window, "learn: offered words for the dictionary");
         update_record(|mut r| {
@@ -1539,7 +1539,7 @@ fn offer(app: &AppHandle, words: Vec<Suggestion>, ignore_gap: bool) -> bool {
     shown
 }
 
-/// A meeting transcript line the person corrected (`note_edits.rs`), `old`
+/// A meeting transcript line the person corrected (`notes/edits.rs`), `old`
 /// → `new`: what's worth learning in it, by the same rules as a dictation
 /// they fixed ([`suggestions`]; the start of a line starts a sentence), the
 /// words turned down or removed before left out. Returned for the window

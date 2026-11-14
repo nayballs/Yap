@@ -85,7 +85,7 @@ test('the sorts: starred first, A–Z, most used, recently added — each fallin
   };
   // Most uses first; a tie goes to the one used last; never used, the order added.
   expect(arrange(list, { sort: 'used', usage })).toEqual([d, g, a, b, e, f]);
-  // Counted under the word, lowercased (dict_usage.rs `key`).
+  // Counted under the word, lowercased (dictionary/usage.rs `key`).
   expect(usageKey(c('x', '  Kubernetes '))).toBe('kubernetes');
   // A search and a sort together.
   expect(arrange(list, { query: 'e', sort: 'az' })).toEqual([e, d, g, a]);

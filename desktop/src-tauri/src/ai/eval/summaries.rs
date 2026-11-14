@@ -12,7 +12,7 @@
 //!   language;
 //! - **after**: today's — `ACTION_PLAN_DEFAULT_FRAGMENT` (the "## Recap",
 //!   a reason per decision) and the meeting's language line after the input
-//!   (`meeting_summary::final_request`, `language.rs`).
+//!   (`meetings::summary::final_request`, `language.rs`).
 //!
 //! Both under `ACTION_PLAN_BASE_PROMPT`, then `postcheck_action_plan` as the
 //! app runs it. Judged on the notes as shown: **language** (the prose's
@@ -32,7 +32,7 @@ use serde_json::{json, Value};
 
 use super::cleanup::Endpoint;
 use super::record;
-use crate::meetings::meeting_summary::{self as summary, language};
+use crate::meetings::summary::{self as summary, language};
 
 /// The phases.
 pub const PHASES: &[&str] = &["before", "after"];

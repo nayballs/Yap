@@ -37,7 +37,7 @@
 //! default (work apps yes, personal chat apps like Discord no) that the
 //! person's choice in Settings (`meeting_detect_apps`) or "Don't ask for
 //! Discord" on a prompt overrides. Two styles (`meeting_detect_style`):
-//! - "popup": in one place (`notice.rs`): an in-app toast while the main
+//! - "popup": in one place (`notices/policy.rs`): an in-app toast while the main
 //!   window is focused, else the Yap bar's card, else a Windows notification
 //!   with Yap's logo (else the in-app toast if the window is on screen);
 //!   focusing the window moves a pending prompt into it. A start prompt
@@ -45,7 +45,7 @@
 //!   auto-dismiss) — an "ignore" for call-prompt fatigue, which offers once
 //!   to stop asking after three "Not now"s or five fades in a row, and stops
 //!   by itself after 35 prompts with no meeting ever recorded
-//!   (`notice::Fatigue`);
+//!   (`notices::policy::Fatigue`);
 //! - "quiet": the notification goes silently into the notification center,
 //!   with no banner and no in-app toast.
 //!
@@ -59,14 +59,14 @@
 //! calendar "meeting ended" event isn't acted on), and the mic signal can't
 //! tell a finished call from one moved to a phone, a breakout room or a
 //! rejoin, so Yap asks instead of stopping. Stopping ends the meeting, so
-//! Rust writes its action plan (`meeting_end.rs`), shown in the meeting
+//! Rust writes its action plan (`meetings/end.rs`), shown in the meeting
 //! notepad or the note in the main window. With "When a call
 //! ends: Stop and summarise automatically" (`meeting_call_end`, Wispr's
 //! "Stop Notetaker when a call ends") it stops and summarises without asking
 //! (`meeting_guard::stop_after_call`).
 //!
 //! **Sure about the ending** (2026-10-29): 15 s off the mic, and a second
-//! opinion (`call_audio::still_on`: the call app still plays sound, or a
+//! opinion (`audio::still_on`: the call app still plays sound, or a
 //! window still shows the meeting). Still on → "Stop taking notes?"
 //! instead, also with "Stop and summarise automatically" (it may turn into
 //! the usual ending while it's up, once that's gone). After Yap stopped a
@@ -547,7 +547,7 @@ enum PromptKind {
     /// "Teams call ended — Stop and summarise?"
     End,
     /// "Stop taking notes?": the call app let go of the mic, but its call
-    /// still looks on (`call_audio::still_on`).
+    /// still looks on (`audio::still_on`).
     Unsure,
     /// "Switch to Zoom?": another app's call started while one records.
     Switch,
@@ -875,7 +875,7 @@ fn offer(s: &State) -> Option<&Call> {
 /// faded, went quietly to the notification center or got "Not now" still
 /// leaves a way to record.
 pub fn tray_item() -> Option<(String, String)> {
-    if crate::meetings::meeting::is_recording() {
+    if crate::meetings::recorder::is_recording() {
         return None;
     }
     let s = lock();
@@ -959,7 +959,7 @@ struct Todo {
     /// on: stop and summarise this note.
     auto_stop: Option<(u64, &'static App)>,
     /// A start prompt went up: call-prompt fatigue counts it
-    /// (`notice::Fatigue`).
+    /// (`notices::policy::Fatigue`).
     prompted: bool,
     /// (note, call): the call came back soon after Yap stopped its notes by
     /// itself: carry on recording in that note.
@@ -1009,7 +1009,7 @@ fn run(app: &AppHandle, todo: Todo) {
     }
     if todo.prompted {
         let ever = ever_recorded();
-        if crate::notices::notice::with_call_fatigue(|f| f.prompted(ever)) == crate::notices::notice::Verdict::SwitchOff {
+        if crate::notices::policy::with_call_fatigue(|f| f.prompted(ever)) == crate::notices::policy::Verdict::SwitchOff {
             stopped_asking(app);
         }
     }
@@ -1079,11 +1079,11 @@ fn drop_unasked(s: &mut State, todo: &mut Todo) {
     }
 }
 
-/// The main window: (on screen, focused) — `notice::window_view` (a test
+/// The main window: (on screen, focused) — `notices::policy::window_view` (a test
 /// run says for itself whether the person is looking at it). Never call
 /// with the lock held.
 fn window_view(app: &AppHandle) -> (bool, bool) {
-    crate::notices::notice::window_view(app)
+    crate::notices::policy::window_view(app)
 }
 
 /// A dictation is recording or transcribing. Locks the pipeline, so never
@@ -1099,7 +1099,7 @@ fn dictating(app: &AppHandle) -> bool {
 }
 
 /// Put up a prompt (replacing whatever was up), in one place
-/// (`notice::place_for`). Pop-up style: the in-app toast while the person
+/// (`notices::policy::place_for`). Pop-up style: the in-app toast while the person
 /// is looking at the main window (focused), else the Yap bar's card, else a
 /// Windows notification, else — nothing else possible — the in-app toast if
 /// the window is on screen. Quietly: a notification without a banner,
@@ -1119,13 +1119,13 @@ fn show_prompt(
     let quiet = s.quiet;
     let fade_ms = matches!(kind, PromptKind::Start | PromptKind::Switch)
         .then(|| s.calls.iter().find(|c| c.id == call_id).and_then(|c| c.fade_ms).unwrap_or(FADE_MS));
-    let place = crate::notices::notice::place_for(
+    let place = crate::notices::policy::place_for(
         focused,
         visible,
         crate::bar::cards_available(),
-        crate::notices::notice::notifications_allowed(),
+        crate::notices::policy::notifications_allowed(),
     );
-    let in_app = !quiet && place == crate::notices::notice::Place::Window;
+    let in_app = !quiet && place == crate::notices::policy::Place::Window;
     // `meeting_auto_start`: a countdown, only where it's sure to be seen
     // (the toast in a focused main window, or the Yap bar's card) and not
     // for a call it just asked about (a rejoin or a reload).
@@ -1159,7 +1159,7 @@ fn show_prompt(
 /// The note Yap is recording `call` into, if any: the one its prompt started,
 /// or a recording started (give or take a minute) after the call did.
 fn recording_of(call: &Call) -> Option<u64> {
-    let st = crate::meetings::meeting::state();
+    let st = crate::meetings::recorder::state();
     if st["recording"].as_bool() != Some(true) {
         return None;
     }
@@ -1194,7 +1194,7 @@ fn on_edges(app: &AppHandle, edges: Vec<Edge>) {
     }
     // A call Yap records ended by the mic: is it still on by a second
     // signal? (Read before the lock: Windows' audio sessions, its windows.)
-    let recording = crate::meetings::meeting::recording_note().is_some();
+    let recording = crate::meetings::recorder::recording_note().is_some();
     let still: Vec<(&'static str, Option<bool>)> = edges
         .iter()
         .filter_map(|e| match e {
@@ -1234,12 +1234,12 @@ fn on_edges(app: &AppHandle, edges: Vec<Edge>) {
     }
 }
 
-/// Is `app_id`'s call still on by a second signal (`call_audio::still_on`)?
+/// Is `app_id`'s call still on by a second signal (`audio::still_on`)?
 /// Never with the lock held.
 fn still_on(app_id: &str) -> Option<bool> {
     let call_app = app_by_id(app_id)?;
     let exes: Vec<String> = call_app.exes.iter().map(|e| e.to_string()).collect();
-    let there = crate::calls::call_audio::still_on(app_id, &exes);
+    let there = crate::calls::audio::still_on(app_id, &exes);
     tracing::info!(app = app_id, ?there, "meeting detect: is the call still on?");
     there
 }
@@ -1294,7 +1294,7 @@ fn call_started(s: &mut State, todo: &mut Todo, id: &'static str, since: u64) {
     let Some(app) = app_by_id(id) else { return };
     s.seq += 1;
     let call_id = s.seq;
-    let recording_note = crate::meetings::meeting::state()["noteId"].as_u64();
+    let recording_note = crate::meetings::recorder::state()["noteId"].as_u64();
     let asked = asks(&s.choices, app);
     let snoozed = s.snoozed.get(id).is_some_and(|until| now_ms() < *until);
     let start = on_start(id, recording_note, s.recorded, s.auto_stopped, now_ms(), asked, snoozed);
@@ -1371,7 +1371,7 @@ enum AtCallEnd {
 /// whether Yap asks about the call's app (one it doesn't gets no ending
 /// either, so a background Discord call can't stop an unrelated
 /// recording); `auto_stop`: `meeting_call_end` is "stop"; `sure`: no
-/// second signal says the call is still on (`call_audio::still_on`).
+/// second signal says the call is still on (`audio::still_on`).
 fn at_call_end(note: Option<u64>, asked: bool, auto_stop: bool, sure: bool) -> AtCallEnd {
     match note {
         Some(note) if asked && !sure => AtCallEnd::Unsure(note),
@@ -1385,7 +1385,7 @@ fn at_call_end(note: Option<u64>, asked: bool, auto_stop: bool, sure: bool) -> A
 /// one, retire prompts that became moot.
 fn tick(app: &AppHandle) {
     let busy = dictating(app);
-    let recording = crate::meetings::meeting::is_recording();
+    let recording = crate::meetings::recorder::is_recording();
     let (wants_view, in_window, unsure) = {
         let s = lock();
         let in_window = s.prompt.as_ref().is_some_and(|p| p.in_app && !p.quiet);
@@ -1431,7 +1431,7 @@ fn tick(app: &AppHandle) {
                 None => show_prompt(&mut s, &mut todo, view, PromptKind::End, p.call_id, p.app, p.note_id),
             }
         }
-        // One place (`notice.rs`): a prompt in the window follows the person
+        // One place (`notices/policy.rs`): a prompt in the window follows the person
         // onto the Yap bar when the window loses the focus (and back when
         // it gets it, `on_main_window_focused`).
         if in_window && !view.1 && crate::bar::cards_available() {
@@ -1454,7 +1454,7 @@ fn tick(app: &AppHandle) {
         if let Some(call_id) = s.switch_due {
             if wants_view && recording && s.prompt.is_none() && settled {
                 s.switch_due = None;
-                let note = crate::meetings::meeting::recording_note();
+                let note = crate::meetings::recorder::recording_note();
                 if let Some(app) = s.calls.iter().find(|c| c.id == call_id).map(|c| c.app) {
                     show_prompt(&mut s, &mut todo, view, PromptKind::Switch, call_id, app, note);
                 }
@@ -1708,19 +1708,19 @@ fn respond_with(app: &AppHandle, prompt_id: u64, action: &str, clicked: bool) ->
     };
     run(app, todo);
     tracing::info!(prompt_id, action, current = prompt.is_some(), "meeting detect: answered");
-    // Call-prompt fatigue (`notice::Fatigue`): "Not now"s and prompts left
+    // Call-prompt fatigue (`notices::policy::Fatigue`): "Not now"s and prompts left
     // to fade in a row → offer once to stop asking.
     if let Some(p) = prompt.as_ref().filter(|p| p.kind == PromptKind::Start) {
         let answer = match action {
-            "dismiss" => Some(crate::notices::notice::Answer::Closed),
-            "ignore" => Some(crate::notices::notice::Answer::Ignored),
-            "record" | "never" => Some(crate::notices::notice::Answer::Engaged),
+            "dismiss" => Some(crate::notices::policy::Answer::Closed),
+            "ignore" => Some(crate::notices::policy::Answer::Ignored),
+            "record" | "never" => Some(crate::notices::policy::Answer::Engaged),
             _ => None,
         };
         if let Some(answer) = answer {
             let ever = ever_recorded();
-            if let crate::notices::notice::Verdict::OfferToStop { ignored } =
-                crate::notices::notice::with_call_fatigue(|f| f.answered(answer, ever))
+            if let crate::notices::policy::Verdict::OfferToStop { ignored } =
+                crate::notices::policy::with_call_fatigue(|f| f.answered(answer, ever))
             {
                 offer_to_stop(app, p.app, ignored);
             }
@@ -1752,7 +1752,7 @@ fn ever_recorded() -> bool {
         return true;
     }
     let found = crate::notes::all().iter().any(|n| {
-        n.note_type == "meeting" && crate::notes::speech_words(&n.transcript) >= crate::meetings::meeting_end::MISTAKE_WORDS
+        n.note_type == "meeting" && crate::notes::speech_words(&n.transcript) >= crate::meetings::end::MISTAKE_WORDS
     });
     if found {
         RECORDED.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1852,14 +1852,14 @@ fn record(app: &AppHandle, call_id: u64, clicked: bool) -> Result<u64, String> {
         .find(|c| c.id == call_id)
         .map(|c| c.app)
         .ok_or("That call has ended.")?;
-    if crate::meetings::meeting::is_recording() {
+    if crate::meetings::recorder::is_recording() {
         return Err("Yap is already recording a meeting.".to_string());
     }
     crate::notes::folder_create("Meetings");
     let title = note_title(call_app, local_now());
     let note = crate::notes::create(&title, "", "meeting", "Meetings");
     crate::notes::mark_meeting(note.id)?;
-    // A made-up title: the AI meeting title may replace it (meeting_assist.rs).
+    // A made-up title: the AI meeting title may replace it (meetings/assist.rs).
     crate::notes::set_title_auto(note.id)?;
     let started = crate::meetings::commands::meeting_start(app.clone(), app.state::<crate::AppState>(), note.id);
     if let Err(e) = started {
@@ -1893,11 +1893,11 @@ fn record(app: &AppHandle, call_id: u64, clicked: bool) -> Result<u64, String> {
 /// plan written, as any end), then "Record notes" on call `call_id` once
 /// its last chunk is in. Blocking (off the main thread, as [`respond`]).
 fn switch_to(app: &AppHandle, call_id: u64) -> Result<u64, String> {
-    if let Some(note_id) = crate::meetings::meeting::recording_note() {
+    if let Some(note_id) = crate::meetings::recorder::recording_note() {
         tracing::info!(note_id, call_id, "meeting detect: switching notes to the new call");
-        crate::meetings::meeting_end::end(app, None)?;
+        crate::meetings::end::end(app, None)?;
         let until = std::time::Instant::now() + SWITCH_WAIT;
-        while crate::meetings::meeting::is_recording() {
+        while crate::meetings::recorder::is_recording() {
             if std::time::Instant::now() > until {
                 return Err("The last meeting's notes are still finishing. Try again in a moment.".to_string());
             }
@@ -1913,7 +1913,7 @@ fn switch_to(app: &AppHandle, call_id: u64) -> Result<u64, String> {
 fn resume_into(app: &AppHandle, note_id: u64, call_id: u64) {
     // The stopped recording's last chunk first (it may still be on its way).
     let until = std::time::Instant::now() + Duration::from_secs(30);
-    while crate::meetings::meeting::is_recording() && std::time::Instant::now() < until {
+    while crate::meetings::recorder::is_recording() && std::time::Instant::now() < until {
         std::thread::sleep(Duration::from_millis(200));
     }
     // Still on (gone meanwhile: nothing to carry on), and the same meeting:
@@ -1954,7 +1954,7 @@ fn resume_into(app: &AppHandle, note_id: u64, call_id: u64) {
             if let Some(call) = s.calls.iter_mut().find(|c| c.id == call_id) {
                 call.note_id = None;
                 let asked = asks(&choices, call.app);
-                if asked && crate::meetings::meeting::recording_note().is_none() {
+                if asked && crate::meetings::recorder::recording_note().is_none() {
                     s.due = Some(call_id);
                 }
             }
@@ -1964,7 +1964,7 @@ fn resume_into(app: &AppHandle, note_id: u64, call_id: u64) {
     }
 }
 
-/// A recording ended (`meeting_end.rs`, once its last chunk is in): a
+/// A recording ended (`meetings/end.rs`, once its last chunk is in): a
 /// pause, Yap's own stop (`automatic`) or the person's, "Started by
 /// mistake?" asked or not. The end of a call's meeting the person stopped,
 /// the third of that app's: "Start notes automatically for Teams calls?",
@@ -2079,7 +2079,7 @@ pub struct CallInfo {
     pub exes: Vec<String>,
 }
 
-/// The call note `note_id`'s recording is of, if any (`call_audio.rs`).
+/// The call note `note_id`'s recording is of, if any (`audio.rs`).
 pub fn call_for(note_id: u64) -> Option<CallInfo> {
     let s = lock();
     let call = s.calls.iter().rev().find(|c| c.note_id == Some(note_id) || recording_of_in(&s, c) == Some(note_id))?;
@@ -2110,7 +2110,7 @@ pub fn window_shows_call(app_id: &str, exe: &str, title: &str) -> bool {
 
 /// "Stop and summarise" (the person's answer to "…call ended"): end the
 /// meeting — Rust writes the action plan once the last chunk is in
-/// (`meeting_end.rs`) — and show it where they'll look: the meeting notepad
+/// (`meetings/end.rs`) — and show it where they'll look: the meeting notepad
 /// when it's on screen; the note in the main window's Notes view when that's
 /// on screen; with neither, the main window comes up on the note. (Yap's own
 /// automatic stops — the length limit, "Stop and summarise automatically",
@@ -2118,9 +2118,9 @@ pub fn window_shows_call(app_id: &str, exe: &str, title: &str) -> bool {
 /// which brings up no window.)
 pub(crate) fn stop_and_summarise(app: &AppHandle, note_id: Option<u64>) {
     let main = window_view(app).0;
-    if note_id.is_none() || crate::meetings::meeting::recording_note() == note_id {
+    if note_id.is_none() || crate::meetings::recorder::recording_note() == note_id {
         // "Started by mistake?" asks where they answered, if it's on screen.
-        if let Err(e) = crate::meetings::meeting_end::end(app, main.then_some("settings")) {
+        if let Err(e) = crate::meetings::end::end(app, main.then_some("settings")) {
             tracing::info!("meeting detect: nothing to stop ({e})");
         }
     }

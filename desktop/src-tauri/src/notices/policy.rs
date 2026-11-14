@@ -141,7 +141,7 @@ pub fn rule(kind: &str) -> Rule {
         // "Stop asking about calls?": after a prompt, never during a
         // dictation.
         "calls-fatigue" => Rule { hold_dictation: true, max_wait_ms: None, ..alert },
-        // "Yap closed during a meeting" (meeting_audio.rs), at the next
+        // "Yap closed during a meeting" (meetings/audio.rs), at the next
         // start: not over a dictation or a meeting going on, and as long as
         // it takes (the note says it too).
         "meetingRecovery" => Rule { hold_dictation: true, hold_meeting: true, max_wait_ms: None, ..alert },
@@ -486,7 +486,7 @@ pub fn window_seen(app: &AppHandle) -> Seen {
 
 /// A Yap window has the focus: the main window or the meeting notepad (a
 /// test run: as `e2e_focus` says, for either on screen). What "Your summary
-/// is ready" asks before it says anything (`meeting_end.rs`). Window
+/// is ready" asks before it says anything (`meetings/end.rs`). Window
 /// getters: never with a lock held.
 pub fn yap_in_front(app: &AppHandle) -> bool {
     if window_view(app).1 {

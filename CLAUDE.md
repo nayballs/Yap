@@ -104,7 +104,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 ## Module index (`desktop/src-tauri/src/`)
 
 One folder per area (an area's `<area>.rs` lists its modules); a big module's parts are its children
-(`dictation/pipeline/`…), each named in its area's doc. The tree and its rules: [app-shell.md](./docs/architecture/app-shell.md#modules).
+(`dictation/pipeline/`…), each named in its area's doc; a module never repeats its folder's name (`meetings/audio.rs`, not `meetings/meeting_audio.rs`). The tree and its rules: [app-shell.md](./docs/architecture/app-shell.md#modules).
 
 **Dictation** — [dictation.md](./docs/architecture/dictation.md)
 - `dictation/pipeline.rs` (+ `pipeline/`) — the heart: record, transcribe, deliver, Undo. The `processing` guard (`Busy`) is let go however a task ends; the warm engine is lent in turns (`EngineCell`), never loaded twice.
@@ -148,7 +148,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 
 **Dictionary** — [dictionary.md](./docs/architecture/dictionary.md)
 - `dictionary/fuzzy.rs` — near-miss correction (never everyday words), the prompt-echo guard.
-- `dictionary/dict_usage.rs` / `dictionary/variants.rs` — how often each word is used; several ways one word is heard.
+- `dictionary/usage.rs` / `dictionary/variants.rs` — how often each word is used; several ways one word is heard.
 - `dictionary/files.rs` — the Dictionary's Import… / Export… files.
 - `dictionary/learn.rs` / `dictionary/snippet_offer.rs` — words and snippets offered from what you do.
 - `dictionary/spoken_names.rs` — how names spelled far from how they're said sound.
@@ -213,7 +213,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 
 **Notes** — [notes.md](./docs/architecture/notes.md)
 - `notes.rs` — the notes store (`notes.json`); nothing new only in fields an older Yap's save would drop.
-- `notes/note_edits.rs` / `notes/transcript_edits.rs` — fixing lines and the summary; a summary run never writes over the person's words.
+- `notes/edits.rs` / `notes/transcript_edits.rs` — fixing lines and the summary; a summary run never writes over the person's words.
 - `notes/tasks.rs` + `notes/task_store.rs` — the summary's checkboxes; tasks (`tasks.json`).
 - `notes/retention.rs` / `notes/pins.rs` — deleting old transcripts; pinned notes (`note_pins.json`).
 - `notes/versions.rs` / `notes/transform.rs` — each note's version history; transforms on a note.
@@ -221,11 +221,11 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `notes/md_file.rs` (+ `md_file/`) — Markdown files in a `doc-<hash>` window, saved back only while unchanged on disk.
 
 **Meetings** — [meetings.md](./docs/architecture/meetings.md) (guide: [`docs/meetings.md`](./docs/meetings.md))
-- `meetings/meeting.rs` — the recorder: mic + loopback, chunking, echo, one clock; one recorder per start.
-- `meetings/meeting_audio.rs` (+ `meetings/meeting_audio/`) / `meetings/disk_watch.rs` — the meeting's audio kept as FLAC; the drive's room.
-- `meetings/meeting_summary.rs` (+ `meeting_summary/`) — rolling digests and the action plan.
-- `meetings/meeting_end.rs` / `meetings/meeting_refine.rs` — a recording's end; the refined transcript.
-- `meetings/meeting_assist.rs` / `meetings/coach_marks.rs` — the notepad's AI; first-meeting coach marks.
+- `meetings/recorder.rs` — the recorder: mic + loopback, chunking, echo, one clock; one recorder per start.
+- `meetings/audio.rs` (+ `meetings/audio/`) / `meetings/disk_watch.rs` — the meeting's audio kept as FLAC; the drive's room.
+- `meetings/summary.rs` (+ `meetings/summary/`) — rolling digests and the action plan.
+- `meetings/end.rs` / `meetings/refine.rs` — a recording's end; the refined transcript.
+- `meetings/assist.rs` / `meetings/coach_marks.rs` — the notepad's AI; first-meeting coach marks.
 - `meetings/notepad.rs` / `meetings/sleep.rs` — the notepad window; the PC asleep mid-meeting.
 - `meetings/import.rs` (+ `import/`) — Import a transcript… from other apps.
 
@@ -237,7 +237,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 
 **Call detection and guard rails** — [call-detection-and-guards.md](./docs/architecture/call-detection-and-guards.md)
 - `calls/meeting_detect.rs` (+ `meeting_detect/auto_offer.rs`) — notices calls and asks.
-- `calls/call_audio.rs` / `calls/app_icons.rs` — the call's own mic and mute; the call apps' icons.
+- `calls/audio.rs` / `calls/app_icons.rs` — the call's own mic and mute; the call apps' icons.
 - `calls/meeting_guard.rs` — length limit, quiet meetings, check-ins.
 - `calls/capture.rs` — meeting windows hidden from screen capture while recording.
 
@@ -249,7 +249,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `bar/pointer.rs` / `bar/menu.rs` — first-use pointers; the ^ menu's extras.
 
 **Notices** — [notices.md](./docs/architecture/notices.md)
-- `notices/notice.rs` — the notice policy, in one place.
+- `notices/policy.rs` — the notice policy, in one place.
 - `notices/alert.rs` / `notices/kinds.rs` / `notices/win_toast.rs` — notices to act on; kinds with a daily cap; Windows notifications.
 
 **Integrations** — [integrations.md](./docs/architecture/integrations.md)
@@ -317,7 +317,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `core/codeColours.js` (+ `codeColours.hljs.js`, `ui/colourCode.js`) — code colours in a Code chat's rows and in an answer's fenced code that names its language: highlight.js in a chunk of its own, loaded when first needed; its output drawn as text tokens, never HTML; `--yap-syn-*` ([yap-code.md](./docs/architecture/yap-code.md#an-opened-stretch-a-row-a-step)).
 - `core/markdown.js` — every rendered answer and note: markdown-it + DOMPurify ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
 - `views/chat/` — Chat ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)): `ChatView.svelte` + `chatState.svelte.js`, `ConversationList`, `ChatThread`, `Composer`, the model picker over `core/chatPicker.js` (shared with the phone), the panel (`DocPanel`, `PageTab`); screenshots: [snip.md](./docs/architecture/snip.md#how-a-screenshot-looks-2026-10-31-after-the-claude-apps).
-- `views/chat/` Code side — `ChatSideSwitch`, `codeChats.svelte.js`, `ServersMenu` (the page tab's Dev servers, a Code chat's), `ElementChip` + `PageAnnotate` (Select an element or annotate: `chat/pages/pick.rs`), `ModeChip`, `AgentTab` (its panel `AgentPanel` + `core/agentPanel.js`, a turn's helpers entries of their own under its row; its rows' pixel characters, Yap's crew: `CrewAvatar`, `crew/`, `core/crew.js` `characterFor`; the chat's own Claude on its working line is **the lead**, cap and baton, never walking), `AgentTodoCard`, `QueuedMessage` (a message sent while the chat's Claude writes waits as Queued: Cancel and edit, Send now; then ✓✓ Read: chatState's queue, `runner::queue_state`), the actions under the person's message (Copy, Rewind, Fork from here: `ChatMessage` + `core/agents.js` `messageTurn`), `AgentWork` (the words and steps of a Code chat's own work in the thread, and of an agent Chat sent out in its Agent panel row, never the thread; its log from `stores/agentLogs.svelte.js`; `StepRows` a stretch opened: a row a step, an edit's to its numbered diff (the replaced part of a changed line marked: `core/diffWords.js`), a command's to itself and its output, a helper's own steps behind the row that sent it; `StepPictures` a step's picture at the end of its line); `stores/agents.svelte.js` ([yap-code.md](./docs/architecture/yap-code.md)).
+- `views/chat/` Code side — `ChatSideSwitch`, `codeChats.svelte.js`, `ServersMenu` (the page tab's Dev servers, a Code chat's), `ElementChip` + `PageAnnotate` (Select an element or annotate: `chat/pages/pick.rs`), `ModeChip`, `AgentTab` (its panel `AgentPanel` + `core/agentPanel.js`, a turn's helpers entries of their own under its row; its rows' pixel characters, Yap's crew: `CrewAvatar`, `crew/`, `core/crew.js` `characterFor`; the chat's own Claude on its working line is **the lead**, cap and baton, never walking), `AgentTodoCard`, `QueuedMessage` (a message sent while the chat's Claude writes waits as Queued: Cancel and edit, Send now; then ✓✓ Read: chatState's queue, `runner::queue_state`), the actions under the person's message (Copy, Rewind, Fork from here: `ChatMessage` + `core/agents.js` `messageTurn`), `AgentWork` (the words and steps of a Code chat's own work in the thread, and of an agent Chat sent out in its Agent panel row, never the thread; its log from `stores/agentLogs.svelte.js`; `StepRows` a stretch opened: a row a step, an edit's to its numbered diff (the replaced part of a changed line marked: `core/intralineDiff.js`), a command's to itself and its output, a helper's own steps behind the row that sent it; `StepPictures` a step's picture at the end of its line); `stores/agents.svelte.js` ([yap-code.md](./docs/architecture/yap-code.md)).
 - `views/help/` + `views/MeetingSetup.svelte` — the title bar's Help and the "Set up meeting notes" checklist.
 - `views/MeetingsView.svelte` and `notepad/` — meetings and the notepad (`Notepad.svelte`, `stores/meetingAudio.svelte.js`; [meetings.md](./docs/architecture/meetings.md)); `components/BriefView.svelte` ([briefs](./docs/architecture/calendar.md#pre-meeting-briefs)); `components/SpeakerMenu` / `SpeakerCard`.
 - `components/ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).

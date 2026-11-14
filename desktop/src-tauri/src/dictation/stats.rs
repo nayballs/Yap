@@ -19,7 +19,7 @@
 //!   dictation (now, and the longest).
 //! - **Fixes**: the words AI cleanup changed (the words as said against
 //!   the text pasted, [`word_diff`] — `core/wordDiff.js`'s twin) and the
-//!   dictionary's fixes (`dict_usage::fixed_in`); this month so far against
+//!   dictionary's fixes (`dictionary::usage::fixed_in`); this month so far against
 //!   the same days of last month, as a %.
 //! - **What counts**: every dictation transcribed — pasted or not, into
 //!   Chat or the quick note too — never an Upload (a file, not dictated),
@@ -185,7 +185,7 @@ impl Tally {
             secs: secs.filter(|s| s.is_finite() && *s > 0.0),
             app: app.trim().to_string(),
             cleanup_words: said.map(|s| word_diff::diff(s, text).words as u64).unwrap_or(0),
-            dictionary_fixes: crate::dictionary::dict_usage::fixed_in(dict, if raw.trim().is_empty() { text } else { raw }, text),
+            dictionary_fixes: crate::dictionary::usage::fixed_in(dict, if raw.trim().is_empty() { text } else { raw }, text),
         }
     }
 }

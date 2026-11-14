@@ -255,7 +255,7 @@ fn first_words(s: &str, n: usize) -> String {
 
 /// The first `budget` estimated tokens of `s`, whole lines (else cut).
 fn clip_tokens(s: &str, budget: usize) -> String {
-    use crate::meetings::meeting_summary::estimate_tokens;
+    use crate::meetings::summary::estimate_tokens;
     if estimate_tokens(s) <= budget {
         return s.trim().to_string();
     }
@@ -347,7 +347,7 @@ fn owner_word(owner: &str) -> Option<String> {
 pub fn plan_tasks(n: &Note) -> Vec<Task> {
     let plan = n.enhanced_content.trim();
     if plan.is_empty() {
-        return crate::meetings::meeting_summary::digest_actions(&n.digests)
+        return crate::meetings::summary::digest_actions(&n.digests)
             .into_iter()
             .filter_map(|a| owner_word(&a.owner).map(|owner| Task { owner, task: a.task.trim().to_string(), due: a.due.trim().to_string() }))
             .filter(|t| !t.task.is_empty())
@@ -462,9 +462,9 @@ fn note_body(n: &Note) -> String {
     }
     let t0 = n.transcript.first().map(|s| s.ts).unwrap_or(0);
     if !n.digests.is_empty() {
-        out.push_str(&crate::meetings::meeting_summary::render_digests(&n.digests, t0, NOTE_SOURCE_TOKENS));
+        out.push_str(&crate::meetings::summary::render_digests(&n.digests, t0, NOTE_SOURCE_TOKENS));
     } else if n.transcript.iter().any(|s| s.is_talk()) {
-        out.push_str(&crate::meetings::meeting_summary::ask_context(n, NOTE_SOURCE_TOKENS / 2));
+        out.push_str(&crate::meetings::summary::ask_context(n, NOTE_SOURCE_TOKENS / 2));
     }
     clip_tokens(&out, NOTE_SOURCE_TOKENS)
 }
@@ -1324,7 +1324,7 @@ pub fn writes_summary(local: bool, model: &str) -> bool {
 pub async fn write(
     app: Option<&tauri::AppHandle>,
     facts: &Facts,
-    ep: &crate::meetings::meeting_summary::Endpoint,
+    ep: &crate::meetings::summary::Endpoint,
 ) -> Result<(Checked, String), String> {
     let Some(messages) = messages(facts) else {
         return Ok((Checked::default(), String::new()));
@@ -1333,7 +1333,7 @@ pub async fn write(
     // Recorded as the calendar's brief in the network receipts (net.rs).
     let ask = async {
         match app {
-            Some(app) => crate::meetings::meeting_summary::chat_beside_dictation(app, ep, messages, &opts).await,
+            Some(app) => crate::meetings::summary::chat_beside_dictation(app, ep, messages, &opts).await,
             None => crate::ai::llm::chat(&ep.base_url, &ep.api_key, &ep.model, &ep.provider, messages, &opts).await,
         }
     };
@@ -1838,7 +1838,7 @@ mod tests {
         let msgs = messages(&f).unwrap();
         assert_eq!(msgs.as_array().unwrap().len(), 4);
         // An 8k local model reads it with room to spare.
-        let size: usize = msgs.as_array().unwrap().iter().map(|m| crate::meetings::meeting_summary::estimate_tokens(m["content"].as_str().unwrap())).sum();
+        let size: usize = msgs.as_array().unwrap().iter().map(|m| crate::meetings::summary::estimate_tokens(m["content"].as_str().unwrap())).sum();
         assert!(size < 2_000, "{size}");
         // The worked example's people never reach a real brief.
         assert!(ungrounded("Okonkwo was getting a second lighting quote.", &[1], &f).is_some());

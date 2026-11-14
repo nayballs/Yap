@@ -63,7 +63,7 @@
         <span class="name">{nameOf(p)}</span>
         <span class="where">{p.site ? `${p.site}, opened beside the chat` : 'Opened beside the chat'}</span>
       </div>
-      <button type="button" class="open" onclick={() => onpage?.(p)} aria-label={`Open the page ${nameOf(p)} beside the chat`} data-testid="chat-page-pill">Open</button>
+      <button type="button" class="open" onclick={() => onpage?.(p)} aria-label={`Open the page ${nameOf(p)} beside the chat`} data-testid="chat-page-card-open">Open</button>
       <button type="button" class="more" data-more aria-label={`More for the page ${nameOf(p)}`} title="More" aria-haspopup="menu" onclick={(e) => more(e, p)}>
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="18.5" cy="12" r="1.6" /></svg>
       </button>

@@ -122,7 +122,7 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   unchanged. Lines' `start_ms`/`end_ms` are on the same session clock as
   `diarize::Timeline` (sample position / 16, 0 at each recording's start).
   **`speakers/labels.rs` — the engine's voices on lines**: a recording
-  (`begin(note, session)` from `meeting::start`: its lines = from the
+  (`begin(note, session)` from `meetings::recorder::start`: its lines = from the
   transcript's length then) takes its session's timelines (`on_segments`;
   in a test run with no engine, `E2E_SESSION`'s): each labels that
   recording's "Them" lines that are talk, placed, settled (`end_ms ≤
@@ -219,7 +219,7 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   contradicts it. Runs after each labelling pass, after the person's own
   speaker edits, every 10 s of a recording with no speaker engine
   (`labels::after_ingest`, "Them" only), and at its end. **The AI step**
-  (`ask_model`, from `meeting_end::write_action_plan` before the plan; only
+  (`ask_model`, from `meetings::end::write_action_plan` before the plan; only
   a model `tools::supports_tools` passes — cloud, or ≥ 4B on this PC): one
   question per voice told apart that said ≥ 10 words and has no firm name
   (≤ `ASK_MAX` 4), with the names still open and an excerpt of ≤ 650 words
@@ -229,7 +229,7 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   "unknown"); a model on this PC answers under the JSON schema as
   llama.cpp's grammar, `evidence` before `name` (the properties go out in
   alphabetical order, and the grammar follows them), inside the sidecar's
-  Busy guard and never during a dictation (`meeting_summary::
+  Busy guard and never during a dictation (`meetings::summary::
   chat_beside_dictation_with`); `check_answer` keeps an answer only when
   its evidence, labels off, is in the excerpt word for word (or nearly),
   says the name, and isn't the voice itself naming that person (unless an
@@ -255,7 +255,7 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   text ("{name}, speaking", "Active speaker: {name}"); self marks ("(You)",
   "(Me)", "you are speaking"); names cleaned (`clean_name`: marks and
   states off, "Shah, Priya" → "Priya Shah", control words never a name).
-  Readings go on the recording's clock (`meeting::them_clock_ms`, the
+  Readings go on the recording's clock (`meetings::recorder::them_clock_ms`, the
   engine's clock) as spans; `align` gives each voice the name shown alone
   (one person, not you) for most of its speech (≥ 3 readings' worth, ≥ 60%;
   the highlight counted from 0.3 s after a stretch begins to 1.2 s after it
@@ -283,7 +283,7 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   length. Checked against sherpa-onnx's own embeddings of the same
   stretches: cosine 0.986–0.995 (`voiceprint::tests::matches_sherpa`).
   `Printer::for_note` reads a stretch of one side of one recording from
-  disk (`meeting_audio::read_side`), passes over clips < 1 s and near
+  disk (`meetings::audio::read_side`), passes over clips < 1 s and near
   silence (RMS < 1e-3), cuts a clip at 10 s; `voice(spans, budget)` is the
   length-weighted centroid of the longest stretches up to `budget`.
   **Nothing is kept**: a print is made when needed and dropped — no
@@ -320,14 +320,14 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   a past meeting's call side from its audio on disk — the notepad's ⋯,
   the Meetings view's and the Notes list's menus (`speaker_find`), and by
   itself after **Transcribe again** when "Tell speakers apart" is on
-  (`after_transcribe_again`, hooked in `meeting_audio::start_job`).
+  (`after_transcribe_again`, hooked in `meetings::audio::start_job`).
   Refused while a meeting records, without call lines, without the model
   (or a staged test run), or without kept audio. **One stream for the whole
   meeting** (`diarize::run_saved`: the child with no live updates, fed as
   fast as it takes it, `Piece::Audio`/`Silence`): every ended recording's
   "Them" in order with 2 s of (dithered) silence between, so a voice keeps
   its number across a pause; `split_by_recording` puts the turns back on
-  each recording's clock. A job of `meeting_audio`'s (`start_side_job`,
+  each recording's clock. A job of `meetings::audio`'s (`start_side_job`,
   kind `speakers`: one per note, `yap-meeting-redo`, the same Cancel —
   `meeting_job_cancel` — and job line, "Finding speakers · 40%"; the
   engine's run is 90% of it). **Only a run that completes changes

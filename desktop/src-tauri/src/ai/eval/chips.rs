@@ -1,5 +1,5 @@
 //! `--chips`: the notepad's newer chips and a Skill on one meeting
-//! (`meetings/meeting_summary/chips.rs`, `meetings/meeting_assist.rs`) on
+//! (`meetings/summary/chips.rs`, `meetings/assist.rs`) on
 //! each `--model`, sent exactly as the app sends them, over
 //! `evals/chips/cases.json`: each case a fictional meeting (title,
 //! attendees, typed notes, Yap's summary, transcript lines) and what's
@@ -30,7 +30,7 @@ use serde_json::{json, Value};
 
 use super::cleanup::Endpoint;
 use super::record;
-use crate::meetings::meeting_summary::{self as summary, chips};
+use crate::meetings::summary::{self as summary, chips};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -129,8 +129,8 @@ fn request(c: &Case, note: &crate::notes::Note) -> Result<Asked, String> {
         }
         "skill" => {
             let skill = crate::chat::skills::by_command(&c.skill).ok_or_else(|| format!("no Skill /{}", c.skill))?;
-            let cited = crate::meetings::meeting_assist::skill_input_for(&skill, note, &c.words).ok_or("nothing in the meeting")?;
-            let m = crate::meetings::meeting_assist::skill_messages(&skill, &cited.text, &c.words);
+            let cited = crate::meetings::assist::skill_input_for(&skill, note, &c.words).ok_or("nothing in the meeting")?;
+            let m = crate::meetings::assist::skill_messages(&skill, &cited.text, &c.words);
             Ok(Asked { messages: m, cap: chips::SKILL_REPLY_TOKENS, temperature: 0.3, passages: cited.passages, longer: None })
         }
         "longer" => {

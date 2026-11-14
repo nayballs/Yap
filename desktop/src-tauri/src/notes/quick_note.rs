@@ -364,7 +364,7 @@ pub fn save(app: &AppHandle, id: Option<u64>, content: &str) -> Result<Saved, St
         None if content.trim().is_empty() => Saved::default(),
         None => create(app, content),
         Some(id) => {
-            let recording = crate::meetings::meeting::recording_note() == Some(id);
+            let recording = crate::meetings::recorder::recording_note() == Some(id);
             let mut changed = false;
             match crate::notes::modify_or_remove(
                 id,
@@ -386,7 +386,7 @@ pub fn save(app: &AppHandle, id: Option<u64>, content: &str) -> Result<Saved, St
                         set_current(Current::New);
                     }
                     let _ = app.emit("yap-notes-changed", ());
-                    let _ = app.emit(crate::meetings::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
+                    let _ = app.emit(crate::meetings::end::EVENT_DELETED, serde_json::json!({ "id": id }));
                     Saved {
                         removed: true,
                         ..Saved::default()
@@ -471,8 +471,8 @@ pub fn takes_dictation(own_window: bool) -> bool {
 pub fn open(app: &AppHandle, fresh: bool) {
     // The app in front, for Send (before the window takes the front).
     send::remember_before(in_front());
-    // Fresh: the page saves what it has, then starts the new note
-    // (`quick_note_new`), so a save on its way can't take its place.
+    // Fresh: the page saves what it has, then opens a new tab for the new
+    // note, so a save on its way can't take its place.
     let shown = shown_now(fresh);
     tracing::info!(fresh, resumed = shown.note_id.is_some(), tabs = shown.tabs.len(), closed = shown.close.len(), "Quick note: opened");
     let _ = app.emit(EVENT_OPEN, &shown);
@@ -580,14 +580,6 @@ fn place(app: &AppHandle, w: &tauri::WebviewWindow) {
 
 // ---- commands ----------------------------------------------------------------------------------
 
-/// The Quick note shortcut from one of Yap's own windows (their in-page
-/// fallback: the hook never sees keys while a Yap webview has the focus):
-/// away if it's in front, else up.
-#[tauri::command]
-pub fn quick_note_toggle(app: AppHandle) {
-    toggle(&app);
-}
-
 /// Bring it up (the Notes view's "Quick note"; `fresh`: on a new note).
 #[tauri::command]
 pub fn quick_note_open(app: AppHandle, fresh: Option<bool>) {
@@ -611,12 +603,6 @@ pub fn quick_note_state() -> Shown {
 #[tauri::command]
 pub fn quick_note_save(app: AppHandle, id: Option<u64>, content: String) -> Result<Saved, String> {
     save(&app, id, &content)
-}
-
-/// "New note": the window starts a new one (what it had is saved already).
-#[tauri::command]
-pub fn quick_note_new() {
-    set_current(Current::New);
 }
 
 /// "Add to the Yap bar" on its empty page (and Settings → Yap bar, which

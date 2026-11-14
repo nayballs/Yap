@@ -537,7 +537,7 @@ shell waiting for it.
   (`spawn_meeting_audio`: `you.wav`/`them.wav` from `YAP_E2E_MEETING_AUDIO` at
   `YAP_E2E_MEETING_SPEED`× real time, or silence; a configured mic that isn't
   plugged in still fails, found by listing devices; it pushes through
-  `meeting::push_audio` + `keep_in_step` like the real capture and logs "the
+  `meetings::recorder::push_audio` + `keep_in_step` like the real capture and logs "the
   test audio has played to the end"; with `set_live_mic` — the guard rails'
   `e2e_meeting_checkins` turns it on — its "mic" carries on with digital
   silence after the files, as a real one does, so the audio clock the
@@ -612,7 +612,7 @@ shell waiting for it.
   `e2e_save_path` says, never through Windows' Save dialog
   (`privacy/diagnostics.rs`), `e2e_coaching_reset` (every
   push-to-talk hint due again), `e2e_notice_reset` / `e2e_focus` /
-  `e2e_notice` (notices/notice.rs: cooldowns and fatigue forgotten before every
+  `e2e_notice` (notices/policy.rs: cooldowns and fatigue forgotten before every
   test, whether the main window counts as focused — by default while it's on
   screen —, a notice staged through the real policy or a pretend
   dictation's `yap-state`), `e2e_paste_elevated { on }` (every paste

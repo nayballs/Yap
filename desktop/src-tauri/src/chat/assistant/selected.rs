@@ -123,7 +123,7 @@ pub fn quote(sel: &Selected) -> Option<crate::chat::documents::Quote> {
     (!text.is_empty()).then(|| crate::chat::documents::Quote { note_id: 0, text, app: sel.app.trim().to_string() })
 }
 
-/// The "Select some text first" alert's kind (its rule in `notice.rs`).
+/// The "Select some text first" alert's kind (its rule in `notices/policy.rs`).
 pub const NOTHING_SELECTED: &str = "askNoSelection";
 
 /// **Ask about the selection** pressed with nothing selected (or the focus

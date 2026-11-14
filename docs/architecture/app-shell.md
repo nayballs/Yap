@@ -135,11 +135,11 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   conversations, `updates.json` — update announcements + the restart marker,
   `calendar.json` — connected calendars + the next week of meetings,
   `dictionary_usage.json` — how often/lately each dictionary word was used,
-  `dictionary/dict_usage.rs`, `icons/` — a cache of the installed call apps' own icons,
+  `dictionary/usage.rs`, `icons/` — a cache of the installed call apps' own icons,
   `calls/app_icons.rs`, `hints.json` — push-to-talk coaching counts, `dictation/coaching.rs`,
   `word_suggestions.json` — your answers to "Add this word to your
   dictionary?", `dictionary/learn.rs`, `notices.json` — call-prompt fatigue counts,
-  `notices/notice.rs`).
+  `notices/policy.rs`).
   Every JSON store writes atomically and quarantines a corrupt file on load
   instead of crashing (`config::atomic_write`/`quarantine_corrupt`, used by all
   eleven stores; each write its own temp file). config.json too: set aside
@@ -202,9 +202,24 @@ CLAUDE.md's module index is — `dictation/`, `pasting/`, `dictionary/`, `ai/`,
 are at the root. An area is `<area>.rs` (its `//!` summary and module list)
 beside `<area>/`. A big module's parts are its children (`dictation/pipeline/`,
 `ai/local_llm/`, `web/`, `apps/`, `voice/tts/`, `chat/tools/` and its
-`agent/`, `chat/turn/`, `meetings/meeting_summary/`): private, with what other modules use
+`agent/`, `chat/turn/`, `meetings/summary/`): private, with what other modules use
 re-exported by the module, except `local_llm`'s, which callers name
 (`local_llm::models::install`, `local_llm::context::context_view`).
+
+**Naming** (14 Nov 2026):
+- A module never repeats its folder's name. It's `meetings::audio`, never
+  `meetings::meeting_audio`, and the same goes for `meetings::recorder`,
+  `meetings::summary`, `notices::policy` and `calls::audio`.
+- Rust files are snake_case. Svelte components are PascalCase.
+- Other frontend modules are camelCase, with `.svelte.js` for one that holds
+  Svelte state.
+- A name says what the file is now. For example, `PageCards.svelte` drew
+  pills until those became cards.
+- Code only the tests use is `#[cfg(test)]`, never
+  `#[allow(dead_code)]`.
+- `#[cfg_attr(…, allow(dead_code))]` is kept for code that only one
+  platform, one feature or one kind of build uses (Windows, `engines`,
+  debug builds).
 
 - **`lib.rs`** — app entry / Tauri `setup`. Runs `portable::init()`, registers the
   updater/autostart/single-instance plugins, starts the input hook + pipeline
@@ -501,7 +516,7 @@ re-exported by the module, except `local_llm`'s, which callers name
     the two messages' ids and `speak`, `tts::auto_speak`); its turn is
     `chat/turn.rs`'s `chat_turn` (shared with the Voice Assistant).
   - `meetings/commands.rs` — `meeting_start` (then `calendar::on_meeting_started`)/
-    `meeting_state` (a recording ends through meetings/meeting_end.rs's
+    `meeting_state` (a recording ends through meetings/end.rs's
     `meeting_end`); `integrations/bridge.rs` — `bridge_status`.
   Elsewhere: `read_aloud_text` / `_selection` / `_action` / `_state`
   (voice/read_aloud.rs), `chat_view_state` + `assistant_stop`

@@ -19,7 +19,7 @@ pub fn meeting_start(
         let p = guard.as_ref().ok_or("pipeline not started")?;
         p.engine_slot()
     };
-    crate::meetings::meeting::start(app.clone(), engine_slot, note_id)?;
+    crate::meetings::recorder::start(app.clone(), engine_slot, note_id)?;
     // A recording makes it a meeting note, filed in Meetings as "Take
     // notes" files its own, unless the person chose its folder; the Notes
     // view says so (`yap-note-filed`, with a way back).
@@ -44,5 +44,5 @@ pub fn meeting_start(
 /// `{ recording, noteId?, elapsedSecs? }` for the Notes UI.
 #[tauri::command]
 pub fn meeting_state() -> serde_json::Value {
-    crate::meetings::meeting::state()
+    crate::meetings::recorder::state()
 }

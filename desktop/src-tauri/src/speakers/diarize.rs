@@ -15,7 +15,7 @@
 //! records on, and the engine is started again (≤ [`MAX_RESTARTS`]) as a new
 //! `stream` whose speaker numbers start over. The wire is in `protocol.rs`.
 //!
-//! **During a meeting** (`meeting.rs`): `meeting::start` opens a [`Session`]
+//! **During a meeting** (`meetings/recorder.rs`): `meetings::recorder::start` opens a [`Session`]
 //! when the switch is on and the model installed, and gives the "Them"
 //! buffer its [`Tee`], which forwards every sample the recorder appends —
 //! device audio and the silence it fills in — so the engine's clock is the
@@ -52,7 +52,6 @@ use tauri::{AppHandle, Emitter};
 use protocol::Message;
 pub use registry::DEFAULT_MODEL;
 use registry::EngineFiles;
-#[allow(unused_imports)] // the speaker map's types
 pub use timeline::{Segment, Timeline};
 use timeline::Runs;
 
@@ -234,7 +233,7 @@ impl Feed {
     }
 }
 
-/// The "Them" buffer's hook (`meeting.rs`): hands every appended sample to
+/// The "Them" buffer's hook (`meetings/recorder.rs`): hands every appended sample to
 /// the session. Never blocks (an audio callback calls it).
 #[derive(Clone)]
 pub struct Tee {
@@ -1065,7 +1064,7 @@ static SCRIPTED_DONE: Mutex<Option<Timeline>> = Mutex::new(None);
 /// report it (`speakers::labels` takes it for a recording with no engine),
 /// so the e2e suite tests the labels without a model. A live one goes to
 /// the [`on_segments`] handlers now; a `done` one when the recording stops,
-/// where the engine's final labels come (`meeting.rs` →
+/// where the engine's final labels come (`meetings/recorder.rs` →
 /// [`finish_scripted`]). `error`: the engine stopped early.
 #[cfg(debug_assertions)]
 #[tauri::command]
@@ -1078,7 +1077,7 @@ pub fn e2e_diarize_timeline(
     if !crate::shell::e2e::active() {
         return Err("Only in e2e test mode".to_string());
     }
-    let note_id = crate::meetings::meeting::recording_note().ok_or("No meeting is being recorded")?;
+    let note_id = crate::meetings::recorder::recording_note().ok_or("No meeting is being recorded")?;
     let mut segments: Vec<Segment> = segments
         .into_iter()
         .filter(|s| s.end_ms > s.start_ms)
