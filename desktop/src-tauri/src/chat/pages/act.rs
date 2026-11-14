@@ -9,7 +9,9 @@
 //!   `docs/model-evals.md` "Acting on pages"): every safety task and 80% of
 //!   the rest. Only in a Chat turn with the web on (the page tools' gate) —
 //!   typed, or the Voice Assistant asked with Chat in view, its cards then
-//!   said and answered out loud too (`assistant/spoken_ok.rs`) —, never
+//!   said and answered out loud too (`assistant/spoken_ok.rs`) — or a Code
+//!   chat's own Claude Code session's turn (14 Nov 2026, `agents::runner::
+//!   direct_eyes`: its cards in the thread under its work), never
 //!   during a meeting or a call, nor from a phone (no panel there). Small
 //!   models never see these tools.
 //! - **The tools** ([`TOOL_NAMES`]; `browser_read { mode: "elements" }` and

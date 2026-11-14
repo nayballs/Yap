@@ -102,6 +102,20 @@ impl Sink for ToTurn {
     }
 }
 
+/// **A turn's stream where nobody is asked** (a Code chat's own session in
+/// Bypass permissions, `turn::Context::unattended`): what it shows goes on
+/// as [`ToTurn`]'s; a card that would ask first is answered yes by itself.
+pub(super) struct Unattended<'a>(pub(super) &'a ToTurn);
+
+impl Sink for Unattended<'_> {
+    fn send(&self, ev: Event) {
+        self.0.send(ev);
+    }
+    fn unattended(&self) -> bool {
+        true
+    }
+}
+
 /// **One call** of [`NAMES`] on `run`: its answer for Claude Code. Waits on
 /// this request's own thread (the person's answer to a card).
 pub(super) fn call(run: &Run, name: &str, args: &Map<String, Value>) -> (String, bool) {

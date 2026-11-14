@@ -326,6 +326,11 @@ async fn ask_with(live: Option<crate::chat::stream::Live<'_>>, what: Ask<'_>, co
         tracing::info!(id, "Chat: a page action needed the user's OK, but nobody watches the turn; refused");
         return Answer::NoOne;
     };
+    // Bypass permissions: nothing asks — the action goes ahead (`Sink::unattended`).
+    if live.sink.unattended() {
+        tracing::info!(id, does = what.does, "Chat: a page action that asks first, allowed without asking (Bypass permissions)");
+        return Answer::Allowed;
+    }
     let (tx, rx) = tokio::sync::oneshot::channel();
     PENDING.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashMap::new).insert(id, tx);
     let _pending = Pending(id);
@@ -370,6 +375,26 @@ mod tests {
 
     fn book() -> Ask<'static> {
         Ask { act: "press", label: "Book now", site: "rail.example.com", does: "book", text: "", key: "page:https://rail.example.com", agent: None }
+    }
+
+    /// A turn where nobody is asked (Bypass permissions).
+    #[derive(Default)]
+    struct Unasked(Log);
+    impl Sink for Unasked {
+        fn send(&self, ev: Event) {
+            self.0.send(ev);
+        }
+        fn unattended(&self) -> bool {
+            true
+        }
+    }
+
+    #[tokio::test]
+    async fn in_bypass_permissions_nothing_asks_it_goes_ahead_without_a_card() {
+        let log = Unasked::default();
+        let answer = tokio::time::timeout(Duration::from_secs(1), ask(Some(Live { sink: &log, beside: None }), book())).await.expect("never waits");
+        assert!(matches!(answer, Answer::Allowed));
+        assert!(log.0 .0.lock().unwrap().is_empty(), "no card shown");
     }
 
     #[tokio::test]

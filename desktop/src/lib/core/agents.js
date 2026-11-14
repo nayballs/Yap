@@ -132,6 +132,13 @@ const DONE = [
   [/^Closing\b/, 'Closed'],
   [/^Showing\b/, 'Showed'],
   [/^Sharing\b/, 'Shared'],
+  // …acting on its pages (14 Nov 2026).
+  [/^Clicking\b/, 'Clicked'],
+  [/^Typing\b/, 'Typed'],
+  [/^Pressing\b/, 'Pressed'],
+  [/^Pointing\b/, 'Pointed'],
+  [/^Dragging\b/, 'Dragged'],
+  [/^Setting\b/, 'Set'],
 ];
 const doneLine = (step) => DONE.reduce((s, [was, now]) => (was.test(s) ? s.replace(was, now) : s), String(step || ''));
 
@@ -349,6 +356,24 @@ const some = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
  * create issue"). `busy`: the agent is on it now — its latest step, as it is
  * ("Running npm test").
  */
+/** **Yap's browser beside the chat, done** (agents/steps.rs `browser_line`): each action's words, once and N times. */
+const BROWSER_DONE = [
+  [/^Opening (?!a tab).* beside the chat$/, 'opened a page', 'opened {n} pages'],
+  [/^Opening a tab beside the chat$/, 'opened a tab', 'opened {n} tabs'],
+  [/^Going (back|forward) on the page beside the chat$/, 'went back', 'went back {n} times'],
+  [/^Finding .* on the page beside the chat$/, 'found on page', 'found on page {n} times'],
+  [/^Reading the page beside the chat$/, 'read the page', 'read the page {n} times'],
+  [/^Clicking on the page beside the chat$/, 'clicked', 'clicked {n} times'],
+  [/^Typing on the page beside the chat$/, 'typed', 'typed {n} times'],
+  [/^Pressing keys on the page beside the chat$/, 'pressed keys', 'pressed keys {n} times'],
+  [/^Setting a field on the page beside the chat$/, 'set a field', 'set {n} fields'],
+  [/^Pointing at the page beside the chat$/, 'pointed at the page', 'pointed {n} times'],
+  [/^Dragging on the page beside the chat$/, 'dragged', 'dragged {n} times'],
+  [/^Scrolling the page beside the chat$/, 'scrolled', 'scrolled {n} times'],
+  [/^(Looking at|Zooming in on) the page beside the chat$/, 'captured page', 'captured page {n} times'],
+  [/^Waiting for the page beside the chat$/, 'waited for the page', 'waited for the page {n} times'],
+];
+
 export function workSummary(group, busy = false) {
   const steps = group?.steps || [];
   const edits = group?.edits || [];
@@ -370,7 +395,17 @@ export function workSummary(group, busy = false) {
   if (read) add(`read ${some(read, 'a file', 'files')}`);
   const searched = count('search');
   if (searched) add(searched === 1 ? 'searched the files' : `searched the files ${searched} times`);
-  const web = count('web');
+  // Yap's browser beside the chat, each action in its own words (14 Nov 2026, as Claude Code's own line says
+  // them: "found on page 2 times, clicked, captured page 3 times"); the web's searches and reads as before.
+  const browsed = new Map();
+  let web = 0;
+  for (const [i, x] of steps.entries()) {
+    if (kinds[i] !== 'web') continue;
+    const b = BROWSER_DONE.find(([re]) => re.test(x.step));
+    if (!b) web += 1;
+    else browsed.set(b, (browsed.get(b) ?? 0) + 1);
+  }
+  for (const [[, one, many], n] of browsed) add(n === 1 ? one : many.replace('{n}', n));
   if (web) add(web === 1 ? 'looked on the web' : `looked on the web ${web} times`);
   // Other tools' calls: whose, when they're all one's ("used github 3 times"), else how many.
   const used = steps.filter((_, i) => kinds[i] === 'tool').map(toolOwner);

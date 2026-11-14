@@ -183,6 +183,13 @@ pub fn browser_line(tool: &str, input: &Value) -> Option<String> {
         },
         pages::WAIT => beside("Waiting for the page"),
         pages::BATCH => beside("Using the page"),
+        // Acting on its pages (14 Nov 2026): what it does, never what it types.
+        pages::act::CLICK => beside("Clicking on the page"),
+        pages::act::TYPE => beside("Typing on the page"),
+        pages::act::KEY => beside("Pressing keys on the page"),
+        pages::act::HOVER => beside("Pointing at the page"),
+        pages::act::DRAG => beside("Dragging on the page"),
+        pages::act::FORM_INPUT => beside("Setting a field on the page"),
         pictures::FIND => beside("Looking for pictures"),
         pictures::LOOK => beside("Looking at a picture"),
         pictures::SHOW => beside("Showing a picture"),
@@ -307,6 +314,11 @@ mod tests {
         assert_eq!(of_tool("mcp__yap__show_picture", &json!({}), &f).step, "Showing a picture beside the chat");
         assert_eq!(of_tool("mcp__yap__share_files", &json!({}), &f).step, "Sharing files in the chat");
         assert_eq!(of_tool("mcp__yap__look_at_screen", &json!({}), &f).step, "Looking at your screen");
+        // Acting on its pages: what it does, never what it types.
+        assert_eq!(of_tool("mcp__yap__browser_click", &json!({ "ref": 164 }), &f).step, "Clicking on the page beside the chat");
+        let typed = of_tool("mcp__yap__browser_type", &json!({ "ref": 12, "text": "hunter2" }), &f).step;
+        assert_eq!(typed, "Typing on the page beside the chat");
+        assert_eq!(of_tool("mcp__yap__browser_key", &json!({ "keys": "Enter" }), &f).step, "Pressing keys on the page beside the chat");
         // Its other tools: as any server's.
         assert_eq!(of_tool("mcp__yap__list_tasks", &json!({}), &f).step, "Using yap · list tasks");
         assert_eq!(of_tool("Frobnicate", &json!({}), &f).step, "Using Frobnicate");

@@ -96,7 +96,7 @@ use std::sync::Arc;
 
 use serde_json::{json, Map, Value};
 
-use super::agents::ToTurn;
+use super::agents::{ToTurn, Unattended};
 use super::server::Run;
 use super::turn::{Call, Slot, SEEN_WAIT};
 use crate::ai::claude_plan::{BASE_URL, PROVIDER};
@@ -104,7 +104,7 @@ use crate::chat::pages::{self, act};
 use crate::chat::pictures::{self, Gate, Look};
 use crate::chat::see_screen;
 use crate::chat::shares::{self, Offer};
-use crate::chat::stream::{Event, Live};
+use crate::chat::stream::{Event, Live, Sink};
 
 /// **What a run may see and do**: the screen look's gate, the pages' and
 /// pictures' (with the web on), as the tool loop's `Gates` has them, and
@@ -419,6 +419,10 @@ async fn run_for(slot: &Slot, turn: &Call, name: &str, args: &Value, wait: std::
         w.number(&s.title, &s.url);
     }
     let sink = ToTurn(turn.events.clone());
+    // Bypass permissions (a Code chat's own session): nobody is asked — its
+    // instructions have Claude ask in the chat first instead (`rpc.rs`).
+    let bypass = Unattended(&sink);
+    let sink_for: &dyn Sink = if turn.ctx.unattended { &bypass } else { &sink };
     let send = |ev: Event| {
         let _ = turn.events.send(ev);
     };
@@ -430,7 +434,7 @@ async fn run_for(slot: &Slot, turn: &Call, name: &str, args: &Value, wait: std::
             act: turn.ctx.eyes.act,
             provider: PROVIDER,
             base_url: BASE_URL,
-            live: Some(Live { sink: &sink, beside: None }),
+            live: Some(Live { sink: sink_for, beside: None }),
             outside,
             search: Some("WebSearch"),
         };

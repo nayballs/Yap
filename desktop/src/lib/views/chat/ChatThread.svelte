@@ -281,6 +281,12 @@
               {#await import('./AgentWork.svelte') then { default: AgentWork }}
                 <AgentWork agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} onview={openShared} answered={answeredAfter(chat.messages, i, (k) => directPills.has(k))} />
               {/await}
+              <!-- Its cards before acting on a page (an action that would buy, send or sign in): Allow once / Don't. -->
+              {#if chat.agentConfirms[`${p.id}:${p.turn ?? 1}`]?.length}
+                {#await import('./PageConfirm.svelte') then { default: PageConfirm }}
+                  <PageConfirm confirms={chat.agentConfirms[`${p.id}:${p.turn ?? 1}`]} />
+                {/await}
+              {/if}
             {/each}
           {/if}
           {#if agentPills.get(i)?.length}

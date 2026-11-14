@@ -110,7 +110,31 @@ const PAGES = {
     <h2>Art</h2>
     <img src="/images/fort_joy_concept.png" width="1200" height="675" alt="Concept art of the keep">
     </article></body></html>`,
+  // A guide whose sections open in a script (agents-direct.spec.js, acting on a page): "Build Order" is a
+  // heading under an invisible toggle laid over it — only a click on the toggle opens it, and its rows are
+  // made then (a click on the heading itself does nothing) — and two builds are tabs, not links.
+  'wiki.example.com/guide/leveling': `<!doctype html><html><head><title>Leveling guide - Example Wiki</title>
+    <style>.order{position:relative;margin:24px 0;padding:8px;border:1px solid #888}.order h2{margin:0}.toggle{position:absolute;inset:0}#rows[hidden]{display:none}</style></head><body>
+    <article><h1>Leveling guide</h1>
+    <div role="tablist"><button role="tab" aria-selected="true" id="tab-heal">Healing</button><button role="tab" aria-selected="false" id="tab-dmg">Damage</button></div>
+    <p id="build">Build: Healing</p>
+    <div class="order"><h2>Build Order<a class="toggle" href="javascript:"></a></h2><ol id="rows" hidden></ol></div>
+    <button id="buy" onclick="document.getElementById('bought').textContent='Bought'">Buy the full guide</button><p id="bought"></p>
+    </article>
+    <script>
+      const rows = document.getElementById('rows');
+      document.querySelector('.toggle').addEventListener('click', (e) => {
+        e.preventDefault();
+        if (!rows.children.length) rows.innerHTML = ['10 Moss Shield Rank 1', '11 Moss Shield Rank 2', '12 River Song Rank 1'].map((t) => '<li>' + t + '</li>').join('');
+        rows.hidden = !rows.hidden;
+      });
+      for (const t of document.querySelectorAll('[role=tab]')) t.addEventListener('click', () => {
+        for (const o of document.querySelectorAll('[role=tab]')) o.setAttribute('aria-selected', String(o === t));
+        document.getElementById('build').textContent = 'Build: ' + t.textContent;
+      });
+    </script></body></html>`,
 };
+export const LEVELING_URL = 'https://wiki.example.com/guide/leveling';
 
 // A made-up rail site for acting on pages (chat/pages/act.rs,
 // chat-browse.spec.js): a journey form, its results (by the stations asked

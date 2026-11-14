@@ -623,6 +623,9 @@ test('core/agents.js: an agent’s turns from its log, their words, the pills a 
     { step: 'Searching the web for bed spacing' },
   ]);
   expect(workSummary(many[0])).toEqual([{ text: 'Searched the files' }, { text: 'looked on the web' }, { text: 'edited 2 files', added: 7, removed: 2 }]);
+  // Yap's browser beside the chat: each action in its own words, as Claude Code's line says them.
+  const browsed = ['Opening wiki.example.com/guide beside the chat', 'Finding “Build Order” on the page beside the chat', 'Clicking on the page beside the chat', 'Reading the page beside the chat', 'Finding “Damage” on the page beside the chat', 'Clicking on the page beside the chat', 'Looking at the page beside the chat'].map((step) => ({ step }));
+  expect(workSummary({ steps: browsed, edits: [] }).map((p) => p.text)).toEqual(['Opened a page', 'found on page 2 times', 'clicked 2 times', 'read the page', 'captured page']);
   expect(workOf([])).toEqual([]);
   // A picture a tool call came back with is on that call's step, in whichever
   // stretch it is, its address the scheme's (the agent's id, then the picture's).

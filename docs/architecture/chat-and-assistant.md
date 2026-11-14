@@ -2879,8 +2879,14 @@ review (safely, for any user, in any language Yap speaks).
   first (`describe`), Rust checks its rules, then the action runs **only if
   the element is still the one described** (its role and name, checked in the
   same script run as the click: a page can't swap it in between — "changed").
-  Clicks and typing are the DOM's (`el.click()`, the value's native setter
-  and `input` / `change` events): untrusted events, which a few sites ignore.
+  Clicks and typing are the DOM's: **a click as a person's mouse sends it**
+  (14 Nov 2026, `act/script.rs` `click`: scrolled into view, the element on
+  top at the element's centre — one inside it, such as a guide's invisible
+  toggle laid over its "Build Order" heading, else the element itself —
+  gets pointerdown, mousedown, pointerup, mouseup and click; before, the
+  element's own `el.click()`, which that toggle and a menu opening on
+  `mousedown` never heard), typing the value's native setter and `input` /
+  `change` events: untrusted events, which a few sites ignore.
   A link with a `target` (a new window: a script's click has no user
   gesture, so the new-window rule would drop it as a pop-up) goes to its
   address in the same tab instead.

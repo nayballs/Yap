@@ -1005,3 +1005,17 @@ fn the_front_tab_is_rusts_pick_until_the_view_has_shown_it() {
     f.clear();
     assert_eq!(f.chosen(), None);
 }
+
+/// A page brought up by its address alone: its pill says its site, then — once read — its own title (14 Nov 2026).
+#[tokio::test]
+async fn a_page_brought_up_by_its_address_takes_its_title_once_read() {
+    sim::install(Some(web()));
+    let west = "https://maps.example.com/west";
+    let mut t = turn(&format!("Bring up {west}"));
+    let log = Log::default();
+    call(&mut t, NAVIGATE, json!({ "url": west }), &log).await;
+    assert_eq!(t.pages.shown[0].title, "maps.example.com");
+    let r = call(&mut t, READ, json!({}), &log).await.result;
+    assert_eq!(r["data"]["title"], "West field", "{r}");
+    assert_eq!(t.pages.shown[0].title, "West field");
+}

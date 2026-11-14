@@ -53,7 +53,7 @@ import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat } from './support/code-chats.js';
 import { writePng } from './support/png.js';
-import { startFakeWeb, FORT_JOY_URL } from './support/fake-web.js';
+import { startFakeWeb, FORT_JOY_URL, LEVELING_URL } from './support/fake-web.js';
 import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine } from '../src/lib/core/agents.js';
 import { panelRows, panelGroups, panelTotals } from '../src/lib/core/agentPanel.js';
 import { workingLine } from '../src/lib/core/working.js';
@@ -240,6 +240,48 @@ const OPENS_A_PAGE = [
   { _mcp: { tool: 'browser_navigate', arguments: { url: FORT_JOY_URL }, result_for: 'toolu_nav', dump: TOOLS } },
   said('p2', [{ type: 'text', text: OPENED }], 'end_turn'),
   result(OPENED, 0.01),
+  { _wait_user: true },
+];
+/** Refs the guide's elements get (`browser_find` numbers them in the page's order; checked below). */
+const REF = { order: 7, tab: 2, buy: 4 };
+const CLICKED = 'The build order starts at Moss Shield.';
+/** The chat's own Claude acts on a page, as Claude Code's own app's browser does: opens the guide, finds the
+ * collapsed "Build Order" and clicks it open, reads it, switches the build's tab, then tries to buy (Yap asks). */
+const call = (n, tool, args) => [
+  begins(`toolu_${n}`, `mcp__yap__${tool}`),
+  said(`a${n}`, [{ type: 'tool_use', id: `toolu_${n}`, name: `mcp__yap__${tool}`, input: args }]),
+  { _mcp: { tool, arguments: args, result_for: `toolu_${n}`, dump: TOOLS } },
+];
+const CLICKS = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  { _mcp: { list: true, dump: TOOLS } },
+  ...call(1, 'browser_navigate', { url: LEVELING_URL }),
+  ...call(2, 'browser_find', { query: 'Build Order' }),
+  ...call(3, 'browser_click', { ref: REF.order }),
+  ...call(4, 'browser_read', {}),
+  ...call(5, 'browser_find', { query: 'Damage' }),
+  ...call(6, 'browser_click', { ref: REF.tab }),
+  ...call(7, 'browser_find', { query: 'Buy the full guide' }),
+  ...call(8, 'browser_click', { ref: REF.buy }),
+  ...call(9, 'browser_read', {}),
+  said('a99', [{ type: 'text', text: CLICKED }], 'end_turn'),
+  result(CLICKED, 0.01),
+  { _wait_user: true },
+];
+const BOUGHT = 'Bought it, as you asked.';
+/** …in Bypass permissions, asked to buy: nothing asks (no card), the click goes ahead. */
+const BUYS = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  ...call(1, 'browser_navigate', { url: LEVELING_URL }),
+  ...call(2, 'browser_find', { query: 'Buy the full guide' }),
+  ...call(3, 'browser_click', { ref: REF.buy }),
+  ...call(4, 'browser_read', {}),
+  said('b99', [{ type: 'text', text: BOUGHT }], 'end_turn'),
+  result(BOUGHT, 0.01),
   { _wait_user: true },
 ];
 const LOOKED = 'Those are two monitors, both blank.';
@@ -814,12 +856,13 @@ test('its session opens pages in Yap’s browser beside the chat, as Claude Code
   await codeChat(main);
   await send(main, `Bring up ${FORT_JOY_URL} beside the chat please.`);
   const agent = await newAgent(yap, before);
-  // Its session lists Yap's browser (never the screen, nor acting on a page) and may use it without a prompt.
+  // Its session lists Yap's browser, acting on its pages too (never the screen, switched off here), and may use it without a prompt.
   await expect.poll(() => toolDumps().length, { timeout: 20_000 }).toBeGreaterThan(0);
   const listed = toolDumps()[0].tools.map((t) => t.name);
-  expect(listed).toEqual(expect.arrayContaining(['browser_navigate', 'browser_read', 'browser_screenshot', 'show_picture']));
-  for (const name of ['look_at_screen', 'browser_click', 'browser_type', 'search_memory']) expect(listed).not.toContain(name);
+  expect(listed).toEqual(expect.arrayContaining(['browser_navigate', 'browser_read', 'browser_screenshot', 'show_picture', 'browser_click', 'browser_type', 'browser_key']));
+  for (const name of ['look_at_screen', 'search_memory']) expect(listed).not.toContain(name);
   expect(after(argsSeen()[0], '--allowedTools')).toContain('mcp__yap__browser_navigate');
+  expect(after(argsSeen()[0], '--allowedTools')).toContain('mcp__yap__browser_click');
   // The page opens beside the chat, in its own tab, as a plan chat's does.
   await expect(main.getByTestId('chat-page')).toBeVisible({ timeout: 30_000 });
   await expect.poll(async () => (await yap.invoke('e2e_page_views')).some((v) => v.key === `page:${FORT_JOY_URL}` && v.loaded), { timeout: 20_000 }).toBe(true);
@@ -835,6 +878,71 @@ test('its session opens pages in Yap’s browser beside the chat, as Claude Code
   expect(messages[2].pages?.map((p) => p.url)).toEqual([FORT_JOY_URL]);
   expect((await agents(yap)).find((j) => j.id === agent.id).turnList[0].beside?.pages?.length).toBe(1);
   await shot(main, '70-a-page-opened-beside-the-chat');
+  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+});
+
+test('its session acts on the page as Claude Code’s own browser does: a collapsed section clicked open, a tab switched; buying asks first, in the thread', async ({ yap, main, shot }) => {
+  test.setTimeout(120_000);
+  fs.rmSync(TOOLS, { force: true });
+  await setConfig(yap, main, { webSearch: true });
+  await script(yap, CLICKS, 'clicks');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, `Open ${LEVELING_URL} and tell me the build order.`);
+  const agent = await newAgent(yap, before);
+  // Buying waits on the person: a card under its work in the thread, and in the page's strip. Don't.
+  const card = thread(main).getByTestId('chat-page-confirm');
+  await expect(card).toBeVisible({ timeout: 60_000 });
+  await expect(card).toContainText('Buy the full guide');
+  await shot(main, '72-acting-asks-before-buying');
+  await card.getByRole('button', { name: "Don't" }).click();
+  const done = await ended(yap, agent.id, 60_000);
+  const dumps = toolDumps();
+  const text = (d) => (d?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join(' ');
+  // Its session lists the acting tools.
+  expect(dumps[0].tools.map((t) => t.name)).toEqual(expect.arrayContaining(['browser_click', 'browser_type', 'browser_key', 'browser_hover', 'browser_drag', 'browser_form_input']));
+  const find = dumps.filter((d) => d.tool === 'browser_find').map(text);
+  // (The refs it found, for the script's clicks.)
+  expect(find[0]).toContain(`[${REF.order}]`);
+  expect(find[1]).toContain(`[${REF.tab}]`);
+  expect(find[2]).toContain(`[${REF.buy}]`);
+  const clicks = dumps.filter((d) => d.tool === 'browser_click');
+  expect(clicks.slice(0, 2).map((d) => d.isError)).toEqual([false, false]);
+  // The section opened (its rows made by the page's own script on the click), and the tab switched.
+  const reads = dumps.filter((d) => d.tool === 'browser_read').map(text);
+  expect(reads[0]).toContain('10 Moss Shield Rank 1');
+  expect(reads[1]).toContain('Build: Damage');
+  // Buying: asked, refused — nothing bought.
+  expect(text(clicks[2])).toMatch(/didn't|not|refused|said no/i);
+  expect(reads[1]).not.toContain('Bought');
+  // Its work says what it did, in plain words.
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  expect(log.some((e) => e.step === 'Clicking on the page beside the chat')).toBe(true);
+  const messages = await messagesOf(yap, done.conversation, 3);
+  expect(messages[2].text).toBe(CLICKED);
+  await expect(card).toHaveAttribute('data-state', /refused|timedOut/);
+  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+});
+
+// The maintainer, 14 Nov 2026: the buy card "must not appear in bypass permissions" (Claude asks in the chat instead: its instructions, rpc.rs).
+test('in Bypass permissions acting on a page asks nothing: no card, the click goes ahead', async ({ yap, main }) => {
+  test.setTimeout(90_000);
+  fs.rmSync(TOOLS, { force: true });
+  await yap.invoke('agent_bypass_confirmed');
+  await setConfig(yap, main, { webSearch: true, agentsMode: 'bypassPermissions' });
+  await script(yap, BUYS, 'buys');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, `Open ${LEVELING_URL} and buy the full guide for me.`);
+  const agent = await newAgent(yap, before);
+  const done = await ended(yap, agent.id, 60_000);
+  expect(done.turnList[0].mode).toBe('bypassPermissions');
+  const text = (d) => (d?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join(' ');
+  const click = toolDumps().find((d) => d.tool === 'browser_click');
+  expect(click.isError).toBe(false);
+  expect(text(toolDumps().find((d) => d.tool === 'browser_read'))).toContain('Bought');
+  await expect(thread(main).getByTestId('chat-page-confirm')).toHaveCount(0);
+  await expect(main.getByTestId('chat-page').getByText('Allow once')).toHaveCount(0);
   await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
 });
 
