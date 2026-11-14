@@ -296,7 +296,7 @@ pub struct Diff {
 
 impl Diff {
     /// Nothing changed (Settings' "2 new tools" line, wave 5).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.added.is_empty() && self.changed.is_empty() && self.removed.is_empty()
     }

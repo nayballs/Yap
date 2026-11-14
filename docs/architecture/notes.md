@@ -332,10 +332,10 @@ under the tabs, a dictation at the caret as plain text.
   steps aside. The in-page fallback: the Quick note shortcut (away), the
   meeting shortcut, the Voice Assistant's, Read aloud (its selection),
   Snip to Chat, Copy last, the language shortcuts and the dictation key.
-- **Commands** — `quick_note_toggle`, `quick_note_open {fresh?}`,
+- **Commands** — `quick_note_open {fresh?}`,
   `quick_note_hide`, `quick_note_state` (the page loading), `quick_note_save
   {id, content}` → `{noteId, title, titleAuto, folder, removed, unsaved?}`,
-  `quick_note_new`, `quick_note_dictate`, `quick_note_key {pressed}`,
+  `quick_note_dictate`, `quick_note_key {pressed}`,
   `quick_note_tabs {ids, active}`, `quick_note_send_target`,
   `quick_note_send {text}`, `quick_note_bar_button {on}`; debug-only
   `e2e_quick_note_dictation {text}` (its mic hearing a transcript),
@@ -597,8 +597,7 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   drop_audio` → `search::removed` (the deleted passages' vectors out of
   the index at its next look, seconds away, search by meaning on or off). At start (+90 s; 0.5 s in
   test mode), hourly, and on the setting set or shortened
-  (`on_config_saved`). Events `yap-note-transcript-deleted`,
-  `yap-notes-changed`. Unit-tested (`due`, `strip`).
+  (`on_config_saved`). Event `yap-notes-changed`. Unit-tested (`due`, `strip`).
 - **Frontend** — `lib/core/noteEdits.js` (`editLine`, `taskToggled` + `setTask`,
   `saveSummary`, `askReplaceSummary`, `SUMMARY_KEPT`) and the pure helpers in
   `notepadText.js` (`lineRef`, `withLineEdit`, `taskText`, `withTaskMark`,

@@ -37,7 +37,6 @@ export const WAITS_FOR_MS = PLAN_WAITS_S * 1000;
 export const SEEN_KEY = 'yap.chat.seen';
 
 /** The states, strongest first. */
-export const STATES = ['needs', 'working', 'new'];
 const RANK = { needs: 3, working: 2, new: 1 };
 
 /** An agent that isn't over: queued or running (asking is the person's). */

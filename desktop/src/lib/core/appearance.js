@@ -35,7 +35,6 @@
 // localStorage (`yap.theme`, `yap.barTheme`; every Yap window shares it),
 // which index.html's head script reads before the first paint, and Rust
 // gives the opaque windows' webviews the same background (shell/theme.rs).
-import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getConfig } from './ipcShared.js';
 

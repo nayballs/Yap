@@ -13,8 +13,7 @@
 export const FEATURE_NAME = 'Yap Code';
 /** What the UI calls a conversation attached to a workspace, and its side of Chat. */
 export const CODE_NAME = 'Code';
-/** What the UI calls a workspace. */
-export const WORKSPACE = 'workspace';
+/** What the UI calls the workspaces. */
 export const WORKSPACES = 'Workspaces';
 
 /**

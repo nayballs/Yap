@@ -501,7 +501,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   (`for_rewrite`, `pipeline/rewrite.rs`), the transforms that reword
   (`transform_uses`: Polish, Shorter and the person's own — never Fix
   grammar only, Translate or Make it a prompt) and a transform on every
-  dictation (`transforms::run_on_dictation_in`); never a language
+  dictation (`transforms::run_on_dictation`); never a language
   shortcut's translation, an AI prompt or a terminal (`kind_for`: no
   samples). **Never AI cleanup**, High included: on the on-device 4B they
   changed none of ten High cleanups (cleanup keeps the words said, and the
@@ -1756,8 +1756,7 @@ name.
 - **Signed in**: `claude auth status --json`, exit code 1 when signed out.
   Only `loggedIn`, `authMethod`, `apiProvider` and `subscriptionType` are
   read; anything else it says (an email, an organisation) is never kept.
-- `status` is cached for 30 s (`refresh` probes again); the commands
-  `claude_code_status {refresh?}` and `claude_code_sign_in`.
+- `status` is cached for 30 s (`refresh` probes again).
 - **Sign in** (`open_sign_in`): Windows Terminal, else PowerShell, on `claude
   auth login`, never piped and never in Yap's kill-on-close job (it stays
   open if Yap quits). Test runs open nothing. The terminal itself

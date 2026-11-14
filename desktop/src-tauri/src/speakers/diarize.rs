@@ -52,7 +52,6 @@ use tauri::{AppHandle, Emitter};
 use protocol::Message;
 pub use registry::DEFAULT_MODEL;
 use registry::EngineFiles;
-#[allow(unused_imports)] // the speaker map's types
 pub use timeline::{Segment, Timeline};
 use timeline::Runs;
 

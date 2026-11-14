@@ -2585,7 +2585,6 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 | `chat_send {…, codeFolder?}` | (Chat's) a new chat's first question, made a Code chat in that workspace |
 | `claude_approve_answer {id, allow}` / `claude_approve_pending` | a permission prompt's answer; the prompts waiting (`integrations/claude_live.rs`) |
 | `claude_approve_reply {id, answers}` | a question card's answers (`AskUserQuestion`): each question's text → the label picked, a list of labels, or the person's own words; `true` when it was still waiting and something was answered |
-| `claude_code_status {refresh?}` / `claude_code_sign_in` | Claude Code on this PC; its sign-in terminal (`ai/claude_code.rs`) |
 
 Debug builds, test mode only: `e2e_claude_script {script?}` (Claude Code is
 the build's own stand-in replaying `script` from now on),

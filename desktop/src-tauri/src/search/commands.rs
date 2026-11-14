@@ -34,18 +34,6 @@ pub async fn search_install(app: AppHandle) -> Result<Status, String> {
     Ok(index::status())
 }
 
-/// "Search my meetings by meaning" on or off (the model and the index stay;
-/// off, the model's server stops).
-#[tauri::command]
-pub fn search_set_enabled(app: AppHandle, on: bool) -> Result<Status, String> {
-    crate::shell::settings::change_config(&app, |c| {
-        c.search_by_meaning = on;
-        Ok(())
-    })?;
-    index::emit(&app);
-    Ok(index::status())
-}
-
 /// Read every passage again (the index deleted; it fills in the background).
 #[tauri::command]
 pub fn search_rebuild(app: AppHandle) -> Result<Status, String> {

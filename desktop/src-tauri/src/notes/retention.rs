@@ -119,7 +119,6 @@ pub fn sweep(app: Option<&AppHandle>) -> usize {
     tracing::info!(meetings = done.len(), days, "Transcript retention: old meeting transcripts deleted");
     if let Some(app) = app {
         for id in &done {
-            let _ = app.emit("yap-note-transcript-deleted", serde_json::json!({ "noteId": id }));
             crate::meetings::meeting_audio::changed(app, *id);
         }
         let _ = app.emit("yap-notes-changed", ());

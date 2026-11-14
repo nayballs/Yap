@@ -46,7 +46,7 @@ it borrows is the on-device model's ([ai-models.md](./ai-models.md)).
   (`notes_for`), `search_chats` (`find_chats` / `chats_for`) and memory's
   items for a question (`memory_relevant` / `memory_block`).
 - **`search/commands.rs`** — `search_status`, `search_install`,
-  `search_set_enabled`, `search_rebuild`, `search_delete`, the Meetings
+  `search_rebuild`, `search_delete`, the Meetings
   view's `search_moments(query, limit)` → `{moments, semantic, range}`,
   the Notes view's `notes_search(query, meaning?, limit?)` and the Chat
   sidebar's `chats_search(query, meaning?, limit?)` → `{hits, semantic}`.

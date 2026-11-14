@@ -14,9 +14,7 @@
 //!   loop fits it to the room left after that (`chat/budget.rs`).
 //!
 //! What a server returns is outside content: wave 4's tool loop treats it
-//! as it treats a web page. Nothing here is logged. (A release build calls
-//! no tool yet: `call.rs`.)
-#![cfg_attr(not(debug_assertions), allow(dead_code))]
+//! as it treats a web page. Nothing here is logged.
 
 use base64::Engine as _;
 use serde_json::{json, Value};

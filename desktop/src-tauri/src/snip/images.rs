@@ -535,13 +535,6 @@ pub fn prepare(ids: Vec<String>, fit: Fit) {
         .ok();
 }
 
-/// The fitted copies a test made (their sizes), by id: what a request
-/// would carry. Debug and test only.
-#[allow(dead_code)]
-pub fn fitted_sizes() -> HashMap<String, (u32, u32)> {
-    FITTED.lock().map(|f| f.iter().map(|((id, _, _), v)| (id.clone(), (v.w, v.h))).collect()).unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

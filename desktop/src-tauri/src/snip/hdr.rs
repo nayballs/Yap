@@ -133,14 +133,13 @@ impl ToSrgb8 {
         ToSrgb8 { white_nits: white, lut: lut.into_boxed_slice() }
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn white_nits(&self) -> f32 {
         self.white_nits
     }
 
     /// One channel's FP16 bits → its 8-bit sRGB value.
-    #[cfg_attr(not(test), allow(dead_code))]
-    #[inline]
+    #[cfg(test)]
     pub fn channel(&self, bits: u16) -> u8 {
         self.lut[bits as usize]
     }

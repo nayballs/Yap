@@ -183,10 +183,7 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   `note_for` makes the note in `folder_for_meeting(key, emails)` (the
   series', else the company's, else Meetings) and keeps its companies
   (`companies::remember`); `on_meeting_started` → `file_linked(noteId, key,
-  emails)` (keeps them, files when `may_file`); **an imported transcript**
-  with attendee emails → `filing::file_imported(noteId, emails)` (the
-  import's hook: keeps them, files by company when the note sits in
-  Personal or Meetings; emits nothing, no network, any thread). **The
+  emails)` (keeps them, files when `may_file`). **The
   offer** (`companies::after_move`, off the command's thread): a meeting
   note filed by hand in a folder of the person's own (not Personal or
   Meetings) — `meeting_file` with `series` false, `note_update` with a new

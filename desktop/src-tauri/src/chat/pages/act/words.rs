@@ -22,7 +22,7 @@
 /// One language's words, by what they'd do.
 pub struct Lang {
     /// Its language (the tests list the tables by it).
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub code: &'static str,
     // ---- a click that asks the person first (rules::needs_ok) ----
     pub sign_in: &'static [&'static str],

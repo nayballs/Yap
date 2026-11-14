@@ -222,23 +222,6 @@ pub fn file_linked(note_id: u64, key: &str, emails: &[String]) -> Option<String>
     move_by_rule(note_id, folder, by)
 }
 
-/// An imported transcript's note (`note_id`, made already) with its
-/// attendees' email addresses (`emails`, "sam@example.com" or "Sam Lee
-/// <sam@example.com>"): their companies kept, and the note into its
-/// company's folder when there's a rule and it sits where Yap put it
-/// ([`may_file`]: Personal or Meetings, not a folder the import was told
-/// to use). Returns the folder it went to. Call it once the note is made,
-/// before telling the windows (it emits nothing itself); no network, no
-/// windows, fine on any thread.
-// The transcript import's hook: unused until the import lands and calls it.
-#[allow(dead_code)]
-pub fn file_imported<S: AsRef<str>>(note_id: u64, emails: &[S]) -> Option<String> {
-    let emails: Vec<String> = emails.iter().map(|e| e.as_ref().to_string()).collect();
-    companies::remember(note_id, &emails);
-    let (_, folder) = companies::folder_for(&emails)?;
-    move_by_rule(note_id, folder, By::Company)
-}
-
 fn move_by_rule(note_id: u64, folder: String, by: By) -> Option<String> {
     let note = crate::notes::get(note_id)?;
     if !may_file(&note, &folder) {
@@ -523,12 +506,6 @@ mod tests {
         crate::notes::update(mine.id, None, None, Some(crate::notes::PERSONAL.into()), None).unwrap();
         assert_eq!(file_linked(mine.id, "1:kick-off@example.com", &client), None);
         assert_eq!(crate::notes::get(mine.id).unwrap().folder, crate::notes::PERSONAL);
-        // An imported transcript with the client's address: by its company.
-        let imported = crate::notes::create("Imported call", "", "upload", crate::notes::PERSONAL);
-        assert_eq!(file_imported(imported.id, &["Sam Lee <sam@example.com>"]).as_deref(), Some("Clients"));
-        // Imported into a folder of the person's own: left there.
-        let theirs = crate::notes::create("Imported call", "", "upload", "Design");
-        assert_eq!(file_imported(theirs.id, &client), None);
         with_rules(|r| *r = Rules::default());
     }
 

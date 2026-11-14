@@ -3,8 +3,7 @@
 //! go in Clients" — every meeting note whose calendar invite has someone
 //! from that company on it goes to that folder: each new one as the
 //! calendar makes it or a recording ties it to its meeting
-//! (`filing::folder_for_meeting`, `filing::file_linked`), an imported
-//! transcript with attendee emails ([`super::file_imported`]), and the past
+//! (`filing::folder_for_meeting`, `filing::file_linked`), and the past
 //! ones when the person says Yes.
 //!
 //! **The company** is an attendee's email domain ([`domain_of`]), never

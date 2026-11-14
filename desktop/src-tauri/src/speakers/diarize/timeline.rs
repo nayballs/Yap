@@ -51,7 +51,6 @@ pub struct Timeline {
 
 impl Timeline {
     /// The voices heard, as `(stream, speaker)`, in the order they first spoke.
-    #[cfg_attr(not(test), allow(dead_code))] // for the speaker map (diarize.rs)
     pub fn voices(&self) -> Vec<(u32, u8)> {
         let mut out: Vec<(u32, u8)> = Vec::new();
         for s in &self.segments {
