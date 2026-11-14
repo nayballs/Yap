@@ -50,6 +50,23 @@ pub fn agent_queue(conversation: u64) -> &'static str {
     runner::queue_state(conversation)
 }
 
+/// **Rewind** a Code chat to before its message `index` (14 Nov 2026,
+/// `agents/rewind.rs`): that message's turn and every later one go, from
+/// the chat and from Claude's session; `files`: the files they changed are
+/// put back too.
+#[tauri::command]
+pub fn agent_rewind(conversation: u64, index: usize, files: bool) -> Result<super::rewind::Rewound, String> {
+    super::rewind::rewind(conversation, index, files)
+}
+
+/// **Fork from here** (14 Nov 2026, `agents/rewind.rs`): a new Code chat
+/// with a Code chat up to and including its message `index`'s turn. The new
+/// chat's id.
+#[tauri::command]
+pub fn agent_fork(conversation: u64, index: usize) -> Result<u64, String> {
+    super::rewind::fork(conversation, index)
+}
+
 /// Stop an agent (a queued one comes off the queue).
 #[tauri::command]
 pub async fn agent_stop(id: String) -> Result<Agent, String> {

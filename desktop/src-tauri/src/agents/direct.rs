@@ -148,6 +148,8 @@ pub fn send(conversation: u64, folder: &Folder, text: &str, shots: &[String], me
     let model = if model.trim().is_empty() { cfg.agents_model.clone() } else { model.to_string() };
     let effort = effort.and_then(|e| Effort::parse(&e)).or_else(|| Effort::parse(&cfg.agents_effort)).unwrap_or(Effort::Medium);
     let now = store::now_secs();
+    // A chat forked from another (Fork from here): its first turn is Claude Code's own fork of that session.
+    let fork = store::take_fork(conversation);
     let agent = Agent {
         id: store::new_id(),
         conversation: Some(conversation),
@@ -163,7 +165,9 @@ pub fn send(conversation: u64, folder: &Folder, text: &str, shots: &[String], me
         effort_asked: true,
         mode: mode.as_str().to_string(),
         pay: if cfg.agents_pay == "key" { "key".into() } else { "plan".into() },
-        session: session::new_session_id(),
+        session: fork.as_ref().map_or_else(session::new_session_id, |f| f.session.clone()),
+        branch: fork.as_ref().map(|f| store::Branch { at: Some(f.at.clone()), from: None }),
+        forked: fork,
         status: Status::Queued,
         created_ts: now,
         updated_ts: now,

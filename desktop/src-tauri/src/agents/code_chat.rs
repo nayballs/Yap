@@ -65,7 +65,7 @@ fn emit(ev: &Changed) {
 }
 
 /// The workspace at `path`, while it is one.
-fn folder_at(path: &str) -> Option<Folder> {
+pub(crate) fn folder_at(path: &str) -> Option<Folder> {
     let want = workspaces::norm(path);
     workspaces::list().into_iter().find(|f| workspaces::norm(&f.path) == want)
 }

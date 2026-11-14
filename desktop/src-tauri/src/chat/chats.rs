@@ -1064,7 +1064,8 @@ pub fn delete_many(ids: &[u64]) -> usize {
         if gone > 0 {
             save_to_disk(s);
         }
-        (gone, images)
+        // (A fork's copies share them: one another chat still shows stays.)
+        (gone, unshown(s, images))
     });
     // Their vectors in the search index go with them.
     if gone > 0 {
@@ -1075,6 +1076,73 @@ pub fn delete_many(ids: &[u64]) -> usize {
         crate::snip::images::delete(&images);
     }
     gone
+}
+
+/// Of `images`, those no conversation shows any more (a fork's messages
+/// share their original's).
+fn unshown(s: &Store, images: Vec<String>) -> Vec<String> {
+    if images.is_empty() {
+        return images;
+    }
+    let shown: std::collections::HashSet<String> = s.conversations.iter().flat_map(|c| c.messages.iter()).flat_map(ChatMessage::image_ids).collect();
+    images.into_iter().filter(|i| !shown.contains(i)).collect()
+}
+
+/// **Rewind** (14 Nov 2026, a Code chat's message: `agents/rewind.rs`):
+/// conversation `id` back to before its message `at` — the person's own —
+/// which goes with everything after it (their screenshots too, unless
+/// another chat still shows them). Returns that message, its words for the
+/// box.
+pub fn rewind(id: u64, at: usize) -> Result<ChatMessage, String> {
+    let (message, images) = with_store(|s| {
+        let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
+        let m = conv.messages.get(at).filter(|m| m.role == "user" && m.kind.is_empty()).cloned().ok_or("That message isn't there any more.")?;
+        let gone: Vec<String> = conv.messages[at..].iter().flat_map(ChatMessage::image_ids).collect();
+        conv.messages.truncate(at);
+        // Its summary only while it covers what's left.
+        if conv.summary.as_ref().is_some_and(|sum| sum.upto > at || sum.after > at) {
+            conv.summary = None;
+        }
+        conv.updated_ts = now_secs();
+        save_to_disk(s);
+        Ok::<_, String>((m, unshown(s, gone)))
+    })?;
+    crate::search::removed();
+    if !images.is_empty() {
+        crate::snip::images::delete(&images);
+    }
+    Ok(message)
+}
+
+/// **Fork from here** (14 Nov 2026, a Code chat's message:
+/// `agents/rewind.rs`): a new conversation with conversation `id`'s first
+/// `upto` messages (their screenshots shared, never copied), titled
+/// `title` — the person's and the answers, never Yap's own lines about the
+/// original's agents (an agent's report marker: those stay with the chat
+/// whose agents they are). The original is untouched.
+pub fn fork(id: u64, upto: usize, title: &str) -> Result<Conversation, String> {
+    with_store(|s| {
+        let from = s.conversations.iter().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
+        let messages: Vec<ChatMessage> = from.messages[..upto.min(from.messages.len())].iter().filter(|m| m.kind.is_empty()).cloned().collect();
+        let scope = from.scope.clone();
+        let new_id = SAVER.next_id(s.conversations.iter().map(|c| c.id).max().unwrap_or(0));
+        let now = now_secs();
+        let conv = Conversation {
+            id: new_id,
+            title: title.trim().to_string(),
+            created_ts: now,
+            updated_ts: now,
+            messages,
+            scope,
+            note: None,
+            archived_ts: 0,
+            summary: None,
+            closed_tabs: Vec::new(),
+        };
+        s.conversations.push(conv.clone());
+        save_to_disk(s);
+        Ok(conv)
+    })
 }
 
 /// A conversation as a page gets it: each screenshot whose file is gone
@@ -2022,6 +2090,42 @@ mod tests {
         // "Delete all chats…": every id the list showed.
         assert_eq!(delete_many(&left), 2);
         assert!(with_store(|s| s.conversations.is_empty()));
+    }
+
+    /// A Code chat's Rewind and Fork from here (14 Nov 2026,
+    /// `agents/rewind.rs`): back to before the person's own message, its
+    /// words handed back; a fork a copy up to a point, its screenshots
+    /// shared, so deleting either chat never takes the other's.
+    #[test]
+    fn a_rewind_cuts_before_a_message_and_a_fork_shares_its_screenshots() {
+        let shot = |id: &str| ChatImage { id: id.into(), ..Default::default() };
+        let c = create("Garden planner");
+        append_question(c.id, "Add a watering schedule", false, &[shot("img_1111111111111111")]).unwrap();
+        append_whole(c.id, ChatMessage { role: "assistant".into(), text: "{\"agent\":\"a1\"}".into(), kind: "agentReport".into(), ..Default::default() }).unwrap();
+        append(c.id, "assistant", "Done: notes.md has it.", &[], None, false).unwrap();
+        append_question(c.id, "Now a minimap button", false, &[shot("img_2222222222222222")]).unwrap();
+        append(c.id, "assistant", "Done: the beds have a minimap.", &[], None, false).unwrap();
+        // A fork up to the first answer: its own chat (never the original agent's report line), the original untouched.
+        let f = fork(c.id, 3, "Garden planner (fork)").unwrap();
+        assert_ne!(f.id, c.id);
+        assert_eq!(f.title, "Garden planner (fork)");
+        assert_eq!(f.messages.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["Add a watering schedule", "Done: notes.md has it."]);
+        assert_eq!(get(c.id).unwrap().messages.len(), 5);
+        // Rewind to before the second question: it and its answer go, its words come back.
+        let back = rewind(c.id, 3).unwrap();
+        assert_eq!(back.text, "Now a minimap button");
+        assert_eq!(get(c.id).unwrap().messages.len(), 3);
+        // Only the person's own message is a place to rewind to (never an answer, nor a report line).
+        assert!(rewind(c.id, 1).is_err());
+        assert!(rewind(c.id, 2).is_err());
+        assert!(rewind(c.id, 9).is_err());
+        assert!(rewind(999, 0).is_err());
+        // Deleting the original leaves the fork's screenshot: another chat still shows it.
+        let gone = with_store(|s| unshown(s, vec!["img_1111111111111111".into(), "img_9999999999999999".into()]));
+        assert_eq!(gone, ["img_9999999999999999"]);
+        delete(c.id);
+        assert_eq!(get(f.id).unwrap().messages[0].images[0].id, "img_1111111111111111");
+        assert!(image_ids().contains("img_1111111111111111"));
     }
 
     #[test]

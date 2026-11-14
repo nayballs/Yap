@@ -142,6 +142,19 @@ pub struct Agent {
     pub pay: String,
     /// Claude Code's session (`--session-id`, then `--resume`).
     pub session: String,
+    /// **Its next run branches the session** (14 Nov 2026, a Code chat's
+    /// Rewind and Fork from here: `agents/rewind.rs`): Claude Code's own
+    /// fork of [`session`](Agent::session) up to a message, or a new session
+    /// altogether. Let go once that run's session says its own id. A new
+    /// field: an older Yap drops it on its save, and the next turn then
+    /// carries on the session as it was (the rewound turns in it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<Branch>,
+    /// **The chat it works in was forked from another** (Fork from here):
+    /// the session and message it branched from — where a Rewind to before
+    /// its own first turn goes back to (the history the fork carried).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forked: Option<Fork>,
     pub status: Status,
     /// Unix seconds.
     pub created_ts: u64,
@@ -401,6 +414,45 @@ pub struct TurnNote {
     /// the row shows again).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dismissed: bool,
+    /// **Where it ended in the session** (14 Nov 2026): its last message's
+    /// `uuid` in Claude Code's stream (its own, not a helper's) — where a
+    /// Rewind to the turn after it, or a Fork from here at it, resumes the
+    /// session (`agents/rewind.rs`). None for a turn from before, or one
+    /// that never said anything.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_uuid: Option<String>,
+    /// **Rewound** (a Code chat's Rewind, 14 Nov 2026): its messages are
+    /// gone from the chat and its session never sees it again; kept for its
+    /// backups and log, never shown. A new field: an older Yap drops it on
+    /// its save, and the turn's pill then finds no message of its own.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub rewound: bool,
+}
+
+/// **Where an agent's next run starts its session** ([`Agent::branch`]):
+/// `at` its message — `--resume <from, else its session> --fork-session
+/// --resume-session-at <at>` —, or `None`: a new session (rewound to
+/// before its first message).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Branch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+    /// Another session to branch (a forked chat rewound to before its own
+    /// first turn: the original's, at the fork's point).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+}
+
+/// **A chat forked from another** (a Code chat's Fork from here): the
+/// session its first turn branches, at that turn's end.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Fork {
+    pub session: String,
+    pub at: String,
+    /// The chat it came from.
+    pub from: u64,
 }
 
 impl TurnNote {
@@ -632,6 +684,10 @@ pub struct Store {
     /// Each Code chat's folder (conversation id → its folder, `code_chat.rs`):
     /// beside its Mode, never in chats.json.
     pub code_chats: BTreeMap<u64, CodeChat>,
+    /// **Chats forked from another, their first turn still to come**
+    /// (conversation id → where its session branches: `agents/rewind.rs`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub forks: BTreeMap<u64, Fork>,
     /// The Bypass warning was confirmed once.
     pub bypass_confirmed: bool,
 }
@@ -1026,6 +1082,11 @@ pub fn mode_of(conversation: Option<u64>, default: &str) -> String {
     set.unwrap_or_else(|| default.to_string())
 }
 
+/// The Mode chosen in chat `conversation` itself (`None`: never chosen there).
+pub fn modes_of(conversation: u64) -> Option<String> {
+    with_store(|s| s.modes.get(&conversation).cloned())
+}
+
 pub fn set_mode(conversation: u64, mode: &str) {
     with_store(|s| {
         s.modes.insert(conversation, mode.to_string());
@@ -1036,6 +1097,25 @@ pub fn set_mode(conversation: u64, mode: &str) {
 // ---- each Code chat's folder ----
 
 /// The folder `conversation` is a Code chat in (`None`: a plain chat).
+/// A forked chat's first turn: where its session branches (taken: once).
+pub fn take_fork(conversation: u64) -> Option<Fork> {
+    with_store(|s| {
+        let f = s.forks.remove(&conversation);
+        if f.is_some() {
+            save(s);
+        }
+        f
+    })
+}
+
+/// Chat `conversation` is a fork: its first turn branches `fork`.
+pub fn set_fork(conversation: u64, fork: Fork) {
+    with_store(|s| {
+        s.forks.insert(conversation, fork);
+        save(s);
+    });
+}
+
 pub fn code_chat_of(conversation: u64) -> Option<CodeChat> {
     with_store(|s| s.code_chats.get(&conversation).cloned())
 }

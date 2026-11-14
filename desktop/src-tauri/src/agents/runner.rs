@@ -608,6 +608,12 @@ pub fn emit(ev: &AgentEvent) {
 /// **Send `ev` to the page only**: what a turn has used so far (`usage`), many
 /// times a turn — never into its log (the turn's note keeps it, saved with
 /// the agent) nor to a phone.
+/// **Agent `agent`'s record changed with no step of its own** (`changed`:
+/// what — "rewound", …): the pages read it again.
+pub(crate) fn told_changed(agent: &Agent, what: &str) {
+    emit(&AgentEvent { changed: Some(what.to_string()), ..AgentEvent::of(agent) });
+}
+
 fn emit_live(ev: &AgentEvent) {
     if let Some(app) = APP.get() {
         let _ = app.emit(EVENT, ev);
@@ -832,6 +838,18 @@ fn opening(agent: &Agent, message: Option<&str>, read_only: bool, direct: bool) 
     match message {
         Some(m) => m.to_string(),
         None => ended(&agent.brief, closing(read_only, direct)),
+    }
+}
+
+/// **The session a branched run starts** ([`store::Branch`], a Code chat's
+/// Rewind or Fork from here): Claude Code's own fork of `session` up to and
+/// including its message `at`, or — rewound to before its first message,
+/// or no session to fork — a new one. Pure.
+pub(crate) fn branched(session: &str, branch: &store::Branch) -> Conversation {
+    let from = branch.from.as_deref().filter(|f| !f.is_empty()).unwrap_or(session);
+    match branch.at.as_deref().filter(|a| !a.is_empty()) {
+        Some(at) if !from.is_empty() => Conversation::Branch { from: from.to_string(), at: at.to_string() },
+        _ => Conversation::New(session::new_session_id()),
     }
 }
 
@@ -1164,7 +1182,12 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     });
     let resuming = message.is_some() && agent.started_ts > 0 && !agent.session.is_empty();
     let session_id = if agent.session.is_empty() { session::new_session_id() } else { agent.session.clone() };
-    let conversation = if resuming { Conversation::Resume(session_id) } else { Conversation::New(session_id) };
+    // A Rewind or a Fork from here: Claude Code's own fork of the session at a message, or a new one.
+    let conversation = match &agent.branch {
+        Some(b) => branched(&agent.session, b),
+        None if resuming => Conversation::Resume(session_id),
+        None => Conversation::New(session_id),
+    };
     let mut spec = agent_spec(&agent, &folder, pay, mode, read_only, conversation, run.mcp_config(), run.settings(), run.env());
     // Yap's read tools, where the run has them: no prompt for a read of the
     // person's own data (none for any other run: its list is empty).
@@ -1342,6 +1365,10 @@ struct Follow {
     /// **Where a message read after an answer had ended splits the turn's
     /// words** (`said`'s index): its words are from there on (`on_taken`).
     split_at: Option<usize>,
+    /// **Its own latest message's place in the session** (the stream's
+    /// `uuid`; a helper's aren't): the turn's `end_uuid` at its result, where
+    /// a Rewind or a Fork from here resumes it (`agents/rewind.rs`).
+    last_uuid: Option<String>,
     problem: Option<ProblemNote>,
     asking: bool,
     /// When its input ended (its last result came).
@@ -1477,6 +1504,7 @@ impl Follow {
             outcome: None,
             said: Vec::new(),
             split_at: None,
+            last_uuid: None,
             problem: None,
             asking: false,
             input_over_at: None,
@@ -1782,7 +1810,11 @@ impl Follow {
         match ev {
             Event::Init(init) => {
                 if !init.session_id.is_empty() {
-                    store::touch(&self.id, |j| j.session = init.session_id.clone());
+                    // (A branch — Rewind, Fork from here — is made: the session is its own now.)
+                    store::touch(&self.id, |j| {
+                        j.session = init.session_id.clone();
+                        j.branch = None;
+                    });
                 }
                 self.meter.model(&init.model);
             }
@@ -1795,6 +1827,12 @@ impl Follow {
                 }
                 // (A helper's message: its tool calls are its own steps, under the call that sent it.)
                 self.under = a.parent_tool_use_id.clone().filter(|p| !p.is_empty());
+                // Its own message's place in the session: where a Rewind or a Fork from here resumes it.
+                if self.under.is_none() {
+                    if let Some(u) = a.uuid.as_ref().filter(|u| !u.is_empty()) {
+                        self.last_uuid = Some(u.clone());
+                    }
+                }
                 // Its own message, whole now: what was being written is this.
                 if self.under.is_none() {
                     self.saying.clear();
@@ -1960,6 +1998,10 @@ impl Follow {
                 t.cost = turn_cost;
                 if usage.is_some() {
                     t.usage.clone_from(&usage);
+                }
+                // Where it ended in the session (Rewind, Fork from here).
+                if self.last_uuid.is_some() {
+                    t.end_uuid.clone_from(&self.last_uuid);
                 }
                 for f in &manifest {
                     if !t.files.contains(f) {
@@ -3148,6 +3190,21 @@ mod tests {
         // Read after the last words, with nothing said since: the turn's words stay whole.
         assert_eq!(turn_words(&said, Some(3)), said.join("\n\n"));
         assert_eq!(turn_words(&[], Some(0)), "");
+    }
+
+    /// A Rewind or a Fork from here: Claude Code's own fork of the session at
+    /// a message, or — to before its first message, or with no session — a
+    /// new one.
+    #[test]
+    fn a_branch_resumes_claude_codes_own_fork_at_its_message_or_starts_afresh() {
+        let at = |u: Option<&str>| store::Branch { at: u.map(str::to_string), from: None };
+        assert_eq!(branched("s-1", &at(Some("u-7"))), Conversation::Branch { from: "s-1".into(), at: "u-7".into() });
+        // A forked chat rewound to before its own first turn: the original session, at the fork's point.
+        let back = store::Branch { at: Some("u-3".into()), from: Some("orig".into()) };
+        assert_eq!(branched("s-1", &back), Conversation::Branch { from: "orig".into(), at: "u-3".into() });
+        assert!(matches!(branched("s-1", &at(None)), Conversation::New(id) if id != "s-1"));
+        assert!(matches!(branched("", &at(Some("u-7"))), Conversation::New(_)));
+        assert!(matches!(branched("s-1", &at(Some(""))), Conversation::New(_)));
     }
 
     /// A picture file read, a screenshot a tool took: the tool result's own

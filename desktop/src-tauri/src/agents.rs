@@ -65,6 +65,7 @@ pub mod modes;
 pub mod output;
 pub mod pictures;
 pub mod remote;
+pub mod rewind;
 pub mod runner;
 pub mod servers;
 pub mod sizing;

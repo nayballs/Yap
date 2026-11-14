@@ -160,6 +160,22 @@ const WRITES_SLOWLY = [
   result('Answer to: {{user_text}}', 0.01),
   { _wait_user: true },
 ];
+/** Answers each message as a turn of its own, its last message's place in the session marked (the stream's `uuid`: where a
+ * Rewind or a Fork from here resumes it). */
+const ECHOES = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  { ...said('e1', [{ type: 'text', text: 'Answer to: {{user_text}}' }], 'end_turn'), uuid: 'end-{{user_text}}' },
+  result('Answer to: {{user_text}}', 0.01),
+  { _wait_user: true },
+];
+/** The same, after a few seconds' work (Rewind is unavailable meanwhile). */
+const ECHOES_SLOWLY = [ECHOES[0], ECHOES[1], ECHOES[2], { _sleep_ms: 4000 }, ...ECHOES.slice(3)];
+/** WATERING, its end marked. */
+const WATERING_MARKED = WATERING.map((l) => (l.message?.id === 'w2' ? { ...l, uuid: 'end-watering' } : l));
+/** The row under the person's message `text`: Copy, Rewind, Fork from here. */
+const actionsOf = (main, text) => thread(main).locator('.cbubble.user', { hasText: text }).locator('xpath=following-sibling::*[1][@data-testid="chat-message-actions"]');
 const queuedBubble = (main) => thread(main).getByTestId('chat-queued');
 /** The ticks of the one message sent from the queue (each test sends one). */
 const ticksOf = (main) => thread(main).getByTestId('chat-ticks');
@@ -825,6 +841,149 @@ test('Send now hands a queued message to Claude at once: read after its answer, 
   await expect(thread(main).getByTestId('chat-agent-work')).toContainText('Answer to: Write a paragraph.');
   await expect(thread(main).getByTestId('chat-agent-work')).not.toContainText('Answer to: Hello next');
   await expect(ticksOf(main)).toHaveAttribute('data-state', 'read');
+});
+
+// The maintainer, 14 Nov 2026, from the Claude Code app's message actions: Copy, Rewind (unavailable while Claude works),
+// Fork from here (agents/rewind.rs).
+test('Rewind takes a Code chat back to before a message: it and what came after go, from the chat and from Claude’s session', async ({ yap, main, shot }) => {
+  test.setTimeout(150_000);
+  await script(yap, ECHOES, 'echoes');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'One');
+  const agent = await newAgent(yap, before);
+  await ended(yap, agent.id);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One']);
+  // While Claude works, Rewind is unavailable; Copy and Fork from here on a finished message aren't.
+  await script(yap, ECHOES_SLOWLY, 'echoes-slowly');
+  await send(main, 'Two');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  await thread(main).locator('.cbubble.user', { hasText: 'One' }).hover();
+  await expect(actionsOf(main, 'One').getByTestId('chat-rewind')).toHaveAttribute('aria-disabled', 'true');
+  await expect(actionsOf(main, 'One').getByTestId('chat-rewind')).toHaveAttribute('title', /unavailable while claude is working/);
+  await expect(actionsOf(main, 'One').getByTestId('chat-fork')).not.toHaveAttribute('aria-disabled', 'true');
+  await shot(main, '95-rewind-unavailable-while-working');
+  await ended(yap, agent.id, 40_000);
+  await script(yap, ECHOES, 'echoes');
+  await send(main, 'Three');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(3);
+  const three = await ended(yap, agent.id);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two', 'Answer to: Three']);
+  expect(three.turnList.map((t) => t.endUuid)).toEqual(['end-One', 'end-Two', 'end-Three']);
+  // Rewind to before "Two": asked first; nothing changed files, so there's nothing to put back.
+  await thread(main).locator('.cbubble.user', { hasText: 'Two' }).hover();
+  await actionsOf(main, 'Two').getByTestId('chat-rewind').click();
+  const ask = main.getByRole('alertdialog', { name: 'Rewind to before this message?' });
+  await expect(ask).toBeVisible();
+  await expect(ask.getByTestId('chat-rewind-files')).toHaveCount(0);
+  await shot(main, '96-rewind-asked-first');
+  await ask.getByRole('button', { name: 'Rewind', exact: true }).click();
+  await expect(ask).toHaveCount(0);
+  // The thread is back to before it; its words are in the box.
+  await expect(thread(main).locator('.cbubble.user')).toHaveText(['One']);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One']);
+  await expect(main.getByRole('textbox', { name: 'Message' })).toHaveValue('Two');
+  const rewound = (await agents(yap)).find((j) => j.id === agent.id);
+  expect(rewound.turnList.map((t) => [t.n, !!t.rewound])).toEqual([[1, false], [2, true], [3, true]]);
+  expect(rewound.branch).toEqual({ at: 'end-One' });
+  expect((await yap.invoke('chat_get', { id: rewound.conversation })).messages).toHaveLength(3);
+  await shot(main, '97-rewound');
+  // The next message: Claude Code's own fork of the session as it stood at the end of "One" — "Two" and "Three" unseen.
+  const oldSession = rewound.session;
+  await send(main, 'Two, again');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(4);
+  const done = await ended(yap, agent.id);
+  const args = argsSeen().at(-1);
+  expect([after(args, '--resume'), after(args, '--resume-session-at'), args.includes('--fork-session')]).toEqual([oldSession, 'end-One', true]);
+  expect(done.session).not.toBe(oldSession);
+  expect(done.branch).toBeUndefined();
+  await expect(thread(main).locator('.cbubble.user')).toHaveText(['One', 'Two, again']);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two, again']);
+});
+
+test('Rewind to before the first message puts back the files Claude changed, and the next message starts a new session', async ({ yap, main }) => {
+  test.setTimeout(120_000);
+  await script(yap, WATERING_MARKED, 'watering-marked');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Add a watering schedule');
+  const agent = await newAgent(yap, before);
+  await ended(yap, agent.id, 40_000);
+  expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe(NOTES1);
+  await thread(main).locator('.cbubble.user', { hasText: 'Add a watering schedule' }).hover();
+  await actionsOf(main, 'Add a watering schedule').getByTestId('chat-rewind').click();
+  const ask = main.getByRole('alertdialog', { name: 'Rewind to before this message?' });
+  // The file it changed goes back too (ticked by default).
+  await expect(ask.getByTestId('chat-rewind-files')).toContainText('Also put back the file Claude changed since');
+  await expect(ask.getByTestId('chat-rewind-files').getByRole('checkbox')).toBeChecked();
+  await ask.getByRole('button', { name: 'Rewind', exact: true }).click();
+  await expect(ask).toHaveCount(0);
+  expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe(NOTES0);
+  await expect(thread(main).locator('.cbubble.user')).toHaveCount(0);
+  await expect(main.getByRole('textbox', { name: 'Message' })).toHaveValue('Add a watering schedule');
+  const rewound = (await agents(yap)).find((j) => j.id === agent.id);
+  expect(rewound.branch).toEqual({});
+  // A new session: nothing of the first turn in it.
+  await script(yap, ECHOES, 'echoes');
+  await send(main, 'Hello again');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(2);
+  const done = await ended(yap, agent.id);
+  const args = argsSeen().at(-1);
+  expect([args.includes('--resume'), args.includes('--fork-session'), after(args, '--session-id')]).toEqual([false, false, done.session]);
+  expect(done.session).not.toBe(rewound.session);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: Hello again']);
+});
+
+test('Fork from here: a new Code chat with the conversation up to that message’s answer, its session Claude Code’s own fork; the original untouched', async ({ yap, main, shot }) => {
+  test.setTimeout(120_000);
+  await script(yap, ECHOES, 'echoes');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'One');
+  const agent = await newAgent(yap, before);
+  await ended(yap, agent.id);
+  await send(main, 'Two');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(2);
+  const original = await ended(yap, agent.id);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two']);
+  // Shown as the message is hovered (as Claude Code's app has them), hidden otherwise.
+  await expect(actionsOf(main, 'Two')).toHaveCSS('opacity', '0');
+  await thread(main).locator('.cbubble.user', { hasText: 'One' }).hover();
+  await expect(actionsOf(main, 'One')).toHaveCSS('opacity', '1');
+  await shot(main, '98-message-actions');
+  await actionsOf(main, 'One').getByTestId('chat-fork').click();
+  // The fork is shown: "One" and its answer, nothing after.
+  await expect.poll(async () => Number(await main.locator('.conv.active').getAttribute('data-conv')), { timeout: 10_000 }).not.toBe(original.conversation);
+  const fork = Number(await main.locator('.conv.active').getAttribute('data-conv'));
+  await expect(thread(main).locator('.cbubble.user')).toHaveText(['One']);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One']);
+  expect((await yap.invoke('chat_get', { id: fork })).title).toMatch(/\(fork\)$/);
+  expect((await yap.invoke('code_chats_list')).chats[fork]?.name).toBe('garden-planner');
+  // The original as it was.
+  expect((await yap.invoke('chat_get', { id: original.conversation })).messages).toHaveLength(6);
+  await shot(main, '99-forked');
+  // Its first message: Claude Code's own fork of the original session, at the end of "One".
+  await send(main, 'Another way');
+  const forked = await newAgent(yap, before + 1);
+  expect(forked.conversation).toBe(fork);
+  const done = await ended(yap, forked.id);
+  const args = argsSeen().at(-1);
+  expect([after(args, '--resume'), after(args, '--resume-session-at'), args.includes('--fork-session')]).toEqual([original.session, 'end-One', true]);
+  expect(done.session).not.toBe(original.session);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Another way']);
+  // The original chat's session is its own still.
+  expect((await agents(yap)).find((j) => j.id === agent.id).session).toBe(original.session);
+  // Rewound to before the fork's own first message: back to the fork's point (the history it carried), never a blank session.
+  await thread(main).locator('.cbubble.user', { hasText: 'Another way' }).hover();
+  await actionsOf(main, 'Another way').getByTestId('chat-rewind').click();
+  await main.getByRole('alertdialog', { name: 'Rewind to before this message?' }).getByRole('button', { name: 'Rewind', exact: true }).click();
+  await expect(thread(main).locator('.cbubble.user')).toHaveText(['One']);
+  await send(main, 'A third way');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === forked.id).turnList.length, { timeout: 20_000 }).toBe(2);
+  await ended(yap, forked.id);
+  const again = argsSeen().at(-1);
+  expect([after(again, '--resume'), after(again, '--resume-session-at'), again.includes('--fork-session')]).toEqual([original.session, 'end-One', true]);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: A third way']);
 });
 
 test('a message with a screenshot goes straight to its session too: the picture with its words, each turn its own', async ({ yap, main, shot }) => {
