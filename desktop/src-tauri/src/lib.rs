@@ -539,6 +539,7 @@ pub fn run() {
             integrations::claude_live::claude_approve_reply,
             integrations::claude_live::claude_approve_pending,
             agents::commands::agent_list,
+            agents::commands::agent_queue,
             agents::servers::dev_servers,
             agents::servers::dev_server_start,
             agents::servers::dev_server_stop,

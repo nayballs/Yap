@@ -17,6 +17,7 @@
 //   shot [--window thread|main|bar|panel|page] [--theme light|dark|both]
 //        [--name <n>] [--selector <css>]
 //   probe --window <w> [--css <selector>] [--text <words>]
+//   click --window main|thread|panel --css <selector>   (one of Yap's own buttons, as the person would)
 //   set '<json>' | set [--web on|off] [--yap-code on|off] [--connectors on|off]
 //   report <prompt> [--timeout 540] [--cards deny|allow] [--no-wait]
 //   sheet [--turns 1-3] [--out <png>]      a contact sheet of the run's shots
@@ -232,13 +233,14 @@ async function main() {
     case 'cancel':
     case 'shot':
     case 'probe':
+    case 'click':
     case 'state':
     case 'agents':
     case 'logs':
     case 'report':
       return send(command, args);
     default:
-      return { ok: false, error: `Commands: build, start, check, ask, wait, answer, cancel, shot, probe, set, state, agents, logs, report, sheet, run, fake, stop (docs/lab.md)` };
+      return { ok: false, error: `Commands: build, start, check, ask, wait, answer, cancel, shot, probe, click, set, state, agents, logs, report, sheet, run, fake, stop (docs/lab.md)` };
   }
 }
 

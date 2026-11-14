@@ -358,6 +358,41 @@ workspace, word for word, and no model of Chat's is asked.
   (`ChatView`). With something typed it's Send, as ever: the message goes
   to it at once, as a note. An agent Chat sent out is stopped from its
   tab, as before.
+- **A message while Claude writes waits: the queue** (2026-11-14,
+  `chatState.svelte.js`'s queue, `QueuedMessage.svelte`,
+  `runner::queue_state` behind `agent_queue`), from the maintainer
+  comparing with Claude Code's own app: a message sent while Claude wrote a
+  paragraph came back joined to that answer, and the answer shown twice.
+  Claude Code reads a message written to it only between steps: while a
+  tool call is out, as that call ends, into the work in hand; while it
+  writes (no call out), only after its answer, as a turn of its own in the
+  same process. So before sending, the message box asks Rust where the
+  chat's own session is (`queue_state`: `taking` a call of its own out
+  (`Live::tools_out`, a helper's don't count), `writing`, or `idle`):
+  - **Writing**: the message waits in the page, a bubble of its own under
+    the thread (dashed, "Queued"), with Copy, × **Cancel and edit message**
+    (its words back in the box, before anything typed there) and **Send
+    now**; nothing is sent yet. It goes by itself at Claude's next tool
+    call (read as that call ends), or once the turn has ended and its
+    answer is in (`yap-agent-report`; 20 seconds at most without one) as
+    the next turn, with its own answer. Several go in order, one a turn.
+  - **Taking**: it goes at once, a note read at the next step, as before.
+    **Idle**: sent as ever.
+  - **✓ Sent, then ✓✓ Read and the time** under a message sent from the
+    queue or while a call was out: read when Claude Code echoes it back
+    (`yap-agent`'s `read`, the message's id, on its "Read your note" step)
+    or, as a turn of its own, once that turn begins.
+  - **Another chat shown** as its turn ends: it waits until its own chat is
+    shown again, however that comes up (a click in the list, the bar's
+    "Claude replied" Open, Open in Chat: an `$effect` on the chat shown,
+    since each sets it its own way; Yap Lab found the bar's Open missed).
+  - **Send now with no call left**: Claude reads it after its answer (a
+    turn of Claude Code's own, as below); the turn's words are split where
+    it read it (`Follow::split_at`), so its answer is only what came after,
+    and what came before stays the work under the first message.
+  - **Never queued**: a message with a screenshot, a quoted passage or a
+    Skill (it goes as before), a plain chat's, or a phone's.
+  - Not built: Claude Code app's Rewind and Fork from here on a message.
 - **Asked out loud, or from a phone** (2026-11-12; the maintainer:
   "please do all of this"): the Voice Assistant's question asked **with
   Chat in view**, and a paired phone's question in a Code chat, go straight
@@ -538,7 +573,12 @@ workspace, word for word, and no model of Chat's is asked.
   session reading Yap's own data, opening a page in Yap's browser beside
   the chat (the panel on it, the answer keeping it), looking at the screen
   (fake monitors: the shots with the message and to Claude Code), ■ Stop
-  and Esc, the switch off). The e2e base config has
+  and Esc, the switch off; the queue: a message while Claude writes waits
+  as Queued and is its own turn with its own answer, a message while a
+  call is out goes at once and ticks ✓✓, Cancel and edit, Send now (its
+  answer only what came after it read it), a message queued in a chat
+  left for another going once that chat is shown again, by a click or the
+  bar card's Open). The e2e base config has
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 
@@ -642,8 +682,11 @@ carrying on with its context; so are agents now.
   - **Its turn ends when every message written has been taken in**
     (`Live::unread`), not at the first result. A note that came with no tool
     call left is a turn of Claude Code's own right after, in the same process
-    (seen on the real one): still the same turn of Yap's, its words after the
-    first result's, one report.
+    (seen on the real one): still the same turn of Yap's, one report, its
+    words only what came after it read the note (`Follow::split_at`,
+    2026-11-14: before, both answers came back joined and the first was
+    shown twice; [the queue](#a-code-chat-that-works-directly) keeps such a
+    message back while Claude writes).
   - **Never read** (Claude Code ended first, the person stopped it, or it
     didn't start on it within 20 seconds, `NOTE_GRACE`): the note goes back
     to Yap and waits as the agent's next turn, as below (`notes_unread`),
@@ -2427,7 +2470,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 
 | Event | Payload |
 |---|---|
-| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, call?, under?, helper?, picture?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `helper` ("back", "failed") with the `call` of a hand-over whose helper has come back (an event of its own, no step); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished): the pages read it again |
+| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, call?, under?, helper?, picture?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `helper` ("back", "failed") with the `call` of a hand-over whose helper has come back (an event of its own, no step); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `read` the id of a message Claude Code has just read (with its "Read your note" step: the queue's ✓✓); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished): the pages read it again |
 | `yap-agent-saying` | `{id, turn, text}` — the message agent `id`'s turn is writing now, all of it so far: many times a second, to the page only (never logged, never to a phone); let go when a `yap-agent` event has its `said`, its `text`, a `step`, or a status that's over |
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
@@ -2449,6 +2492,7 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 | `agent_list` | every agent, newest first (each with `active`: the runner has it now) |
 | `agent_get {id}` | `{agent, log}`: the agent (with `active`) and its `yap-agent` events (none once swept) |
 | `agent_stop {id}` / `agent_continue {id}` | Stop; Continue a stopped, interrupted or failed one |
+| `agent_queue {conversation}` | where that Code chat's own session is, for the message box's queue: `taking` (a call of its own out: a message goes now), `writing` (it waits) or `idle` |
 | `agent_message {id, text}` | the tab's "Tell the agent…": its next turn; while it works, handed to it now and read at its next step ("go ahead" after a plan carries it out, as a turn of its own) |
 | `agent_go_ahead {id, turn?}` | a report card's or an Agent panel row's Go ahead: a plan waiting (or set aside: Plan not used) carried out (Yap's go-ahead at the chat's Mode), once; `turn` an earlier turn's plan, as a turn of its own naming it; refused while it works or with no plan there |
 | `agent_move_to_finished {id, turn}` | a panel row's Move to finished: a turn whose record says it's at work but that nothing runs marked interrupted (its agent too), a waiting plan Plan not used; refused while the runner has the agent |
@@ -2662,6 +2706,16 @@ followed in the Agent tab and reported back out loud; the plan's usage limits,
 checked against Anthropic's own figures for the account. What those runs
 turned up was fixed the same day: the Agent tab rebuilt to read like Claude
 Code, Open in terminal's blank tab, Chat's thread following a report.
+
+**The queue, through Yap Lab on Opus 5.5 (the real Claude Code),
+2026-11-14:** a 200-word paragraph asked for and, while it was written, a
+second message ("How long do blue whales live?"): it waited as Queued, then
+went as the next turn; each answer its own, the second ✓✓ Read. Also: a
+message while a tool call was out (one answer covering both, ✓✓); Send now
+late (separate answers); two queued (in order); Cancel and edit (back in the
+box, nothing sent); and a message queued in one chat while another was
+shown, which went once its chat was shown again (the bar's Open missing it
+was found here and fixed).
 
 **Checked through Yap Lab on the real Claude Code 2.1.296 (Haiku),
 2026-11-12:**

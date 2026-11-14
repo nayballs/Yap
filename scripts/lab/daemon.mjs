@@ -693,6 +693,20 @@ async function probe({ window: which = 'main', css, text }) {
   return { window: which, ...(css ? { css } : {}), ...rest, ...(text ? { words: cut(text, 120), has } : {}) };
 }
 
+/**
+ * **Clicks a button of the test Yap's own** (`--css`, in `--window` main / thread / panel), as the person would
+ * (14 Nov 2026, the message box's queue: a queued message's Send now and Cancel and edit). Only Yap's own windows,
+ * never a page beside the chat (that's Claude's to act on, with its rules); the first match that shows.
+ */
+async function click({ window: which = 'main', css }) {
+  if (!css) throw new Error('click needs --css');
+  if (!['main', 'thread', 'panel'].includes(which)) throw new Error("click works in Yap's own window: main, thread or panel");
+  const scope = which === 'panel' ? '[data-testid="chat-panel-slot"] ' : which === 'thread' ? '[data-testid="chat-column"] ' : '';
+  const target = main().locator(`${scope}${css}`).first();
+  await target.click({ timeout: 5_000 });
+  return { window: which, css, clicked: true };
+}
+
 /** Config keys `set` never touches (keys, sign-ins, Chat's model: `start` sets those). */
 const NEVER_SET = /key|token|secret|password|llmScopes|auth/i;
 
@@ -910,6 +924,14 @@ async function shutdown(why, end = 'stopped') {
 const COMMANDS = {
   ping: async () => ({ pong: true }),
   ask: async (a) => {
+    // **While a turn goes** (14 Nov 2026, the message box's queue): typed and sent in the same chat as the person
+    // would mid-answer — no turn of the lab's own; the queue, a ✓✓ and the answers show in the thread (`probe`, `shot`).
+    if (a.while) {
+      const box = main().getByRole('textbox', { name: 'Message' });
+      await box.fill(String(a.text ?? ''), { timeout: 10_000 });
+      await main().getByRole('button', { name: 'Send', exact: true }).click({ timeout: 10_000 });
+      return { sentWhile: true, turn: turn?.n ?? null, turnStatus: turn?.status ?? null };
+    }
     const t = await startTurn({ text: a.text, spoken: !!a.spoken, chat: a.chat ?? 'new', autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: Array.isArray(a.pictures) ? a.pictures : null, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
@@ -926,6 +948,7 @@ const COMMANDS = {
   },
   agents: async () => agentsView(),
   probe: async (a) => probe(a),
+  click: async (a) => click(a),
   set: async (a) => setThings(a),
   answer: async (a) => {
     const [id, how = 'allow'] = a._;

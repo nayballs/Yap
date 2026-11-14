@@ -146,6 +146,23 @@ const SLOWISH = [
   { _wait_user: true },
 ];
 
+/** Writes for a while with no tool call, then answers the message it has; a message read after that answer is a turn of
+ * its own in the same process (as Claude Code does), answered the same way. */
+const WRITES_SLOWLY = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  { _sleep_ms: 5000 },
+  said('w1', [{ type: 'text', text: 'Answer to: {{user_text}}' }], 'end_turn'),
+  result('Answer to: {{user_text}}', 0.01),
+  { _wait_user: true },
+  said('w2', [{ type: 'text', text: 'Answer to: {{user_text}}' }], 'end_turn'),
+  result('Answer to: {{user_text}}', 0.01),
+  { _wait_user: true },
+];
+const queuedBubble = (main) => thread(main).getByTestId('chat-queued');
+/** The ticks of the one message sent from the queue (each test sends one). */
+const ticksOf = (main) => thread(main).getByTestId('chat-ticks');
 /** Says how many pictures its message came with (the stand-in's `{{user_pictures}}`). */
 const SEES = [{ _wait_user: true }, { _dump_args: ARGS }, init(), said('p1', [{ type: 'text', text: 'Pictures with it: {{user_pictures}}.' }], 'end_turn'), result('Pictures with it: {{user_pictures}}.', 0.01), { _wait_user: true }];
 /** A turn that takes its time, then says how many pictures its messages came with: its first, and a note's meanwhile. */
@@ -660,6 +677,150 @@ test('a message while it works is handed to it at once: the same turn, one answe
   expect(messages[3].text).toContain('Read notes.md. Noted: Keep the headings as they are.');
   // (It changed nothing: its answer is all there is, with no "Agent done" line.)
   await expect.poll(() => laidOut(main)).toEqual(['you', 'work', 'you', 'answer']);
+  // (A tool call was out: it went at once, never queued — and shows it was read.)
+  await expect(queuedBubble(main)).toHaveCount(0);
+  await expect(ticksOf(main)).toHaveAttribute('data-state', 'read');
+});
+
+// The maintainer, 14 Nov 2026: a message sent while Claude wrote a paragraph came back joined to that answer, and the
+// answer shown twice. As in Claude Code's own app it waits now — Queued, × Cancel and edit, Send now — and gets its own.
+test('a message while Claude writes waits in the queue, a bubble of its own, then is its own turn with its own answer', async ({ yap, main, shot }) => {
+  test.setTimeout(90_000);
+  await script(yap, WRITES_SLOWLY, 'writes-slowly');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Write a paragraph.');
+  const agent = await newAgent(yap, before);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  await send(main, 'Hello next');
+  // Waiting: its own bubble, Queued, with Cancel and edit and Send now; nothing sent to Claude yet.
+  await expect(queuedBubble(main)).toHaveCount(1);
+  await expect(queuedBubble(main)).toContainText('Hello next');
+  await expect(queuedBubble(main)).toContainText('Queued');
+  await expect(queuedBubble(main).getByRole('button', { name: 'Send now' })).toBeVisible();
+  await shot(main, '90-a-queued-message');
+  // The first turn's answer is its own; then the message goes as the next turn, its own answer.
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 40_000 }).toBe(2);
+  await expect(queuedBubble(main)).toHaveCount(0);
+  const done = await ended(yap, agent.id, 40_000);
+  expect(done.turnList.map((t) => [t.n, t.request])).toEqual([[1, 'Write a paragraph.'], [2, 'Hello next']]);
+  const messages = await messagesOf(yap, done.conversation, 6);
+  expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'agentReport', 'assistant', 'user', 'agentReport', 'assistant']);
+  expect([messages[2].text, messages[5].text]).toEqual(['Answer to: Write a paragraph.', 'Answer to: Hello next']);
+  // Each answer once, each after its own message — never joined, never twice; the second read (✓✓).
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: Write a paragraph.', 'Answer to: Hello next']);
+  await expect(ticksOf(main)).toHaveAttribute('data-state', 'read');
+  await shot(main, '91-each-its-own-answer');
+});
+
+test('a message queued in one chat waits while another is shown, and goes once its chat opens again', async ({ yap, main }) => {
+  test.setTimeout(120_000);
+  await script(yap, WRITES_SLOWLY, 'writes-slowly');
+  // Another chat to look at meanwhile.
+  const first = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Just a chat to look at.');
+  await ended(yap, (await newAgent(yap, first)).id, 40_000);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveCount(1, { timeout: 30_000 });
+  const other = await main.locator('.conv.active').getAttribute('data-conv');
+  const before = (await agents(yap)).length;
+  await newCodeChat(main, 'garden-planner');
+  await send(main, 'Write a paragraph.');
+  const agent = await newAgent(yap, before);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  const mine = await main.locator('.conv.active').getAttribute('data-conv');
+  await send(main, 'Hello next');
+  await expect(queuedBubble(main)).toHaveCount(1);
+  // Away while its turn ends and its answer comes in.
+  await main.locator(`.conv[data-conv="${other}"]`).click();
+  await ended(yap, agent.id, 40_000);
+  await expect.poll(async () => (await yap.invoke('chat_get', { id: Number(mine) })).messages.length, { timeout: 30_000 }).toBe(3);
+  await new Promise((r) => setTimeout(r, 2500));
+  // Nothing went while away; back in its chat, it goes as the next turn.
+  expect((await agents(yap)).find((j) => j.id === agent.id).turnList).toHaveLength(1);
+  await main.locator(`.conv[data-conv="${mine}"]`).click();
+  await expect(queuedBubble(main)).toHaveCount(0, { timeout: 15_000 });
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 30_000 }).toBe(2);
+  const done = await ended(yap, agent.id, 40_000);
+  const messages = await messagesOf(yap, done.conversation, 6);
+  expect(messages[5].text).toBe('Answer to: Hello next');
+});
+
+// Yap Lab, 14 Nov 2026: back in the chat through the bar's "Claude replied" Open (not a click in the list), the queued
+// message stayed put — that Open shows the chat its own way. However the chat comes up, what waits in it goes.
+test('a queued message goes when its chat comes back through the bar card\'s Open, not only a click', async ({ yap, main }) => {
+  test.setTimeout(120_000);
+  await script(yap, WRITES_SLOWLY, 'writes-slowly');
+  const first = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Just a chat to look at.');
+  await ended(yap, (await newAgent(yap, first)).id, 40_000);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveCount(1, { timeout: 30_000 });
+  const other = await main.locator('.conv.active').getAttribute('data-conv');
+  const before = (await agents(yap)).length;
+  await newCodeChat(main, 'garden-planner');
+  await send(main, 'Write a paragraph.');
+  const agent = await newAgent(yap, before);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  const mine = Number(await main.locator('.conv.active').getAttribute('data-conv'));
+  await send(main, 'Hello next');
+  await expect(queuedBubble(main)).toHaveCount(1);
+  await main.locator(`.conv[data-conv="${other}"]`).click();
+  await ended(yap, agent.id, 40_000);
+  await expect.poll(async () => (await yap.invoke('chat_get', { id: mine })).messages.length, { timeout: 30_000 }).toBe(3);
+  // The card's Open, as `open_agent` sends it: Chat on that conversation.
+  await yap.invoke('plugin:event|emit', { event: 'yap-assistant-turn', payload: { phase: 'open', conversationId: mine, show: true } });
+  await expect(main.locator(`.conv.active[data-conv="${mine}"]`)).toHaveCount(1, { timeout: 10_000 });
+  await expect(queuedBubble(main)).toHaveCount(0, { timeout: 15_000 });
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 30_000 }).toBe(2);
+  const done = await ended(yap, agent.id, 40_000);
+  expect((await messagesOf(yap, done.conversation, 6))[5].text).toBe('Answer to: Hello next');
+});
+
+test('Cancel and edit takes a queued message back into the box, and nothing goes', async ({ yap, main }) => {
+  test.setTimeout(90_000);
+  await script(yap, WRITES_SLOWLY, 'writes-slowly');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Write a paragraph.');
+  const agent = await newAgent(yap, before);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  await send(main, 'Hello next');
+  await expect(queuedBubble(main)).toHaveCount(1);
+  await queuedBubble(main).getByRole('button', { name: 'Cancel and edit message' }).click();
+  await expect(queuedBubble(main)).toHaveCount(0);
+  await expect(main.getByRole('textbox', { name: 'Message' })).toHaveValue('Hello next');
+  const done = await ended(yap, agent.id, 40_000);
+  await new Promise((r) => setTimeout(r, 1500));
+  expect((await agents(yap)).find((j) => j.id === agent.id).turnList).toHaveLength(1);
+  expect(argsSeen()).toHaveLength(1);
+  const messages = await messagesOf(yap, done.conversation, 3);
+  expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'agentReport', 'assistant']);
+});
+
+test('Send now hands a queued message to Claude at once: read after its answer, each answer its own, never shown twice', async ({ yap, main }) => {
+  test.setTimeout(90_000);
+  await script(yap, WRITES_SLOWLY, 'writes-slowly');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Write a paragraph.');
+  const agent = await newAgent(yap, before);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  await send(main, 'Hello next');
+  await expect(queuedBubble(main)).toHaveCount(1);
+  await queuedBubble(main).getByRole('button', { name: 'Send now' }).click();
+  await expect(queuedBubble(main)).toHaveCount(0);
+  // With no tool call left, Claude reads it after its answer: a turn of its own in the same process (one run).
+  const done = await ended(yap, agent.id, 40_000);
+  expect(argsSeen()).toHaveLength(1);
+  const messages = await messagesOf(yap, done.conversation, 4);
+  expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'user', 'agentReport', 'assistant']);
+  // Its answer is only what came after it read the message; what came before stays under the first message.
+  expect(messages[3].text).toBe('Answer to: Hello next');
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: Hello next']);
+  await expect(thread(main).getByTestId('chat-agent-work')).toContainText('Answer to: Write a paragraph.');
+  await expect(thread(main).getByTestId('chat-agent-work')).not.toContainText('Answer to: Hello next');
+  await expect(ticksOf(main)).toHaveAttribute('data-state', 'read');
 });
 
 test('a message with a screenshot goes straight to its session too: the picture with its words, each turn its own', async ({ yap, main, shot }) => {

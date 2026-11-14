@@ -197,6 +197,11 @@ pub struct AgentEvent {
     /// (`call`) shows it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub picture: Option<super::pictures::StepPicture>,
+    /// **A message sent while it worked, read now** (14 Nov 2026, the
+    /// message box's queue): its chat message's id (`chat:<conv>:<index>`),
+    /// with the "Read your note" step — its bubble's ✓✓.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read: Option<String>,
     /// Its final words (and, from an older Yap, its words as it worked).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -434,11 +439,14 @@ struct Live {
     plan_allowed: bool,
     /// Its folder, compared ([`workspaces::norm`]).
     folder: String,
+    /// **Its own tool calls out now** (begun, not back; a helper's aren't): a
+    /// message written now is taken in as the one running ends ([`queue_state`]).
+    tools_out: u32,
 }
 
 impl Live {
     fn new(folder: String) -> Live {
-        Live { session: None, sent: 0, results: 0, written: Vec::new(), taken: 0, notes: Vec::new(), input_over: false, started: false, extra: Vec::new(), extra_shots: Vec::new(), pending: None, stopping: None, plan_allowed: false, folder }
+        Live { session: None, sent: 0, results: 0, written: Vec::new(), taken: 0, notes: Vec::new(), input_over: false, started: false, extra: Vec::new(), extra_shots: Vec::new(), pending: None, stopping: None, plan_allowed: false, folder, tools_out: 0 }
     }
 
     /// How many messages written to it Claude Code hasn't taken in yet:
@@ -1329,6 +1337,9 @@ struct Follow {
     /// of its own right after, in this process: its words join these).
     outcome: Option<(Status, String)>,
     said: Vec<String>,
+    /// **Where a message read after an answer had ended splits the turn's
+    /// words** (`said`'s index): its words are from there on (`on_taken`).
+    split_at: Option<usize>,
     problem: Option<ProblemNote>,
     asking: bool,
     /// When its input ended (its last result came).
@@ -1463,6 +1474,7 @@ impl Follow {
             last_text: String::new(),
             outcome: None,
             said: Vec::new(),
+            split_at: None,
             problem: None,
             asking: false,
             input_over_at: None,
@@ -1539,6 +1551,14 @@ impl Follow {
 
     /// A tool call: its line, its file or command; a `TodoWrite` its list.
     fn on_tool(&mut self, id: &str, name: &str, input: &serde_json::Value) {
+        // One of its own calls out now (the queue: `queue_state`).
+        if self.under.is_none() {
+            with_state(|s| {
+                if let Some(l) = s.live.get_mut(&self.id) {
+                    l.tools_out += 1;
+                }
+            });
+        }
         if backed_up_tool(name) {
             self.edits.insert(id.to_string());
         }
@@ -1805,6 +1825,14 @@ impl Follow {
                 }
                 // (Claude Code's own record of a call is its message's: one result a message.)
                 let results = u.blocks.iter().filter(|b| matches!(b, Block::ToolResult { .. })).count();
+                // Its own calls back: fewer out (the queue: `queue_state`).
+                if results > 0 && u.parent_tool_use_id.as_deref().is_none_or(str::is_empty) {
+                    with_state(|s| {
+                        if let Some(l) = s.live.get_mut(&self.id) {
+                            l.tools_out = l.tools_out.saturating_sub(results as u32);
+                        }
+                    });
+                }
                 let record = u.tool_use_result.as_ref().filter(|_| results == 1);
                 for block in &u.blocks {
                     if let Block::ToolResult { tool_use_id, is_error, text, pictures } = block {
@@ -1870,13 +1898,20 @@ impl Follow {
         let Some(note) = note else { return };
         self.unread_since = None;
         let n = self.n;
+        // Read after an answer had ended (a result in: no tool call was left, so it's a turn of Claude
+        // Code's own in this process): what it says from here on is this message's answer, not the one
+        // before's too (14 Nov 2026, the maintainer: a paragraph and the reply to "Hello" came back as one
+        // answer, shown twice). A note read mid-work (no result yet) leaves the turn's words whole.
+        if self.outcome.is_some() && !self.said.is_empty() {
+            self.split_at = Some(self.said.len());
+        }
         if let Some(agent) = store::update(&self.id, |j| {
             if let Some(t) = j.turn_mut(n) {
                 t.request = format!("{}\n\n{}", t.request.trim(), note.text.trim());
             }
         }) {
-            tracing::info!(id = %self.id, turn = n, "Agents: it took a note in");
-            emit(&AgentEvent { step: Some(NOTE_READ.into()), ..self.event(&agent) });
+            tracing::info!(id = %self.id, turn = n, late = self.outcome.is_some(), "Agents: it took a note in");
+            emit(&AgentEvent { step: Some(NOTE_READ.into()), read: note.message_id.clone(), ..self.event(&agent) });
         }
     }
 
@@ -1950,7 +1985,9 @@ impl Follow {
         if !text.is_empty() && self.said.last() != Some(&text) {
             self.said.push(text.clone());
         }
-        self.outcome = Some((outcome, self.said.join("\n\n")));
+        // (A message read after an answer had ended: the turn's words are from it on — what came before
+        // stays its work's, under the message before.)
+        self.outcome = Some((outcome, turn_words(&self.said, self.split_at)));
         // Over once every message written has been taken in (this result
         // covers them) — or the person stopped it. A note still unread:
         // Claude Code starts on it now, a turn of its own in this process.
@@ -2118,6 +2155,16 @@ impl Follow {
 pub fn after_plan(planned: bool, allowed: bool, edited: bool) -> (bool, bool) {
     let plan = planned && !(allowed && edited);
     (plan, plan && allowed)
+}
+
+/// **A turn's words**: what it said, from where a message read after an
+/// answer had ended split it (`Follow::split_at`) — that message's answer,
+/// never the one before's too — else all of it.
+fn turn_words(said: &[String], split_at: Option<usize>) -> String {
+    match split_at {
+        Some(k) if k < said.len() => said[k..].join("\n\n"),
+        _ => said.join("\n\n"),
+    }
 }
 
 /// A result's outcome: stopped (when the person stopped it), failed, or done.
@@ -2401,6 +2448,26 @@ fn notes_unread(id: &str) {
         let _ = queued_turn(id, note, !waiting);
         waiting = true;
     }
+}
+
+/// **What a message for conversation `conversation`'s own session does now**
+/// (14 Nov 2026, the message box's queue): `"taking"` — a turn of the chat's
+/// own (a Code chat that works directly) works with one of its tool calls
+/// out, so Claude Code reads a message written now as that call ends, into
+/// the work in hand; `"writing"` — it works with no call out (writing its
+/// answer), so a message written now would be read only after that answer:
+/// it waits in the queue instead, for its next call or the turn's end;
+/// `"idle"` — nothing of the chat's own working: sent as ever.
+pub fn queue_state(conversation: u64) -> &'static str {
+    let ids: Vec<String> = store::list().into_iter().filter(|a| a.conversation == Some(conversation) && a.turn_list.last().is_some_and(|t| t.direct)).map(|a| a.id).collect();
+    with_state(|s| {
+        let working = ids.iter().filter_map(|id| s.live.get(id)).find(|l| l.started && !l.input_over && l.stopping.is_none());
+        match working {
+            Some(l) if l.tools_out > 0 => "taking",
+            Some(_) => "writing",
+            None => "idle",
+        }
+    })
 }
 
 /// **A follow-up for agent `id`** (its Code chat's next request, `message_agent`,
@@ -3066,6 +3133,19 @@ mod tests {
         assert!(!agent.turn_list[1].read_only);
         assert!(!test_pending(&id).unwrap().read_only);
         test_live(&id, None);
+    }
+
+    /// The queue (14 Nov 2026): a message read after an answer had ended is
+    /// a turn of Claude Code's own in the same process, its words only what
+    /// came after; never split, or split past the end, all of it.
+    #[test]
+    fn a_message_read_after_an_answer_has_only_the_words_that_came_after() {
+        let said: Vec<String> = ["A paragraph about whales.", "Blue whales live about 80 to 90 years.", "Mostly krill."].map(String::from).to_vec();
+        assert_eq!(turn_words(&said, Some(1)), "Blue whales live about 80 to 90 years.\n\nMostly krill.");
+        assert_eq!(turn_words(&said, None), said.join("\n\n"));
+        // Read after the last words, with nothing said since: the turn's words stay whole.
+        assert_eq!(turn_words(&said, Some(3)), said.join("\n\n"));
+        assert_eq!(turn_words(&[], Some(0)), "");
     }
 
     /// A picture file read, a screenshot a tool took: the tool result's own
