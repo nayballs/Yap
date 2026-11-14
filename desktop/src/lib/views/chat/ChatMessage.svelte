@@ -19,6 +19,7 @@
   import { menuKey, openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { removedLine, sizeLine, imageItems, splitScreenText, sentPlaced, shown } from './chatImages.js';
   import { splitElements } from '../../core/selectedElements.js';
+  import { copyText } from '../../core/itemMenus.js';
   import ElementChip from './ElementChip.svelte';
   import { screenPixels } from './chatShots.svelte.js';
   import { thoughtLabel } from './chatThink.svelte.js';
@@ -43,7 +44,12 @@
    * opened (a `ShownPicture`). `pagethumb(url)`: a page's picture taken
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null } = $props();
+  // **Under the person's message in a Code chat** (14 Nov 2026, the Claude Code app's: Copy, Rewind, Fork from here;
+  // `actions`: `{ rewind, fork }` — why each can't run now, '' when it can —, `onrewind`, `onfork`; agents/rewind.rs).
+  const act = (why, run) => () => {
+    if (!why) run?.();
+  };
   // A message sent from the queue (chatState's `ticks`): ✓ sent, ✓✓ once Claude read it, and when.
   const readAt = $derived(tick?.readAt ? new Date(tick.readAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
 
@@ -223,6 +229,38 @@
   {/if}
 </div>
 {/if}
+{#if m.role === 'user' && actions}
+  <!-- Shown on hovering the message (or the row, or its focus): Copy, Rewind (unavailable while Claude works), Fork from here. -->
+  <div class="uacts" data-testid="chat-message-actions">
+    <button type="button" class="uact" onclick={() => copyText(picks.text)} aria-label="Copy" title="Copy">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
+    </button>
+    <button
+      type="button"
+      class="uact"
+      class:off={!!actions.rewind}
+      aria-disabled={actions.rewind ? 'true' : undefined}
+      onclick={act(actions.rewind, actions.onrewind)}
+      aria-label={actions.rewind ? `Rewind (${actions.rewind.toLowerCase()})` : 'Rewind'}
+      title={actions.rewind ? `Rewind (${actions.rewind.toLowerCase()})` : 'Rewind: back to before this message'}
+      data-testid="chat-rewind"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h11a5 5 0 0 1 0 10H9" /><path d="M8 5 4 9l4 4" /></svg>
+    </button>
+    <button
+      type="button"
+      class="uact"
+      class:off={!!actions.fork}
+      aria-disabled={actions.fork ? 'true' : undefined}
+      onclick={act(actions.fork, actions.onfork)}
+      aria-label={actions.fork ? `Fork from here (${actions.fork.toLowerCase()})` : 'Fork from here'}
+      title={actions.fork ? `Fork from here (${actions.fork.toLowerCase()})` : 'Fork from here: a new chat with the conversation up to this message’s answer'}
+      data-testid="chat-fork"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7" /><path d="M12 12v5" /></svg>
+    </button>
+  </div>
+{/if}
 {#if shared.length}
   <!-- The files it shared into the conversation (share_files): a picture
        large, several as a grid, other files as cards (their own chunk). -->
@@ -394,6 +432,52 @@
   :global(:root[data-motion='reduced']) .cbubble.streaming .cbody > :global(*)::after,
   :global(:root[data-motion='reduced']) .cbubble.streaming .cbody > :global(* > li)::after {
     animation: none;
+  }
+  .uacts {
+    display: flex;
+    justify-content: flex-end;
+    gap: 2px;
+    margin: 2px 2px 0 auto;
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+  .cbubble.user:hover + .uacts,
+  .uacts:hover,
+  .uacts:focus-within {
+    opacity: 1;
+  }
+  .uact {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: var(--yap-r);
+    background: none;
+    color: var(--yap-paper-muted);
+    cursor: pointer;
+  }
+  .uact svg {
+    width: 15px;
+    height: 15px;
+  }
+  .uact:hover {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
+  }
+  .uact.off {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .uact.off:hover {
+    background: none;
+    color: var(--yap-paper-muted);
+  }
+  .uact:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
   }
   .ticks {
     display: flex;

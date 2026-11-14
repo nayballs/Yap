@@ -216,6 +216,10 @@ impl std::fmt::Debug for Picture {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Assistant {
     pub message_id: Option<String>,
+    /// **Its place in the session** (the stream's `uuid`, one per message it
+    /// writes): where a Rewind or a Fork from here resumes the session
+    /// (`Conversation::Branch`).
+    pub uuid: Option<String>,
     pub model: Option<String>,
     pub blocks: Vec<Block>,
     /// `Some` for a subagent's message: the Agent (or Skill) call it runs under.
@@ -577,6 +581,7 @@ pub fn from_value(v: Value) -> Event {
         "assistant" => v.get("message").filter(|m| m.is_object()).map(|m| {
             Event::Assistant(Assistant {
                 message_id: opt_str(m, "id"),
+                uuid: opt_str(&v, "uuid"),
                 model: opt_str(m, "model"),
                 blocks: blocks(m.get("content")),
                 parent_tool_use_id: opt_str(&v, "parent_tool_use_id"),

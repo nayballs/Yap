@@ -32,7 +32,8 @@
   // Code chat each turn's to-do card under its pill (AgentTodoCard), and a
   // running agent's permission prompts for this chat — each in a small chunk.
   import { agents, agentById } from '../../stores/agents.svelte.js';
-  import { pillsByAnswer, pillsByQuestion, answeredAfter, directLine, plainReport, agentOfReport, reportFolder } from '../../core/agents.js';
+  import { pillsByAnswer, pillsByQuestion, answeredAfter, directLine, plainReport, agentOfReport, reportFolder, messageTurn } from '../../core/agents.js';
+  import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { chatStatus } from '../../stores/chatStatus.svelte.js';
   import QueuedMessage from './QueuedMessage.svelte';
 
@@ -163,11 +164,43 @@
 
   function messageMenu(e, m) {
     const reading = !!m.id && chat.speakingId === m.id;
-    openContextMenu(
-      e,
-      messageItems(m, { read: m.role === 'assistant' && m.id ? () => chat.readAloud(m) : null, reading }),
-      { label: m.role === 'assistant' ? 'Answer' : 'Question', row: e.currentTarget }
-    );
+    const items = messageItems(m, { read: m.role === 'assistant' && m.id ? () => chat.readAloud(m) : null, reading });
+    // A Code chat's own message: Rewind and Fork from here too (as under it).
+    const a = actionsFor(m);
+    if (a) {
+      items.push({ separator: true });
+      items.push({ label: a.rewind ? `Rewind (${a.rewind.toLowerCase()})` : 'Rewind', icon: 'undo', disabled: !!a.rewind, onselect: a.onrewind });
+      items.push({ label: a.fork ? `Fork from here (${a.fork.toLowerCase()})` : 'Fork from here', icon: 'split', disabled: !!a.fork, onselect: a.onfork });
+    }
+    openContextMenu(e, items, { label: m.role === 'assistant' ? 'Answer' : 'Question', row: e.currentTarget });
+  }
+
+  // **Rewind and Fork from here** (14 Nov 2026, agents/rewind.rs; the Claude Code app's message actions): under the
+  // person's own message in a Code chat — one that started a turn of Claude's —, Copy, Rewind (back to before it:
+  // asked first, the files Claude changed since put back as they were unless unticked) and Fork from here (a new chat
+  // with the conversation up to its answer).
+  function actionsFor(m) {
+    if (!code?.current || m?.role !== 'user' || !m.id) return null;
+    const t = messageTurn(agents.list, chat.activeId, m.id);
+    if (!t) return null;
+    return { rewind: t.rewind, fork: t.fork, onrewind: () => askRewind(m, t.files), onfork: () => chat.forkAt(m) };
+  }
+  let rewindOpen = $state(false);
+  let rewindAsk = $state(null);
+  let rewindFiles = $state(true);
+  let rewindBusy = $state(false);
+  function askRewind(m, files) {
+    rewindAsk = { m, files };
+    rewindFiles = true;
+    rewindOpen = true;
+  }
+  async function doRewind() {
+    if (!rewindAsk) return;
+    rewindBusy = true;
+    const ok = await chat.rewindAt(rewindAsk.m, rewindAsk.files > 0 && rewindFiles);
+    rewindBusy = false;
+    rewindOpen = false;
+    if (ok) chat.inputEl?.focus({ preventScroll: true });
   }
 </script>
 
@@ -263,6 +296,7 @@
               pagethumb={chat.pageThumb}
               conversation={chat.activeId}
               onshared={openShared}
+              actions={m.role === 'user' ? actionsFor(m) : null}
             />
           {/if}
           {#if directPills.get(i)?.length}
@@ -357,7 +391,37 @@
   {/await}
 {/if}
 
+<ConfirmDialog
+  bind:open={rewindOpen}
+  title="Rewind to before this message?"
+  body="This message and everything after it go, and Claude won't see them again. Its words go back in the message box."
+  confirmLabel="Rewind"
+  busyLabel="Rewinding…"
+  busy={rewindBusy}
+  onconfirm={doRewind}
+>
+  {#if rewindAsk?.files}
+    <label class="rewindfiles" data-testid="chat-rewind-files">
+      <input type="checkbox" bind:checked={rewindFiles} />
+      Also put back the {rewindAsk.files === 1 ? 'file' : `${rewindAsk.files} files`} Claude changed since, as they were
+    </label>
+  {/if}
+</ConfirmDialog>
+
 <style>
+  .rewindfiles {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 10px;
+    color: var(--yap-paper-ink);
+    font-size: 13px;
+    line-height: 1.4;
+    cursor: pointer;
+  }
+  .rewindfiles input {
+    margin-top: 2px;
+  }
   /* Where the summary takes over: a thin rule, quiet words, Show summary. */
   .summarised {
     display: flex;

@@ -396,7 +396,49 @@ workspace, word for word, and no model of Chat's is asked.
   - **Never queued**: a message with a screenshot, a picked element, a
     quoted passage or a Skill (it goes as before), a plain chat's, or a
     phone's.
-  - Not built: Claude Code app's Rewind and Fork from here on a message.
+- **Rewind and Fork from here** (2026-11-14, `agents/rewind.rs`), the
+  rest of the Claude Code app's message actions: under the person's
+  message in a Code chat (on hover, or its right-click menu) are Copy,
+  **Rewind** and **Fork from here**. Built from Anthropic's public docs (the
+  Agent SDK's `resumeSessionAt` and `forkSession`, the CLI's
+  `--fork-session`; Claude Code 2.1.296 takes `--resume-session-at`) and the
+  app's behaviour as seen, never from the app's files.
+  - **Where each turn ended**: its own last message's `uuid` in Claude
+    Code's stream (a helper's don't count), kept at its result as
+    `TurnNote.end_uuid` (`Follow::last_uuid`).
+  - **Rewind** (asked first: "Rewind to before this message?") takes the
+    chat back to before the message: it and everything after go from the
+    thread (`chats::rewind`; their screenshots too, unless another chat
+    shows them), its words come back in the box, and that turn and every
+    later one are marked `rewound` (kept for their backups and log, never
+    shown: `pillsAt` skips them). The files they changed go back as they
+    were, newest turn first, through Undo's own backups
+    (`runner::undo_turn`), unless "Also put back the files Claude changed
+    since" is unticked (it shows only when they changed some). Claude never
+    sees those turns again: the agent's `branch` makes its next run Claude
+    Code's own fork of the session up to the end of the turn before
+    (`--resume <session> --fork-session --resume-session-at <its end_uuid>`,
+    `session::Conversation::Branch`), or a new session when the message was
+    the chat's first; the branch is let go once that run's init says its
+    own id. **Unavailable while the chat's Claude works** ("Rewind
+    (unavailable while Claude is working)", as the app), and past a turn
+    from before Yap kept `end_uuid` (said, never guessed).
+  - **Fork from here** opens a new Code chat ("<title> (fork)") in the same
+    workspace and Mode, with the conversation up to and including that
+    message's turn — its answer too (`chats::fork`: the messages copied,
+    their screenshots shared, never copied; deleting either chat keeps
+    what the other still shows). Its first turn is Claude Code's own fork
+    of the original session at that turn's end (`store::Fork`, taken by
+    `direct::send`; the agent keeps it as `forked`, so a Rewind to before
+    its own first message goes back to that point, never a blank session).
+    Yap's own report lines about the original's agent aren't copied. The
+    original chat and its session are untouched, and
+    the files are the workspace's (a fork branches the conversation, not
+    the folder, as Anthropic's docs say). Once that turn is over only.
+  - **A message Claude read while it worked** (a note, joined to its turn)
+    has neither: rewinding to it would cut a turn in two.
+  - Not built: the CLI's "Restore code" alone (Rewind always takes the
+    conversation back; the files are the choice).
 - **Asked out loud, or from a phone** (2026-11-12; the maintainer:
   "please do all of this"): the Voice Assistant's question asked **with
   Chat in view**, and a paired phone's question in a Code chat, go straight
@@ -584,7 +626,12 @@ workspace, word for word, and no model of Chat's is asked.
   call is out goes at once and ticks ✓✓, Cancel and edit, Send now (its
   answer only what came after it read it), a message queued in a chat
   left for another going once that chat is shown again, by a click or the
-  bar card's Open). The e2e base config has
+  bar card's Open; Rewind: unavailable while Claude works, asked first,
+  the thread and the box, the turns rewound, the next turn Claude Code's
+  own fork at the end of the turn before; to before the first message, the
+  file put back and a new session; Fork from here: a new Code chat up to
+  that answer, its first turn a fork of the original session, the original
+  untouched). The e2e base config has
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 
@@ -2476,7 +2523,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 
 | Event | Payload |
 |---|---|
-| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, call?, under?, helper?, picture?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `helper` ("back", "failed") with the `call` of a hand-over whose helper has come back (an event of its own, no step); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `read` the id of a message Claude Code has just read (with its "Read your note" step: the queue's ✓✓); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished): the pages read it again |
+| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, call?, under?, helper?, picture?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `helper` ("back", "failed") with the `call` of a hand-over whose helper has come back (an event of its own, no step); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `read` the id of a message Claude Code has just read (with its "Read your note" step: the queue's ✓✓); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished; 2026-11-14: `rewound` a Rewind): the pages read it again |
 | `yap-agent-saying` | `{id, turn, text}` — the message agent `id`'s turn is writing now, all of it so far: many times a second, to the page only (never logged, never to a phone); let go when a `yap-agent` event has its `said`, its `text`, a `step`, or a status that's over |
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
@@ -2498,6 +2545,8 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 | `agent_list` | every agent, newest first (each with `active`: the runner has it now) |
 | `agent_get {id}` | `{agent, log}`: the agent (with `active`) and its `yap-agent` events (none once swept) |
 | `agent_stop {id}` / `agent_continue {id}` | Stop; Continue a stopped, interrupted or failed one |
+| `agent_rewind {conversation, index, files}` | Rewind: back to before the person's message `index` (one that started a turn of the chat's own); `files` puts back the files those turns changed: `{text, turns, restored, deleted, problems}`; refused while it works, or past a turn from before `endUuid` |
+| `agent_fork {conversation, index}` | Fork from here: a new Code chat up to and including that message's turn; its id |
 | `agent_queue {conversation}` | where that Code chat's own session is, for the message box's queue: `taking` (a call of its own out: a message goes now), `writing` (it waits) or `idle` |
 | `agent_message {id, text}` | the tab's "Tell the agent…": its next turn; while it works, handed to it now and read at its next step ("go ahead" after a plan carries it out, as a turn of its own) |
 | `agent_go_ahead {id, turn?}` | a report card's or an Agent panel row's Go ahead: a plan waiting (or set aside: Plan not used) carried out (Yap's go-ahead at the chat's Mode), once; `turn` an earlier turn's plan, as a turn of its own naming it; refused while it works or with no plan there |

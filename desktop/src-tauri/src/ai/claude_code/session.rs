@@ -185,6 +185,13 @@ pub enum Conversation {
     New(String),
     /// `--resume <id>`.
     Resume(String),
+    /// **A branch of `from`, up to and including its message `at`**
+    /// (14 Nov 2026, a Code chat's Rewind and Fork from here): `--resume
+    /// <from> --fork-session --resume-session-at <at>` — Claude Code's own
+    /// fork (a new session id, the original untouched) of the conversation
+    /// as it stood at that message (the Agent SDK's documented `forkSession`
+    /// and `resumeSessionAt`). Its id is Claude Code's, told in its init.
+    Branch { from: String, at: String },
 }
 
 impl Conversation {
@@ -196,6 +203,8 @@ impl Conversation {
     pub fn id(&self) -> &str {
         match self {
             Conversation::New(id) | Conversation::Resume(id) => id,
+            // (Until its init says the branch's own.)
+            Conversation::Branch { from, .. } => from,
         }
     }
 }
@@ -370,6 +379,10 @@ pub fn args(spec: &Spec, files: &Files) -> Vec<String> {
     match &spec.conversation {
         Conversation::New(id) => push("--session-id", id.clone()),
         Conversation::Resume(id) => push("--resume", id.clone()),
+        Conversation::Branch { from, at } => {
+            push("--resume", from.clone());
+            push("--resume-session-at", at.clone());
+        }
     }
     if let Some(m) = spec.model.as_deref().filter(|m| !m.is_empty()) {
         push("--model", m.to_string());
@@ -434,6 +447,10 @@ pub fn args(spec: &Spec, files: &Files) -> Vec<String> {
     }
     if spec.replay_user_messages {
         a.push("--replay-user-messages".into());
+    }
+    // A branch: a session of its own, the original untouched.
+    if matches!(spec.conversation, Conversation::Branch { .. }) {
+        a.push("--fork-session".into());
     }
     a
 }
@@ -781,7 +798,7 @@ impl Session {
             pid,
             pay = spec.pay.label(),
             mode = spec.permission_mode.as_str(),
-            resume = matches!(spec.conversation, Conversation::Resume(_)),
+            resume = !matches!(spec.conversation, Conversation::New(_)),
             "claude code: session started"
         );
         let shared = Arc::new(Shared {
@@ -1119,6 +1136,12 @@ mod tests {
             ],
             "the defaults: a new session, nothing runs unasked"
         );
+
+        // A branch (Rewind, Fork from here): Claude Code's own fork, at a message.
+        spec.conversation = Conversation::Branch { from: "prev-id".into(), at: "msg-7".into() };
+        let branch = args(&spec, &Files::default());
+        assert_eq!(branch[7..11], ["--resume", "prev-id", "--resume-session-at", "msg-7"]);
+        assert_eq!(branch.last().map(String::as_str), Some("--fork-session"));
 
         spec.conversation = Conversation::Resume("prev-id".into());
         spec.model = Some("claude-opus-5-5".into());

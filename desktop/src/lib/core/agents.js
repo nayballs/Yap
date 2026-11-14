@@ -853,6 +853,35 @@ export function workingDirectly(agents, conversation) {
 }
 
 /**
+ * **Rewind and Fork from here on a message** (14 Nov 2026, agents/rewind.rs; the Claude Code app's message actions): the
+ * turn the person's message `messageId` started in Code chat `conversation` (its own, not rewound), with why each action
+ * can't run now ('' when it can) — Rewind never while the chat's Claude works, nor past a turn from before Yap kept where
+ * each turn ends; Fork from here once its own turn is done, from a turn whose end is known — and `files`, how many files
+ * that turn and the later ones changed (Rewind can put them back). null for any other message (one Claude read while it
+ * worked, a plain chat's).
+ */
+export function messageTurn(agents, conversation, messageId) {
+  if (conversation == null || !messageId) return null;
+  for (const a of agents || []) {
+    if (a?.conversation !== conversation) continue;
+    const turns = a.turnList || [];
+    const t = turns.find((x) => x?.direct && !x.rewound && x.messageId === messageId);
+    if (!t) continue;
+    const before = turns.filter((x) => x.n < t.n && !x.rewound).sort((x, y) => y.n - x.n)[0];
+    const later = turns.filter((x) => x.n >= t.n && !x.rewound && !x.undone);
+    const files = new Set(later.flatMap((x) => x.files || [])).size;
+    const rewind = workingDirectly(agents, conversation)
+      ? 'Unavailable while Claude is working'
+      : before && !before.endUuid
+        ? "Can't rewind past a message from before this version of Yap"
+        : '';
+    const fork = isLive(t.status) ? 'Unavailable while Claude is on this message' : !t.endUuid ? "Can't fork from a message from before this version of Yap" : '';
+    return { agent: a, turn: t, files, rewind, fork };
+  }
+  return null;
+}
+
+/**
  * **The agent pills under a question** (11 Nov 2026): the turns the person's
  * own message started in a Code chat that works directly (a turn's
  * `direct`: agents/direct.rs). There's no answer of Chat's to put them
@@ -872,6 +901,8 @@ function pillsAt(agents, conversation, messages, direct) {
     const turns = j.turnList?.length ? j.turnList : [{ n: 1, messageId: j.messageId, status: j.status, title: '' }];
     for (const t of turns) {
       if (!!t.direct !== direct) continue;
+      // Rewound (a Code chat's Rewind): its messages are gone, and a later turn may have its message's place.
+      if (t.rewound) continue;
       const q = messageIndex(t.messageId, conversation);
       if (q < 0) continue;
       const at = direct ? (q < messages.length ? q : -1) : answerAfter(messages, q);

@@ -6,7 +6,8 @@
 //!
 //! **The script**, one JSON object a line (blank lines and `//` comments
 //! skipped). A line is printed as it is, with `{{session_id}}` (from
-//! `--session-id` / `--resume`, else a new one), `{{user_text}}` (the words
+//! `--session-id` / `--resume`, else a new one — a new one with
+//! `--fork-session`, as Claude Code), `{{user_text}}` (the words
 //! of the user message the turn started with), `{{notes}}` (those of the
 //! messages taken in while it worked, joined with "; "), `{{user_pictures}}`
 //! (how many pictures the turn's messages came with: its first and each
@@ -240,7 +241,8 @@ impl Ctx {
             }
             i += 1;
         }
-        if ctx.session_id.is_empty() {
+        // `--fork-session` (a Rewind, a Fork from here): a new session of its own, as Claude Code's.
+        if ctx.session_id.is_empty() || args.iter().any(|a| a == "--fork-session") {
             ctx.session_id = super::session::new_session_id();
         }
         Ok(ctx)

@@ -9,6 +9,7 @@
 // 2026): several can be answering at once, and the thread and the composer
 // show the open one's only.
 import { isLive } from '../../core/agentNow.js';
+import { splitElements } from '../../core/selectedElements.js';
 import { invoke } from '@tauri-apps/api/core';
 import { tick, untrack } from 'svelte';
 import { toast } from '../../ui/toast.svelte.js';
@@ -1453,6 +1454,62 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     else waitingOpen.add(conv);
   }
 
+  // ---- Rewind and Fork from here (14 Nov 2026, agents/rewind.rs; the Claude Code app's message actions) ----
+
+  /** A message's index in the chat shown ("chat:<conversation>:<index>"). */
+  const indexOf = (id) => Number(String(id ?? '').split(':').at(-1));
+
+  /**
+   * **Rewind** to before the person's message `m` in the Code chat shown: it and everything after go, from the chat and
+   * from Claude's session; its words come back in the box (before anything typed there); `files`: the files Claude
+   * changed since go back as they were. False when it didn't.
+   */
+  async function rewindAt(m, files) {
+    const conv = activeId;
+    const index = indexOf(m?.id);
+    if (conv == null || !Number.isInteger(index)) return false;
+    let r;
+    try {
+      r = await invoke('agent_rewind', { conversation: conv, index, files: !!files });
+    } catch (e) {
+      toast({ title: "Couldn't rewind", description: String(e), variant: 'destructive' });
+      return false;
+    }
+    queued = queued.filter((q) => q.conv !== conv);
+    if (activeId === conv) {
+      await reloadActive();
+      const words = splitElements(r.text || '').text.trim();
+      if (words) input = input.trim() ? `${words}\n${input}` : words;
+    }
+    refreshList();
+    const changed = r.restored + r.deleted;
+    const filesLine = !files ? 'The files stay as they are.' : changed ? `${changed === 1 ? '1 file' : `${changed} files`} put back as they were.` : '';
+    toast({
+      title: 'Rewound',
+      description: [filesLine, ...(r.problems || [])].filter(Boolean).join(' ') || undefined,
+      variant: r.problems?.length ? 'default' : 'success',
+    });
+    return true;
+  }
+
+  /** **Fork from here**: a new Code chat with the conversation up to and including `m`'s answer, opened. */
+  async function forkAt(m) {
+    const conv = activeId;
+    const index = indexOf(m?.id);
+    if (conv == null || !Number.isInteger(index)) return false;
+    let id;
+    try {
+      id = await invoke('agent_fork', { conversation: conv, index });
+    } catch (e) {
+      toast({ title: "Couldn't fork the chat", description: String(e), variant: 'destructive' });
+      return false;
+    }
+    await refreshList();
+    await selectConversation(id);
+    toast({ title: 'Forked into a new chat', description: 'The original chat is as it was.', variant: 'success' });
+    return true;
+  }
+
   /** × Cancel and edit: out of the queue, its words back in the box (before what's there). */
   function cancelQueued(qid) {
     const q = queued.find((x) => x.qid === qid);
@@ -1975,6 +2032,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     setQueueGate,
     cancelQueued,
     sendQueuedNow,
+    rewindAt,
+    forkAt,
     agentEvent,
     agentReported,
     get doc() { return doc; },
