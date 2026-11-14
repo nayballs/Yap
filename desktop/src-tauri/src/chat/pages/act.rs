@@ -1199,7 +1199,16 @@ async fn real_type(t: &OpenTab, el: &rules::Element, text: &str) -> Option<Value
     if before["r"] != "ok" || before["focused"] != true {
         return None;
     }
-    backend::input(&t.key, &[("Input.insertText", json!({ "text": text }))]).await.ok()?;
+    // Each character as a person's keyboard types it (keydown, its text, keyup): pages that listen for keys
+    // hear them (14 Nov 2026, a report from the maintainer's Code chat: Input.insertText alone put the words
+    // in, but a page reacting to key presses never noticed).
+    // (A textarea — a textbox with no input type — or an editable region takes several lines.)
+    let multiline = el.editable || (el.role == "textbox" && el.kind.is_empty());
+    let calls: Vec<(&str, Value)> = text.chars().flat_map(|c| typed_char(c, multiline)).collect();
+    if calls.is_empty() {
+        return None;
+    }
+    backend::input(&t.key, &calls).await.ok()?;
     let after = backend::act(&t.key, "fieldNow", &json!({ "ref": el.r, "role": el.role, "name": el.name })).await.ok()?;
     let arrived = after["r"] == "ok" && (after["n"] != before["n"] || after["v"] != before["v"]);
     if !arrived {
@@ -1207,6 +1216,73 @@ async fn real_type(t: &OpenTab, el: &rules::Element, text: &str) -> Option<Value
     }
     let now: String = after["v"].as_str().unwrap_or("").chars().take(200).collect();
     Some(json!({ "r": "ok", "value": now, "inserted": true }))
+}
+
+/// **One character as a keyboard types it** (DevTools' `Input.dispatchKeyEvent`):
+/// keydown with its text (the page gets keydown, keypress, beforeinput and
+/// input, trusted), then keyup — a letter, a digit, a space or a mark with
+/// the key that makes it; any other character (an accent, an emoji) with
+/// its text alone, as a keyboard's input method sends it. A line break:
+/// Enter, in a field that takes several lines only (in a one-line field it
+/// would send the form: dropped). Pure.
+pub fn typed_char(c: char, multiline: bool) -> Vec<(&'static str, Value)> {
+    if c == '\r' {
+        return Vec::new();
+    }
+    if c == '\n' {
+        if !multiline {
+            return Vec::new();
+        }
+        return vec![
+            ("Input.dispatchKeyEvent", json!({ "type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13, "text": "\r", "unmodifiedText": "\r" })),
+            ("Input.dispatchKeyEvent", json!({ "type": "keyUp", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13 })),
+        ];
+    }
+    let s = c.to_string();
+    let (code, vk) = key_of(c);
+    let mut down = json!({ "type": "keyDown", "key": s, "text": s, "unmodifiedText": s });
+    let mut up = json!({ "type": "keyUp", "key": s });
+    if let Some(code) = code {
+        down["code"] = json!(code);
+        up["code"] = json!(code);
+    }
+    if vk > 0 {
+        down["windowsVirtualKeyCode"] = json!(vk);
+        up["windowsVirtualKeyCode"] = json!(vk);
+    }
+    vec![("Input.dispatchKeyEvent", down), ("Input.dispatchKeyEvent", up)]
+}
+
+/// The physical key (`KeyA`, `Digit1`, `Space`…) and its Windows virtual key
+/// code for a character a US keyboard types; `None`, 0: none. Pure.
+fn key_of(c: char) -> (Option<String>, u32) {
+    match c {
+        'a'..='z' | 'A'..='Z' => (Some(format!("Key{}", c.to_ascii_uppercase())), c.to_ascii_uppercase() as u32),
+        '0'..='9' => (Some(format!("Digit{c}")), c as u32),
+        ' ' => (Some("Space".into()), 0x20),
+        '-' | '_' => (Some("Minus".into()), 0xBD),
+        '=' | '+' => (Some("Equal".into()), 0xBB),
+        ',' | '<' => (Some("Comma".into()), 0xBC),
+        '.' | '>' => (Some("Period".into()), 0xBE),
+        '/' | '?' => (Some("Slash".into()), 0xBF),
+        ';' | ':' => (Some("Semicolon".into()), 0xBA),
+        '\'' | '"' => (Some("Quote".into()), 0xDE),
+        '[' | '{' => (Some("BracketLeft".into()), 0xDB),
+        ']' | '}' => (Some("BracketRight".into()), 0xDD),
+        '\\' | '|' => (Some("Backslash".into()), 0xDC),
+        '`' | '~' => (Some("Backquote".into()), 0xC0),
+        '!' => (Some("Digit1".into()), 0x31),
+        '@' => (Some("Digit2".into()), 0x32),
+        '#' => (Some("Digit3".into()), 0x33),
+        '$' => (Some("Digit4".into()), 0x34),
+        '%' => (Some("Digit5".into()), 0x35),
+        '^' => (Some("Digit6".into()), 0x36),
+        '&' => (Some("Digit7".into()), 0x37),
+        '*' => (Some("Digit8".into()), 0x38),
+        '(' => (Some("Digit9".into()), 0x39),
+        ')' => (Some("Digit0".into()), 0x30),
+        _ => (None, 0),
+    }
 }
 
 /// **Enter in `el` asked first** when it would buy, pay, book, send… (a

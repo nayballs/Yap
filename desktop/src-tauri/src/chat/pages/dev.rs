@@ -61,7 +61,13 @@ pub struct Line {
     pub text: String,
     pub source: String,
     pub at: u64,
+    /// The same line again straight after (a browser's own console folds
+    /// them so): how many times in all (0 or 1: once).
+    pub times: u32,
 }
+
+/// The same line again within this long of the last: one line, counted.
+const SAME_WITHIN_MS: u64 = 2_000;
 
 /// A request: DevTools' id, its method and address (secrets hidden), its
 /// kind (Document, XHR, Fetch, Script…), its status, or why it failed.
@@ -116,18 +122,18 @@ pub fn record(key: &str, event: &str, params: &str) {
                 t => t,
             }
             .to_string();
-            push_line(key, Line { level, text, source: String::new(), at: now_ms() });
+            push_line(key, Line { level, text, source: String::new(), at: now_ms(), times: 1 });
         }
         "Runtime.exceptionThrown" => {
             let d = &p["exceptionDetails"];
             let text = d["exception"]["description"].as_str().or_else(|| d["text"].as_str()).unwrap_or("An error").to_string();
             let source = d["url"].as_str().map(|u| format!("{}:{}", redact_url(u), d["lineNumber"].as_u64().unwrap_or(0) + 1)).unwrap_or_default();
-            push_line(key, Line { level: "error".into(), text, source, at: now_ms() });
+            push_line(key, Line { level: "error".into(), text, source, at: now_ms(), times: 1 });
         }
         "Log.entryAdded" => {
             let e = &p["entry"];
             let source = e["url"].as_str().map(redact_url).unwrap_or_default();
-            push_line(key, Line { level: e["level"].as_str().unwrap_or("info").into(), text: e["text"].as_str().unwrap_or("").into(), source, at: now_ms() });
+            push_line(key, Line { level: e["level"].as_str().unwrap_or("info").into(), text: e["text"].as_str().unwrap_or("").into(), source, at: now_ms(), times: 1 });
         }
         "Network.requestWillBeSent" => {
             let r = Request {
@@ -173,6 +179,14 @@ fn push_line(key: &str, mut line: Line) {
     line.text = clip(&line.text, LINE_MAX);
     with(|l| {
         let c = &mut l.entry(key.to_string()).or_default().console;
+        // The same again at once (a blocked tracker's warning, once per try): one line, counted
+        // (14 Nov 2026, a report from the maintainer's own Code chat: "each failed tracking request
+        // appeared 3–4 times with the same timestamp", burying the real error).
+        if let Some(last) = c.back_mut().filter(|x| x.level == line.level && x.text == line.text && x.source == line.source && line.at.saturating_sub(x.at) <= SAME_WITHIN_MS) {
+            last.times = last.times.max(1) + 1;
+            last.at = line.at;
+            return;
+        }
         c.push_back(line);
         while c.len() > KEEP {
             c.pop_front();
@@ -262,7 +276,7 @@ pub fn definitions(gate: crate::chat::pictures::Gate, act: bool) -> Value {
     if act {
         out.push(tool(JAVASCRIPT, "Run JavaScript in the page and get its value back (top-level await; the last expression's value). For inspecting and debugging a page: the user is asked first.", json!({ "code": s(), "tab": tab() }), &["code"]));
     }
-    out.push(tool(VIEW, "Lay the page out as on a phone, a tablet or a desktop (preset), or a width and height of its own, and in light or dark (color_scheme).", json!({ "preset": { "type": "string", "enum": ["mobile", "tablet", "desktop"] }, "width": int(), "height": int(), "color_scheme": { "type": "string", "enum": ["light", "dark", "auto"] }, "tab": tab() }), &[]));
+    out.push(tool(VIEW, "Lay the page out as on a phone, a tablet or a desktop (preset; desktop: the panel's own size again), or a width and height of its own, and in light or dark (color_scheme).", json!({ "preset": { "type": "string", "enum": ["mobile", "tablet", "desktop"] }, "width": int(), "height": int(), "color_scheme": { "type": "string", "enum": ["light", "dark", "auto"] }, "tab": tab() }), &[]));
     Value::Array(out)
 }
 
@@ -284,7 +298,18 @@ pub async fn execute(turn: &mut crate::web::Turn, name: &str, args: &Value, ctx:
                 .filter(|l| pattern.is_empty() || l.text.to_lowercase().contains(&pattern) || l.source.to_lowercase().contains(&pattern))
                 .collect();
             let total = lines.len();
-            let shown: Vec<String> = lines.iter().skip(total.saturating_sub(limit)).map(|l| if l.source.is_empty() { format!("[{}] {}", l.level, l.text) } else { format!("[{}] {} ({})", l.level, l.text, l.source) }).collect();
+            let shown: Vec<String> = lines
+                .iter()
+                .skip(total.saturating_sub(limit))
+                .map(|l| {
+                    let times = if l.times > 1 { format!(" (×{})", l.times) } else { String::new() };
+                    if l.source.is_empty() {
+                        format!("[{}] {}{times}", l.level, l.text)
+                    } else {
+                        format!("[{}] {} ({}){times}", l.level, l.text, l.source)
+                    }
+                })
+                .collect();
             if args["clear"].as_bool() == Some(true) {
                 clear(&t.key, true);
             }
@@ -374,7 +399,8 @@ pub async fn execute(turn: &mut crate::web::Turn, name: &str, args: &Value, ctx:
             let size = match (preset.as_str(), w, h) {
                 ("mobile", _, _) => Some((375, 812, true)),
                 ("tablet", _, _) => Some((768, 1024, true)),
-                ("desktop", _, _) => None,
+                // (desktop: the panel's own size again — "reset" says the same.)
+                ("desktop" | "reset" | "panel" | "none", _, _) => None,
                 (_, Some(w), Some(h)) => Some((w.clamp(200, 4000), h.clamp(200, 4000), false)),
                 (_, Some(_), None) | (_, None, Some(_)) => return failed("width and height go together (or a preset: mobile, tablet, desktop).".into(), "Couldn't change the page's size".into()),
                 _ => Some((0, 0, false)),
@@ -442,6 +468,21 @@ mod tests {
         assert!(console_of(key).is_empty() && network_of(key).len() == 2);
         forget(key);
         assert!(network_of(key).is_empty());
+    }
+
+    #[test]
+    fn the_same_console_line_again_at_once_is_one_line_counted() {
+        // (14 Nov 2026: a blocked tracker's warning came 3–4 times in a row, burying the real error.)
+        let key = "page:https://shop.example.com/fold";
+        forget(key);
+        for _ in 0..4 {
+            record(key, "Log.entryAdded", r#"{"entry":{"level":"warning","text":"Tracking Prevention blocked access to storage","url":"https://ads.example.com/t.js"}}"#);
+        }
+        record(key, "Runtime.consoleAPICalled", r#"{"type":"error","args":[{"type":"string","value":"Cart failed"}]}"#);
+        let lines = console_of(key);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!((lines[0].times, lines[1].times), (4, 1));
+        forget(key);
     }
 
     #[test]

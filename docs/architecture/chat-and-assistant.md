@@ -2972,9 +2972,16 @@ review (safely, for any user, in any language Yap speaks).
   native setter: the field then holds those words, picks options, takes
   dates); **typing with no ref goes in at the cursor** (later that night,
   the maintainer: "type at the cursor like" Claude Code's own browser's
-  `type`): where the focus is, as real input (`Input.insertText`, the
-  trusted input events typing sends; `act::real_type` reads the field
-  before and after, `fieldNow`, and says `typed: "as keys"`), what was
+  `type`): where the focus is, as real key presses — each character
+  DevTools' `Input.dispatchKeyEvent` keydown with its text, then keyup
+  (`act::typed_char`: the page hears keydown, keypress, input and keyup,
+  trusted, as from a keyboard; an accent or an emoji its text alone; a line
+  break Enter in a field of several lines, nothing in a one-line one, where
+  it would send the form). At first it was `Input.insertText` alone: the
+  words went in but a page listening for keys never heard them (a report
+  from the maintainer's own Code chat, on a practice site for browser
+  automation, the same night). `act::real_type` reads the field before and
+  after (`fieldNow`) and says `typed: "as keys"`; what was
   there kept, the selection replaced; when the keys can't land, the page
   script's insert at the caret (`script::type_at_caret`), never both. Its
   Enter, with `submit`, as ever. Every rule of typing holds either way. The same
@@ -2998,7 +3005,10 @@ review (safely, for any user, in any language Yap speaks).
 - **The developer's tools** (14 Nov 2026, `pages/dev.rs`; a Claude Code
   session's only — a plan chat's turn, a Code chat's own session: listed by
   `claude_live/eyes.rs`, never Chat's own loop): `browser_console` (what
-  the page logged and threw, newest last; `errors`, `pattern`, `clear`),
+  the page logged and threw, newest last; `errors`, `pattern`, `clear`;
+  the same line again within 2 s one line, counted "(×4)", as a browser's
+  own console folds them — that report again: a blocked tracker's warning
+  came 3–4 times in a row and buried the real error),
   `browser_network` (its requests: method, address — a token, key,
   signature or session in its query shown "REDACTED" — status or why it
   failed; `id` a response's body), `browser_javascript` (DevTools'
@@ -3006,8 +3016,11 @@ review (safely, for any user, in any language Yap speaks).
   **asked first** — card act "script", "A script can do anything you could
   on the page" — but in Bypass permissions, never in a meeting or a call),
   `browser_view` (a phone's 375 × 812 or a tablet's 768 × 1024 with touch,
-  a size of its own, the desktop again; light, dark or the system's
-  colours: `Emulation.*`). The console and the network are kept from the
+  a size of its own, the desktop again — "desktop", or "reset": the panel's
+  own size; light, dark or the system's colours: `Emulation.*`; a tab's
+  width set with `browser_tabs` clears a phone's or a tablet's layout too:
+  the report found "the panel's width" said done while the page stayed
+  375 px). The console and the network are kept from the
   moment a page opens (`view.rs` `watch_devtools`: DevTools' Runtime, Log
   and Network domains), 500 of each, in memory only, gone with the page
   (`dev::forget`). What they read is web content.
