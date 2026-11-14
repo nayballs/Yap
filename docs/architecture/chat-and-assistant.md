@@ -2615,7 +2615,14 @@ of sight. What they share is said once, in the line.
   model): an older answer's buttons still show (`BrowserOffers.svelte`,
   `ChatMessage.offers`), and the code stays for them.
 - **Which pages**: as above, public http(s) only (`web::check_url`); four
-  new tabs and twelve shots a turn. A file on this PC (a `file:` address
+  new tabs and twelve shots a turn in Chat's own tool loop (a key or the
+  model on this PC: its context and its cost per call). **A Claude Code
+  session has none of the per-turn counts** (14 Nov 2026, `web::Turn::uncapped`:
+  a plan chat's turn, `chat/turn/plan.rs`, and a Code chat's own session,
+  `agents::runner::beside_web`; the maintainer, after his Code chat's Claude
+  stopped at twelve: "let's please remove that limit… to unlimited") — no
+  cap on shots, new tabs, picture looks or pictures shown; Claude Code keeps
+  its own context. Every rule about what may open holds. A file on this PC (a `file:` address
   or a path) is never loaded: the model is told to show a picture with
   `show_picture` and its path, and that a local web page isn't opened
   (`pictures/local.rs` `not_a_page`, under `chat/pictures.rs` above). None is an action tool

@@ -468,6 +468,20 @@ impl Turn {
     /// conversation (found by an earlier search; their searches are replayed
     /// to the model with their addresses, `chats::history_messages`): "tell
     /// me more about the first one".
+    /// **A Claude Code session's turn** (14 Nov 2026; the maintainer, whose
+    /// Code chat's Claude stopped at "Yap only allows 12 screenshots per
+    /// message": "let's please remove that limit… to unlimited"): none of the
+    /// per-turn counts of the pages and pictures — 12 shots, 4 new tabs, 4
+    /// picture looks, 8 shown. Claude Code keeps its own context (it compacts
+    /// a long one) and runs its own loop; the counts are for Yap's own tool
+    /// loop, which fits a small on-device model's context and pays a key per
+    /// call. Every rule about what may open or be typed holds.
+    pub fn uncapped(mut self) -> Turn {
+        self.pages.uncapped = true;
+        self.pictures.uncapped = true;
+        self
+    }
+
     pub fn with_earlier_sources<'a>(mut self, urls: impl IntoIterator<Item = &'a str>) -> Turn {
         self.linked.extend(urls.into_iter().map(str::to_string));
         self

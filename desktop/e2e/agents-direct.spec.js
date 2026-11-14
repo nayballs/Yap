@@ -261,6 +261,24 @@ const MONITORS = [
   { x: 0, y: 0, width: 1280, height: 720, scale: 1, hdr: false, whiteNits: 80 },
   { x: 1280, y: 0, width: 1280, height: 720, scale: 1, hdr: false, whiteNits: 80 },
 ];
+/** Opens the person's page, then takes `n` shots of it (Chat's own loop stops at 12 a turn). */
+const SHOTS = 14;
+const MANY_SHOTS = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  begins('toolu_open', 'mcp__yap__browser_navigate'),
+  said('o1', [{ type: 'tool_use', id: 'toolu_open', name: 'mcp__yap__browser_navigate', input: { url: FORT_JOY_URL } }]),
+  { _mcp: { tool: 'browser_navigate', arguments: { url: FORT_JOY_URL }, result_for: 'toolu_open' } },
+  ...Array.from({ length: SHOTS }, (_, i) => [
+    begins(`toolu_shot${i}`, 'mcp__yap__browser_screenshot'),
+    said(`o${i + 2}`, [{ type: 'tool_use', id: `toolu_shot${i}`, name: 'mcp__yap__browser_screenshot', input: {} }]),
+    { _mcp: { tool: 'browser_screenshot', arguments: {}, result_for: `toolu_shot${i}`, dump: TOOLS } },
+  ]).flat(),
+  said('o99', [{ type: 'text', text: 'Looked at it closely.' }], 'end_turn'),
+  result('Looked at it closely.', 0.01),
+  { _wait_user: true },
+];
 /** A line Claude Code's own helper (`Task`) says, under the call that sent it. */
 const under = (call, line) => ({ ...line, parent_tool_use_id: call });
 const HELPED = 'The notes are checked.';
@@ -852,6 +870,24 @@ test('its session looks at the screen when asked, as Chat’s own does: the scre
   await expect.poll(() => laidOut(main), { timeout: 20_000 }).toEqual(['you', 'work', 'answer']);
   await expect(thread(main).getByTestId('chat-agent-work')).toContainText('Looked at your screen');
   await shot(main, '71-it-looked-at-the-screen');
+});
+
+test('its session isn’t held to Chat’s per-turn counts: more than 12 page shots in one turn', async ({ yap, main }) => {
+  test.setTimeout(120_000);
+  fs.rmSync(TOOLS, { force: true });
+  await setConfig(yap, main, { webSearch: true });
+  await script(yap, MANY_SHOTS, 'many-shots');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, `Open ${FORT_JOY_URL} and look at it closely.`);
+  const agent = await newAgent(yap, before);
+  await ended(yap, agent.id, 90_000);
+  // Every shot taken, past the 12 Chat's own loop stops at.
+  const shots = toolDumps().filter((d) => d.tool === 'browser_screenshot');
+  expect(shots).toHaveLength(SHOTS);
+  expect(shots.filter((d) => d.isError)).toEqual([]);
+  expect(shots.every((d) => d.content.some((b) => b.type === 'image'))).toBe(true);
+  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 test('its session reads Yap’s own data on request: meetings, notes, tasks and the calendar, never its memory', async ({ yap, main }) => {

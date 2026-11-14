@@ -348,8 +348,17 @@ global hook never sees keys while a Yap window has the focus.
 - The composer: the screenshot's 120 px tile (its size and ✕ on hover:
   "How a screenshot looks", below), "Ask about this screenshot…" in the
   box, the caret there (dictating into it works: Chat's mic, or the hotkey's
-  in-page fallback). **Enter on an empty box asks "What's this?"**. Up to 4
-  screenshots a question (snipping again adds one). They wait while another
+  in-page fallback). **Enter on an empty box asks "What's this?"**. **Up to
+  100 screenshots a question** (14 Nov 2026; the maintainer: "it should be as
+  many as the user wants"; before, 4): as many as Claude takes in one request
+  on a 200k-token model (600 above; OpenAI 1,500), each made smaller as there
+  are more so they fit one request (`Fit::cap_for`). Snipping again, or
+  Shift as you let go, adds more. A model that takes fewer — Groq's 3, a
+  model on this PC 4 (`images::per_request`) — says so when it's sent ("Groq's
+  model takes 3 screenshots a message, and this one has 6. Remove 3, or
+  choose another model.", `images::too_many_line`), nothing sent and every
+  one left in the box (until 14 Nov the extra ones were dropped without a
+  word, `turn::prepare`). They wait while another
   view shows — Rust keeps them since 2026-10-25 (`snip/waiting.rs`, below),
   so a question asked out loud takes them too. Never sent by itself.
 - A question keeps its screenshots: over its bubble, at their own pixels
@@ -367,10 +376,10 @@ global hook never sees keys while a Yap window has the focus.
   `chat_image_drop`; the box says "Drop pictures to ask about them" while
   they're dragged over). Only pictures (PNG, JPEG, GIF, BMP, WebP, TIFF,
   HEIC with Windows' codec), ≤ 50 MB a file, ≤ 100 MP, as many as the
-  question has room for (4); the rest are left with a line saying so. With
-  4 waiting, a paste or a drop says "A question carries 4 screenshots at
-  most" and adds nothing (until 2026-10-30 a paste took the oldest's place
-  without a word). Each
+  question has room for (100; 4 until 14 Nov 2026); the rest are left with
+  a line saying so. With 100 waiting, a paste or a drop says "A question
+  carries 100 screenshots at most" and adds nothing (until 2026-10-30 a
+  paste took the oldest's place without a word). Each
   is decoded — PNG here, anything else by **Windows' own codecs**
   (`Windows.Graphics.Imaging.BitmapDecoder`: EXIF rotation and colour
   profile applied; no image crate) — its see-through pixels laid on white,

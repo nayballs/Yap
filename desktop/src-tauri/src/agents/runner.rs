@@ -888,7 +888,8 @@ fn beside_web(cfg: &crate::config::YapConfig, agent: &Agent, ctx: &claude_live::
     }
     let settings = crate::web::Settings::for_chat(cfg, crate::ai::claude_plan::PROVIDER, &agent.model, crate::ai::claude_plan::BASE_URL, "");
     let earlier: Vec<&str> = ctx.said.iter().map(String::as_str).collect();
-    let mut turn = crate::web::Turn::new(settings, crate::web::Endpoints::current(), &ctx.question, &earlier);
+    // (A Claude Code session: none of Chat's per-turn counts, `web::Turn::uncapped`.)
+    let mut turn = crate::web::Turn::new(settings, crate::web::Endpoints::current(), &ctx.question, &earlier).uncapped();
     if let Some(conv) = agent.conversation.and_then(crate::chat::chats::get) {
         turn = turn.with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())));
         turn.pictures.local = crate::chat::pictures::local::Context::of_chat(&conv, &ctx.question);

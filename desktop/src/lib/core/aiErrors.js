@@ -78,6 +78,8 @@ export function aiError(err) {
   if (/answer was cut off|error decoding response body|the connection dropped/.test(lower)) {
     return said(CUT_OFF, false);
   }
+  // More screenshots than the model takes in one message (snip/images.rs `too_many_line`): Yap's own words.
+  if (/ takes \d+ screenshots a message, and this one has \d+\./.test(raw)) return said(raw, false);
   // Claude declined (Anthropic's safety check): Rust says it so already.
   if (/claude declined to answer/.test(lower)) return said(DECLINED, false);
   // Yap's own words already ("No groq API key — add one in Settings → …").

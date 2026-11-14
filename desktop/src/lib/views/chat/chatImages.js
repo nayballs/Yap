@@ -11,8 +11,8 @@ import { toast } from '../../ui/toast.svelte.js';
 /** What Enter on an empty box sends with a screenshot. */
 export const DEFAULT_PROMPT = "What's this?";
 
-/** Screenshots one message carries, at most (snip/images.rs). */
-export const MAX_SHOTS = 4;
+/** Screenshots one message carries, at most (snip/images.rs `MAX_PER_REQUEST`: as many as Claude takes in one request; 4 before 14 Nov 2026). */
+export const MAX_SHOTS = 100;
 
 /** A screenshot's address (`http://yapsnip.localhost/<id>` in WebView2). */
 export function chatImageUrl(id) {
