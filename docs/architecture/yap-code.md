@@ -1402,6 +1402,25 @@ characters are Yap's own.
   and dark, the avatars at 2× (`12-crew-avatars-2x-*`), and the **crew sheet**
   (`10-crew-sheet-*`: every character, prop and pose, a test-only overlay
   drawn with the panel's own markup and CSS, never in the app).
+- **The lead** (14 Nov 2026; the maintainer: the chat's own Claude, the one
+  that "organises agents", should look "like the leader… clearly different
+  from the agent animations that open in the side window", only in Claude
+  Code inside Yap). Anthropic's own name for that role is the *lead agent*;
+  the agents it sends are the crew. In a Code chat's thread, the chat's own
+  Claude at work is its crew character (by its model) in a **captain's cap**
+  (navy, a gold badge: `--yap-crew-cap`, `--yap-crew-gold`) waving a
+  **conductor's baton** on the beat — standing, never walking, where the
+  agents in the Agent panel walk with their Mode's tool (`sprites.js`
+  `LEAD`, `prop: 'lead'`, not one of the Modes' `PROP_IDS`; `crew.css`
+  `.pr-lead`). On the step it's on, in the spinner's place, at a pixel a
+  square (`size: 0.5`, 18 × 16 px), with how long it's worked this turn and
+  its tokens after the words, as Claude Code's own working line ("3m 44s ·
+  9.4k tokens": `core/agents.js` `workClock`); writing or between steps, on a
+  line of its own at the thread's foot ("Writing", "Thinking";
+  `AgentWork.svelte` `wlead`). Its turn over, it's gone: the answer is all
+  there is. Never in the Agent panel's rows, nor in Chat's own chats.
+  Tests: `agents-direct.spec.js` (the lead and its clock while it works,
+  gone after: `61-the-lead-at-work`), the crew sheet's row of leads.
 
 ### The timeline
 

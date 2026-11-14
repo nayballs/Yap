@@ -1117,6 +1117,7 @@ async function showCrewSheet(main) {
     <div id="crew-sheet" data-testid="crew-sheet"><h2>Yap's crew</h2>
     <h3>Every character, working (each with a Mode's prop)</h3><div class="crow">${CHARACTER_IDS.map((c, i) => cell(c, PROP_IDS[i % PROP_IDS.length], 'working', `${crewName(c)} · ${props[PROP_IDS[i % PROP_IDS.length]]}`)).join('')}</div>
     <h3>The Modes' props (Sonnet, working)</h3><div class="crow">${PROP_IDS.map((p) => cell('sonnet', p, 'working', props[p])).join('')}</div>
+    <h3>The lead: a Code chat's own Claude on its working line (cap and baton; never walking)</h3><div class="crow">${['haiku', 'sonnet', 'opus', 'fable'].map((c) => cell(c, 'lead', 'working', `${crewName(c)} · lead`)).join('')}<figure>${crewMarkup({ character: 'sonnet', prop: 'lead', pose: 'working', size: 0.5, label: 'Claude is working' })}<figcaption>on a line</figcaption></figure></div>
     <h3>The poses (Opus, Plan)</h3><div class="crow">${['working', 'needs', 'done', 'stopped', 'failed', 'queued', 'unused'].map((pose) => cell('opus', 'plan', pose, pose)).join('')}</div></div>`;
   await main.evaluate((h) => {
     const host = document.createElement('div');

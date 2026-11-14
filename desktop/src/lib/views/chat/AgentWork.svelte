@@ -9,7 +9,13 @@
   //
   // - Its log comes from stores/agentLogs.svelte.js (read once, then live);
   //   the turn's events are `turnsOf`'s, grouped by core/agents.js `workOf`.
-  // - While it works, the last line is the step it's on, with a spinner.
+  // - While it works, the last line is the step it's on, with a spinner —
+  //   in the thread, **the lead** instead (14 Nov 2026, the maintainer: the
+  //   chat's own Claude "like the leader… clearly different from the agent
+  //   animations"): its crew character in a captain's cap, conducting
+  //   (CrewAvatar's `lead`), and how long it's worked and its tokens, as
+  //   Claude Code's own working line ("3m 44s · 9.4k tokens"). Writing, or
+  //   between steps, the lead stays on a line of its own at the foot.
   // - **Its words as it writes them** (12 Nov 2026, as Claude Code's own
   //   transcript shows them): the message it's writing now is the last
   //   paragraph, growing (`agentLogs.saying`, live only); once it's whole
@@ -42,6 +48,10 @@
   import { colourCode } from '../../ui/colourCode.js';
   import { agentLogs, watchAgentLog, watchSaying } from '../../stores/agentLogs.svelte.js';
   import StepPictures from './StepPictures.svelte';
+  import CrewAvatar from './CrewAvatar.svelte';
+  import { characterFor } from '../../core/crew.js';
+  import { workClock } from '../../core/agents.js';
+  import { turnSecs, tokensOf, fmtTokens } from '../../core/agentPanel.js';
   import StepRows from './StepRows.svelte';
 
   /**
@@ -75,6 +85,24 @@
   // (Housekeeping alone — "Starting Claude Code" — is a line only while it's what the agent is on: not once it writes.)
   const onStep = $derived(live && !saying);
   const items = $derived(events != null ? workOf(events, '', onStep) : note?.startedTs || live ? workOf(note?.events || [], final, onStep) : []);
+  /** **The lead**: in the thread it's the chat's own Claude at work (an agent's row in the Agent panel has its own walking crew). */
+  const lead = $derived(events == null);
+  let now = $state(Date.now() / 1000);
+  $effect(() => {
+    if (!lead || !live) return;
+    now = Date.now() / 1000;
+    const tick = setInterval(() => (now = Date.now() / 1000), 1000);
+    return () => clearInterval(tick);
+  });
+  /** "1m 12s · 9.4k tokens": how long it's worked this turn, and what it's used. */
+  const clock = $derived.by(() => {
+    if (!lead || !live || !note) return '';
+    const used = tokensOf(note.usage);
+    return [workClock(turnSecs(note, now)), used ? `${fmtTokens(used)} tokens` : ''].filter(Boolean).join(' · ');
+  });
+  /** Its step line is up now (the last item a stretch of steps): the lead's on it; else on a line of its own. */
+  const stepUp = $derived(onStep && items.length > 0 && items[items.length - 1].kind !== 'said');
+  const leadName = $derived(characterFor('claude-plan', agent?.model));
   /** The stretches the person opened (by where they start: a stretch keeps its place as more come). */
   let opened = $state({});
   const toggle = (key) => (opened = { ...opened, [key]: !opened[key] });
@@ -92,10 +120,11 @@
         <div class="wgroup" data-testid="chat-agent-work-steps" data-open={open ? 'true' : 'false'} data-busy={busy ? 'true' : 'false'}>
           <div class="wrow">
             <button type="button" class="wline" aria-expanded={open} onclick={() => toggle(i)} title={open ? 'Hide the steps' : 'Show the steps'}>
-              {#if busy}<span class="spin" aria-hidden="true"></span>{/if}
+              {#if busy && lead}<CrewAvatar character={leadName} prop="lead" pose="working" size={0.5} label="Claude is working" testid="chat-lead" />{:else if busy}<span class="spin" aria-hidden="true"></span>{/if}
               <span class="wtext">
                 {#each parts as p, k (k)}{k ? ', ' : ''}{p.text}{#if p.added}<span class="plus">+{p.added}</span>{/if}{#if p.removed}<span class="minus">−{p.removed}</span>{/if}{/each}
               </span>
+              {#if busy && clock}<span class="wclock" data-testid="chat-lead-clock">{clock}</span>{/if}
               <svg class="chev" class:down={open} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
             </button>
             <!-- The pictures its steps came back with, at the end of the line (opened: each by its step). -->
@@ -108,6 +137,14 @@
     {#if saying}
       <!-- (Its code is coloured once the message is whole: not at every piece.) -->
       <div class="wsaid" data-testid="chat-agent-work-saying" aria-live="off">{@html renderMarkdown(saying)}</div>
+    {/if}
+    {#if lead && live && !stepUp}
+      <!-- The lead, writing or between steps: on a line of its own at the foot, as Claude Code's working line. -->
+      <div class="wlead" data-testid="chat-lead-line">
+        <CrewAvatar character={leadName} prop="lead" pose="working" size={0.5} label="Claude is working" testid="chat-lead" />
+        <span class="wtext">{saying ? 'Writing' : line || 'Thinking'}</span>
+        {#if clock}<span class="wclock" data-testid="chat-lead-clock">{clock}</span>{/if}
+      </div>
     {/if}
   </div>
 {/if}
@@ -222,6 +259,21 @@
   }
   .chev.down {
     transform: rotate(90deg);
+  }
+  /* How long it's worked, and its tokens: quieter than its words. */
+  .wclock {
+    flex: 0 0 auto;
+    color: var(--yap-muted-70);
+    font-variant-numeric: tabular-nums;
+  }
+  /* The lead on a line of its own (writing, or between steps). */
+  .wlead {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 2px 0;
+    color: var(--yap-muted);
+    font-size: 12px;
   }
   .spin {
     flex: 0 0 auto;

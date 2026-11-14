@@ -527,6 +527,15 @@ test('the chat’s own Claude is no agent: “Thinking”, no tab, “Claude is 
   // Its first line is the chat thinking, as Chat's own turn says it — not "Starting Claude Code" on every message.
   await expect(thread(main).getByTestId('chat-agent-work').locator('[data-busy="true"] .wtext')).toHaveText('Thinking', { timeout: 20_000 });
   expect((await yap.invoke('agent_get', { id: agent.id })).log.some((e) => e.step === 'Starting Claude Code')).toBe(false);
+  // **The lead** on its line (14 Nov 2026): its crew character in a captain's cap, conducting — never an agent's walk — and
+  // how long it's worked, as Claude Code's own working line ("3m 44s · 9.4k tokens").
+  const lead = thread(main).getByTestId('chat-lead').first();
+  await expect(lead).toBeVisible();
+  await expect(lead).toHaveAttribute('data-prop', 'lead');
+  await expect(lead).toHaveAttribute('data-pose', 'working');
+  await expect(lead.locator('.c-cap')).toHaveCount(1);
+  await expect(thread(main).getByTestId('chat-lead-clock').first()).toHaveText(/^\d+s/);
+  await shot(main, '61-the-lead-at-work');
   // No tab of its own, nothing in "Agents working"; the bar: "Claude is working", never "1 agent working".
   await expect(tab(main)).toHaveCount(0);
   await expect(main.getByTestId('chat-running-agents')).toHaveCount(0);
@@ -539,6 +548,8 @@ test('the chat’s own Claude is no agent: “Thinking”, no tab, “Claude is 
   await messagesOf(yap, done.conversation, 3);
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText([HELPED]);
   await expect.poll(async () => (await yap.invoke('bar_status')).chats).toBe(0);
+  // Its turn over, the lead's gone: the answer is all there is.
+  await expect(thread(main).getByTestId('chat-lead')).toHaveCount(0);
   await expect(tab(main)).toHaveCount(0);
 
   // **The helper it sent is the agent**: in the panel, a row of its own — what it was asked, how many steps it

@@ -30,6 +30,12 @@
   width: 72px;
   height: 64px;
 }
+/* On a line of text (the lead on a Code chat's working line): a square a pixel. */
+.crew.size-half {
+  width: 18px;
+  height: 16px;
+  vertical-align: middle;
+}
 .crew > svg {
   display: block;
   width: 100%;
@@ -153,6 +159,16 @@
   fill: var(--yap-crew-white);
   opacity: 0.75;
 }
+/* The lead's captain's cap, its peak and its gold badge. */
+.crew .pq {
+  fill: var(--yap-crew-cap);
+}
+.crew .pQ {
+  fill: color-mix(in srgb, var(--yap-crew-cap) 70%, #000);
+}
+.crew .po {
+  fill: var(--yap-crew-gold);
+}
 
 /* Frames: f1 shows when still, f2 is its other frame; w1 / w2 only while working. */
 .crew .f2,
@@ -217,6 +233,15 @@
 /* Accept edits: the pencil scribbles. */
 .crew.pr-edits.po-working .c-prop {
   animation: crew-scribble 0.48s steps(1) infinite;
+}
+/* The lead (a Code chat's own Claude): stands — it doesn't walk — and
+   conducts, its baton beating (f1 / f2) and its body bobbing on the beat. */
+.crew.pr-lead.po-working .c-fl,
+.crew.pr-lead.po-working .c-fr {
+  animation: none;
+}
+.crew.pr-lead.po-working .c-bod {
+  animation: crew-bob 0.7s steps(1) infinite -0.35s;
 }
 /* Bypass permissions: floats gently in its helmet. */
 .crew.pr-bypass.po-working .c-all {
