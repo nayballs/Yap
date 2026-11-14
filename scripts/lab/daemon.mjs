@@ -707,6 +707,47 @@ async function click({ window: which = 'main', css }) {
   return { window: which, css, clicked: true };
 }
 
+/**
+ * **Select an element on the page beside the chat**, as a person does (the page tab's arrow, Ctrl+Shift+S):
+ * its tools open with Select on, the element showing `text` (the smallest that holds the words) — or `css` —
+ * scrolled into view and clicked through DevTools' own inspect overlay (real input, `e2e_page_click`), and its
+ * chip awaited in the message box. The next `ask` sends it with the words typed.
+ */
+async function pick({ text, css }) {
+  if (!text && !css) throw new Error('pick needs words on the page (or --css)');
+  const views = (await tryInvoke('e2e_page_views', {}, [])) ?? [];
+  const front = views.find((v) => v.onScreen) ?? views[0];
+  if (!front) throw new Error('No page beside the chat');
+  const m = main();
+  const chips = m.locator('[data-testid="chat-elements"] [data-testid="chat-element-chip"]');
+  const before = await chips.count();
+  if (!(await m.locator('[data-testid="chat-page-tools"]').count())) await m.locator('[data-testid="chat-page-select"]').click();
+  await m.locator('[data-testid="chat-page-tools"]').waitFor({ timeout: 5000 });
+  const find = `(() => {
+    const css = ${JSON.stringify(css ?? null)}, want = ${JSON.stringify(String(text ?? '').replace(/\s+/g, ' ').trim().toLowerCase())};
+    const shown = (e) => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+    let el = css ? document.querySelector(css) : null;
+    if (!css) {
+      let best = null;
+      for (const e of document.body.querySelectorAll('*')) {
+        if (!shown(e)) continue;
+        const t = (e.innerText || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+        if (t.includes(want) && (!best || t.length < best.t)) best = { e, t: t.length };
+      }
+      el = best && best.e;
+    }
+    if (!el) return null;
+    el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    const r = el.getBoundingClientRect();
+    return { x: r.left + Math.min(r.width / 2, 24), y: r.top + r.height / 2 };
+  })()`;
+  const at = JSON.parse(await invoke('e2e_page_view_eval', { key: front.key, script: find }));
+  if (!at) throw new Error(css ? `Nothing on the page matches ${css}` : `Nothing on the page says “${cut(text, 60)}”`);
+  await invoke('e2e_page_click', { key: front.key, x: at.x, y: at.y });
+  await chips.nth(before).waitFor({ timeout: 20_000 });
+  return { picked: (await chips.nth(before).locator('.eltext').textContent())?.trim() ?? '', page: front.url, chips: before + 1 };
+}
+
 /** Config keys `set` never touches (keys, sign-ins, Chat's model: `start` sets those). */
 const NEVER_SET = /key|token|secret|password|llmScopes|auth/i;
 
@@ -949,6 +990,7 @@ const COMMANDS = {
   agents: async () => agentsView(),
   probe: async (a) => probe(a),
   click: async (a) => click(a),
+  pick: async (a) => pick(a),
   set: async (a) => setThings(a),
   answer: async (a) => {
     const [id, how = 'allow'] = a._;

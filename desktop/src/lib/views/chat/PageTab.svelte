@@ -14,8 +14,7 @@
   //   and Enter: `page_view_go`, a search on the person's engine — Ctrl+L
   //   in the panel, Esc puts it back; "Not secure" on a plain-http page,
   //   never a localhost one) across the whole row. Its buttons — a Code
-  //   chat's Dev servers (ServersMenu.svelte), Save a shot (a picture of it,
-  //   kept with the answer: `page_view_shot`), Open in <browser>
+  //   chat's Dev servers (ServersMenu.svelte), Open in <browser>
   //   (`open_external`, the browser Settings → General → Links chose),
   //   expand, ✕ — sit in the panel's tab row after its + (`actions`, drawn
   //   by DocPanel.svelte's `rowActions`), as Claude Code's app has them
@@ -36,19 +35,27 @@
   //   are never WebView2's: Rust dismisses them while Yap acts (view.rs),
   //   and here, while the person uses the page, a strip asks them
   //   (`yap-page-dialog` → `page_view_dialog`).
-  // - Under it, where it's from, its section and "Open in Brave" in words
-  //   (as a picture's "From … · Open in …"); a right-click on words
-  //   selected in the page offers Ask Yap about this and Read aloud (its own
-  //   menu, Rust's), and Snip to Chat.
+  // - No footer under it since 14 Nov 2026 (the maintainer: "not needed";
+  //   Open in Brave is the tab row's button, a page's own error a line under
+  //   the address). A right-click on words selected in the page offers Ask
+  //   Yap about this and Read aloud (its own menu, Rust's), and Snip to Chat.
+  // - **Select an element or annotate** (the address row's arrow,
+  //   Ctrl+Shift+S, as the Claude Code app's): a compact toolbar at the
+  //   page's foot — Select (DevTools' own inspect mode on the live page:
+  //   one pick, its chip in the message box, chat/pages/pick.rs), the pen, a
+  //   shape (rectangle, ellipse, arrow) and words drawn on a still of the
+  //   page in its place (PageAnnotate.svelte; Add to message: the marked
+  //   picture in Chat's box), ×.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getContext, onMount, tick, untrack } from 'svelte';
   import { openExternalLink } from '../../core/externalLinks.js';
-  import { toast } from '../../ui/toast.svelte.js';
   import { useBrowserName, openInLabel } from '../../stores/browserName.svelte.js';
   import { tabKeyOf } from './chatDoc.svelte.js';
   import { questionParts, whyOf } from './pageConfirm.js';
   import ServersMenu from './ServersMenu.svelte';
+  import PageAnnotate from './PageAnnotate.svelte';
+  import { addPicked } from '../../stores/pickedElements.svelte.js';
 
   /**
    * `doc`: the panel's state (its `page`); `narrow`: no room beside the chat
@@ -113,7 +120,6 @@
   let st = $state({ title: '', url: '', canGoBack: false, canGoForward: false, loading: true, error: null, width: null });
   let stageEl = $state(null);
   let addrEl = $state(null);
-  let shooting = $state(false);
   let failed = $state('');
   // Where the address bar last took this tab (a tab shown again opens there).
   const went = untrack(() => doc.pageNow[key]?.went || '');
@@ -149,6 +155,8 @@
   function measure() {
     const el = stageEl;
     if (!el || !el.isConnected) return null;
+    // Annotating: the still is drawn on in the page's place (PageAnnotate.svelte), the live page out of sight.
+    if (still) return null;
     const r = el.getBoundingClientRect();
     if (r.width < 24 || r.height < 24) return null;
     if (el.checkVisibility && !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return null;
@@ -305,25 +313,133 @@
   }
 
   /** Ctrl+L in the panel: the address bar. */
+  // ---- Select an element, or annotate (chat/pages/pick.rs; as the Claude Code app's browser pane) ----------
+  // The address row's arrow (Ctrl+Shift+S) opens the tools under the page: Select (DevTools' own inspect
+  // mode on the live page: one pick, its chip in the message box), or the pen, a shape or words drawn on a
+  // still of the page (Add to message: the marked picture in the box). × closes them.
+  /** The tools when open: `{tool: 'select' | 'pen' | 'shape' | 'text', shape: 'rect' | 'ellipse' | 'arrow'}`. */
+  let tools = $state(null);
+  /** The still being drawn on (a `data:` PNG), while annotating. */
+  let still = $state(null);
+  let annotEl = $state(null);
+  let marks = $state(0);
+  let shapesOpen = $state(false);
+  let toolError = $state('');
+  let picking = false;
+
+  const SHAPES = [
+    { id: 'rect', name: 'Rectangle' },
+    { id: 'ellipse', name: 'Ellipse' },
+    { id: 'arrow', name: 'Arrow' },
+  ];
+  const shapeName = $derived(SHAPES.find((x) => x.id === (tools?.shape || 'rect'))?.name || 'Rectangle');
+
+  async function pickOn(on) {
+    if (on === picking) return;
+    picking = on;
+    try {
+      await invoke('page_pick', { key, on });
+    } catch (e) {
+      picking = false;
+      if (on) toolError = `Yap couldn't select on this page: ${e}`;
+    }
+  }
+
+  function openTools() {
+    if (blank || failed) return;
+    toolError = '';
+    tools = { tool: 'select', shape: tools?.shape || 'rect' };
+    pickOn(true);
+  }
+
+  function closeTools() {
+    pickOn(false);
+    tools = null;
+    still = null;
+    marks = 0;
+    shapesOpen = false;
+  }
+
+  const toggleTools = () => (tools ? closeTools() : openTools());
+
+  /** A tool chosen: Select on the live page; the pen, a shape or words on a still of it. */
+  async function useTool(tool, shape) {
+    if (!tools) return;
+    shapesOpen = false;
+    toolError = '';
+    tools = { tool, shape: shape || tools.shape };
+    if (tool === 'select') {
+      still = null;
+      marks = 0;
+      pickOn(true);
+      return;
+    }
+    await pickOn(false);
+    if (!still) {
+      try {
+        still = await invoke('page_still', { key });
+      } catch (e) {
+        toolError = `Yap couldn't take a still of the page: ${e}`;
+        tools = { ...tools, tool: 'select' };
+        pickOn(true);
+      }
+    }
+  }
+
+  /** Add to message: the still with its marks, in Chat's box (Rust's: `page_annotated`). */
+  async function addAnnotation() {
+    if (!annotEl) return;
+    try {
+      await invoke('page_annotated', { png: annotEl.picture() });
+      closeTools();
+    } catch (e) {
+      toolError = `Yap couldn't add the picture: ${e}`;
+    }
+  }
+
+  onMount(() => {
+    let alive = true;
+    let unPick = null;
+    let unKey = null;
+    // A pick on this page: its chip in the message box, and the tools close (one pick, as the app's).
+    listen('yap-page-picked', (e) => {
+      const p = e.payload;
+      if (p?.key !== key) return;
+      picking = false;
+      if (p.error) {
+        toolError = String(p.error);
+        return;
+      }
+      addPicked(p.element);
+      closeTools();
+    }).then((u) => (alive ? (unPick = u) : u()));
+    // The page's own keys (it has the focus): Ctrl+Shift+S toggles the tools, Esc closes them.
+    listen('yap-page-key', (e) => {
+      const k = e.payload;
+      if (!k?.down || k.repeat) return;
+      if (k.ctrl && k.shift && !k.alt && k.vk === 0x53) toggleTools();
+      else if (k.vk === 0x1b && tools && !k.ctrl && !k.shift && !k.alt) closeTools();
+    }).then((u) => (alive ? (unKey = u) : u()));
+    return () => {
+      alive = false;
+      unPick?.();
+      unKey?.();
+      if (picking) invoke('page_pick', { key, on: false }).catch(() => {});
+    };
+  });
+
   function tabKey(e) {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'l') {
       e.preventDefault();
       e.stopPropagation();
       addrEl?.focus();
-    }
-  }
-
-  /** Save a shot: a picture of the page as it is, kept with the answer, shown in its tab. */
-  async function saveShot() {
-    if (shooting) return;
-    shooting = true;
-    try {
-      const picture = await invoke('page_view_shot', { key, url: here, title, conversationId });
-      doc.showPicture(picture);
-    } catch (e) {
-      toast({ title: "Couldn't take a shot of the page", description: String(e), variant: 'destructive' });
-    } finally {
-      shooting = false;
+    } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleTools();
+    } else if (e.key === 'Escape' && tools && !e.defaultPrevented) {
+      e.preventDefault();
+      closeTools();
     }
   }
 
@@ -335,10 +451,7 @@
       <!-- A Code chat's dev servers (.claude/launch.json): its page opens here when this tab has none, else in a new tab. -->
       <ServersMenu {workspace} onopen={(url, name) => (blank ? go(url) : doc.showPage({ url, title: name }))} />
     {/if}
-    <button type="button" class="pagebtn" onclick={saveShot} disabled={blank || shooting || !!failed} aria-label="Save a shot of the page" title="Save a shot (a picture of the page as it is)" data-testid="chat-page-shot">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
-    </button>
-    <button type="button" class="pagebtn" onclick={openOutside} disabled={blank} aria-label={openInLabel(browser.label)} title={`${openInLabel(browser.label)}\n${here}`}>
+    <button type="button" class="pagebtn" onclick={openOutside} disabled={blank} aria-label={openInLabel(browser.label)} title={`${openInLabel(browser.label)}\n${here}`} data-testid="chat-page-open">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5H5V6h5" /></svg>
     </button>
     {#if !narrow}
@@ -407,6 +520,20 @@
         </button>
       </span>
     {/if}
+    <!-- Select an element or annotate (Ctrl+Shift+S): the tools under the page. -->
+    <button
+      type="button"
+      class="pagebtn pickbtn"
+      class:on={!!tools}
+      onclick={toggleTools}
+      disabled={blank || !!failed}
+      aria-label="Select an element or annotate"
+      aria-pressed={!!tools}
+      title={'Select an element or annotate (Ctrl+Shift+S)\nSends Claude a picture of it with its HTML, styles and where it is'}
+      data-testid="chat-page-select"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l12 6.5-5.2 1.6L9.6 16.5z" /><path d="M12.4 11.6 17 16.5" /></svg>
+    </button>
     {#if !rowActions}
       <!-- (Outside the panel's tab row: here, as before.) -->
       <div class="pageactions">{@render actions()}</div>
@@ -414,6 +541,9 @@
   </header>
   {#if addrError}
     <p class="addrerror" role="alert" data-testid="chat-page-address-error">{addrError}</p>
+  {:else if st.error && !blank}
+    <!-- The page's own trouble (it stopped working, it couldn't load): said under the address. -->
+    <p class="addrerror" role="status" data-testid="chat-page-error">{st.error}</p>
   {/if}
   {#if ask}
     <!-- Yap asks before an action here (chat/pages/act/confirm.rs): the
@@ -458,6 +588,9 @@
   <!-- The page's own webview sits over this (Rust's); under it, what shows
        until it's there, or when it couldn't open — or a new tab's start. -->
   <div class="stage" class:blank bind:this={stageEl} role="region" aria-label={blank ? 'New tab' : `The page: ${title}`} data-testid="chat-page-stage">
+    {#if still}
+      <PageAnnotate bind:this={annotEl} src={still} tool={tools?.tool === 'shape' ? 'shape' : tools?.tool} shape={tools?.shape} onmarks={(n) => (marks = n)} />
+    {/if}
     {#if blank}
       <div class="newtab" data-testid="chat-page-new">
         {#if workspace && servers.length}
@@ -512,20 +645,51 @@
     {/if}
   </div>
 
-  {#if !blank}
-    <footer class="pageinfo">
-      <p class="pagesource" data-testid="chat-page-source">
-        <span class="from">From <span class="pagesite">{site || here}</span>{#if page?.section && !went}<span class="sep" aria-hidden="true">·</span><span class="section">{page.section}</span>{/if}</span>
-        <span class="sep" aria-hidden="true">·</span>
-        <button type="button" class="openlink" onclick={openOutside} title={here} data-testid="chat-page-open">{openInLabel(browser.label)}</button>
-      </p>
-      {#if st.error}
-        <p class="pageerror" role="status">{st.error}</p>
-      {:else}
-        <p class="pagehint">Select words on the page and right-click to ask Yap about them or hear them read aloud.</p>
+  {#if tools}
+    <div class="pagetools" role="toolbar" aria-label="Select an element or annotate" data-testid="chat-page-tools">
+      <button type="button" class="toolbtn" class:on={tools.tool === 'select'} onclick={() => useTool('select')} aria-label="Select an element" title={'Select element (Ctrl+Shift+S)\nSends Claude a picture of it with its HTML, styles and selector'} data-testid="chat-page-tool-select">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l12 6.5-5.2 1.6L9.6 16.5z" /></svg>
+      </button>
+      <button type="button" class="toolbtn" class:on={tools.tool === 'pen'} onclick={() => useTool('pen')} aria-label="Pen" title="Pen" data-testid="chat-page-tool-pen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l1-4L16 5l3 3L8 19z" /><path d="M14 7l3 3" /></svg>
+      </button>
+      <span class="shapegroup">
+        <button type="button" class="toolbtn" class:on={tools.tool === 'shape'} onclick={() => useTool('shape')} aria-label={shapeName} title={shapeName} data-testid="chat-page-tool-shape">
+          {#if tools.shape === 'ellipse'}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><ellipse cx="12" cy="12" rx="8" ry="6" /></svg>
+          {:else if tools.shape === 'arrow'}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19L19 5M10 5h9v9" /></svg>
+          {:else}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="1.5" /></svg>
+          {/if}
+        </button>
+        <button type="button" class="toolmenu" onclick={() => (shapesOpen = !shapesOpen)} aria-label="Shapes" aria-expanded={shapesOpen} title="Shapes" data-testid="chat-page-tool-shapes">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10l5 5 5-5" /></svg>
+        </button>
+        {#if shapesOpen}
+          <span class="shapes" role="menu" aria-label="Shapes">
+            {#each SHAPES as x (x.id)}
+              <button type="button" role="menuitem" class="shapeitem" class:on={tools.shape === x.id} onclick={() => useTool('shape', x.id)} data-testid={`chat-page-shape-${x.id}`}>{x.name}</button>
+            {/each}
+          </span>
+        {/if}
+      </span>
+      <button type="button" class="toolbtn" class:on={tools.tool === 'text'} onclick={() => useTool('text')} aria-label="Text" title="Text" data-testid="chat-page-tool-text">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6V4h14v2M12 4v16M9 20h6" /></svg>
+      </button>
+      {#if toolError}
+        <span class="toolerror" role="alert" title={toolError}>{toolError}</span>
       {/if}
-    </footer>
+      {#if still}
+        <span class="toolsep" aria-hidden="true"></span>
+        <button type="button" class="toolprimary" onclick={addAnnotation} title={marks ? 'Add the page with your marks to your message (Ctrl+Z takes the last mark back)' : 'Add the page to your message'} data-testid="chat-page-tool-add">Add to message</button>
+      {/if}
+      <button type="button" class="toolbtn" onclick={closeTools} aria-label="Close" title="Close (Esc)" data-testid="chat-page-tool-close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+      </button>
+    </div>
   {/if}
+
 </section>
 
 <style>
@@ -868,6 +1032,124 @@
     background: var(--yap-paper-s1);
   }
   /* The stage: the page's own webview lies over it. */
+  .pickbtn.on {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
+  }
+  /* Select an element or annotate: under the page, never over it. */
+  .pagetools {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin: 6px auto 8px;
+    padding: 3px;
+    max-width: calc(100% - 16px);
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-paper-card);
+    box-shadow: var(--yap-shadow-sm);
+  }
+  .toolsep {
+    width: 1px;
+    height: 18px;
+    margin: 0 4px;
+    background: var(--yap-paper-rule);
+  }
+  .toolbtn,
+  .toolmenu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    min-width: 28px;
+    padding: 0;
+    border: none;
+    border-radius: var(--yap-r);
+    background: none;
+    color: var(--yap-paper-muted);
+    cursor: pointer;
+  }
+  .toolmenu {
+    min-width: 16px;
+    margin-left: -2px;
+  }
+  .toolbtn svg {
+    width: 16px;
+    height: 16px;
+  }
+  .toolmenu svg {
+    width: 12px;
+    height: 12px;
+  }
+  .toolbtn:hover,
+  .toolmenu:hover {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
+  }
+  .toolbtn.on {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
+  }
+  .shapegroup {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+  .shapes {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 6px);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    min-width: 120px;
+    padding: 4px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: var(--yap-r-lg);
+    background: var(--yap-paper-card);
+    box-shadow: var(--yap-shadow-menu);
+  }
+  .shapeitem {
+    padding: 6px 8px;
+    border: none;
+    border-radius: var(--yap-r);
+    background: none;
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .shapeitem:hover,
+  .shapeitem.on {
+    background: var(--yap-paper-s2);
+  }
+  .toolerror {
+    min-width: 0;
+    max-width: 220px;
+    padding: 0 6px;
+    color: var(--yap-paper-danger);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .toolprimary {
+    height: 26px;
+    padding: 0 10px;
+    border: none;
+    border-radius: var(--yap-r);
+    background: var(--yap-ink);
+    color: var(--yap-ink-fg);
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .toolprimary:hover {
+    background: var(--yap-ink-hover);
+  }
   .stage {
     position: relative;
     flex: 1 1 auto;
@@ -980,59 +1262,5 @@
   .pagefail .why {
     color: var(--yap-paper-muted);
     overflow-wrap: anywhere;
-  }
-  .pageinfo {
-    flex: 0 0 auto;
-    padding: 9px 18px 11px;
-    border-top: 1px solid var(--yap-paper-s2);
-  }
-  .pagesource,
-  .pagehint,
-  .pageerror {
-    margin: 0;
-    font-size: 11.5px;
-    color: var(--yap-paper-muted);
-  }
-  .pagesource {
-    display: flex;
-    align-items: baseline;
-    min-width: 0;
-    white-space: nowrap;
-  }
-  .from {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .openlink {
-    flex: 0 0 auto;
-    padding: 0;
-    border: none;
-    background: none;
-    color: var(--yap-link);
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .openlink:hover {
-    text-decoration: underline;
-  }
-  .openlink:focus-visible {
-    outline: 2px solid var(--yap-focus-ring);
-    outline-offset: 1px;
-  }
-  .pagesite {
-    color: var(--yap-paper-text-2);
-    font-weight: 600;
-  }
-  .sep {
-    margin: 0 6px;
-  }
-  .pagehint {
-    margin-top: 2px;
-  }
-  .pageerror {
-    margin-top: 2px;
-    color: var(--yap-paper-danger);
   }
 </style>

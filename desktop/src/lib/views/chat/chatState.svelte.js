@@ -21,6 +21,8 @@ import { signInClaudePlan } from '../../stores/claudePlan.svelte.js';
 import { streamCall, liveAnswer, applyEvent, streamingHeight, STOPPED, SUPERSEDED } from '../../core/streaming.js';
 import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from '../../stores/speech.svelte.js';
 import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused, pastedImage, keepPasted } from './chatImages.js';
+// (`pickedElements`, not `picked`: that's the conversations picked in the list, below.)
+import { picked as pickedElements, takePicked } from '../../stores/pickedElements.svelte.js';
 import { waitingShots, followWaitingShots, removeWaiting, clearWaiting, followPixelRatio } from './chatShots.svelte.js';
 import { questionTokens, isTooLong } from './chatBudget.js';
 import { fmtContext } from '../../core/aiUsage.js';
@@ -331,7 +333,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   let snipHotkey = $state('');
   // Files are being dragged over the window (a drop lands in the box).
   let dragging = $state(false);
-  const visionBlocked = $derived(waitingShots.list.length > 0 && vision.images === false);
+  // The box's tiles: its screenshots, not a picked element's picture (its chip shows it: pickedElements).
+  const tiles = $derived(waitingShots.list.filter((s) => s.source !== 'element'));
+  const visionBlocked = $derived(tiles.length > 0 && vision.images === false);
   const switchName = $derived.by(() => {
     const s = vision.imagesSwitch;
     if (!s) return '';
@@ -1525,12 +1529,19 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const asText = opts?.asText === true;
     // With a screenshot waiting, an empty box asks "What's this?".
     const fromBox = opts?.text == null;
-    const shots = fromBox ? waitingShots.list : [];
-    const text = (fromBox ? input.trim() : String(opts.text).trim()) || (shots.length ? DEFAULT_PROMPT : '');
+    // Elements picked on a page beside the chat (chat/pages/pick.rs): their blocks go with the words, their
+    // pictures with the screenshots — but to a model that can't read images, the words alone. (A message from
+    // the queue goes with its own words only: what's in the box stays there.)
+    const elements = fromBox ? pickedElements.list : [];
+    const noImages = vision.images === false;
+    const boxShots = fromBox ? waitingShots.list : [];
+    const shots = noImages ? boxShots.filter((s) => s.source !== 'element') : boxShots;
+    const text = (fromBox ? input.trim() : String(opts.text).trim()) || (shots.length || elements.length ? DEFAULT_PROMPT : '');
     // **Claude is working** (a Code chat's own session): the message waits, a bubble of its own, until Claude can
-    // take it (its next step) or its turn ends. With a screenshot, a passage or a Skill it goes now, as before.
+    // take it (its next step) or its turn ends. With a screenshot, a picked element, a passage or a Skill it goes
+    // now, as before.
     let queuedHow = opts?.fromQueue ?? null;
-    if (fromBox && text && !shots.length && !quote && activeId != null && !sending && !skills.parse(text)?.skill && queueGate()) {
+    if (fromBox && text && !shots.length && !elements.length && !quote && activeId != null && !sending && !skills.parse(text)?.skill && queueGate()) {
       // Rust says (agents/runner.rs `queue_state`): writing its answer — it waits; a tool call out — it goes now,
       // read as that ends (✓, then ✓✓); nothing of the chat's own working — sent as ever.
       let state = 'idle';
@@ -1552,25 +1563,27 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (shots.length && vision.images === false && !asText) return;
     // Too long for the model on its own: the line under the box says so,
     // and nothing goes (chat/budget.rs checks again).
-    if (inputTooLong) {
+    if (fromBox && inputTooLong) {
       shortenPaste();
       return;
     }
-    tooLong = '';
-    const voice = byVoice;
+    if (fromBox) tooLong = '';
+    const voice = fromBox && byVoice;
     // "/decisions last week" (or a one-tap prompt): a Skill, asked across
     // the meetings (chat/skills.rs).
     const skill = opts?.skill ?? skills.parse(text)?.skill?.command ?? null;
     if (skill && !messages.length && !scope) scope = 'meetings';
     if (fromBox) input = '';
     // The passage it's about (the document panel), out of the box with it.
-    const about = skill ? null : quote;
-    quote = null;
+    const about = skill || !fromBox ? null : quote;
+    if (fromBox) quote = null;
     // Out of the box (Rust takes them with the question, chat_send).
-    waitingShots.list = [];
-    byVoice = false;
+    if (fromBox) waitingShots.list = [];
+    const sentElements = fromBox ? takePicked().map((e) => (noImages ? { ...e, image: null } : e)) : [];
+    if (noImages) for (const e of elements) if (e.image) invoke('chat_waiting_remove', { id: e.image }).catch(() => {});
+    if (fromBox) byVoice = false;
     // Think it through (chat/think.rs): this question only.
-    const thinkIt = takeThink();
+    const thinkIt = fromBox ? takeThink() : false;
     // The next question: the last answer stops talking.
     stopReading();
     // This send's question and bubble carry its `turn`, and are found by
@@ -1579,7 +1592,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const turn = ++sendSeq;
     // (Words from a page beside the chat: quoted as a selection, its site named.)
     const sentQuote = about ? (about.page ? { noteId: 0, text: about.text, app: about.page.site || about.page.title || '' } : { noteId: about.noteId, text: about.text }) : null;
-    const question = { role: 'user', text, voice, id: null, turn, images: shots, quote: sentQuote };
+    const question = { role: 'user', text, voice, id: null, turn, images: shots, quote: sentQuote, elements: sentElements };
     messages = [...messages, question];
     // **The answer, in its own conversation** (`Answer`): a new chat's is
     // that new chat's until its question makes the conversation. Another
@@ -1643,6 +1656,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         selection: about && !about.page ? { noteId: about.noteId, text: about.text, fromLine: about.fromLine ?? null, toLine: about.toLine ?? null } : null,
         // Words from a page beside the chat (chat/pages/view.rs `PageQuote`).
         pageQuote: about?.page ? { text: about.text, site: about.page.site || '' } : null,
+        // Elements picked on a page beside the chat (chat/pages/pick.rs `with_elements`).
+        elements: sentElements.length ? sentElements : null,
         // A new chat made a Code chat before its first question (agents/code_chat.rs).
         codeFolder: activeId == null ? (newChatFolder?.() ?? null) : null,
         // A new chat's connectors switched off in its + menu (connectors/chats.rs).
@@ -1987,7 +2002,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     set follow(v) { follow = v; },
     get scope() { return scope; },
     set scope(v) { scope = v; },
-    get attached() { return waitingShots.list; },
+    get attached() { return tiles; },
     get copiedShot() { return waitingShots.copied; },
     removeShot: removeWaiting,
     clearShots: clearWaiting,

@@ -39,6 +39,8 @@
   import CodeEdge from './CodeEdge.svelte';
   import ContextRing from './ContextRing.svelte';
   import ThinkButton from './ThinkButton.svelte';
+  import ElementChip from './ElementChip.svelte';
+  import { picked, removePicked } from '../../stores/pickedElements.svelte.js';
   import ConnectorLogo from '../../settings/connectors/ConnectorLogo.svelte';
 
   /**
@@ -304,6 +306,15 @@
         <!-- "Copy every snip to the clipboard" (snip.rs): said once, quietly. -->
         <div class="copiedline" role="status" data-testid="chat-snip-copied">Copied · Ctrl+V to paste it anywhere</div>
       {/if}
+    </div>
+  {/if}
+  {#if picked.list.length}
+    <!-- Elements picked on a page beside the chat (PageTab's Select, chat/pages/pick.rs): a chip each,
+         its card on hover — as the Claude Code app attaches them to the prompt. -->
+    <div class="elrow" data-testid="chat-elements">
+      {#each picked.list as el (el.uid)}
+        <ElementChip {el} picture={el.image} onremove={() => removePicked(el.uid)} />
+      {/each}
     </div>
   {/if}
   {#if chat.inputTooLong || chat.tooLong}
@@ -880,6 +891,12 @@
     height: 11px;
   }
   /* A waiting screenshot's tile (the frame itself: app.css .shotframe). */
+  .elrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 12px 0;
+  }
   .shotchip {
     flex: 0 0 auto;
   }

@@ -317,6 +317,9 @@ pub fn run() {
             chat::pages::view::page_view_reload,
             chat::pages::view::page_view_go,
             chat::pages::view::page_view_shot,
+            chat::pages::pick::page_pick,
+            chat::pages::pick::page_still,
+            chat::pages::pick::page_annotated,
             chat::pages::act::confirm::chat_page_confirm,
             chat::pages::act::confirm::chat_connector_confirm,
             dictation::commands::cancel_recording,
@@ -947,6 +950,8 @@ pub fn run() {
             chat::pages::view::e2e_page_views,
             #[cfg(debug_assertions)]
             chat::pages::view::e2e_page_view_ask,
+            #[cfg(debug_assertions)]
+            chat::pages::pick::e2e_page_click,
             #[cfg(debug_assertions)]
             voice::tts::tts_e2e_spoken,
             #[cfg(debug_assertions)]

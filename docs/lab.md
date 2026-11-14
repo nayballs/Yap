@@ -240,6 +240,19 @@ shows, in Yap's own window only, never a page beside the chat.
 {"ok":true,"window":"thread","css":"[data-testid=\"chat-queued-send-now\"]","clicked":true}
 ```
 
+### `pick "<words on the page>"` or `pick --css <selector>`
+
+Selects an element on the page beside the chat as a person does (14 Nov 2026; the
+page tab's arrow, "Select an element or annotate"): the page's tools open with Select
+on, the smallest element showing those words (or matching the selector) is scrolled
+into view and clicked through DevTools' own inspect overlay (real input:
+`e2e_page_click`), and its chip is awaited in the message box. The next `ask` (typed:
+`--chat same`) sends it with the words, as `chat_send`'s `elements` — its picture too.
+
+```json
+{"ok":true,"picked":"<h1 class=\"title\">","page":"http://localhost:5180/","chips":1}
+```
+
 ### `set '<json>'` or `set [--web on|off] [--yap-code on|off] [--connectors on|off]`
 
 Changes the running test Yap as another surface would (`save_config`, Settings told,

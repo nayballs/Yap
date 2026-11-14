@@ -130,6 +130,7 @@ function foreignFrames(r,max){var out=[],fs=qa('iframe,frame',r);for(var i=0;i<f
 pub mod act;
 pub mod backend;
 pub mod dev;
+pub mod pick;
 pub mod preview;
 pub mod read;
 pub mod see;

@@ -158,6 +158,7 @@ pub async fn chat_send(
     think: Option<bool>,
     selection: Option<crate::chat::documents::Selection>,
     page_quote: Option<crate::chat::pages::view::PageQuote>,
+    elements: Option<Vec<crate::chat::pages::pick::Picked>>,
     code_folder: Option<String>,
     connectors_off: Option<Vec<String>>,
 ) -> Result<serde_json::Value, String> {
@@ -171,6 +172,8 @@ pub async fn chat_send(
     // question that fails before its answer gives them back, as the page
     // gives the question back (not one a newer question replaced, nor one
     // stopped: those are kept as asked).
+    // Elements picked on a page beside the chat (`pick.rs`): their blocks after the words, for the model.
+    let text = crate::chat::pages::pick::with_elements(&text, &elements.unwrap_or_default());
     let image_ids = images.unwrap_or_default();
     let taken = if image_ids.is_empty() { Vec::new() } else { crate::snip::waiting::sent(&app, &image_ids) };
     // A passage selected in the document panel ("Change this…", documents.rs):
@@ -178,7 +181,9 @@ pub async fn chat_send(
     if selection.is_some() {
         crate::chat::documents::quote_sent();
     }
-    let turn = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text);
+    // Where each came from in the box (a page's picked element, an annotated page): kept on the question.
+    let sources: Vec<(String, String)> = taken.iter().map(|i| (i.id.clone(), i.source.clone())).collect();
+    let turn = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, sources, as_text);
     let send = crate::chat::skills::with(skill_turn, crate::chat::documents::with_selection(selection, turn));
     // Text selected on a page beside the chat: what the question is about.
     // (Boxed: the command's future is made on the main thread, whose stack
@@ -261,6 +266,16 @@ pub(crate) async fn question_images(app: &AppHandle, ids: &[String], as_text: bo
     Ok(QuestionImages { images: prepared, target: Some((provider, model)), text })
 }
 
+/// A question's pictures keep the source they had in Chat's box ("element",
+/// "annotation", "snip"…): the stored copies only know they're pictures.
+fn keep_sources(images: &mut [crate::chat::chats::ChatImage], sources: &[(String, String)]) {
+    for image in images {
+        if let Some((_, source)) = sources.iter().find(|(id, s)| *id == image.id && !s.is_empty()) {
+            image.source = source.clone();
+        }
+    }
+}
+
 /// [`chat_send`]'s turn.
 #[allow(clippy::too_many_arguments)]
 async fn send_turn(
@@ -272,12 +287,16 @@ async fn send_turn(
     on_stream: crate::chat::stream::PageChannel,
     turn_id: Option<String>,
     image_ids: Vec<String>,
+    sources: Vec<(String, String)>,
     as_text: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let by_voice = voice.unwrap_or(false);
     let stop = crate::chat::stream::Stoppable::new(turn_id.as_deref());
     let watched = on_stream.0.is_some();
-    let QuestionImages { images: turn_images, target, text } = question_images(app, &image_ids, as_text.unwrap_or(false), text).await?;
+    let QuestionImages { images: mut turn_images, target, text } = question_images(app, &image_ids, as_text.unwrap_or(false), text).await?;
+    // Each picture keeps its source from Chat's box: an element's shows in its
+    // chip, never as a screenshot tile (pick.rs; before, all said "snip").
+    keep_sources(&mut turn_images.images, &sources);
     let turned = crate::snip::turn::with(
         turn_images,
         chat_turn(
@@ -359,4 +378,20 @@ async fn send_turn(
         // words come as its report.
         "direct": turn.direct,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chat::chats::ChatImage;
+
+    #[test]
+    fn a_question_keeps_its_pictures_sources_from_the_box() {
+        let stored = |id: &str| ChatImage { id: id.into(), w: 4, h: 4, bytes: 10, source: "snip".into(), ..Default::default() };
+        let mut images = vec![stored("a"), stored("b"), stored("c")];
+        let sources = vec![("a".to_string(), "element".to_string()), ("b".to_string(), String::new())];
+        keep_sources(&mut images, &sources);
+        let got: Vec<&str> = images.iter().map(|i| i.source.as_str()).collect();
+        assert_eq!(got, ["element", "snip", "snip"]);
+    }
 }
