@@ -146,9 +146,9 @@ pub fn now() -> Waiting {
 }
 
 /// A snip landed in Chat ([`Waiting::land`]).
-pub fn landed(app: &AppHandle, conversation: Option<u64>, image: ChatImage) {
-    super::thumbs::prepare_tiles(app, std::slice::from_ref(&image));
-    change(Some(app), |w| w.land(conversation, vec![image]));
+pub fn landed(app: &AppHandle, conversation: Option<u64>, images: Vec<ChatImage>) {
+    super::thumbs::prepare_tiles(app, &images);
+    change(Some(app), |w| w.land(conversation, images));
 }
 
 /// Pictures pasted or dropped into the box.

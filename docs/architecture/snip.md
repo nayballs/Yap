@@ -78,9 +78,12 @@ what's taken (overlay::Select, virtual-desktop pixels):
         · Space or Alt, then a click: a window's visible frame
         ▼
 cut at physical pixels (one monitor's frame, or put together from each)
+        ├── Shift held as you let go → kept (lit, numbered), the overlay
+        │   stays up for the next; let go without it (or Enter, Esc) → all
+        │   of them, in order (2026-11-14)
         ├── Ctrl held / Ctrl+C → the clipboard (PNG + DIB, out of Win+V
         │   history), focus back
-        ├── Shift held / Ctrl+S → the Save dialog, the folder used last
+        ├── Ctrl+S → the Save dialog, the folder used last
         ▼
 PNG → <data>/chat-images/ → waiting in the box (snip/waiting.rs,
         yap-chat-waiting) → yap-snip {image, conversationId} → the main
@@ -253,9 +256,26 @@ it.
   at the capture (a window over it shows too): the "visible area" of the
   plan, not a capture of the window alone.
 - **What's for** — **Ctrl held as you let go** (or **Ctrl+C** while the box
-  is up, Ctrl+Enter): copy; **Shift** (or **Ctrl+S**): save; neither: Chat.
-  The label says it as you hold them: "812 × 430 · Ctrl copy · Shift save",
-  then "812 × 430 · Copy". Ctrl+C / Ctrl+S with nothing lit take the monitor
+  is up, Ctrl+Enter): copy; **Ctrl+S**: save; neither: Chat. The label says
+  it as you hold them: "812 × 430 · Ctrl copy · Shift another", then
+  "812 × 430 · Copy".
+- **Several at once** (2026-11-14; the maintainer: "take screenshot after
+  screenshot… a keybind that lets the user take multiple screenshots when
+  snip is active… all screenshots go into chat"): **Shift held as you let
+  go** keeps that shot — it stays lit with its edge and its number by its
+  top left corner, the hint says "2 taken · Snip the next (Shift for more)
+  · Enter to finish" — and the overlay waits for the next (a box, a click
+  for a monitor, a window; on any monitor). Letting go without Shift (the
+  label: "812 × 430 · 3 to Chat"), or Enter, ends it: every shot, in the
+  order taken, cut from the same frozen pictures, lands in Chat's box
+  together (`yap-snip`'s `images`; `Last.images`), and a spoken "snip"
+  then listens once for the question about them all. **Esc — or anything
+  that would cancel (right-click, another app, the monitors changing, the
+  time) — sends the ones kept** (`Select::ended`): a snip taken is never
+  lost; with none kept it cancels as ever. Once one's kept the snip is
+  Chat's (Ctrl and Ctrl+S do nothing more). Up to `overlay::MAX_KEPT` (a
+  question's own limit): the last one allowed ends it. Shift saved before;
+  saving is Ctrl+S's alone now (Chat comes first: the 23 Oct decision). Ctrl+C / Ctrl+S with nothing lit take the monitor
   under the pointer. Kept from the plan's "small toolbar after selecting":
   release = done stays (the 23 Oct decision, no second confirm), so the
   toolbar is the label's legend and the keys rather than buttons to click.
@@ -463,7 +483,8 @@ anywhere" for six seconds (`yap-snip-copied {id}`, `chatShots.svelte.js`).
 - **"Copy every snip to the clipboard"** (`snip_copy`, on; Settings →
   Shortcuts, under Snip to Chat; `settingsIndex.js` `snip-copy`). Off: Chat
   only.
-- Ctrl on release (copy only, no Chat) and Shift (save) are unchanged.
+- Ctrl on release (copy only, no Chat) and Ctrl+S (save) are unchanged; several
+  kept with Shift: the last of them is the one copied.
 - A picture **pasted or dropped** into Chat (`attach.rs`) is never copied
   back: it came from the clipboard or a file.
 

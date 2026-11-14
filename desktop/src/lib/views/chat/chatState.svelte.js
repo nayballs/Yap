@@ -587,15 +587,17 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
    * caret there. Never sent by itself.
    */
   async function takeSnip(p) {
-    const img = p?.image;
-    if (!img?.id) return;
+    // (Several from one snip — Shift held as each was let go, snip.rs — in order; else its one.)
+    const imgs = (Array.isArray(p?.images) && p.images.length ? p.images : [p?.image]).filter((i) => i?.id);
+    if (!imgs.length) return;
     if (p.conversationId != null) {
       if (p.conversationId !== activeId) await selectConversation(p.conversationId);
     } else if (activeId != null) {
       // Rust has the box as it should be (yap-chat-waiting): kept.
       newChat({ keepShots: true });
     }
-    if (!waitingShots.list.some((a) => a.id === img.id)) waitingShots.list = [...waitingShots.list, img].slice(-MAX_SHOTS);
+    const fresh = imgs.filter((img) => !waitingShots.list.some((a) => a.id === img.id));
+    if (fresh.length) waitingShots.list = [...waitingShots.list, ...fresh].slice(-MAX_SHOTS);
     refreshVision();
     await tick();
     inputEl?.focus();
