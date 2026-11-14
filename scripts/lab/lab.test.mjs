@@ -180,6 +180,51 @@ describe('a turn’s record', () => {
     const missed = checkTurn({ questionImages: 0 }, { result: summarize({ turn: turn(0), items: [], conv }), calls: [] });
     assert.deepEqual(missed.map((c) => [c.check, c.pass]), [['questionImages 0', false]]);
   });
+
+  // 14 Nov 2026: a question to a Code chat that works directly came back at once with no answer — the
+  // session's work isn't Chat's stream. Now the turn is the session's, over with its answer in the chat.
+  test('a Code chat’s own session: the turn waits for its answer; its steps, its calls, its cards and pages', () => {
+    const event = (seq, name, payload) => ({ seq, ts: seq * 1000, kind: 'event', name, payload });
+    const call = (seq, session, content, agent = true) => ({ seq, ts: seq * 1000, kind: 'claude', pid: 5, agent, line: { type: content[0].type === 'tool_use' ? 'assistant' : 'user', session_id: session, message: { content } } });
+    const sent = { seq: 2, kind: 'sent', ok: true, reply: { conversationId: 3, direct: { id: 'ab12', turn: 2, folder: 'lab-sandbox', mode: 'auto', status: 'queued' } } };
+    const working = [
+      { seq: 1, kind: 'stream', event: { kind: 'turn', conversationId: 3 } },
+      sent,
+      event(3, 'yap-agent', { id: 'ab12', turn: 2, status: 'running', step: 'Thinking' }),
+      event(4, 'yap-agent', { id: 'ab12', turn: 2, status: 'running', step: 'Opening wiki.example.com/guide beside the chat' }),
+      call(5, 'sess-1', [{ type: 'tool_use', id: 'toolu_n', name: 'mcp__yap__browser_navigate', input: { url: 'https://wiki.example.com/guide' } }]),
+      call(6, 'sess-1', [{ type: 'tool_result', tool_use_id: 'toolu_n', content: '{"success":true,"displayText":"Brought up wiki.example.com/guide beside the chat"}' }]),
+      event(7, 'yap-agent-shown', { id: 'ab12', turn: 2, conversation: 3, event: { kind: 'page', page: { url: 'https://wiki.example.com/guide', title: 'Guide' } } }),
+      event(8, 'yap-agent', { id: 'ab12', turn: 2, status: 'running', step: 'Clicking on the page beside the chat' }),
+      event(9, 'yap-agent', { id: 'ab12', turn: 2, status: 'running', step: 'Clicking on the page beside the chat' }),
+      call(10, 'sess-1', [{ type: 'tool_use', id: 'toolu_c', name: 'mcp__yap__browser_click', input: { ref: 4 } }]),
+      // Another agent at work meanwhile: never the session's.
+      call(11, 'sess-9', [{ type: 'tool_use', id: 'toolu_e', name: 'Edit', input: { file_path: 'notes.md' } }]),
+      event(12, 'yap-agent-shown', { id: 'ab12', turn: 2, conversation: 3, event: { kind: 'confirm', id: 41, act: 'press', label: 'Buy the full guide', site: 'wiki.example.com', does: 'buy', state: 'asking' } }),
+    ];
+    // Chat's send came back at once, naming the session: the turn isn't over.
+    assert.deepEqual(endOf(working), { done: false, status: 'running', error: null, session: true });
+    const turn = { n: 3, question: 'Open the guide', spoken: false, startedAt: 0, status: 'running', askedAt: 0 };
+    const agents = [{ id: 'ab12', session: 'sess-1', folder: 'lab-sandbox', model: 'claude-haiku-5-5', status: 'running', turnList: [{ n: 2, model: 'claude-haiku-5-5', mode: 'auto', effort: 'low', status: 'running' }] }];
+    const now = summarize({ turn, items: working, conv: { messages: [{ role: 'user', text: 'Open the guide' }] }, agents });
+    assert.equal(now.status, 'waiting', 'its card waits');
+    assert.deepEqual(now.pending, ['confirm:41']);
+    assert.deepEqual(now.steps, ['Thinking', 'Opening wiki.example.com/guide beside the chat', 'Clicking on the page beside the chat']);
+    assert.deepEqual(now.tools.map((t) => [t.via, t.server, t.name, t.ok]), [['session', 'yap', 'browser_navigate', true], ['session', 'yap', 'browser_click', null]]);
+    assert.deepEqual(now.agentTools, ['Edit']);
+    assert.deepEqual(now.pagesShown, ['https://wiki.example.com/guide']);
+    assert.equal(now.model, 'claude-haiku-5-5');
+    assert.deepEqual(now.session, { id: 'ab12', turn: 2, folder: 'lab-sandbox', mode: 'auto', effort: 'low', status: 'running', cost: null });
+    // Its turn over: still not, until its answer is in the chat (the daemon gives it 20 s) …
+    const over = [...working, event(13, 'yap-agent', { id: 'ab12', turn: 2, status: 'done' })];
+    assert.deepEqual(endOf(over), { done: false, status: 'running', error: null, session: true, ended: 13_000, endedStatus: 'done' });
+    // … then answered; a failed turn's answer, failed.
+    assert.deepEqual(endOf([...over, event(14, 'yap-agent-report', { agent: 'ab12', conversation: 3 })]), { done: true, status: 'answered', error: null, session: true });
+    const failed = [...working, event(13, 'yap-agent', { id: 'ab12', turn: 2, status: 'failed' }), event(14, 'yap-agent-report', { agent: 'ab12' })];
+    assert.equal(endOf(failed).status, 'failed');
+    // An earlier turn's end or another agent's report doesn't end it.
+    assert.equal(endOf([...working, event(13, 'yap-agent', { id: 'ab12', turn: 1, status: 'done' }), event(14, 'yap-agent-report', { agent: 'zz99' })]).done, false);
+  });
 });
 
 describe('shots, the sheet and scripts', () => {

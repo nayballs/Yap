@@ -150,6 +150,21 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   a working agent: its Read and Edit are the agent's, never this turn's — the
   record says which process is an agent's run, and a script's checks leave
   them out; the transcript has them whole as `via: "agent"`).
+- **A Code chat that works directly** (14 Nov 2026; before, `ask` came back at
+  once with no answer: the message goes straight to the chat's own Claude Code
+  session, whose work isn't Chat's stream). `chat_send`'s reply names the
+  session (`direct: {id, turn}`), and the turn is the session's: `ask` waits
+  until its answer is in the chat (`yap-agent-report` for it; its turn over and
+  no answer 20 s on, over anyway), or a card waits. Then `steps` are the
+  session's own lines ("Opening … beside the chat", "Clicking on the page beside
+  the chat"), `tools` its calls (`via: "session"`: Claude Code's own tools, and
+  Yap's as `server: "yap"`, each with its result — told apart from another
+  agent's by its Claude Code session id), `model` its model, `cards` and
+  `pagesShown` what it showed beside the chat (`yap-agent-shown`: an
+  ask-first card is `confirm:<n>`, answered with `answer` as a Chat turn's),
+  and `session` says which: `{id, turn, folder, mode, effort, status, cost}`.
+  `--chat same` asks its next turn, so a conversation with it is one `ask`
+  after another.
 - Long fields are cut with their full length said (`… [+1234 chars, 1634 in all]`);
   the **transcript** file has everything: the result, every tool call whole, the
   conversation as Chat saved it, the pages, and the turn's part of the record.
@@ -511,7 +526,7 @@ numbers start at 1 again); reports, sheets and `shot`'s own files stay.
   `eval::tool_called`); `claude` — Claude Code's own stream-json messages for a run Yap
   started (its tool calls and results, never the deltas); `event` — the app-wide
   events a spoken question and an agent go by (`yap-assistant-turn`,
-  `yap-assistant-stream`, `yap-chat-answering`, `yap-claude-approve`, `yap-agent`,
+  `yap-assistant-stream`, `yap-chat-answering`, `yap-claude-approve`, `yap-agent`, `yap-agent-shown`,
   `yap-alert`…). Long strings are cut and pictures' base64 left out. The lab sums a
   turn up from it (`scripts/lab/turns.mjs`) with the conversation as Chat saved it
   (`chat_get`) and the live pages (`e2e_page_views`) — never by reading the screen.

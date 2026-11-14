@@ -37,6 +37,58 @@ export function streamEvents(items) {
   for (const it of items) {
     if (it.kind === 'stream' && it.event) out.push({ seq: it.seq, ts: it.ts, ev: it.event });
     else if (it.kind === 'event' && it.name === 'yap-assistant-stream' && it.payload?.event) out.push({ seq: it.seq, ts: it.ts, ev: it.payload.event, conversation: it.payload.conversationId });
+    // What a Code chat's own session showed beside the chat (agents/runner.rs `yap-agent-shown`): a page, a
+    // picture, a card before an action that buys — as a Chat turn's stream has them.
+    else if (it.kind === 'event' && it.name === 'yap-agent-shown' && it.payload?.event) out.push({ seq: it.seq, ts: it.ts, ev: it.payload.event, conversation: it.payload.conversation, agent: it.payload.id });
+  }
+  return out;
+}
+
+/**
+ * **A Code chat's own session took the question** (it works directly:
+ * `agents/direct.rs`, the message straight to its Claude Code): `chat_send`'s
+ * reply names it — `{ id, turn, folder, mode }`; `null`: Chat answered it.
+ * Pure.
+ */
+export function directOf(items) {
+  const d = items.find((it) => it.kind === 'sent' && it.ok)?.reply?.direct;
+  return d?.id ? { id: String(d.id), turn: Number(d.turn) || 1, folder: d.folder ?? '', mode: d.mode ?? '' } : null;
+}
+
+/** An agent's turn over (`yap-agent`'s status). */
+const OVER = ['done', 'failed', 'stopped'];
+
+/**
+ * **Where a Code chat's session is** (`directOf`'s `{ id, turn }`): over once
+ * its answer is in the chat (`yap-agent-report` for it), its status then
+ * the turn's last (`done` answered, else failed or stopped); before that,
+ * `ended` — when its turn was over, if it was (the daemon waits a little
+ * for the report, then ends it anyway). Pure.
+ */
+function sessionEnd(items, { id, turn }) {
+  let over = null;
+  for (const it of items) {
+    if (it.kind !== 'event') continue;
+    const p = it.payload ?? {};
+    if (it.name === 'yap-agent' && String(p.id) === id && (Number(p.turn) || 1) >= turn && OVER.includes(String(p.status).toLowerCase())) {
+      over = { at: it.ts ?? 0, status: String(p.status).toLowerCase() };
+    }
+    if (it.name === 'yap-agent-report' && String(p.agent) === id) {
+      const status = over?.status === 'failed' ? 'failed' : over?.status === 'stopped' ? 'stopped' : 'answered';
+      return { done: true, status, error: status === 'failed' ? "its turn didn't finish" : null, session: true };
+    }
+  }
+  return { done: false, status: 'running', error: null, session: true, ...(over ? { ended: over.at, endedStatus: over.status } : {}) };
+}
+
+/** **What the session did, step by step** (`yap-agent`'s `step` lines for its turn: "Opening … beside the chat", "Clicking on the page beside the chat"), each once in a row. Pure. */
+export function sessionSteps(items, { id, turn }) {
+  const out = [];
+  for (const it of items) {
+    if (it.kind !== 'event' || it.name !== 'yap-agent') continue;
+    const p = it.payload ?? {};
+    if (String(p.id) !== id || (Number(p.turn) || 1) !== turn || !p.step) continue;
+    if (out[out.length - 1] !== p.step) out.push(String(p.step));
   }
   return out;
 }
@@ -60,6 +112,8 @@ export function conversationOf(items) {
 export function endOf(items, { spoken = false } = {}) {
   for (const it of items) {
     if (!spoken && it.kind === 'sent') {
+      // A Code chat's own session took it: the turn is the session's, over with its answer.
+      if (it.ok && it.reply?.direct?.id) return sessionEnd(items, directOf(items));
       if (it.ok) return { done: true, status: it.reply?.stopped ? 'stopped' : 'answered', error: null };
       const error = String(it.error ?? 'failed');
       return { done: true, status: /stopped/i.test(error) ? 'stopped' : 'failed', error };
@@ -187,6 +241,7 @@ export function toolsOf(items, { full = false } = {}) {
         const mcp = /^mcp__([^_]+(?:_[^_]+)*)__(.+)$/.exec(b.name ?? '');
         const call = {
           via: it.agent ? 'agent' : 'claude',
+          ...(line.session_id ? { session: line.session_id } : {}),
           ...(mcp ? { server: mcp[1] } : {}),
           name: mcp ? mcp[2] : b.name,
           args: full ? b.input : brief(b.input, max),
@@ -254,6 +309,12 @@ export function sharedItems(message) {
 }
 
 export function summarize({ turn, items, conv, pages = [], approvals = [], agents = [], transcript = null, now = Date.now() }) {
+  // A Code chat's own session took the question: its steps, its calls and its model are the turn's.
+  const direct = directOf(items);
+  const agent = direct ? (agents.find((a) => String(a.id) === direct.id) ?? null) : null;
+  const note = agent?.turnList?.find((x) => Number(x.n) === direct.turn) ?? null;
+  const calls = toolsOf(items);
+  const theSession = (t) => !!direct && t.via === 'agent' && (!agent?.session || !t.session || t.session === agent.session);
   const found = answerOf(conv, turn.askedAt ?? 0);
   const message = found?.message ?? null;
   const sent = items.find((it) => it.kind === 'sent' && it.ok);
@@ -274,11 +335,13 @@ export function summarize({ turn, items, conv, pages = [], approvals = [], agent
     // "screen"), each by its source.
     questionImages: (questionOf(conv, turn.askedAt ?? 0)?.images ?? []).map((i) => ({ source: i.source ?? '', asText: !!i.asText })),
     answer: cut(answer, ANSWER_MAX),
-    model: message?.model ?? sent?.reply?.model ?? null,
-    steps,
-    // The turn's own calls; an agent's at work meanwhile, by name only.
-    tools: toolsOf(items).filter((t) => t.via !== 'agent').map(({ seq, pid, ...t }) => t),
-    agentTools: toolsOf(items).filter((t) => t.via === 'agent').map((t) => t.name),
+    model: direct ? note?.model || agent?.model || null : (message?.model ?? sent?.reply?.model ?? null),
+    steps: direct ? sessionSteps(items, direct) : steps,
+    // The turn's own calls (a Code chat's session's: `via: "session"`); an agent's at work meanwhile, by name only.
+    tools: direct
+      ? calls.filter(theSession).map(({ seq, pid, session, ...t }) => ({ ...t, via: 'session' }))
+      : calls.filter((t) => t.via !== 'agent').map(({ seq, pid, session, ...t }) => t),
+    agentTools: calls.filter((t) => t.via === 'agent' && !theSession(t)).map((t) => t.name),
     cards,
     pending: pending.map((c) => c.id),
     pages: pages.map((p) => ({ url: p.url ?? p.address ?? '', onScreen: p.onScreen ?? p.on_screen ?? null, loaded: p.loaded ?? null })),
@@ -299,7 +362,18 @@ export function summarize({ turn, items, conv, pages = [], approvals = [], agent
     ms: (turn.endedAt ?? now) - turn.startedAt,
     transcript,
   };
+  if (direct) {
+    out.session = {
+      id: direct.id,
+      turn: direct.turn,
+      folder: direct.folder || agent?.folder || '',
+      mode: note?.mode || direct.mode || agent?.mode || '',
+      effort: note?.effort || agent?.effort || '',
+      status: note?.status ?? agent?.status ?? 'running',
+      cost: note?.cost ?? null,
+    };
+  }
   if (out.status === 'waiting') out.hint = `A card is waiting (it times out after 2 minutes): npm run lab -- answer ${pending[0].id} allow|deny${pending[0].answers.includes('always') ? '|always' : ''}`;
-  if (out.status === 'running') out.hint = 'Still answering: npm run lab -- wait';
+  if (out.status === 'running') out.hint = direct ? 'Claude Code is still working in the Code chat: npm run lab -- wait' : 'Still answering: npm run lab -- wait';
   return out;
 }
