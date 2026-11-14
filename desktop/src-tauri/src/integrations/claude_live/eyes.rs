@@ -147,12 +147,12 @@ const PICTURES: &[&str] = &[pictures::FIND, pictures::LOOK, pictures::SHOW];
 /// Every tool here, in the order they're listed: the screen, the browser,
 /// the pictures, then sharing files into the conversation.
 pub fn all_names() -> Vec<&'static str> {
-    std::iter::once(see_screen::LOOK).chain(pages::ALL.iter().copied()).chain(PICTURES.iter().copied()).chain(std::iter::once(shares::NAME)).collect()
+    std::iter::once(see_screen::LOOK).chain(pages::ALL.iter().copied()).chain(pages::dev::NAMES.iter().copied()).chain(PICTURES.iter().copied()).chain(std::iter::once(shares::NAME)).collect()
 }
 
 /// Whether `name` is one of the tools here.
 pub fn is_one(name: &str) -> bool {
-    name == see_screen::LOOK || pages::ALL.contains(&name) || PICTURES.contains(&name) || name == shares::NAME
+    name == see_screen::LOOK || pages::ALL.contains(&name) || pages::dev::NAMES.contains(&name) || PICTURES.contains(&name) || name == shares::NAME
 }
 
 /// Where `share_files` is offered with `eyes`: as `show_picture` takes a
@@ -168,8 +168,8 @@ pub fn share_offer(eyes: Eyes) -> Offer {
 pub fn sees(name: &str) -> bool {
     match name {
         see_screen::LOOK | pictures::FIND | pictures::LOOK => true,
-        pages::NAVIGATE | pages::TABS => false,
-        n => pages::ALL.contains(&n),
+        pages::NAVIGATE | pages::TABS | pages::dev::VIEW => false,
+        n => pages::ALL.contains(&n) || pages::dev::NAMES.contains(&n),
     }
 }
 
@@ -181,6 +181,8 @@ pub fn offers(eyes: Eyes, name: &str) -> bool {
     match name {
         see_screen::LOOK => see_screen::offers(eyes.screen, name),
         n if pages::ALL.contains(&n) => pages::offers(eyes.pictures, eyes.act, n),
+        // The developer's tools (a Claude Code session's, as its own browser has them: `pages/dev.rs`).
+        n if pages::dev::NAMES.contains(&n) => pages::dev::offers(eyes.pictures, eyes.act, n),
         n if PICTURES.contains(&n) => eyes.pictures.offers(n, true) || (eyes.pictures == Gate::Off && pictures::file_offers(eyes.files, n)),
         shares::NAME => share_offer(eyes) != Offer::Off,
         _ => false,
@@ -201,6 +203,7 @@ fn loop_definitions(eyes: Eyes) -> Vec<Value> {
     // in front, `plan.rs` `away_line`.)
     let mut all = each(see_screen::definitions(eyes.screen, see_screen::Takes::Screen));
     all.extend(each(pages::definitions(eyes.pictures, eyes.act)));
+    all.extend(each(pages::dev::definitions(eyes.pictures, eyes.act)));
     all.extend(each(pictures::definitions(eyes.pictures, true)));
     // (The web off: picture files by a path only.)
     if eyes.pictures == Gate::Off {
@@ -234,6 +237,10 @@ fn title(name: &str) -> &'static str {
         act::HOVER => "Point at the page",
         act::DRAG => "Drag on the page",
         act::FORM_INPUT => "Set a field on the page",
+        pages::dev::CONSOLE => "Read the page's console",
+        pages::dev::NETWORK => "Read the page's network requests",
+        pages::dev::JAVASCRIPT => "Run a script on the page",
+        pages::dev::VIEW => "Resize the page",
         pictures::FIND => "List a page's pictures",
         pictures::LOOK => "Look at a picture",
         shares::NAME => "Share files in the chat",
@@ -245,7 +252,7 @@ fn title(name: &str) -> &'static str {
 /// the page nor what's in view. A scroll, a shot (of what a scroll put in
 /// view), anything that acts, opens or shows, Claude Code runs in order.
 fn read_only(name: &str) -> bool {
-    matches!(name, see_screen::LOOK | pages::READ | pages::FIND | pictures::FIND | pictures::LOOK)
+    matches!(name, see_screen::LOOK | pages::READ | pages::FIND | pages::dev::CONSOLE | pages::dev::NETWORK | pictures::FIND | pictures::LOOK)
 }
 
 /// **The tools as an MCP server lists them**: the tool loop's definitions,
@@ -301,7 +308,7 @@ pub fn refused(name: &str, eyes: Eyes, meeting: bool) -> Option<Value> {
             "Didn't use the panel beside the chat: not asked in Chat",
         ));
     }
-    if pages::acts(name) {
+    if pages::acts(name) || name == pages::dev::JAVASCRIPT {
         if meeting {
             return Some(failed("Yap doesn't act on pages during a meeting or a call. Say so in a few words.", "Didn't act on the page: a meeting or a call"));
         }
@@ -444,6 +451,18 @@ async fn run_for(slot: &Slot, turn: &Call, name: &str, args: &Value, wait: std::
             result["note"] = json!(SHOT_NOTE);
         }
         (result, run.looks)
+    } else if pages::dev::NAMES.contains(&name) {
+        // The developer's tools: the console, the network, a script (asked first, but in Bypass), the view.
+        let ctx = pages::Ctx {
+            gate: turn.ctx.eyes.pictures,
+            act: turn.ctx.eyes.act,
+            provider: PROVIDER,
+            base_url: BASE_URL,
+            live: Some(Live { sink: sink_for, beside: None }),
+            outside,
+            search: Some("WebSearch"),
+        };
+        (pages::dev::execute(&mut w, name, args, &ctx).await, Vec::new())
     } else if name == shares::NAME {
         // Files shared into the conversation (chat/shares.rs): its stream
         // hears each share at once; nothing comes to the model but names.

@@ -93,7 +93,7 @@ function shown(el){if(!vis(el))return false;var b=el.getBoundingClientRect(),w=w
 function loc(el,x,y){var o=fOff(el.ownerDocument);return {x:x-o.x,y:y-o.y};}
 function mk(el,k,o){var w=win(el);o.view=w;var C=/^pointer/.test(k)?w.PointerEvent:/^key/.test(k)?w.KeyboardEvent:/^(drag|drop)/.test(k)?w.DragEvent:/^(mouse|click|dblclick|contextmenu|auxclick)/.test(k)?w.MouseEvent:w.Event;return new (C||w.Event)(k,o);}
 function send(el,k,o){try{return el.dispatchEvent(mk(el,k,o));}catch(e){return true;}}
-function pev(el,k,x,y,btn,bs,det){var lv=/(enter|leave)$/.test(k),o={bubbles:!lv,cancelable:!lv,composed:!lv,clientX:x,clientY:y,screenX:x,screenY:y,button:btn||0,buttons:bs||0,detail:det||0};if(/^pointer/.test(k)){o.pointerId=1;o.pointerType='mouse';o.isPrimary=true;o.width=1;o.height=1;o.pressure=bs?0.5:0;}return send(el,k,o);}
+function pev(el,k,x,y,btn,bs,det){var lv=/(enter|leave)$/.test(k),o={bubbles:!lv,cancelable:!lv,composed:!lv,clientX:x,clientY:y,screenX:x,screenY:y,button:btn||0,buttons:bs||0,detail:det||0,ctrlKey:!!(a.mods&&a.mods.ctrl),shiftKey:!!(a.mods&&a.mods.shift),altKey:!!(a.mods&&a.mods.alt),metaKey:!!(a.mods&&a.mods.meta)};if(/^pointer/.test(k)){o.pointerId=1;o.pointerType='mouse';o.isPrimary=true;o.width=1;o.height=1;o.pressure=bs?0.5:0;}return send(el,k,o);}
 function sTo(sc,y){try{if(sc)sc.scrollTo({top:y,behavior:'instant'});else W.scrollTo({left:W.scrollX,top:y,behavior:'instant'});}catch(e){if(sc)sc.scrollTop=y;else W.scrollTo(W.scrollX,y);}}
 function sBy(sc,dy){try{if(sc)sc.scrollBy({top:dy,behavior:'instant'});else W.scrollBy({top:dy,behavior:'instant'});}catch(e){if(sc)sc.scrollTop+=dy;else W.scrollBy(0,dy);}}
 function into(el){try{el.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});}catch(e){try{el.scrollIntoView();}catch(e2){}}}
@@ -262,10 +262,14 @@ kev('keyup');
 if(k==='Escape'&&R.hov){if(R.hov.isConnected)leave(R.hov);R.hov=null;}
 kd.push(k);}
 var fe=focusIn();return {r:'ok',keys:kd,focused:bare(fe)?null:desc(fe),scroll:scrollAt()};}
-if(op==='snap'){var main=mainEl();var all=qa(SEL+',iframe,frame'),els=[],more=false;
-for(var i=0;i<all.length;i++){var ae2=all[i];if(!vis(ae2))continue;if(ae2.tagName==='IFRAME'||ae2.tagName==='FRAME'){if(fdoc(ae2))continue;var fb=ae2.getBoundingClientRect();if(fb.width<20||fb.height<20)continue;}if(els.length>=a.max){more=true;break;}els.push(desc(ae2));}
+if(op==='snap'){var main=mainEl();var all=qa(SEL+',iframe,frame'),els=[],more=false;var wi=null,whl=0,wst=null,hlv=function(e){var m=/^h([1-6])$/.exec(tag(e));if(m)return +m[1];if((e.getAttribute('role')||'').toLowerCase()==='heading')return +(e.getAttribute('aria-level')||2)||2;return 0;};if(a.within){wi=R.els[a.within];if(!wi||!wi.isConnected)return {title:sq(D.title),url:location.href,text:'',headings:[],elements:[],forms:[],password:false,payment:false,more:false,gone:true};whl=hlv(wi);if(whl){var hs2=wi.ownerDocument.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]');for(var j=0;j<hs2.length;j++){var h2=hs2[j];if(h2===wi||wi.contains(h2)||h2.contains(wi)||!(wi.compareDocumentPosition(h2)&4))continue;if(hlv(h2)<=whl){wst=h2;break;}}}}var inside=function(x){if(!wi)return true;if(!whl)return wi===x||wi.contains(x);var p=wi.compareDocumentPosition(x);if(!(x===wi||(p&4)||(p&16)))return false;return !wst||!!(wst.compareDocumentPosition(x)&2);};
+for(var i=0;i<all.length;i++){var ae2=all[i];if(!vis(ae2)||!inside(ae2))continue;if(ae2.tagName==='IFRAME'||ae2.tagName==='FRAME'){if(fdoc(ae2))continue;var fb=ae2.getBoundingClientRect();if(fb.width<20||fb.height<20)continue;}if(els.length>=a.max){more=true;break;}els.push(desc(ae2));}
 return {title:sq(D.title),url:location.href,text:main&&a.text?sq(shownText(main)).slice(0,a.text):'',headings:heads(),elements:els,forms:formsInfo(),password:!!q1('input[type=password]'),payment:takesCard(D),more:more,scroll:scrollAt()};}
 if(op==='describe')return base(find());
+if(op==='aim'){var ae=find();if(!ae)return {r:'gone'};if(!same(ae))return {r:'changed'};if(ae.disabled)return {r:'disabled'};var atg=tag(ae)==='a'?(ae.getAttribute('target')||'').toLowerCase():'';if(atg&&atg!=='_self'&&atg!=='_parent'&&atg!=='_top'&&/^https?:/i.test(ae.href))return {r:'script'};var ax,ay,ah;if(a.at){ax=Number(a.x);ay=Number(a.y);ah=ptAt(ax,ay);if(!ah||!holds(ae,ah))return {r:'changed'};}else{if(!shown(ae))into(ae);var ac=rr(ae);ax=ac.left+ac.width/2;ay=ac.top+ac.height/2;ah=ptAt(ax,ay);if(ah&&!holds(ae,ah)){into(ae);ac=rr(ae);ax=ac.left+ac.width/2;ay=ac.top+ac.height/2;ah=ptAt(ax,ay);}}var acv='';if(ah&&!holds(ae,ah)){var aco=ah.closest('dialog,[role=dialog],[role=alertdialog],[aria-modal=true]')||ah;acv=sq(aco.getAttribute('aria-label')||aco.innerText||aco.textContent||'').slice(0,60);var acb=[].slice.call(aco.querySelectorAll('button,[role=button],a[href]')).filter(function(b){return shown(b)&&sq(b.innerText||b.getAttribute('aria-label')||'');}).slice(0,4).map(function(b){return '['+refOf(b)+'] '+sq(b.innerText||b.getAttribute('aria-label')||'').slice(0,30);});if(acb.length)acv+=' — its buttons: '+acb.join(', ');}var aks=a.kinds||['mousedown','click'],aws=[window];if(win(ae)!==window)aws.push(win(ae));var ast={id:Math.random().toString(36).slice(2),n:0,ws:aws,ks:aks,h:null};ast.h=function(e){if(e.isTrusted&&(!a.on||holds(ae,e.target)))ast.n++;};aws.forEach(function(w){aks.forEach(function(k){w.addEventListener(k,ast.h,true);});});if(window.__yapAim){try{var old=window.__yapAim;old.ws.forEach(function(w){old.ks.forEach(function(k){w.removeEventListener(k,old.h,true);});});}catch(e){}}window.__yapAim=ast;return {r:'ok',id:ast.id,x:ax,y:ay,covered:acv};}
+if(op==='listen'){var le=null;if(a.ref){le=find();if(!le)return {r:'gone'};if(!same(le))return {r:'changed'};try{le.focus({preventScroll:false});}catch(e){}}var lks=a.kinds||['keydown'],lws=[window],lf=le||document.activeElement;if(lf&&win(lf)!==window)lws.push(win(lf));var lst={id:Math.random().toString(36).slice(2),n:0,ws:lws,ks:lks,h:null};lst.h=function(e){if(e.isTrusted)lst.n++;};if(window.__yapAim){try{var lo=window.__yapAim;lo.ws.forEach(function(w){lo.ks.forEach(function(k){w.removeEventListener(k,lo.h,true);});});}catch(e){}}lws.forEach(function(w){lks.forEach(function(k){w.addEventListener(k,lst.h,true);});});window.__yapAim=lst;return {r:'ok',id:lst.id};}
+if(op==='unhover'){if(R.hov&&R.hov.isConnected)leave(R.hov);R.hov=null;return {r:'ok'};}
+if(op==='aimed'){var ad=window.__yapAim;if(!ad||ad.id!==a.id)return {r:'ok',heard:-1};ad.ws.forEach(function(w){ad.ks.forEach(function(k){try{w.removeEventListener(k,ad.h,true);}catch(e){}});});window.__yapAim=null;var ao={r:'ok',heard:ad.n};if(a.hover&&ad.n){var hv=find();if(hv)R.hov=hv;}if(Number(a.count)>1){var as=find();if(as)ao.selected=selNow(as);}return ao;}
 if(op==='where'){var wh=find();if(!wh)return {r:'gone'};return {r:'ok',scroll:scrollAt(),inView:inView(),seen:shown(wh)};}
 if(op==='section'){var se=find();if(!se)return {r:'gone'};var hl=function(e){var t=tag(e),m=/^h([1-6])$/.exec(t);if(m)return +m[1];if((e.getAttribute('role')||'').toLowerCase()==='heading')return +(e.getAttribute('aria-level')||2)||2;return 0;};
 var lv=hl(se),dc=se.ownerDocument,stop=null;if(lv){var hs=dc.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]');for(var i=0;i<hs.length;i++){var h=hs[i];if(h===se||se.contains(h)||h.contains(se)||!(se.compareDocumentPosition(h)&4))continue;if(hl(h)<=lv){stop=h;break;}}}
@@ -330,9 +334,11 @@ fn build(op: &str, args: serde_json::Value) -> String {
 }
 
 /// Read the page with its elements: its text cut at `text` characters, at
-/// most `max` elements.
-pub fn snap(text: usize, max: usize) -> String {
-    build("snap", serde_json::json!({ "text": text, "max": max }))
+/// most `max` elements — only those inside element `within` (`browser_read { mode: "elements",
+/// ref }`): a heading's section, up to the next heading at its level or
+/// above, or the element itself; `gone` when it isn't there now.
+pub fn snap_within(text: usize, max: usize, within: Option<u32>) -> String {
+    build("snap", serde_json::json!({ "text": text, "max": max, "within": within }))
 }
 
 /// Describe element `r` as it is now.
@@ -391,6 +397,38 @@ pub fn where_is(r: u32) -> String {
 /// from character `offset`, `max` of them, and whether there's `more`.
 pub fn section(r: u32, offset: usize, max: usize) -> String {
     build("section", serde_json::json!({ "ref": r, "offset": offset, "max": max }))
+}
+
+/// **Before real input on element `r`** (if it's still `role` "`name`"):
+/// the point to press — its centre, scrolled into view, or (`at`) the
+/// shot's point, still on it — what's on top of it there (a dialog's words
+/// and its buttons by ref), and a listener for the real events `kinds`
+/// ("mousedown", "click"…) in its page and frame. `{r: "script"}`: a
+/// link to another window, which the script's own click takes.
+pub fn aim(r: u32, role: &str, name: &str, at: Option<(f64, f64)>, kinds: &[&str], on: bool) -> String {
+    let (x, y) = at.unwrap_or((0.0, 0.0));
+    build("aim", serde_json::json!({ "ref": r, "role": role, "name": name, "at": at.is_some(), "x": x, "y": y, "kinds": kinds, "on": on }))
+}
+
+/// **Before real keys**: element `r` focused (if it's still `role`
+/// "`name`"; `None`: the focus as it is) and a listener for the real
+/// events `kinds` ("keydown"); `aimed` reads it.
+pub fn listen(target: Option<(u32, &str, &str)>, kinds: &[&str]) -> String {
+    let (r, role, name) = target.unwrap_or((0, "", ""));
+    build("listen", serde_json::json!({ "ref": r, "role": role, "name": name, "kinds": kinds }))
+}
+
+/// **After real input** aimed at element `r` (`id`: `aim`'s): `heard`, how
+/// many of the real events the page got (-1: the page went — a link
+/// followed), and the words a double or triple click (`count`) selected.
+pub fn aimed(r: u32, id: &str, count: u8, hover: bool) -> String {
+    build("aimed", serde_json::json!({ "ref": r, "id": id, "count": count, "hover": hover }))
+}
+
+/// **The hovered element let go** (after a real Escape): the pointer leaves
+/// it, as the script's own Escape does, so a hover's popup closes.
+pub fn unhover() -> String {
+    build("unhover", serde_json::json!({}))
 }
 
 /// Start watching the page for what an action changes (`changes` reads it).
@@ -501,7 +539,9 @@ mod tests {
         let args = s.rsplit_once("})(\"type\",").map(|(_, a)| a.trim_end_matches(')')).unwrap();
         let v: serde_json::Value = serde_json::from_str(args).unwrap();
         assert_eq!(v, serde_json::json!({ "ref": 4, "role": "textbox", "name": "From", "text": "Kellbrook\"});alert(1);//</script>", "submit": true }));
-        assert!(snap(2500, 150).contains("})(\"snap\",{"));
+        assert!(snap_within(2500, 150, None).contains("})(\"snap\",{"));
+        assert!(snap_within(0, 150, Some(9)).contains("\"within\":9"));
+        assert!(aim(3, "heading", "Order", None, &["mousedown"], false).contains("})(\"aim\",{"));
         assert!(describe(7).contains("})(\"describe\",{\"ref\":7})"));
         assert!(scroll("up", 1.0, None).contains("\"to\":\"up\""));
         assert!(click_at(3, "button", "Go", 120.0, 48.5).contains("})(\"clickAt\",{"));

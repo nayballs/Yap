@@ -458,6 +458,32 @@ workspace, word for word, and no model of Chat's is asked.
     `confirm`; Allow once / Don't, no answer in two minutes a no; the turn
     over, one still asking lapses: `ended`). While it acts, the page's tab
     says "Yap is using this page", its Stop stopping the turn (`agent_stop`).
+    **As Claude Code's own browser, one to one** (the same evening; the
+    maintainer: "the Yap Chat-code stuff, is actually so I can use that
+    instead of the anthropic claude-code app"): clicks, double and triple
+    clicks, hover and keys are **real input** (DevTools' `Input` domain, the
+    script's own events only when that can't land; chat-and-assistant.md,
+    "Real input"), a click takes `modifiers` (Ctrl, Shift, Alt, Meta), a read
+    takes a ref (one section, or the controls inside one part with mode
+    "elements") and gives up to 50,000 characters, and the session has the
+    **developer's tools**: `browser_console`, `browser_network`,
+    `browser_javascript` (asked first, but in Bypass) and `browser_view`
+    (`pages/dev.rs`). Left out on purpose: none of Claude Code's browser
+    tools; its dev servers (`preview_*`) are a coding app's, and Yap's
+    panel opens public pages only.
+    Checked in Yap Lab on Opus against the real web (a wiki guide: a folded
+    section clicked open, a cookie banner refused by its button's ref, a
+    talent icon hovered by its point in a shot — the site's own tooltip,
+    which only a real mouse opens — the console, 380 requests, scripts
+    asked first, a phone's layout in dark), then asked tool by tool what's
+    still apart. What it named and was then done: a click by ref scrolls a
+    button clipped in a box of its own into view first; `browser_find` says
+    when there are more matches than it lists; a hover on an icon with no
+    words names what it was; `browser_zoom` says it takes the shot's pixels.
+    What stays apart: `find` by a description (the app's runs a model),
+    the accessibility tree with its depth (Yap lists links, buttons and
+    fields by ref, and reads a heading's section), scrolling sideways, and
+    a script asked first outside Bypass.
     A heading's words never ask (`rules::click_needs_ok`: "Build Order"
     opens, it doesn't order). Its lines say "Clicking on the page beside the
     chat" and the like, never what it types; a stretch of them is said

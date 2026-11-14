@@ -286,6 +286,32 @@ const BUYS = [
   result(BOUGHT, 0.01),
   { _wait_user: true },
 ];
+const DEVVED = 'The page logged one line and made one request.';
+/** The developer's tools, as Claude Code's own browser has them: the console, the network, a script (asked
+ * first), the page as on a phone in dark. */
+const DEV_TOOLS = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  { _mcp: { list: true, dump: TOOLS } },
+  ...call(1, 'browser_navigate', { url: LEVELING_URL }),
+  ...call(2, 'browser_wait', { seconds: 1 }),
+  ...call(3, 'browser_console', {}),
+  ...call(4, 'browser_network', { pattern: 'progress' }),
+  ...call(5, 'browser_javascript', { code: 'document.title + " / " + document.querySelectorAll("[role=tab]").length' }),
+  ...call(6, 'browser_view', { preset: 'mobile', color_scheme: 'dark' }),
+  ...call(7, 'browser_javascript', { code: 'innerWidth + " " + matchMedia("(prefers-color-scheme: dark)").matches' }),
+  ...call(8, 'browser_view', { preset: 'desktop', color_scheme: 'auto' }),
+  // Any key or combination as real keystrokes; a scroll and a hover at a point of the latest shot.
+  ...call(9, 'browser_key', { keys: 'ctrl+a x' }),
+  ...call(10, 'browser_read', {}),
+  ...call(11, 'browser_screenshot', {}),
+  ...call(12, 'browser_scroll', { direction: 'down', x: 60, y: 60 }),
+  ...call(13, 'browser_hover', { x: 60, y: 40 }),
+  said('d99', [{ type: 'text', text: DEVVED }], 'end_turn'),
+  result(DEVVED, 0.01),
+  { _wait_user: true },
+];
 const LOOKED = 'Those are two monitors, both blank.';
 /** The chat's own Claude looks at the screen when asked (Yap's look_at_screen). */
 const LOOKS_AT_THE_SCREEN = [
@@ -924,7 +950,8 @@ test('its session acts on the page as Claude Code’s own browser does: a collap
   // The section opened (its rows made by the page's own script on the click), and the tab switched.
   const reads = dumps.filter((d) => d.tool === 'browser_read').map(text);
   expect(reads[0]).toContain('10 Moss Shield Rank 1');
-  expect(reads[1]).toContain('Build: Damage');
+  // A real click (DevTools' input, isTrusted, as Claude Code's own browser clicks), never the script's own events.
+  expect(reads[1]).toContain('Build: Damage (real click)');
   // One part: the heading's section, its rows a line each, in the page's own script.
   expect(reads[2]).toContain('"section":"Build Order"');
   // (The result is JSON as Claude Code gets it: its line breaks written \n.)
@@ -942,6 +969,47 @@ test('its session acts on the page as Claude Code’s own browser does: a collap
 });
 
 // The maintainer, 14 Nov 2026: the buy card "must not appear in bypass permissions" (Claude asks in the chat instead: its instructions, rpc.rs).
+test('its session has Claude Code’s developer tools: the console, the network (secrets hidden), a script asked first, a phone’s layout in dark', async ({ yap, main }) => {
+  test.setTimeout(120_000);
+  fs.rmSync(TOOLS, { force: true });
+  await setConfig(yap, main, { webSearch: true });
+  await script(yap, DEV_TOOLS, 'dev-tools');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, `Open ${LEVELING_URL} and check its console and requests.`);
+  const agent = await newAgent(yap, before);
+  // A script asks first (outside Bypass): its card in the thread, its words on it. Allow once (twice).
+  for (let i = 0; i < 2; i++) {
+    const card = thread(main).getByTestId('chat-page-confirm').locator('.asking, [data-state="asking"]').first();
+    const asking = thread(main).locator('[data-testid="chat-page-confirm"][data-state="asking"]').first();
+    await expect(asking).toBeVisible({ timeout: 60_000 });
+    await expect(asking).toContainText('run a script');
+    await asking.getByRole('button', { name: 'Allow once' }).click();
+    void card;
+  }
+  await ended(yap, agent.id, 60_000);
+  const dumps = toolDumps();
+  const text = (d) => (d?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join(' ');
+  const of = (tool, i = 0) => text(dumps.filter((d) => d.tool === tool)[i]);
+  expect(dumps[0].tools.map((t) => t.name)).toEqual(expect.arrayContaining(['browser_console', 'browser_network', 'browser_javascript', 'browser_view']));
+  expect(of('browser_console')).toContain('[log] Guide loaded');
+  // The request, its token hidden, its status (the fake web has no such page). (Its host is the test web's own:
+  // a request outside the stand-in's prefix isn't turned back to the page's address, as a real page's needs no turning.)
+  expect(of('browser_network')).toMatch(/GET \S+\/api\/progress\?token=REDACTED&level=20 4\d\d \[Fetch\]/);
+  expect(of('browser_network')).not.toContain('abc123');
+  expect(of('browser_javascript')).toContain('Leveling guide - Example Wiki / 2');
+  expect(of('browser_view')).toContain('375×812 (touch), dark colours');
+  expect(of('browser_javascript', 1)).toContain('375 true');
+  expect(of('browser_view', 1)).toContain("the panel's own size, the system's colours");
+  // Real keystrokes, a combination among them; the scroll and the hover at a point done.
+  expect(of('browser_read')).toContain('Keys: Ctrl+a x');
+  expect(dumps.filter((d) => ['browser_key', 'browser_scroll', 'browser_hover'].includes(d.tool)).map((d) => [d.tool, d.isError])).toEqual([['browser_key', false], ['browser_scroll', false], ['browser_hover', false]]);
+  expect(of('browser_scroll')).toContain('Scrolled down at a point');
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  expect(log.some((e) => e.step === "Reading the page's console beside the chat")).toBe(true);
+  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+});
+
 test('in Bypass permissions acting on a page asks nothing: no card, the click goes ahead', async ({ yap, main }) => {
   test.setTimeout(90_000);
   fs.rmSync(TOOLS, { force: true });

@@ -125,6 +125,7 @@ function foreignFrames(r,max){var out=[],fs=qa('iframe,frame',r);for(var i=0;i<f
 
 pub mod act;
 pub mod backend;
+pub mod dev;
 pub mod read;
 pub mod see;
 #[cfg(any(test, debug_assertions))]
@@ -222,7 +223,7 @@ pub const READ_MAX: usize = 5000;
 /// a long guide, said it paged through 5,000 characters at a time guessing
 /// which part held the section; Claude Code's own browser reads 50,000): its
 /// context is big and it compacts a long one.
-pub const SESSION_READ_MAX: usize = 20_000;
+pub const SESSION_READ_MAX: usize = 50_000;
 
 /// **How much of a page's text one read gives this turn** ([`READ_MAX`], or
 /// [`SESSION_READ_MAX`] in a Claude Code session's). Pure.
@@ -382,10 +383,10 @@ pub fn definitions(gate: Gate, act: bool) -> Value {
         tool(FIND, "Find words on the page: matches by ref.", json!({ "query": s(), "tab": tab() }), &["query"]),
     ];
     if look {
-        out.push(tool(SCROLL, "Scroll the page; amount in screens.", json!({ "direction": { "type": "string", "enum": ["down", "up", "top", "bottom"] }, "amount": { "type": "number" }, "tab": tab() }), &["direction"]));
+        out.push(tool(SCROLL, "Scroll the page, or the part at x, y of the latest shot; amount in screens.", json!({ "direction": { "type": "string", "enum": ["down", "up", "top", "bottom"] }, "amount": { "type": "number" }, "x": { "type": "number" }, "y": { "type": "number" }, "tab": tab() }), &["direction"]));
         out.push(tool(SCROLL_TO, "Scroll a ref or text into view.", json!({ "ref": r(), "text": s(), "tab": tab() }), &[]));
         out.push(tool(SCREENSHOT, "Look at what's in view now.", json!({ "tab": tab() }), &[]));
-        out.push(tool(ZOOM, "A sharper look at part of the view: top, middle (center), bottom, left, right, a corner (top-left…), or \"x,y,w,h\" fractions.", json!({ "region": s(), "tab": tab() }), &["region"]));
+        out.push(tool(ZOOM, "A sharper look at part of the view: top, middle (center), bottom, left, right, a corner (top-left…), or \"x,y,w,h\" fractions or the latest shot's pixels.", json!({ "region": s(), "tab": tab() }), &["region"]));
     }
     if act {
         // A model that sees clicks at a point too, and types where it
@@ -393,18 +394,22 @@ pub fn definitions(gate: Gate, act: bool) -> Value {
         let button = || json!({ "type": "string", "enum": ["left", "right", "middle"] });
         let (click, click_props, typed) = if look {
             (
-                "Click a ref, or x, y in the latest browser_screenshot's pixels; count 2 or 3: a double or triple click.",
-                json!({ "ref": r(), "x": { "type": "number" }, "y": { "type": "number" }, "button": button(), "count": { "type": "integer" }, "tab": tab() }),
+                "Click a ref, or x, y in the latest browser_screenshot's pixels; count 2 or 3: a double or triple click; modifiers: keys held (ctrl+shift).",
+                json!({ "ref": r(), "x": { "type": "number" }, "y": { "type": "number" }, "button": button(), "count": { "type": "integer" }, "modifiers": s(), "tab": tab() }),
                 &["text"][..],
             )
         } else {
-            ("Click a ref; count 2 or 3: a double or triple click.", json!({ "ref": r(), "button": button(), "count": { "type": "integer" }, "tab": tab() }), &["ref", "text"][..])
+            ("Click a ref; count 2 or 3: a double or triple click; modifiers: keys held (ctrl+shift).", json!({ "ref": r(), "button": button(), "count": { "type": "integer" }, "modifiers": s(), "tab": tab() }), &["ref", "text"][..])
         };
         out.push(tool(act::CLICK, click, click_props, &[]));
         let type_what = if look { "Type into a field (ref, else the focused one); submit: Enter after." } else { "Type into a field; submit: Enter after." };
         out.push(tool(act::TYPE, type_what, json!({ "ref": r(), "text": s(), "submit": { "type": "boolean" }, "tab": tab() }), typed));
-        out.push(tool(act::KEY, "Press keys: Enter, Tab, Escape, arrows, PageDown…", json!({ "keys": s(), "tab": tab() }), &["keys"]));
-        out.push(tool(act::HOVER, "Point at a ref (hover menus).", json!({ "ref": r(), "tab": tab() }), &["ref"]));
+        out.push(tool(act::KEY, "Press keys: Enter, Tab, Escape, arrows, PageDown…, letters or combinations (ctrl+a).", json!({ "keys": s(), "tab": tab() }), &["keys"]));
+        if look {
+            out.push(tool(act::HOVER, "Point at a ref, or x, y of the latest shot (hover menus).", json!({ "ref": r(), "x": { "type": "number" }, "y": { "type": "number" }, "tab": tab() }), &[]));
+        } else {
+            out.push(tool(act::HOVER, "Point at a ref (hover menus).", json!({ "ref": r(), "tab": tab() }), &["ref"]));
+        }
         let drag = if look { "Drag from one {ref} or {x, y} to another (a list's order, a slider, a drop zone)." } else { "Drag from one {ref} to another (a list's order, a drop zone)." };
         out.push(tool(act::DRAG, drag, json!({ "from": { "type": "object" }, "to": { "type": "object" }, "tab": tab() }), &["from", "to"]));
         out.push(tool(act::FORM_INPUT, "Set a select, checkbox (true/false) or text field.", json!({ "ref": r(), "value": s(), "tab": tab() }), &["ref", "value"]));
@@ -1038,6 +1043,10 @@ async fn read(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
     }
     // One part of it: a heading's section, or one element (its ref from browser_find or the elements).
     if let Some(r) = ref_of(&args["ref"]) {
+        // …its links, buttons and fields alone, with mode "elements".
+        if elements {
+            return read::elements_in(turn, &tab, offset.unwrap_or(0), act, Some(r)).await;
+        }
         return read::section(turn, &tab, r, offset.unwrap_or(0)).await;
     }
     if mode == "tables" {

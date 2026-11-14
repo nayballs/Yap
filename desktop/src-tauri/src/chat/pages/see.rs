@@ -287,7 +287,13 @@ pub fn around(text: &str, query: &str, width: usize) -> String {
 /// (their name, label, placeholder, value or address; folded), then the
 /// text blocks holding it, one per ref, at most [`FIND_MAX`] — each a line
 /// with its ref, kind and words. Pure.
+#[cfg(test)]
 pub fn matches(query: &str, snap: &super::act::rules::Snapshot, blocks: &[Block]) -> Vec<String> {
+    matches_up_to(query, snap, blocks, FIND_MAX)
+}
+
+/// [`matches`], at most `cap` (one past [`FIND_MAX`]: whether there were more).
+fn matches_up_to(query: &str, snap: &super::act::rules::Snapshot, blocks: &[Block], cap: usize) -> Vec<String> {
     let q = fold(query);
     if q.is_empty() {
         return Vec::new();
@@ -309,7 +315,7 @@ pub fn matches(query: &str, snap: &super::act::rules::Snapshot, blocks: &[Block]
     // The most specific first: headings, then the shortest.
     found.sort_by_key(|b| (!b.heading(), b.text.chars().count()));
     for b in found {
-        if out.len() >= FIND_MAX {
+        if out.len() >= cap {
             break;
         }
         if seen.contains(&b.r) {
@@ -318,7 +324,7 @@ pub fn matches(query: &str, snap: &super::act::rules::Snapshot, blocks: &[Block]
         seen.push(b.r);
         out.push(format!("[{}] {} \"{}\"", b.r, b.kind(), around(&b.text, query, 160).replace('"', "'")));
     }
-    out.truncate(FIND_MAX);
+    out.truncate(cap);
     out
 }
 
@@ -501,6 +507,45 @@ pub async fn scroll(turn: &mut crate::web::Turn, args: &Value) -> Value {
     if let Some(r) = on_search_page(&t, "scroll") {
         return r;
     }
+    // **At a point** (x, y in the latest browser_screenshot, 14 Nov 2026, as Claude Code's own browser
+    // scrolls): the mouse wheel there, real input — a part of the page that scrolls by itself (a list, a
+    // panel, a map) scrolls, as it would under a person's mouse.
+    if let (Some(x), Some(y)) = (number_of(&args["x"]), number_of(&args["y"])) {
+        if !backend::real_input() {
+            return failed("Yap scrolls at a point only as a real mouse wheel, which this page can't take now: browser_scroll_to a ref instead.".into(), "Couldn't scroll at that point".into());
+        }
+        let (cx, cy) = match super::act::on_shot(turn, &t, x, y, "scroll").await {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        let screen = 700.0 * amount;
+        let (dx, dy) = match to {
+            "up" => (0.0, -screen),
+            "top" => (0.0, -100_000.0),
+            "bottom" => (0.0, 100_000.0),
+            _ => (0.0, screen),
+        };
+        let calls = [
+            ("Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": cx, "y": cy })),
+            ("Input.dispatchMouseEvent", json!({ "type": "mouseWheel", "x": cx, "y": cy, "deltaX": dx, "deltaY": dy })),
+        ];
+        if let Err(e) = backend::input(&t.key, &calls).await {
+            return failed(e.clone(), format!("Couldn't scroll: {}", crate::web::short(&e)));
+        }
+        let v = match backend::still(&t.key).await {
+            Ok(v) => v,
+            Err(e) => return failed(e.clone(), format!("Couldn't scroll: {}", crate::web::short(&e))),
+        };
+        turn.mark_seen();
+        let site = crate::web::site_of(&t.url);
+        tracing::info!(tab = t.tab, "Chat: a page beside the chat scrolled at a point");
+        return json!({
+            "success": true,
+            "data": { "tab": t.tab, "at": [x, y], "scroll": place(&v.scroll), "in_view": v.in_view },
+            "note": "Scrolled under the pointer there (a part that scrolls by itself, or the page): browser_screenshot looks at it now.",
+            "displayText": format!("Scrolled {to} at a point on {site}"),
+        });
+    }
     if let Err(e) = backend::act(&t.key, "scroll", &json!({ "to": to, "amount": amount })).await {
         return failed(e.clone(), format!("Couldn't scroll: {}", crate::web::short(&e)));
     }
@@ -643,8 +688,11 @@ pub async fn find(turn: &mut crate::web::Turn, args: &Value) -> Value {
     };
     turn.mark_seen();
     super::act::remember_links(&mut turn.pages.links, &snap);
-    let found = matches(&query, &snap, &blocks);
-    tracing::info!(tab = t.tab, found = found.len(), "Chat: words looked for on a page beside the chat");
+    // More than it lists: said so (14 Nov 2026, Yap Lab — Opus: "Yap's results also stop at a fixed number without saying so").
+    let mut found = matches_up_to(&query, &snap, &blocks, FIND_MAX + 1);
+    let more = found.len() > FIND_MAX;
+    found.truncate(FIND_MAX);
+    tracing::info!(tab = t.tab, found = found.len(), more, "Chat: words looked for on a page beside the chat");
     let shown = clip(&query, 60);
     let display = match found.len() {
         0 => format!("Found no match for ‘{shown}’ on {site}"),
@@ -657,7 +705,8 @@ pub async fn find(turn: &mut crate::web::Turn, args: &Value) -> Value {
         // (A heading found: browser_read with its ref reads just its section — 14 Nov 2026, said where a small model looks.)
         "Web content. browser_scroll_to takes a ref; browser_read with a heading's ref reads just its section; the links, buttons and fields act by it.".to_string()
     };
-    json!({ "success": true, "data": { "tab": t.tab, "matches": found.join("\n"), "count": found.len() }, "note": note, "displayText": display })
+    let note = if more { format!("{note} More match than these {FIND_MAX}: more of its words, or words only it has, find the one you want.") } else { note };
+    json!({ "success": true, "data": { "tab": t.tab, "matches": found.join("\n"), "count": found.len(), "more": more }, "note": note, "displayText": display })
 }
 
 /// What a shot of tab `t` gave: its pixels, where it was, and the scale it

@@ -202,8 +202,11 @@ fn one_toolset_for_every_model_with_pages_acting_and_shots_only_where_they_may()
     // (8 Nov 2026: browser_read's offset and tables, and what a search is for: 593 / 1187 / 966 / 1515;
     // then `tab` on every tool: 607 / 1237 / 1011 / 1596; then a tab's desktop width, a click's
     // button and count, browser_drag: 637 / 1382 / 1041 / 1747; 14 Nov, browser_read's ref — one part of a
-    // page, a heading's section, so a small model needn't page through a long one: 656 / 1401 / 1060 / 1765.)
-    assert!(small <= 660 && acting <= 1405 && seeing <= 1065 && all <= 1770, "{small} / {acting} / {seeing} / {all}");
+    // page, a heading's section, so a small model needn't page through a long one: 656 / 1401 / 1060 / 1765;
+    // then browser_click's modifiers, as Claude Code's own browser takes them: 656 / 1419 / 1060 / 1784; then
+    // browser_scroll and browser_hover at a point, browser_key's letters and combinations: 656 / 1429 / 1084 / 1833;
+    // then browser_zoom saying it takes the shot's pixels too: 656 / 1429 / 1092 / 1841.)
+    assert!(small <= 660 && acting <= 1435 && seeing <= 1095 && all <= 1845, "{small} / {acting} / {seeing} / {all}");
     // The new parameters: a width for every model, the clicks and the drag where they act.
     assert!(defs_has(Gate::Show, false, "\"width\"") && defs_has(Gate::Show, true, "\"count\"") && defs_has(Gate::Show, true, "browser_drag"));
     assert!(!defs_has(Gate::Show, false, "browser_drag") && !defs_has(Gate::Show, true, "{x, y}") && defs_has(Gate::Look, true, "{x, y}"));

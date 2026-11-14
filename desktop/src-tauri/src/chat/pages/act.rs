@@ -412,7 +412,7 @@ pub fn count_of(v: &Value) -> Option<u8> {
 /// once the page scrolled or its view changed size since it
 /// (`see::Frame::moved`: a desktop width set or taken off, the panel
 /// resized). `doing`: the verb ("click", "drag").
-async fn on_shot(turn: &crate::web::Turn, t: &OpenTab, x: f64, y: f64, doing: &str) -> Result<(f64, f64), Value> {
+pub(super) async fn on_shot(turn: &crate::web::Turn, t: &OpenTab, x: f64, y: f64, doing: &str) -> Result<(f64, f64), Value> {
     let Some(frame) = turn.pages.frame.clone().filter(|f| f.key == t.key) else {
         return Err(failed(
             format!("x, y are in the latest browser_screenshot's pixels: take one of this tab first (or {doing} by ref)."),
@@ -443,6 +443,248 @@ async fn on_shot(turn: &crate::web::Turn, t: &OpenTab, x: f64, y: f64, doing: &s
 /// password, card or code field), "middle": a link opened in a new tab as a
 /// browser does (as `browser_tabs` new opens it, under its rules), else as
 /// a click.
+/// **The keys held with a click** (`modifiers`: "ctrl", "shift", "alt", "meta" —
+/// "cmd" and "win" are meta, "option" alt — joined with "+": "ctrl+shift"),
+/// as Claude Code's own browser takes them; `None`: one Yap doesn't know.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Mods {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
+impl Mods {
+    /// The DevTools `modifiers` bits: Alt 1, Ctrl 2, Meta 4, Shift 8.
+    pub fn bits(self) -> u8 {
+        u8::from(self.alt) | u8::from(self.ctrl) << 1 | u8::from(self.meta) << 2 | u8::from(self.shift) << 3
+    }
+    fn json(self) -> Value {
+        json!({ "ctrl": self.ctrl, "shift": self.shift, "alt": self.alt, "meta": self.meta })
+    }
+    /// What a link does with them in a browser: Ctrl, Shift or Meta open it apart (a new tab or window).
+    fn opens_apart(self) -> bool {
+        self.ctrl || self.shift || self.meta
+    }
+}
+
+/// `modifiers` as a model writes them. Pure.
+pub fn mods_of(v: &Value) -> Option<Mods> {
+    let mut m = Mods::default();
+    let given = match v {
+        Value::Null => return Some(m),
+        Value::String(s) => s.to_ascii_lowercase(),
+        Value::Array(a) => a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("+").to_ascii_lowercase(),
+        _ => return None,
+    };
+    for k in given.split(['+', ',', ' ']).map(str::trim).filter(|k| !k.is_empty()) {
+        match k {
+            "ctrl" | "control" => m.ctrl = true,
+            "shift" => m.shift = true,
+            "alt" | "option" => m.alt = true,
+            "meta" | "cmd" | "command" | "win" | "windows" | "super" => m.meta = true,
+            _ => return None,
+        }
+    }
+    Some(m)
+}
+
+/// **A real click** (14 Nov 2026; the maintainer, after Yap Code's browser was
+/// compared with Claude Code's: "Let's try to match 1-1"): the press and its
+/// release sent as a person's mouse sends them (`backend::input`, DevTools'
+/// `Input.dispatchMouseEvent`, `isTrusted` — what a few sites wait for, and
+/// what menus that open on a press want) at the point `aim` found: the
+/// element's centre, scrolled into view, or the shot's point. Whatever is on
+/// top there gets it, as it would with a person's mouse (said so:
+/// `covered`). `None`: not this time — the simulator, a link to another
+/// window, or the page heard nothing (a panel out of sight) — and the
+/// script's own click goes instead; never both.
+async fn real_click(t: &OpenTab, el: &rules::Element, at: Option<(f64, f64)>, count: u8, mods: Mods) -> Option<Value> {
+    if !backend::real_input() {
+        return None;
+    }
+    let (x0, y0) = at.unwrap_or((0.0, 0.0));
+    let aim = backend::act(&t.key, "aim", &json!({ "ref": el.r, "role": el.role, "name": el.name, "at": at.is_some(), "x": x0, "y": y0, "kinds": ["mousedown", "click"] })).await.ok()?;
+    match aim["r"].as_str() {
+        Some("ok") => {}
+        // Gone, changed, disabled: said as the script's own click says it.
+        Some("gone" | "changed" | "disabled") => return Some(aim),
+        _ => return None,
+    }
+    let (x, y, id) = (aim["x"].as_f64()?, aim["y"].as_f64()?, aim["id"].as_str()?.to_string());
+    let m = mods.bits();
+    let mut calls = vec![("Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": x, "y": y, "modifiers": m }))];
+    for n in 1..=count.max(1) {
+        calls.push(("Input.dispatchMouseEvent", json!({ "type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": n, "modifiers": m })));
+        calls.push(("Input.dispatchMouseEvent", json!({ "type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": n, "modifiers": m })));
+    }
+    if let Err(e) = backend::input(&t.key, &calls).await {
+        tracing::info!("Chat: a real click couldn't be sent ({}); the script's own instead", crate::web::short(&e));
+        let _ = backend::act(&t.key, "aimed", &json!({ "ref": el.r, "id": id, "count": 1 })).await;
+        return None;
+    }
+    let back = backend::act(&t.key, "aimed", &json!({ "ref": el.r, "id": id, "count": count })).await.ok()?;
+    if back["heard"].as_i64().unwrap_or(0) == 0 {
+        tracing::info!("Chat: a real click didn't reach the page; the script's own instead");
+        return None;
+    }
+    let mut out = json!({ "r": "ok", "real": true });
+    if let Some(c) = aim["covered"].as_str().filter(|c| !c.is_empty()) {
+        out["covered"] = json!(c);
+    }
+    if let Some(sel) = back.get("selected").filter(|v| !v.is_null()) {
+        out["selected"] = sel.clone();
+    }
+    Some(out)
+}
+
+/// **A key as DevTools sends it** (`Input.dispatchKeyEvent`): its down and up.
+/// `None`: one of [`key_name`]'s it doesn't map. Pure.
+pub fn key_events(k: &str) -> Option<Vec<Value>> {
+    if let Some(v) = combo_events(k) {
+        return Some(v);
+    }
+    let (key, code, vk, text, shift) = match k {
+        "Enter" => ("Enter", "Enter", 13, "\r", false),
+        "Tab" => ("Tab", "Tab", 9, "", false),
+        "Shift+Tab" => ("Tab", "Tab", 9, "", true),
+        "Escape" => ("Escape", "Escape", 27, "", false),
+        "Space" => (" ", "Space", 32, " ", false),
+        "ArrowUp" => ("ArrowUp", "ArrowUp", 38, "", false),
+        "ArrowDown" => ("ArrowDown", "ArrowDown", 40, "", false),
+        "ArrowLeft" => ("ArrowLeft", "ArrowLeft", 37, "", false),
+        "ArrowRight" => ("ArrowRight", "ArrowRight", 39, "", false),
+        "PageUp" => ("PageUp", "PageUp", 33, "", false),
+        "PageDown" => ("PageDown", "PageDown", 34, "", false),
+        "Home" => ("Home", "Home", 36, "", false),
+        "End" => ("End", "End", 35, "", false),
+        _ => return None,
+    };
+    let modifiers = if shift { 8 } else { 0 };
+    let down = if text.is_empty() {
+        json!({ "type": "rawKeyDown", "key": key, "code": code, "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk, "modifiers": modifiers })
+    } else {
+        json!({ "type": "keyDown", "key": key, "code": code, "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk, "text": text, "unmodifiedText": text, "modifiers": modifiers })
+    };
+    let up = json!({ "type": "keyUp", "key": key, "code": code, "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk, "modifiers": modifiers });
+    Some(vec![down, up])
+}
+
+/// **A combination's down and up** ([`combo_name`]'s: "Ctrl+A", "Shift+F5",
+/// "Backspace"): `None` for one of [`KEYS`] alone (above). Pure.
+fn combo_events(k: &str) -> Option<Vec<Value>> {
+    let parts: Vec<&str> = k.split('+').collect();
+    let (last, held) = parts.split_last()?;
+    if held.is_empty() && KEYS.contains(last) {
+        return None;
+    }
+    let (ctrl, alt, shift, meta) = (held.contains(&"Ctrl"), held.contains(&"Alt"), held.contains(&"Shift"), held.contains(&"Meta"));
+    let modifiers = u8::from(alt) | u8::from(ctrl) << 1 | u8::from(meta) << 2 | u8::from(shift) << 3;
+    let (key, code, vk, text): (String, String, u32, String) = match *last {
+        "Backspace" => ("Backspace".into(), "Backspace".into(), 8, String::new()),
+        "Delete" => ("Delete".into(), "Delete".into(), 46, String::new()),
+        "Insert" => ("Insert".into(), "Insert".into(), 45, String::new()),
+        f if f.len() >= 2 && f.starts_with('F') && f[1..].parse::<u32>().is_ok() => (f.into(), f.into(), 111 + f[1..].parse::<u32>().ok()?, String::new()),
+        one if one.chars().count() == 1 => {
+            let c = one.chars().next()?;
+            let typed = if c.is_ascii_alphabetic() { if shift { c.to_ascii_uppercase() } else { c.to_ascii_lowercase() } } else { c };
+            let (code, vk) = if c.is_ascii_alphabetic() {
+                (format!("Key{}", c.to_ascii_uppercase()), c.to_ascii_uppercase() as u32)
+            } else if c.is_ascii_digit() {
+                (format!("Digit{c}"), c as u32)
+            } else {
+                (String::new(), 0)
+            };
+            // (Text only when no Ctrl, Alt or Meta is held: a shortcut types nothing.)
+            let text = if ctrl || alt || meta { String::new() } else { typed.to_string() };
+            (typed.to_string(), code, vk, text)
+        }
+        named => {
+            // One of KEYS with keys held ("Shift+ArrowDown", "Ctrl+Enter").
+            let base = key_events(named)?;
+            return Some(base.into_iter().map(|mut e| {
+                e["modifiers"] = json!(modifiers | e["modifiers"].as_u64().unwrap_or(0) as u8);
+                if ctrl || alt || meta {
+                    if let Some(o) = e.as_object_mut() {
+                        o.remove("text");
+                        o.remove("unmodifiedText");
+                    }
+                    if e["type"] == "keyDown" {
+                        e["type"] = json!("rawKeyDown");
+                    }
+                }
+                e
+            }).collect());
+        }
+    };
+    let down = if text.is_empty() {
+        json!({ "type": "rawKeyDown", "key": key, "code": code, "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk, "modifiers": modifiers })
+    } else {
+        json!({ "type": "keyDown", "key": key, "code": code, "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk, "text": text, "unmodifiedText": text, "modifiers": modifiers })
+    };
+    let up = json!({ "type": "keyUp", "key": key, "code": code, "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk, "modifiers": modifiers });
+    Some(vec![down, up])
+}
+
+/// **A real key** (as [`real_click`]): key `k` pressed as a person's keyboard
+/// presses it, on `target` focused (else where the focus is). `None`: not
+/// this time (the simulator, a key it doesn't map, the page heard nothing) —
+/// the script's own key instead; never both.
+async fn real_key(t: &OpenTab, target: Option<&rules::Element>, k: &str) -> Option<Value> {
+    if !backend::real_input() {
+        return None;
+    }
+    let events = key_events(k)?;
+    let a = match target {
+        Some(el) => json!({ "ref": el.r, "role": el.role, "name": el.name, "kinds": ["keydown"] }),
+        None => json!({ "kinds": ["keydown"] }),
+    };
+    let listen = backend::act(&t.key, "listen", &a).await.ok()?;
+    match listen["r"].as_str() {
+        Some("ok") => {}
+        Some("gone" | "changed") => return Some(listen),
+        _ => return None,
+    }
+    let id = listen["id"].as_str()?.to_string();
+    let calls: Vec<(&str, Value)> = events.into_iter().map(|e| ("Input.dispatchKeyEvent", e)).collect();
+    if backend::input(&t.key, &calls).await.is_err() {
+        let _ = backend::act(&t.key, "aimed", &json!({ "id": id })).await;
+        return None;
+    }
+    let back = backend::act(&t.key, "aimed", &json!({ "id": id })).await.ok()?;
+    let heard = back["heard"].as_i64().unwrap_or(0) != 0;
+    // Escape after a hover: the pointer leaves what it hovered, so its popup closes (as the script's own Escape).
+    if heard && k == "Escape" {
+        let _ = backend::act(&t.key, "unhover", &json!({})).await;
+    }
+    heard.then(|| json!({ "r": "ok", "real": true }))
+}
+
+/// **A real hover** (as [`real_click`]): the pointer moved onto element
+/// `el`'s centre as a person's mouse moves. `None`: the script's own.
+async fn real_hover(t: &OpenTab, el: &rules::Element) -> Option<Value> {
+    if !backend::real_input() {
+        return None;
+    }
+    // (Heard only as the element's own mouseover: a pointer that moved on the page but not onto it is no hover.)
+    let aim = backend::act(&t.key, "aim", &json!({ "ref": el.r, "role": el.role, "name": el.name, "kinds": ["mouseover"], "on": true })).await.ok()?;
+    match aim["r"].as_str() {
+        Some("ok") => {}
+        Some("gone" | "changed" | "disabled") => return Some(aim),
+        _ => return None,
+    }
+    let (x, y, id) = (aim["x"].as_f64()?, aim["y"].as_f64()?, aim["id"].as_str()?.to_string());
+    // (From just beside it, so the page sees the pointer arrive.)
+    let calls = [("Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": (x - 12.0).max(0.0), "y": y })), ("Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": x, "y": y }))];
+    if backend::input(&t.key, &calls).await.is_err() {
+        let _ = backend::act(&t.key, "aimed", &json!({ "ref": el.r, "id": id })).await;
+        return None;
+    }
+    // (Kept as the hovered one, as the script's own hover keeps it: a later Escape lets it go.)
+    let back = backend::act(&t.key, "aimed", &json!({ "ref": el.r, "id": id, "hover": true })).await.ok()?;
+    (back["heard"].as_i64().unwrap_or(0) != 0).then(|| json!({ "r": "ok", "real": true }))
+}
+
 async fn click(turn: &mut crate::web::Turn, args: &Value, ctx: &super::Ctx<'_>) -> Value {
     let live = ctx.live;
     let Some(button) = button_of(&args["button"]) else {
@@ -453,6 +695,9 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, ctx: &super::Ctx<'_>) 
     };
     // (Only the left button clicks more than once.)
     let count = if button == 0 { count } else { 1 };
+    let Some(mods) = mods_of(&args["modifiers"]) else {
+        return failed("modifiers are ctrl, shift, alt or meta, joined with + (\"ctrl+shift\").".into(), "Couldn't click: no such key to hold".into());
+    };
     let mut t = match tab_for(turn, args, "click").await {
         Ok(t) => t,
         Err(e) => return e,
@@ -502,12 +747,14 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, ctx: &super::Ctx<'_>) 
     // A middle click on a link: a new tab, as a browser opens it — under
     // `browser_tabs` new's rules (its words and address asked about, four
     // pages a turn).
-    if button == 1 && el.role == "link" && crate::web::check_url(&el.href).is_ok() {
+    // (Ctrl, Shift or Meta held on a link opens it apart, as a browser does: the same.)
+    if (button == 1 || (button == 0 && mods.opens_apart())) && el.role == "link" && crate::web::check_url(&el.href).is_ok() {
         drop(_busy.take());
         remember_page_links(&mut turn.pages.links, &[(el.href.clone(), rules::name_of(&el))]);
         let mut r = super::open(turn, &json!({ "url": el.href }), ctx).await;
         if r["success"] == json!(true) {
-            let display = format!("Middle-clicked ‘{label}’ on {site}: it opened in a new tab");
+            let how = if button == 1 { "Middle-clicked" } else { "Opened" };
+            let display = format!("{how} ‘{label}’ on {site}: it opened in a new tab");
             r["displayText"] = json!(display);
         }
         return r;
@@ -538,13 +785,20 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, ctx: &super::Ctx<'_>) 
     }
     let was = before(&t).await;
     let mark = backend::mark(&t.key).await;
-    let done = match (button, count, at) {
-        (0, 1, Some((x, y))) => backend::act(&t.key, "clickAt", &json!({ "ref": el.r, "role": el.role, "name": el.name, "x": x, "y": y })).await,
-        (0, 1, None) => backend::act(&t.key, "click", &json!({ "ref": el.r, "role": el.role, "name": el.name })).await,
-        (b, n, at) => {
-            let (x, y) = at.unwrap_or((0.0, 0.0));
-            backend::act(&t.key, "press", &json!({ "ref": el.r, "role": el.role, "name": el.name, "at": at.is_some(), "x": x, "y": y, "button": b, "count": n })).await
-        }
+    // The left button: a real click first (a person's mouse, as Claude Code's own browser clicks); the
+    // script's own when that can't be (never both). A right-click stays the script's: a real one would
+    // open the panel's own menu over the person's screen.
+    let real = if button == 0 { real_click(&t, &el, at, count, mods).await } else { None };
+    let done = match real {
+        Some(v) => Ok(v),
+        None => match (button, count, at) {
+            (0, 1, Some((x, y))) => backend::act(&t.key, "clickAt", &json!({ "ref": el.r, "role": el.role, "name": el.name, "x": x, "y": y, "mods": mods.json() })).await,
+            (0, 1, None) => backend::act(&t.key, "click", &json!({ "ref": el.r, "role": el.role, "name": el.name, "mods": mods.json() })).await,
+            (b, n, at) => {
+                let (x, y) = at.unwrap_or((0.0, 0.0));
+                backend::act(&t.key, "press", &json!({ "ref": el.r, "role": el.role, "name": el.name, "at": at.is_some(), "x": x, "y": y, "button": b, "count": n, "mods": mods.json() })).await
+            }
+        },
     };
     let done = match done {
         Ok(v) => v,
@@ -1099,6 +1353,44 @@ pub fn key_name(k: &str) -> Option<&'static str> {
     })
 }
 
+/// **A key or a combination Yap presses only as real input** (14 Nov 2026,
+/// as Claude Code's own browser takes them): a letter, a digit or a sign,
+/// F1–F12, Backspace, Delete, Insert or one of [`KEYS`], with Ctrl, Alt,
+/// Shift or Meta held ("ctrl+a", "Shift+ArrowDown", "F5"), named as
+/// [`key_events`] reads it ("Ctrl+A"). `None`: not one. Pure.
+pub fn combo_name(k: &str) -> Option<String> {
+    let parts: Vec<&str> = k.trim().split('+').map(str::trim).filter(|p| !p.is_empty()).collect();
+    let (last, held) = parts.split_last()?;
+    let mut mods = Vec::new();
+    for m in held {
+        let m = match m.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => "Ctrl",
+            "alt" | "option" => "Alt",
+            "shift" => "Shift",
+            "meta" | "cmd" | "command" | "win" => "Meta",
+            _ => return None,
+        };
+        if !mods.contains(&m) {
+            mods.push(m);
+        }
+    }
+    let base = match last.to_ascii_lowercase().as_str() {
+        "backspace" => "Backspace".to_string(),
+        "delete" | "del" => "Delete".to_string(),
+        "insert" | "ins" => "Insert".to_string(),
+        f if f.len() >= 2 && f.starts_with('f') && f[1..].parse::<u8>().is_ok_and(|n| (1..=12).contains(&n)) => f.to_ascii_uppercase(),
+        _ if last.chars().count() == 1 && !last.chars().next().is_some_and(char::is_control) => last.to_ascii_uppercase(),
+        _ => key_name(last)?.to_string(),
+    };
+    // The browser's own shortcuts, never the page's: closing, printing, saving, opening, new windows, view
+    // source and DevTools (a dialog over the person's screen, or the panel's own page gone).
+    let command = mods.contains(&"Ctrl") || mods.contains(&"Meta");
+    if (command && ["W", "P", "S", "O", "N", "T", "Q", "U"].contains(&base.as_str())) || base == "F12" || (command && mods.contains(&"Shift") && ["I", "J", "C"].contains(&base.as_str())) {
+        return None;
+    }
+    Some(mods.into_iter().map(str::to_string).chain(std::iter::once(base)).collect::<Vec<_>>().join("+"))
+}
+
 /// The keys a call asks for, in order (a string — "Tab Tab Enter",
 /// "Shift+Tab, Enter" — or a list): the names, or the one Yap doesn't press.
 /// Pure.
@@ -1121,14 +1413,36 @@ pub fn keys_of(v: &Value) -> Result<Vec<&'static str>, String> {
     given.iter().map(|k| key_name(k).ok_or_else(|| format!("Yap doesn't press ‘{}’ on a page: only {}.", rules::clip(k, 20), KEYS.join(", ")))).collect()
 }
 
+/// **The keys a call asks for when one is a key or a combination only real
+/// input presses** ([`combo_name`]: "a", "Ctrl+A", "F5"): each named so, in
+/// order, or `None` when one isn't a key at all. Pure.
+pub fn combos_of(v: &Value) -> Option<Vec<String>> {
+    let given: Vec<String> = match v {
+        Value::Array(a) => a.iter().filter_map(|k| k.as_str().map(str::to_string)).collect(),
+        Value::String(s) => {
+            let s = s.replace(" + ", "+").replace("+ ", "+").replace(" +", "+");
+            s.split([' ', ',']).filter(|k| !k.trim().is_empty()).map(str::to_string).collect()
+        }
+        _ => Vec::new(),
+    };
+    if given.is_empty() || given.len() > MAX_KEYS {
+        return None;
+    }
+    given.iter().map(|k| combo_name(k)).collect()
+}
+
 /// **`browser_key`**: keys pressed in turn in the field or element with the
 /// focus (or `ref`'s) — each Enter or Space judged where it lands, as a
 /// click or a submit is (asked first when it would buy, send…).
 async fn key(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat::stream::Live<'_>>) -> Value {
     let given = if args["keys"].is_null() { &args["key"] } else { &args["keys"] };
-    let keys = match keys_of(given) {
-        Ok(k) => k,
-        Err(e) => return failed(e, "Couldn't press keys: none Yap presses".into()),
+    let keys: Vec<String> = match keys_of(given) {
+        Ok(k) => k.into_iter().map(String::from).collect(),
+        // Any other key or combination (a letter, Ctrl+A, F5): as real keystrokes only (as Claude Code's own browser).
+        Err(e) => match combos_of(given) {
+            Some(c) if backend::real_input() => c,
+            _ => return failed(e, "Couldn't press keys: none Yap presses".into()),
+        },
     };
     let mut t = match tab_for(turn, args, "press keys").await {
         Ok(t) => t,
@@ -1156,7 +1470,9 @@ async fn key(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat
     let mark = backend::mark(&t.key).await;
     let mut asked = false;
     let mut pressed: Vec<&str> = Vec::new();
-    for k in &keys {
+    for k in keys.iter().map(String::as_str) {
+        // (A combination's own key: "Ctrl+Enter" judged as Enter.)
+        let base = k.rsplit('+').next().unwrap_or(k);
         // Where it lands: `ref`'s element for the first, then the one with the focus.
         let d = match target.as_ref() {
             Some(el) => backend::describe(&t.key, el.r).await,
@@ -1170,7 +1486,7 @@ async fn key(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat
         if let Some(r) = d.el.as_ref().and_then(|el| unreachable(el, &label_of(el), "press keys in")) {
             return r;
         }
-        if let (true, Some(el)) = (matches!(*k, "Enter" | "Space"), d.el.as_ref()) {
+        if let (true, Some(el)) = (matches!(base, "Enter" | "Space"), d.el.as_ref()) {
             let label = rules::name_of(el);
             let field = rules::takes_text(el) && !matches!(el.role.as_str(), "button" | "link" | "checkbox" | "radio" | "switch");
             // This key's own question, apart from an earlier key's.
@@ -1187,10 +1503,10 @@ async fn key(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat
                 }
                 // …and if it sends what Yap typed (its form's button; outside
                 // a form, the one right after), as a submit of it.
-                if let Some(r) = send_typed(turn, &t, el, *k == "Enter", &site, live, &mut this_asked, &mut busy).await {
+                if let Some(r) = send_typed(turn, &t, el, base == "Enter", &site, live, &mut this_asked, &mut busy).await {
                     return r;
                 }
-            } else if *k == "Enter" {
+            } else if base == "Enter" {
                 // In a field: what Yap typed, sent — a submit under submit's
                 // rules (its words as they go, then what sending does) —
                 // else as a submit (in a form) or a send (outside one, but a
@@ -1209,13 +1525,20 @@ async fn key(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat
         if busy.is_none() {
             busy = backend::busy(&t.key).await;
         }
-        let a = match target.take() {
-            Some(el) => json!({ "keys": [k], "ref": el.r, "role": el.role, "name": el.name }),
-            None => json!({ "keys": [k] }),
-        };
-        let done = match backend::act(&t.key, "key", &a).await {
-            Ok(v) => v,
-            Err(e) => return failed(e.clone(), format!("Couldn't press {k}: {}", crate::web::short(&e))),
+        let target_now = target.take();
+        // A real key first (a person's keyboard, as Claude Code's own browser presses it); the script's own when that can't be.
+        let done = match real_key(&t, target_now.as_ref(), k).await {
+            Some(v) => v,
+            None => {
+                let a = match target_now {
+                    Some(el) => json!({ "keys": [k], "ref": el.r, "role": el.role, "name": el.name }),
+                    None => json!({ "keys": [k] }),
+                };
+                match backend::act(&t.key, "key", &a).await {
+                    Ok(v) => v,
+                    Err(e) => return failed(e.clone(), format!("Couldn't press {k}: {}", crate::web::short(&e))),
+                }
+            }
         };
         if let Some(r) = not_done(&done, k, "press keys in") {
             return r;
@@ -1253,9 +1576,25 @@ async fn hover(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
         return e;
     }
     let busy = backend::busy(&t.key).await;
-    let (_, el) = match element(&t, ref_of(&args["ref"]), "hover").await {
-        Ok(x) => x,
-        Err(e) => return e,
+    // At a point (x, y in the latest shot, as Claude Code's own browser hovers): the element there.
+    let (_, el) = match (ref_of(&args["ref"]), number_of(&args["x"]), number_of(&args["y"])) {
+        (None, Some(x), Some(y)) => {
+            let (cx, cy) = match on_shot(turn, &t, x, y, "hover").await {
+                Ok(p) => p,
+                Err(e) => return e,
+            };
+            match backend::at(&t.key, cx, cy).await {
+                Ok(d) => match d.el.clone() {
+                    Some(el) => (d, el),
+                    None => return failed("There's nothing at that point of the page.".into(), "Couldn't hover: nothing there".into()),
+                },
+                Err(e) => return failed(e.clone(), format!("Couldn't hover: {}", crate::web::short(&e))),
+            }
+        }
+        (r, _, _) => match element(&t, r, "hover").await {
+            Ok(x) => x,
+            Err(e) => return e,
+        },
     };
     let label = rules::name_of(&el);
     let site = crate::web::site_of(&t.url);
@@ -1265,9 +1604,13 @@ async fn hover(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
     acting(live, &t.key);
     let was = before(&t).await;
     let mark = backend::mark(&t.key).await;
-    let done = match backend::act(&t.key, "hover", &json!({ "ref": el.r, "role": el.role, "name": el.name })).await {
-        Ok(v) => v,
-        Err(e) => return failed(e.clone(), format!("Couldn't hover over ‘{label}’: {}", crate::web::short(&e))),
+    // A real pointer first (a person's mouse moving onto it); the script's own events when that can't be.
+    let done = match real_hover(&t, &el).await {
+        Some(v) => v,
+        None => match backend::act(&t.key, "hover", &json!({ "ref": el.r, "role": el.role, "name": el.name })).await {
+            Ok(v) => v,
+            Err(e) => return failed(e.clone(), format!("Couldn't hover over ‘{label}’: {}", crate::web::short(&e))),
+        },
     };
     if let Some(r) = not_done(&done, &label, "hover over") {
         return r;
@@ -1277,7 +1620,9 @@ async fn hover(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
     backend::pause(std::time::Duration::from_millis(350)).await;
     drop(busy);
     let data = after(turn, &t, &was).await;
-    json!({ "success": true, "data": data, "note": NOTE, "displayText": format!("Hovered over ‘{label}’ on {site}") })
+    // (An icon with no words: what it was — its tooltip, if one opened, is in what changed.)
+    let what = if label.trim().is_empty() { format!("the {} there", if el.role.is_empty() { "element" } else { el.role.as_str() }) } else { format!("‘{label}’") };
+    json!({ "success": true, "data": data, "note": NOTE, "displayText": format!("Hovered over {what} on {site}") })
 }
 
 /// A checkbox's value as models write it. Pure.
