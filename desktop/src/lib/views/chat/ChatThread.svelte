@@ -293,6 +293,7 @@
               ondoc={(d) => chat.doc.show(d.id, { title: d.title })}
               onpicture={(p) => chat.doc.showPicture(p)}
               onpage={(p) => chat.doc.showPage(p)}
+              pagethumb={chat.pageThumb}
               conversation={chat.activeId}
               onshared={openShared}
               actions={m.role === 'user' ? actionsFor(m) : null}

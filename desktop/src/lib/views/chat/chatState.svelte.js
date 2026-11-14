@@ -1568,6 +1568,17 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (next) sendQueued(next, 'turn');
   }
 
+  // ---- a page's picture for its card (14 Nov 2026, chat/pages/thumb.rs): taken once the page an answer brought
+  // up has loaded — after the answer is in the thread, often. The cards of the answers shown take it by address
+  // (the saved answer has it too, read again later).
+  let pageThumbs = $state({});
+  /** `yap-page-thumb`: `{url, thumb, title}` (the page's own title then). */
+  function pageThumbTaken(p) {
+    if (p?.url && p?.thumb?.id) pageThumbs = { ...pageThumbs, [p.url]: { thumb: p.thumb, title: p.title || '' } };
+  }
+  /** What was taken of `url`'s page since its answer was read (`{thumb, title}`), or null. */
+  const pageThumb = (url) => (url ? (pageThumbs[url] ?? null) : null);
+
   /** The messages sent from the queue, by id: ✓ sent, ✓✓ read and when (kept apart from `messages`, which a
    * report reads again from the chat as saved). */
   let ticks = $state({});
@@ -2014,6 +2025,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
 
   return {
     get queued() { return queued.filter((q) => q.conv === activeId); },
+    pageThumbTaken,
+    pageThumb,
     /** A message's ✓ / ✓✓ (sent from the queue), or null. */
     tickOf: (id) => (id ? (ticks[id] ?? null) : null),
     setQueueGate,

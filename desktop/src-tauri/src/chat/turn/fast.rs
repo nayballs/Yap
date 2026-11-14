@@ -31,7 +31,7 @@ pub fn asked_page(text: &str, engine: &str, country: &str, keyless: bool) -> Opt
     if let Some((name, url)) = crate::apps::site_asked(text, country) {
         let shown = crate::web::short_url(&url);
         return Some(AskedPage {
-            page: crate::chat::pages::ShownPage { site: crate::web::site_of(&url), url, title: name.clone(), section: String::new() },
+            page: crate::chat::pages::ShownPage { site: crate::web::site_of(&url), url, title: name.clone(), ..Default::default() },
             reply: format!("{name} is open beside the chat."),
             chip: format!("Brought up {shown} beside the chat"),
         });
@@ -44,7 +44,7 @@ pub fn asked_page(text: &str, engine: &str, country: &str, keyless: bool) -> Opt
     }
     let search = crate::web::BrowserSearch::new(engine, &words);
     Some(AskedPage {
-        page: crate::chat::pages::ShownPage { site: crate::web::site_of(&search.url), url: search.url.clone(), title: format!("Search: {}", search.query), section: String::new() },
+        page: crate::chat::pages::ShownPage { site: crate::web::site_of(&search.url), url: search.url.clone(), title: format!("Search: {}", search.query), ..Default::default() },
         reply: format!("The search for \u{201C}{}\u{201D} is open beside the chat, on {}.", search.query, search.engine),
         chip: format!("Brought up a search for \"{}\" beside the chat", search.query),
     })
@@ -87,6 +87,8 @@ pub(super) fn page_turn(
     if let Some(w) = watcher {
         w.send(crate::chat::stream::Event::Page { page: opened.page.clone() });
     }
+    // Its picture for the card in the thread, once the Chat view's tab has it loaded.
+    crate::chat::pages::thumb::take_soon(&opened.page.url);
     let tools_used = vec![opened.chip];
     let index = crate::chat::chats::append(conv.id, "assistant", &opened.reply, &tools_used, None, false)?;
     crate::chat::chats::set_pages(conv.id, index, std::slice::from_ref(&opened.page), &[]);

@@ -217,7 +217,7 @@ fn one_toolset_for_every_model_with_pages_acting_and_shots_only_where_they_may()
     let defs = definitions(Gate::Show, false).to_string();
     assert!(defs.contains("\"offset\"") && defs.contains("\"tables\"") && defs.contains("results for the user: web search finds pages"), "{defs}");
     // The shapes the page and chats.json keep.
-    let p = serde_json::to_value(ShownPage { url: MAP.into(), title: "T".into(), site: "s".into(), section: String::new() }).unwrap();
+    let p = serde_json::to_value(ShownPage { url: MAP.into(), title: "T".into(), site: "s".into(), ..Default::default() }).unwrap();
     assert_eq!(p, json!({ "url": MAP, "title": "T", "site": "s" }));
 }
 
@@ -229,7 +229,7 @@ async fn navigate_opens_a_tab_from_a_link_the_person_gave_a_search_or_a_site_the
     // No tab open: a new one, the page told at once, kept with the answer.
     let r = call(&mut t, NAVIGATE, json!({ "url": MAP }), &log).await.result;
     assert_eq!(r["displayText"], "Brought up maps.example.com/fort-joy beside the chat", "{r}");
-    assert_eq!(t.pages.shown, [ShownPage { url: MAP.into(), title: "maps.example.com".into(), site: "maps.example.com".into(), section: String::new() }]);
+    assert_eq!(t.pages.shown, [ShownPage { url: MAP.into(), title: "maps.example.com".into(), site: "maps.example.com".into(), ..Default::default() }]);
     assert!(log.kinds().contains(&"page".to_string()));
     assert!(!t.seen(), "nothing of the page went to the model");
     // An address the model wrote, nothing from outside in the turn yet: it

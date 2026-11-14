@@ -41,9 +41,10 @@
    * brought up (a `ShownPage`, chat/pages.rs). The files it shared into the
    * conversation (`files`, chat/shares.rs) show under it (SharedFiles, its
    * own chunk): `conversation` the chat's id, `onshared(p)` a shared picture
-   * opened (a `ShownPicture`).
+   * opened (a `ShownPicture`). `pagethumb(url)`: a page's picture taken
+   * since the answer was read (chat/pages/thumb.rs), for its card.
    */
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, actions = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null } = $props();
   // **Under the person's message in a Code chat** (14 Nov 2026, the Claude Code app's: Copy, Rewind, Fork from here;
   // `actions`: `{ rewind, fork }` — why each can't run now, '' when it can —, `onrewind`, `onfork`; agents/rewind.rs).
   const act = (why, run) => () => {
@@ -329,7 +330,7 @@
     {/if}
     {#if pages.length}
       {#await import('./PagePills.svelte') then { default: PagePills }}
-        <PagePills {pages} {onpage} />
+        <PagePills {pages} {onpage} thumbFor={pagethumb} />
       {/await}
     {/if}
   </div>
