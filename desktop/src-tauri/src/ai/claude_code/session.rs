@@ -830,6 +830,12 @@ impl Session {
         lock(&self.shared.state).session_id.clone()
     }
 
+    /// Its `system/init` came: Claude Code started the session (a branch it
+    /// couldn't make never gets there).
+    pub fn started(&self) -> bool {
+        lock(&self.shared.state).init_seen
+    }
+
     /// The latest `system/init`'s capabilities (empty before the first turn).
     #[cfg(test)]
     pub fn capabilities(&self) -> Vec<String> {

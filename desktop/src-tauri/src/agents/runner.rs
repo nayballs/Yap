@@ -846,6 +846,10 @@ fn opening(agent: &Agent, message: Option<&str>, read_only: bool, direct: bool) 
 /// including its message `at`, or — rewound to before its first message,
 /// or no session to fork — a new one. Pure.
 pub(crate) fn branched(session: &str, branch: &store::Branch) -> Conversation {
+    // (The conversation as text instead: a new session.)
+    if branch.seed.is_some() {
+        return Conversation::New(session::new_session_id());
+    }
     let from = branch.from.as_deref().filter(|f| !f.is_empty()).unwrap_or(session);
     match branch.at.as_deref().filter(|a| !a.is_empty()) {
         Some(at) if !from.is_empty() => Conversation::Branch { from: from.to_string(), at: at.to_string() },
@@ -1188,6 +1192,9 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         None if resuming => Conversation::Resume(session_id),
         None => Conversation::New(session_id),
     };
+    // (A branch Claude Code may refuse: if it never starts, the next turn starts afresh with the conversation as text.)
+    let branching = matches!(conversation, Conversation::Branch { .. });
+    let seed = agent.branch.as_ref().and_then(|b| b.seed.clone()).filter(|s| !s.trim().is_empty());
     let mut spec = agent_spec(&agent, &folder, pay, mode, read_only, conversation, run.mcp_config(), run.settings(), run.env());
     // Yap's read tools, where the run has them: no prompt for a read of the
     // person's own data (none for any other run: its list is empty).
@@ -1212,6 +1219,10 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         None => (true, Vec::new(), Vec::new()),
     });
     let mut first = std::iter::once(opening(&agent, message.as_deref(), read_only, direct)).chain(extra.iter().map(|t| format!("Also: {t}"))).collect::<Vec<_>>().join("\n\n");
+    // A rewound or forked chat Claude Code couldn't branch: the conversation kept so far first, as text.
+    if let Some(seed) = &seed {
+        first = format!("{seed}\n\n{first}");
+    }
     // **The screenshots its request came with** (the turn's own, and those
     // of words that came while it started), as Claude Code's own app sends
     // a pasted picture. Never again with a Continue: its session has them.
@@ -1322,7 +1333,13 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     }
     // Unregistered: a permission card still waiting is a no.
     drop(run);
-    (follow.finish(), n)
+    let ended = follow.finish();
+    // A branch Claude Code never started (it refused the point, or the flag): the next turn starts afresh, the
+    // conversation kept so far as text, and the turn says so.
+    if branching && !session.started() && ended == Status::Failed {
+        super::rewind::fall_back(&agent.id, n);
+    }
+    (ended, n)
 }
 
 /// **Following one turn** of an agent.
@@ -3197,14 +3214,17 @@ mod tests {
     /// new one.
     #[test]
     fn a_branch_resumes_claude_codes_own_fork_at_its_message_or_starts_afresh() {
-        let at = |u: Option<&str>| store::Branch { at: u.map(str::to_string), from: None };
+        let at = |u: Option<&str>| store::Branch { at: u.map(str::to_string), ..Default::default() };
         assert_eq!(branched("s-1", &at(Some("u-7"))), Conversation::Branch { from: "s-1".into(), at: "u-7".into() });
         // A forked chat rewound to before its own first turn: the original session, at the fork's point.
-        let back = store::Branch { at: Some("u-3".into()), from: Some("orig".into()) };
+        let back = store::Branch { at: Some("u-3".into()), from: Some("orig".into()), seed: None };
         assert_eq!(branched("s-1", &back), Conversation::Branch { from: "orig".into(), at: "u-3".into() });
         assert!(matches!(branched("s-1", &at(None)), Conversation::New(id) if id != "s-1"));
         assert!(matches!(branched("", &at(Some("u-7"))), Conversation::New(_)));
         assert!(matches!(branched("s-1", &at(Some(""))), Conversation::New(_)));
+        // No branch Claude Code can make: a new session (its first message the conversation as text).
+        let seeded = store::Branch { seed: Some("Me: hello".into()), ..at(Some("u-7")) };
+        assert!(matches!(branched("s-1", &seeded), Conversation::New(id) if id != "s-1"));
     }
 
     /// A picture file read, a screenshot a tool took: the tool result's own

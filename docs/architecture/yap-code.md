@@ -435,6 +435,26 @@ workspace, word for word, and no model of Chat's is asked.
     original chat and its session are untouched, and
     the files are the workspace's (a fork branches the conversation, not
     the folder, as Anthropic's docs say). Once that turn is over only.
+  - **When Claude Code can't make the branch.** `--resume-session-at` is
+    the Agent SDK's documented `resumeSessionAt` ("load the conversation
+    only up to and including the message with this UUID… usually with
+    `fork_session`"), but the CLI reference doesn't list the flag, so a
+    Claude Code may not take it. Yap asks the installed one once
+    (`cli::resumes_at`: a made-up session resumed at a made-up message, so
+    "No conversation found" where the flag is known, "unknown option"
+    where it isn't; nothing is sent anywhere; kept per program and
+    version). Where it isn't taken, or the session isn't on this PC any
+    more, Rewind and Fork set a **seed** instead (`Branch::seed`,
+    `rewind::seed_of`): the next turn starts a new session whose first
+    message is the conversation kept so far as text ("Me: …", "You: …", the
+    latest 24,000 characters, each message at most 4,000), then the
+    person's words. That's Anthropic's own advice for a session that can't
+    be resumed. A branched run Claude Code never starts (it couldn't find
+    the point) fails with "Claude Code couldn't pick the conversation up at
+    that point. Send your message again…" and sets the seed
+    (`rewind::fall_back`), so a chat is never stuck on a branch.
+    Claude Code's transcript files are never read or edited (their format
+    is internal to it).
   - **A message Claude read while it worked** (a note, joined to its turn)
     has neither: rewinding to it would cut a turn in two.
   - Not built: the CLI's "Restore code" alone (Rewind always takes the
@@ -626,7 +646,9 @@ workspace, word for word, and no model of Chat's is asked.
   call is out goes at once and ticks ✓✓, Cancel and edit, Send now (its
   answer only what came after it read it), a message queued in a chat
   left for another going once that chat is shown again, by a click or the
-  bar card's Open; Rewind: unavailable while Claude works, asked first,
+  bar card's Open; Rewind and Fork on a Claude Code without the flag, or
+  one that can't make the branch: a new session with the conversation as
+  text, never stuck; Rewind: unavailable while Claude works, asked first,
   the thread and the box, the turns rewound, the next turn Claude Code's
   own fork at the end of the turn before; to before the first message, the
   file put back and a new session; Fork from here: a new Code chat up to

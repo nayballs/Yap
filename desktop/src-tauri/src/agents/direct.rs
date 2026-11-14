@@ -165,8 +165,11 @@ pub fn send(conversation: u64, folder: &Folder, text: &str, shots: &[String], me
         effort_asked: true,
         mode: mode.as_str().to_string(),
         pay: if cfg.agents_pay == "key" { "key".into() } else { "plan".into() },
-        session: fork.as_ref().map_or_else(session::new_session_id, |f| f.session.clone()),
-        branch: fork.as_ref().map(|f| store::Branch { at: Some(f.at.clone()), from: None }),
+        session: fork.as_ref().filter(|f| f.seed.is_none() && !f.session.is_empty()).map_or_else(session::new_session_id, |f| f.session.clone()),
+        branch: fork.as_ref().map(|f| match &f.seed {
+            Some(seed) => store::Branch { seed: Some(seed.clone()), ..Default::default() },
+            None => store::Branch { at: Some(f.at.clone()), ..Default::default() },
+        }),
         forked: fork,
         status: Status::Queued,
         created_ts: now,
