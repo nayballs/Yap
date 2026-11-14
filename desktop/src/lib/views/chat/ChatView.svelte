@@ -454,6 +454,8 @@
       // The queue: a step beginning takes what waits, a message read ticks ✓✓, a turn's end lets the next go.
       listen('yap-agent', (e) => chat.agentEvent(e.payload)),
       listen('yap-agent-report', (e) => chat.agentReported(e.payload)),
+      // A page's picture for its card, taken once it loaded (chat/pages/thumb.rs).
+      listen('yap-page-thumb', (e) => chat.pageThumbTaken(e.payload)),
       // Whether a spoken question is being listened for (Esc calls it off).
       listen('yap-assistant', (e) => {
         chat.assistantListening = e.payload?.phase === 'listening';

@@ -1121,6 +1121,12 @@ test('its session opens pages in Yap’s browser beside the chat, as Claude Code
   expect(messages[2].text).toBe(OPENED);
   expect(messages[2].pages?.map((p) => p.url)).toEqual([FORT_JOY_URL]);
   expect((await agents(yap)).find((j) => j.id === agent.id).turnList[0].beside?.pages?.length).toBe(1);
+  // Under its answer, the page's card with its picture (chat/pages/thumb.rs), as in Chat — kept with the answer.
+  const card = thread(main).getByTestId('chat-page-card');
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText('wiki.example.com, opened beside the chat');
+  await expect(card.getByTestId('chat-page-thumb')).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => (await messagesOf(yap, done.conversation, 3))[2].pages?.[0]?.thumb?.id ?? '', { timeout: 20_000 }).toMatch(/^img_[0-9a-f]{16}$/);
   await shot(main, '70-a-page-opened-beside-the-chat');
   await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });

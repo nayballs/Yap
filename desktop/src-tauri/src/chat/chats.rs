@@ -244,7 +244,8 @@ pub fn add_question_images(id: u64, images: &[ChatImage]) {
 }
 
 /// Every image id a conversation refers to — a question's screenshots, the
-/// pictures an answer showed (`pictures`) and the ones it shared (`files`) —
+/// pictures an answer showed (`pictures`), the ones it shared (`files`) and
+/// its pages' pictures (`pages[].thumb`) —
 /// (the screenshots sweep keeps
 /// these for their time; anything else goes after a day).
 pub fn image_ids() -> std::collections::HashSet<String> {
@@ -255,7 +256,12 @@ impl ChatMessage {
     /// The chat-images ids this message refers to: its screenshots, the
     /// pictures it showed and the ones it shared.
     pub fn image_ids(&self) -> impl Iterator<Item = String> + '_ {
-        self.images.iter().map(|i| i.id.clone()).chain(self.pictures.iter().map(|p| p.id.clone())).chain(crate::chat::shares::image_ids(&self.files))
+        self.images
+            .iter()
+            .map(|i| i.id.clone())
+            .chain(self.pictures.iter().map(|p| p.id.clone()))
+            .chain(crate::chat::shares::image_ids(&self.files))
+            .chain(self.pages.iter().filter_map(|p| p.thumb.as_ref().map(|t| t.id.clone())))
     }
 }
 
@@ -740,6 +746,8 @@ pub fn delete_where(gone: impl Fn(&Conversation) -> bool) -> Vec<u64> {
 /// Add a whole message to a conversation (a note's Ask thread keeps what
 /// the window showed: `plain`, `stopped`, the model). Returns its index.
 pub fn append_whole(id: u64, mut message: ChatMessage) -> Result<usize, String> {
+    // Its pages' pictures taken already (`pages::thumb`).
+    crate::chat::pages::thumb::fill(&mut message.pages);
     with_store(|s| {
         let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("Conversation not found")?;
         message.ts = now_secs();
@@ -845,10 +853,35 @@ pub fn set_pages(id: u64, index: usize, pages: &[crate::chat::pages::ShownPage],
         let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
         if m.role == "assistant" {
             m.pages = pages.to_vec();
+            // Their pictures taken already (`pages::thumb`; one taken after: `set_page_thumb`).
+            crate::chat::pages::thumb::fill(&mut m.pages);
             m.offers = offers.to_vec();
             save_to_disk(s);
         }
     });
+}
+
+/// **A page's picture, taken after its answer was saved**
+/// (`pages::thumb`): set on the answers of the last hour that brought `url`
+/// up and have none yet, with the page's own title where they knew only its
+/// site. How many it was set on.
+pub fn set_page_thumb(url: &str, taken: &crate::chat::pages::thumb::Taken) -> usize {
+    let key = crate::web::normal_url(url);
+    let since = now_secs().saturating_sub(60 * 60);
+    with_store(|s| {
+        let mut set = 0;
+        for m in s.conversations.iter_mut().flat_map(|c| c.messages.iter_mut()).filter(|m| m.role == "assistant" && m.ts >= since) {
+            for p in m.pages.iter_mut().filter(|p| p.thumb.is_none() && crate::web::normal_url(&p.url) == key) {
+                if crate::chat::pages::thumb::apply(p, taken) {
+                    set += 1;
+                }
+            }
+        }
+        if set > 0 {
+            save_to_disk(s);
+        }
+        set
+    })
 }
 
 /// Keep the questions an answer asked before acting on a page with it
@@ -1740,6 +1773,7 @@ mod tests {
             title: "Fort Joy map".into(),
             site: "maps.example.com".into(),
             section: "Chests".into(),
+            ..Default::default()
         };
         let offer = crate::chat::pages::BrowserOffer { url: page.url.clone(), why: "the interactive map".into(), site: page.site.clone() };
         let m = ChatMessage { role: "assistant".into(), text: "It's open beside the chat.".into(), pages: vec![page.clone()], offers: vec![offer.clone()], ..Default::default() };
