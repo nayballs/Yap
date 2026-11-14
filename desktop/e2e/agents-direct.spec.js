@@ -700,7 +700,7 @@ test('a message while Claude writes waits in the queue, a bubble of its own, the
   await expect(queuedBubble(main).getByRole('button', { name: 'Send now' })).toBeVisible();
   await shot(main, '90-a-queued-message');
   // Something typed meanwhile stays in the box: the queued message goes with its own words only.
-  const box = main.locator('.composer textarea, .composer [contenteditable]').first();
+  const box = main.getByRole('textbox', { name: 'Message' });
   await box.fill('A draft, not sent yet');
   // The first turn's answer is its own; then the message goes as the next turn, its own answer.
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 40_000 }).toBe(2);

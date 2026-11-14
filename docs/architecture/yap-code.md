@@ -390,8 +390,12 @@ workspace, word for word, and no model of Chat's is asked.
     turn of Claude Code's own, as below); the turn's words are split where
     it read it (`Follow::split_at`), so its answer is only what came after,
     and what came before stays the work under the first message.
-  - **Never queued**: a message with a screenshot, a quoted passage or a
-    Skill (it goes as before), a plain chat's, or a phone's.
+  - **It goes with its own words only**: whatever is in the box as it goes
+    (words being typed, a screenshot, a picked element, a passage, Think)
+    stays there for the next message.
+  - **Never queued**: a message with a screenshot, a picked element, a
+    quoted passage or a Skill (it goes as before), a plain chat's, or a
+    phone's.
   - Not built: Claude Code app's Rewind and Fork from here on a message.
 - **Asked out loud, or from a phone** (2026-11-12; the maintainer:
   "please do all of this"): the Voice Assistant's question asked **with
