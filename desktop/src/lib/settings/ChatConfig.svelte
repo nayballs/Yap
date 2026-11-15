@@ -81,6 +81,17 @@
       desc="The Voice Assistant asks this model too, and reads its answers aloud"
       onclick={openVoiceAssistant}
     />
+    {#if cfg}
+      <!-- A new document's outline as a card first: Go, or Edit (chat/cards/outline.rs). -->
+      <Row setting="chat-outline-review">
+        <Toggle
+          bind:checked={cfg.chatOutlineReview}
+          label="Show the outline before writing"
+          desc="Before Chat writes a document, its headings show in the chat: Go, or Edit them and add a note"
+          hint="Asked out loud, Yap says the headings: say “go ahead”, or what to change. Off, the document is written straight away."
+        />
+      </Row>
+    {/if}
   </Group>
 
   {#if enabled}

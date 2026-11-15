@@ -1283,6 +1283,35 @@ turn simply ended: nothing carried on, though "yes" plainly meant go ahead.
 - **Not yet** (denied): Claude is told to change nothing and end with the
   plan as it is; it stays a plan, reported as before ("The agent's plan is
   ready").
+- **Comments on the plan** (15 Nov 2026, the Claude app's plan review;
+  `AgentApprove.svelte`, `views/chat/planComments.js`): select words of the
+  plan on its card and a **Comment** button shows by them; or **Add a
+  comment** (the selected words if there are some, else the whole plan).
+  Each comment is listed under the plan ("“seedlings every morning”" over
+  the words, × to take it back), its words marked in the plan
+  (`markQuotes`); kept in `agents.planComments` while the card waits, so a
+  redraw keeps them. With a comment, **Revise the plan · 2** leads (Go ahead
+  and Not yet stay beside it). It sends them (`claude_approve_revise {id,
+  comments: [{quote, text}]}`, `approve::Book::revise`: a plan's card only,
+  something to say only, at most 20): ExitPlanMode is refused with them
+  (`Outcome::Revised`, `approve::revise_message`: "The user reviewed your
+  plan in Yap and left comments on it. Stay in plan mode and change nothing
+  yet. Revise the plan so it answers every comment… then call ExitPlanMode
+  again with the whole revised plan." and the comments numbered, "On “…”:" or
+  "On the whole plan:"), so **Claude Code stays in Plan mode, this turn still,
+  and answers with a new plan**: another card, "The agent's revised plan is
+  ready". The old plan and its comments are kept on the turn
+  (`runner::plan_revised` → `TurnNote::plans_before` `[{plan, comments, ts}]`,
+  `yap-agent` `changed: "plan-revised"`; an older Yap's save drops it) and
+  shown **folded** in the thread under the turn's work, as "Plan from before
+  your last message" keeps the to-dos (`PlanHistory.svelte`: "Plan before your
+  comments · 2 comments", opened the plan with the commented words marked and
+  the comments; "Revising the plan with your comments…" while the new one is
+  written). Such a refusal is never a denial of the agent's
+  (`runner::revised_plan`, `approve::REVISE_LEAD`: left out of the turn's
+  denials and its steps). **Go ahead** works on the revised plan as on any.
+  The bar's card and a phone keep Go ahead / Not yet (comments are the
+  thread's).
 - **Go ahead on the report** (`AgentReportCard.svelte`, `agent_go_ahead`,
   `runner::go_ahead`): a "The agent's plan is ready" card whose plan is still the
   agent's latest turn, and still waiting (not set aside as "Plan not used":
@@ -2786,7 +2815,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
 | `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs, questions?}` (`questions`: a question card's, `tool` "AskUserQuestion": `[{question, header, options: [{label, description}], multiSelect}]`, its `summary` the first question) — `run` is the agent's id; a plan's (`tool` "ExitPlanMode"): `summary` "The plan is ready", `detail` the plan |
-| `yap-claude-approve-done` | `{id, run, outcome, by, byName?, byDevice?}` — outcome allowed \| denied \| timedOut \| ended \| cancelled; `by` "pc", "phone" (a paired phone: its name and id, Remote Control) or null |
+| `yap-claude-approve-done` | `{id, run, outcome, by, byName?, byDevice?}` — outcome allowed \| denied \| timedOut \| ended \| cancelled \| revised (a plan sent back with comments, 15 Nov 2026); `by` "pc", "phone" (a paired phone: its name and id, Remote Control) or null |
 | `yap-agent-mode` | `{conversation, mode}` — a chat's Mode changed (the chip, or a phone) |
 | `yap-code-run` | `{id, conversation, text?, run?}`: a ▶ Run's news (`agents/run_block.rs`): `run` when it starts and ends (`{id, conversation, command, shell, ranIn, note?, state, code?, startedMs, endedMs, cut}`, state running \| done \| failed \| stopped), `text` its new output |
 | `yap-code-chat` | `{conversations, folder, removed?}` — those chats are Code chats in `folder` now (`null`: plain); `removed`: a workspace removed in Settings, its name; no conversations: the workspaces changed |
@@ -2979,7 +3008,12 @@ the build's own stand-in replaying `script` from now on),
     and on the bar, Go ahead carrying the plan out at once at the chip's
     mode on `--resume`, its report "The agent is carrying out its plan"; Not yet a
     plan, the report card's Go ahead once, the bar's "The agent's plan is ready"
-    Go ahead. Light and dark.
+    Go ahead. **Comments on a plan** (15 Nov 2026): words selected and
+    commented on, a comment on the whole plan, one taken back; Revise the plan
+    (the stand-in's `_mcp approve` `dump` reads the comments Claude Code got,
+    its next ExitPlanMode the revised plan's card), the old plan folded with
+    its comments (`plansBefore` in agents.json), then Go ahead as ever. Light
+    and dark.
 - **Unit** for Code chats and memory: `chat::turn::prompt` (a Code chat's
   whole prompt built), `chat::turn::plan` (the `Spec`),
   `claude_plan::sessions` (the transcript under the workspace by its ids),

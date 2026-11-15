@@ -701,6 +701,8 @@ pub struct Turn {
     passages: Mutex<Vec<(usize, String)>>,
     /// …and the ones a document cites (the answer's sources).
     cited: Mutex<Vec<usize>>,
+    /// How many outlines this turn showed the person (`cards/outline.rs`).
+    reviews: std::sync::atomic::AtomicUsize,
 }
 
 impl Turn {
@@ -729,6 +731,12 @@ impl Turn {
             }
         }
         name_citations(text, &labels)
+    }
+
+    /// **One more outline shown** this turn (`cards/outline.rs`): how many
+    /// now, this one included.
+    pub fn reviewed(&self) -> usize {
+        self.reviews.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
     }
 
     /// The passages this turn's documents cite.

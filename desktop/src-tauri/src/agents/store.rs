@@ -440,6 +440,34 @@ pub struct TurnNote {
     /// its save, and the turn's pill then finds no message of its own.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub rewound: bool,
+    /// **Its plans before the person's comments** (15 Nov 2026, Plan mode's
+    /// review, as the Claude app's): each plan this turn showed that the
+    /// person sent back with comments ("Revise the plan",
+    /// `claude_live/approve.rs`), oldest first, with those comments — kept
+    /// folded in the thread above the plan that followed. A new field of the
+    /// turn's own: an older Yap drops it on its save (the latest plan stays).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub plans_before: Vec<PlanBefore>,
+}
+
+/// **A plan sent back with comments** ([`TurnNote::plans_before`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PlanBefore {
+    /// The plan as Claude wrote it (markdown).
+    pub plan: String,
+    pub comments: Vec<PlanComment>,
+    /// When it was sent back (unix seconds).
+    pub ts: u64,
+}
+
+/// **A comment on a plan**: the words of the plan it's on (`quote`, empty:
+/// the whole plan) and what the person said about them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PlanComment {
+    pub quote: String,
+    pub text: String,
 }
 
 /// **Where an agent's next run starts its session** ([`Agent::branch`]):

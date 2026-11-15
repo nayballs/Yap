@@ -11,12 +11,15 @@
   // chunk. An agent about to start (act "agent") has a card of its own,
   // AgentConfirm.svelte, and so does a connector's tool (act "connector"),
   // ConnectorConfirm.svelte — and a question of Chat's own model (act
-  // "question", chat/cards/ask.rs), ChatQuestion.svelte.
+  // "question", chat/cards/ask.rs), ChatQuestion.svelte — and a new
+  // document's outline before the writing (act "outline",
+  // chat/cards/outline.rs), OutlineCard.svelte.
   import { invoke } from '@tauri-apps/api/core';
   import { questionParts, whyOf, doneWords } from './pageConfirm.js';
   import AgentConfirm from './AgentConfirm.svelte';
   import ConnectorConfirm from './ConnectorConfirm.svelte';
   import ChatQuestion from './ChatQuestion.svelte';
+  import OutlineCard from './OutlineCard.svelte';
 
   /** `confirms`: the turn's questions (`confirm` events: id, label, site, does, state, act, text). */
   let { confirms = [] } = $props();
@@ -45,6 +48,8 @@
     <ConnectorConfirm card={c} />
   {:else if c.act === 'question'}
     <ChatQuestion card={c} />
+  {:else if c.act === 'outline'}
+    <OutlineCard card={c} />
   {:else}
   <div class="pconfirm" class:asking={st === 'asking'} role="group" aria-label="Yap asks before acting on the page" data-testid="chat-page-confirm" data-state={st}>
     <svg class="picon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z" /><path d="M12 8v5M12 16.5v.01" /></svg>

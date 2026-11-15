@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn the_cards_are_listed_as_the_tool_loop_has_them() {
-        let all = definitions(Cards { ask: true, next_step: true, chapters: true });
+        let all = definitions(Cards { ask: true, next_step: true, chapters: true, outline: false });
         let names: Vec<&str> = all.iter().filter_map(|d| d["name"].as_str()).collect();
         assert_eq!(names, cards::NAMES);
         assert_eq!(all[0]["inputSchema"]["required"], json!(["questions"]));
