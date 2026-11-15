@@ -77,6 +77,8 @@ export const FIELD_DEFAULTS = {
   snipCopy: true,
   chatImageDays: 30,
   chatFileDays: 30,
+  // "Archive chats you haven't used in" (chat/auto_archive.rs): 7 / 30 / 90 days, 0 = never.
+  chatArchiveDays: 0,
   snipSaveDir: '',
   streamingPartials: true,
   historyEnabled: true,

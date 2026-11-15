@@ -520,6 +520,10 @@ pub fn run() {
             chat::commands::chat_tabs_closed,
             chat::commands::chats_archived,
             chat::commands::chat_archive,
+            chat::auto_archive::chat_queued,
+            chat::auto_archive::chats_auto_archive_unsaid,
+            chat::auto_archive::chats_auto_archive_said,
+            chat::auto_archive::chats_auto_archive_undo,
             chat::commands::chat_send,
             chat::shares::chat_file_open,
             chat::shares::chat_file_reveal,
@@ -967,6 +971,8 @@ pub fn run() {
             ai::local_llm::vision::e2e_local_vision,
             #[cfg(debug_assertions)]
             notices::policy::e2e_notice_reset,
+            #[cfg(debug_assertions)]
+            chat::auto_archive::e2e_chat_auto_archive,
             #[cfg(debug_assertions)]
             notices::policy::e2e_notice,
             #[cfg(debug_assertions)]
@@ -1440,6 +1446,8 @@ pub fn run() {
             chat::pages::view::init(&handle);
             // Which conversations are answering (chat/stream.rs): Chat's status dots.
             chat::stream::init(&handle);
+            // Chats not used in a while archived (chat/auto_archive.rs; off by default): soon, then daily.
+            chat::auto_archive::init(&handle);
 
             // A saved transform's shortcut (transforms.rs): its slot, run on
             // its own thread.
@@ -1566,6 +1574,8 @@ pub fn run() {
                             // moves into the window (one place: notices/policy.rs).
                             calls::meeting_detect::on_main_window_focused(&focus_handle);
                             calendar::on_main_window_focused();
+                            // …and chats archived while the person was away are said.
+                            chat::auto_archive::on_main_window_focused(&focus_handle);
                             // Files dragged in from Explorer: any input window
                             // WebView2 made anew gets Yap's drop target.
                             shell::file_drop::attach(&w);

@@ -826,6 +826,8 @@ pub fn e2e_focus(app: AppHandle, focused: bool, beside: Option<bool>) -> Result<
     // way).
     if focused {
         crate::calls::meeting_detect::on_main_window_focused(&app);
+        // …and chats archived while away are said (chat/auto_archive.rs).
+        crate::chat::auto_archive::on_main_window_focused(&app);
     }
     crate::calendar::on_main_window_focused();
     Ok(())

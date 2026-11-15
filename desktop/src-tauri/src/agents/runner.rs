@@ -692,6 +692,14 @@ pub fn active(id: &str) -> bool {
     with_state(|s| s.live.contains_key(id) || s.queue.iter().any(|(q, _, _)| q == id))
 }
 
+/// **The chats with an agent at work now** (working, starting, a turn
+/// queued, or waiting for a slot; a Code chat's own Claude is one too):
+/// auto-archive never takes them (`chat/auto_archive.rs`).
+pub fn working_chats() -> Vec<u64> {
+    let mine: Vec<(String, u64)> = store::list().into_iter().filter_map(|a| a.conversation.map(|c| (a.id, c))).collect();
+    with_state(|s| mine.into_iter().filter(|(id, _)| s.live.contains_key(id) || s.queue.iter().any(|(q, _, _)| q == id)).map(|(_, c)| c).collect())
+}
+
 /// **A turn began**: the plans in its chat nobody acted on set aside
 /// (`store::plans_aside`), and every page told ("planUnused").
 fn plans_aside_told() {

@@ -25,7 +25,9 @@ one side.
   on)` in one write, its place in the list kept; `list` leaves archived ones
   out, `list_archived` has them, archived last first; `latest` — the Voice
   Assistant's — skips them; a message added to an archived conversation
-  brings it back; commands `chats_archived`, `chat_archive(ids, archived?)`);
+  brings it back; commands `chats_archived`, `chat_archive(ids, archived?)`;
+  2026-11-15, **auto-archive**: chats not used in a while archived by
+  themselves, `chat/auto_archive.rs`, [below](#auto-archive-2026-11-15));
   every save tells search by meaning (`search::changed`), a deletion
   `search::removed` (its vectors go, [search.md](./search.md)); `with_all` /
   `stamp` for the index; `chat_send` (`chat/commands.rs`; the turn itself is
@@ -1924,6 +1926,10 @@ one side.
   written (Normal, Concise, Explanatory, Formal, your own), picked from the
   composer's Style chip, a block in the system prompt
   ([below](#styles-2026-11-15)).
+- **`chat/auto_archive.rs`** — **Auto-archive** (15 Nov 2026, the Claude
+  app's): chats not used in 7, 30 or 90 days moved to Archived by
+  themselves, at start and once a day, never one at work; off by default
+  ([below](#auto-archive-2026-11-15)).
 
 ## Questions about selected text (2026-10-31)
 
@@ -5808,3 +5814,62 @@ never an incognito chat.
   refused, a new chat in it carrying its block, another chat moved in from
   its ⋯, its page listing both, deleted with its chats kept; light and
   dark).
+
+## Auto-archive (2026-11-15)
+
+After the Claude app's auto-archive: Chat's list keeps to the chats in use.
+**Settings → Privacy & data → Chats → "Archive chats you haven't used in"**
+(`chat_archive_days`: Never, the default, 7, 30 or 90 days; found by
+Settings' search as "archive", "auto-archive", "old chats"…). With it set,
+a chat whose last message is that many days old or more moves to
+**Archived** by itself (`chat/auto_archive.rs`):
+
+- **Which chats.** Chat and Code chats alike; a project's chat too, keeping
+  its project (`projects.json` is never touched, so Restore puts it back
+  in it). **Never** a chat at work (`at_work`): a turn answering it
+  (`stream::answering_ids`), an agent working, starting, queued or waiting
+  for a slot in it — a Code chat's own Claude is one
+  (`runner::working_chats`) — a ▶ Run still running
+  (`run_block::running_chats`), or a message waiting in the page's queue
+  (`chatState` tells Rust which chats have one, `chat_queued`, and `[]` as
+  Chat closes); nor the chat the Chat view shows
+  (`assistant::shown_conversation`), an incognito chat, a meeting's Ask
+  thread (`note`), or one archived already. Chats can't be pinned.
+- **"Used"** is the chat's last message: `updated_ts` (never older than
+  `created_ts`). Yap keeps no time a chat was opened, and archiving or
+  restoring doesn't change it — so Undo brings a chat back as old as it
+  was, and the next run takes it again unless it's used. A chat with no
+  time at all, or one "used" after now (a clock set back), is left alone.
+- **When.** 20 s after Yap starts (a test run: 1 s), then once a day by the
+  wall clock (the thread looks hourly: a PC asleep doesn't count towards
+  a sleep), and at once when the setting is set or changed
+  (`on_config_saved`, as "Keep chat screenshots" sweeps). **Each run is
+  one `chats::set_archived` write**; a run with nothing due writes
+  nothing. The pages hear `yap-chats-archived` (`{ids, archived}`): Chat's
+  list and its Archived look again.
+- **What it says.** A run that archived something says so once, quietly:
+  a toast in Yap's own window while the person is in it (the notice
+  policy's window place, `notices/policy.rs`: `window_view`'s "in front")
+  — never a card on the Yap bar nor a Windows notification. Until then it
+  waits (`UNSAID`, in memory), said when the main window next comes to
+  the front (`on_main_window_focused`: the Focused event, `show_settings`,
+  a test's `e2e_focus`) or as the window starts listening
+  (`chats_auto_archive_unsaid`). Runs not said yet are said as one.
+  `yap-chats-auto-archived` `{ids, days}` → `notices/chatsArchived.js`: an
+  info toast (held while a dictation runs, one at a time), "Archived 3
+  chats you hadn't used in 30 days" — "They're in Archived, at the foot of
+  Chat's list. A new message brings one back." — with **Undo**
+  (`chats_auto_archive_undo`: those chats back, one write); shown, it's
+  told back (`chats_auto_archive_said`). The log says how many, never
+  which or what.
+- **A message** in an archived chat still brings it back
+  (`append_message`), as for one archived by hand.
+- Tests: `cargo test chat::auto_archive` (the rule with the clock passed
+  in: the days to the second, off, a clock set back, no time; never a
+  chat at work, incognito, a meeting's or archived; a Code chat like any
+  other; a run in one write, its project kept, nothing due nothing
+  written, a message bringing one back; runs said as one);
+  `chat-auto-archive.spec.js` (archived at start, a newer chat and a
+  meeting's Ask kept, the setting on its page, Undo; a run's notice with
+  Undo, a Code chat with a ▶ Run running kept until it's stopped, then
+  archived).

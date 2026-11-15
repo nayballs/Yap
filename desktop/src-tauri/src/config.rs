@@ -439,6 +439,14 @@ pub struct YapConfig {
     /// whatever this says. Default 30.
     #[serde(default = "default_chat_file_days")]
     pub chat_file_days: u32,
+    /// "Archive chats you haven't used in" (Settings → Privacy & data, 15
+    /// Nov 2026, the Claude app's auto-archive; `chat/auto_archive.rs`):
+    /// days since a chat's last message after which it moves to Archived
+    /// chats, checked at start and once a day (7, 30, 90; 0 = never).
+    /// Chat and Code chats, never one at work, incognito or a meeting's.
+    /// Default 0: off.
+    #[serde(default)]
+    pub chat_archive_days: u32,
     /// Snip to Chat's **Save** (Shift as you let go, Ctrl+S, a chat
     /// screenshot's "Save image as…"): the folder the Save dialog opened in
     /// last (`snip::copy_save`). Empty = Pictures.
@@ -1623,6 +1631,7 @@ impl Default for YapConfig {
             snip_copy: true,
             chat_image_days: default_chat_image_days(),
             chat_file_days: default_chat_file_days(),
+            chat_archive_days: 0,
             snip_save_dir: String::new(),
             model_size: default_model_size(),
             use_gpu: true,
