@@ -126,6 +126,15 @@ pub(crate) fn in_chat(cfg: &YapConfig, provider: &str, model: &str, base_url: &s
 /// "Bring up <address>" opened the page with the session never told; its
 /// Claude has Yap's browser now, as Claude Code's own app has its pane).
 fn to_its_session(cfg: &YapConfig, conversation: Option<u64>, scope: Option<&str>) -> bool {
+    let away = scope == Some("assistant") && !crate::chat::assistant::asked_in_chat();
+    goes_to_session(cfg, conversation, away, scope == Some("meetings"))
+}
+
+/// [`to_its_session`] with where it was asked said outright: `away`, the
+/// Voice Assistant's question asked from another app; `meetings`, asked
+/// across the meetings. (The Voice Assistant asks before its turn runs:
+/// `assistant::to_chat_queue`.)
+pub(crate) fn goes_to_session(cfg: &YapConfig, conversation: Option<u64>, away: bool, meetings: bool) -> bool {
     // (A new chat's first question: the workspace the page picked for it, before its conversation is made.)
     let code_chat = match conversation {
         Some(_) => crate::agents::code_chat::folder_of(conversation).is_some(),
@@ -135,14 +144,13 @@ fn to_its_session(cfg: &YapConfig, conversation: Option<u64>, scope: Option<&str
         return false;
     }
     let on_plan = resolve_chat_endpoint(cfg).is_ok_and(|e| e.3 == crate::ai::claude_plan::PROVIDER);
-    let away = scope == Some("assistant") && !crate::chat::assistant::asked_in_chat();
     crate::agents::direct::applies(crate::agents::direct::Message {
         setting: cfg.agents_direct,
         offered: crate::agents::offered(cfg),
         code_chat,
         on_plan,
         away,
-        with_more: scope == Some("meetings"),
+        with_more: meetings,
     })
 }
 

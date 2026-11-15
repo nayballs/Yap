@@ -1403,7 +1403,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // went straight into the turn, and one Claude read after its answer had ended came back joined to that answer and
   // shown twice. A Code chat that works directly only (`queueGate`: its session working).
 
-  /** Messages waiting for Claude: `{ qid, conv, text, at }`, in order. */
+  /** Messages waiting for Claude: `{ qid, conv, text, voice, at, later?, plain? }`, in order (`voice`: dictated or
+   * asked out loud — its answer is read aloud as a spoken one's is, `turn/report.rs`; `later`: queued on purpose,
+   * Ctrl+Enter — it waits for the turn's end, never handed over at a step; `plain`: in a chat that isn't a Code chat,
+   * waiting for the answer being written). */
   let queued = $state([]);
   let queueSeq = 0;
   /** Whether a message sent now might wait (ChatView: a Code chat is shown); Rust's `agent_queue` says if it does. */
@@ -1428,8 +1431,28 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     for (let i = 0; sending && i < 300; i++) await new Promise((r) => setTimeout(r, 100));
     if (sending || q.conv !== activeId || !queued.some((x) => x.qid === q.qid)) return false;
     queued = queued.filter((x) => x.qid !== q.qid);
-    await send({ text: q.text, fromQueue: how });
+    await send({ text: q.text, fromQueue: how, voice: !!q.voice });
     return true;
+  }
+
+  /**
+   * **A question asked out loud while Claude works in the Code chat shown** (`yap-chat-spoken`, chat/assistant.rs
+   * `to_chat_queue`; 15 Nov 2026, the maintainer: "it's just text"): the person's words for Claude, as a typed
+   * message is — so it goes as one does: Queued while Claude writes its answer, at once (✓, then ✓✓) while a step is
+   * under way, as ever once it's done. Marked spoken: its answer is read aloud.
+   */
+  async function spokenWhileWorking(p) {
+    const text = String(p?.text ?? '').trim();
+    const conv = p?.conversation;
+    if (!text || conv == null) return;
+    for (let i = 0; sending && i < 300; i++) await new Promise((r) => setTimeout(r, 100));
+    // Another chat shown by now, or a send still going: it waits in its own chat's queue (never lost).
+    if (conv !== activeId || sending) {
+      queued = [...queued, { qid: `q${++queueSeq}`, conv, text, voice: true, at: Date.now() }];
+      if (conv !== activeId) waitingOpen.add(conv);
+      return;
+    }
+    await send({ text, voice: true, spoken: true });
   }
   /** Chats with messages waiting that went unsent while another chat was shown: tried again as they open. */
   const waitingOpen = new Set();
@@ -1516,6 +1539,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (!q) return;
     queued = queued.filter((x) => x.qid !== qid);
     input = input.trim() ? `${q.text}\n${input}` : q.text;
+    // (Asked out loud: still spoken words in the box, as dictated ones are.)
+    if (q.voice) byVoice = true;
   }
 
   /** Send now: to Claude at once (it takes it in at its next step, or as its next turn). */
@@ -1541,11 +1566,16 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
     if (!queuedIn(conv).length) return;
     if (p.call && p.step && isLive(p.status) && !p.under) {
+      // (Working again: a release timed for the end of an earlier turn would hand one over mid-turn.)
+      clearTimeout(releaseAfter.get(conv));
       releaseAfter.delete(conv);
-      const waiting = queuedIn(conv);
-      (async () => {
-        for (const q of waiting) if (!(await sendQueued(q, 'step'))) break;
-      })();
+      // (One queued on purpose, Ctrl+Enter, waits for the turn's end: never handed over at a step.)
+      const waiting = queuedIn(conv).filter((q) => !q.later);
+      if (waiting.length) {
+        (async () => {
+          for (const q of waiting) if (!(await sendQueued(q, 'step'))) break;
+        })();
+      }
       return;
     }
     if (!isLive(p.status)) {
@@ -1566,6 +1596,21 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     releaseAfter.delete(conv);
     const next = queuedIn(conv)[0];
     if (next) sendQueued(next, 'turn');
+  }
+
+  /** An answer of Chat's own is in (not one a Code chat's session writes): the first message queued for after it
+   * goes now — unless that chat's session is at work by now, whose turn's end hands it over (`agentEvent`). */
+  async function afterAnswer(conv) {
+    if (!queuedIn(conv).length) return;
+    let state = 'idle';
+    if (queueGate()) {
+      try {
+        state = await invoke('agent_queue', { conversation: conv });
+      } catch {
+        /* as ever */
+      }
+    }
+    if (state === 'idle') release(conv);
   }
 
   // ---- a page's picture for its card (14 Nov 2026, chat/pages/thumb.rs): taken once the page an answer brought
@@ -1609,18 +1654,34 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // take it (its next step) or its turn ends. With a screenshot, a picked element, a passage or a Skill it goes
     // now, as before.
     let queuedHow = opts?.fromQueue ?? null;
-    if (fromBox && text && !shots.length && !elements.length && !quote && activeId != null && !sending && !skills.parse(text)?.skill && queueGate()) {
+    // **Ctrl+Enter: queued on purpose** (15 Nov 2026; the Claude app's box says "Enter to send, Ctrl+Enter to queue
+    // for later"): while the Code chat's Claude works it waits for the turn's end even with a tool call out (Enter
+    // hands it over at the next step), and while an answer is written in any chat it waits for that answer (Enter
+    // waits for nothing then). With nothing going on it's sent as Enter sends it.
+    const later = fromBox && opts?.later === true;
+    // (Asked out loud, `spokenWhileWorking`: its words alone, never the box's screenshots, elements or passage.)
+    const queueable = fromBox ? !shots.length && !elements.length && !quote : opts?.spoken === true;
+    const gated = queueGate();
+    if (queueable && text && activeId != null && (!sending || later) && (gated || later) && !skills.parse(text)?.skill) {
       // Rust says (agents/runner.rs `queue_state`): writing its answer — it waits; a tool call out — it goes now,
       // read as that ends (✓, then ✓✓); nothing of the chat's own working — sent as ever.
       let state = 'idle';
-      try {
-        state = await invoke('agent_queue', { conversation: activeId });
-      } catch {
-        /* an older Yap: as ever */
+      if (gated) {
+        try {
+          state = await invoke('agent_queue', { conversation: activeId });
+        } catch {
+          /* an older Yap: as ever */
+        }
       }
-      if (state === 'writing') {
-        queued = [...queued, { qid: `q${++queueSeq}`, conv: activeId, text, at: Date.now() }];
-        input = '';
+      if (state === 'writing' || (later && (state === 'taking' || sending))) {
+        // (Dictated into the box: it stays spoken as it waits.)
+        const spoken = fromBox ? byVoice : opts?.voice === true;
+        const how = later ? { later: true, ...(gated ? {} : { plain: true }) } : {};
+        queued = [...queued, { qid: `q${++queueSeq}`, conv: activeId, text, voice: spoken, at: Date.now(), ...how }];
+        if (fromBox) {
+          input = '';
+          byVoice = false;
+        }
         followThread();
         return;
       }
@@ -1636,7 +1697,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       return;
     }
     if (fromBox) tooLong = '';
-    const voice = fromBox && byVoice;
+    // (One from the queue, or asked out loud while Claude worked: as it came.)
+    const voice = fromBox ? byVoice : opts?.voice === true;
     // "/decisions last week" (or a one-tap prompt): a Skill, asked across
     // the meetings (chat/skills.rs).
     const skill = opts?.skill ?? skills.parse(text)?.skill?.command ?? null;
@@ -1735,9 +1797,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     );
     rec.stop = call.stop;
     rec.supersede = call.supersede;
+    let answered = false;
     try {
       const res = await call.promise;
       if (!alive) return;
+      // (Answered: what was queued for after it may go — a Code chat's session hands its own over, `agentEvent`.)
+      answered = !res.direct;
       if (res.conversationId != null && rec.conv !== res.conversationId) {
         const shownHere = isShown(rec);
         adopt(rec, res.conversationId);
@@ -1914,7 +1979,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (alive && sendWhenFree === rec) {
         sendWhenFree = null;
         send();
-      }
+      } else if (alive && answered && rec.conv != null) afterAnswer(rec.conv);
     }
   }
 
@@ -2036,6 +2101,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     forkAt,
     agentEvent,
     agentReported,
+    spokenWhileWorking,
     get doc() { return doc; },
     get connectors() { return connectors; },
     get conversations() { return conversations; },

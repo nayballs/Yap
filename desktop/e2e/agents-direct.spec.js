@@ -146,6 +146,17 @@ const SLOWISH = [
   { _wait_user: true },
 ];
 
+/** Reads a file for a while (a tool call out), answers, then answers the next message as a turn of its own. */
+const READS_THEN_ANSWERS = [
+  ...SLOWISH.slice(0, 6),
+  said('s1b', [{ type: 'text', text: 'Answer to: {{user_text}} Noted: {{notes}}' }], 'end_turn'),
+  result('Answer to: {{user_text}} Noted: {{notes}}', 0.01),
+  { _wait_user: true },
+  said('s2', [{ type: 'text', text: 'Answer to: {{user_text}}' }], 'end_turn'),
+  result('Answer to: {{user_text}}', 0.01),
+  { _wait_user: true },
+];
+
 /** Writes for a while with no tool call, then answers the message it has; a message read after that answer is a turn of
  * its own in the same process (as Claude Code does), answered the same way. */
 const WRITES_SLOWLY = [
@@ -737,6 +748,73 @@ test('a message while Claude writes waits in the queue, a bubble of its own, the
   await expect(ticksOf(main)).toHaveAttribute('data-state', 'read');
   await expect(box).toHaveValue('A draft, not sent yet');
   await shot(main, '91-each-its-own-answer');
+});
+
+// The Claude app's box while Claude works: "Enter to send, Ctrl+Enter to queue for later" (15 Nov 2026). Ctrl+Enter queues
+// a message on purpose — even with a tool call out, when Enter hands it to Claude at once — and it goes as the next turn.
+test('Ctrl+Enter queues a message for later even with a tool call out: it waits for the turn to end, then is its own turn', async ({ yap, main, shot }) => {
+  test.setTimeout(90_000);
+  await script(yap, READS_THEN_ANSWERS, 'reads-then-answers');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Read notes.md.');
+  const agent = await newAgent(yap, before);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  const box = main.getByRole('textbox', { name: 'Message' });
+  // The box says how, as the Claude app's does while it works.
+  await expect(box).toHaveAttribute('placeholder', 'Enter to send, Ctrl+Enter to queue for later');
+  // A tool call out (Enter would hand it over now): Ctrl+Enter keeps it for later.
+  await expect.poll(() => yap.invoke('agent_queue', { conversation: agent.conversation }), { timeout: 15_000 }).toBe('taking');
+  await box.fill('Keep the headings as they are.');
+  await box.press('Control+Enter');
+  await expect(queuedBubble(main)).toHaveCount(1);
+  await expect(queuedBubble(main)).toContainText('Keep the headings as they are.');
+  await expect(queuedBubble(main).locator('[data-later="true"]')).toHaveCount(1);
+  await expect(box).toHaveValue('');
+  await shot(main, '93-queued-for-later');
+  // Never handed over mid-turn: the first turn ends without it, then it's the next turn, its own answer.
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 40_000 }).toBe(2);
+  await expect(queuedBubble(main)).toHaveCount(0);
+  const done = await ended(yap, agent.id, 40_000);
+  expect(done.turnList.map((t) => [t.n, t.request])).toEqual([[1, 'Read notes.md.'], [2, 'Keep the headings as they are.']]);
+  const messages = await messagesOf(yap, done.conversation, 6);
+  expect(messages[2].text).not.toContain('Keep the headings');
+  expect(messages[5].text).toContain('Answer to: Keep the headings as they are.');
+  await expect(ticksOf(main)).toHaveAttribute('data-state', 'read');
+});
+
+// The maintainer, 15 Nov 2026: "it's just text" — a question asked out loud (the Voice Assistant's shortcut, the Code
+// chat in view) while Claude wrote went into its turn at once, past the queue. It goes through the same queue now.
+test('asked out loud while Claude writes: it waits in the queue as a typed message does, then its own turn, its answer read aloud', async ({ yap, main, shot }) => {
+  test.setTimeout(90_000);
+  await script(yap, WRITES_SLOWLY, 'writes-slowly');
+  await setConfig(yap, main, { speakReplies: true, agentsSpeak: 'voice' });
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Write a paragraph.');
+  const agent = await newAgent(yap, before);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  await askAloud(yap, 'Hello next');
+  // Waiting as a typed one would: its own bubble, Queued, the mic a spoken message has; nothing sent to Claude yet.
+  await expect(queuedBubble(main)).toHaveCount(1);
+  await expect(queuedBubble(main)).toContainText(/hello next/i);
+  await expect(queuedBubble(main)).toContainText('Queued');
+  await expect(queuedBubble(main).getByTestId('chat-queued-voice')).toBeVisible();
+  expect((await agents(yap)).find((j) => j.id === agent.id).turnList).toHaveLength(1);
+  await shot(main, '92-a-spoken-message-queued');
+  // The first turn's answer is its own; then it goes as the next turn, its own answer.
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 40_000 }).toBe(2);
+  await expect(queuedBubble(main)).toHaveCount(0);
+  const done = await ended(yap, agent.id, 40_000);
+  expect(done.turnList[1].request).toMatch(/^hello next/i);
+  const messages = await messagesOf(yap, done.conversation, 6);
+  expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'agentReport', 'assistant', 'user', 'agentReport', 'assistant']);
+  expect([!!messages[0].voice, messages[3].voice]).toEqual([false, true]);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: Write a paragraph.', /^Answer to: hello next/i]);
+  await expect(ticksOf(main)).toHaveAttribute('data-state', 'read');
+  // Asked out loud, its answer read aloud (as said: a full stop added); the typed one's isn't.
+  await expect.poll(() => spoken(yap), { timeout: 30_000 }).toEqual([expect.stringMatching(/^Answer to: hello next/i)]);
 });
 
 test('a message queued in one chat waits while another is shown, and goes once its chat opens again', async ({ yap, main }) => {

@@ -717,6 +717,34 @@ li.md-loose > p:first-child {
 li.md-loose > p:last-child {
   margin-bottom: 0 !important;
 }
+/* A task item: its checkbox where the bullet would be, no bullet as well
+   (the notepad's summary and a note's page style their own). */
+li.task {
+  list-style: none;
+  margin-left: -18px;
+}
+li.task > input {
+  margin: 0 5px 0 0;
+  vertical-align: -1px;
+}
+/* Footnotes (markdown.js): a small raised number, the notes under the text. */
+sup.md-fnref {
+  font-size: 0.72em;
+  line-height: 0;
+  margin-left: 1px;
+  color: var(--yap-muted);
+}
+.md-footnotes {
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--yap-border-subtle);
+  font-size: 0.9em;
+  color: var(--yap-muted);
+}
+.md-footnotes ol {
+  margin: 0;
+  padding-left: 20px;
+}
 /* GitHub-style tables in answers (markdown.js): scroll sideways when wide. */
 .md-table {
   max-width: 100%;
@@ -734,6 +762,9 @@ li.md-loose > p:last-child {
   border-bottom: 1px solid var(--yap-border-subtle);
   text-align: left;
   vertical-align: top;
+  /* A long cell wraps between words; a short one never breaks mid-word to make
+     room for it ("Siz e" under an answer's `overflow-wrap: anywhere`). */
+  overflow-wrap: break-word;
 }
 .md-table th {
   font-weight: 600;
@@ -782,6 +813,7 @@ li.md-loose > p:last-child {
   font-style: italic;
 }
 pre.md-code {
+  position: relative;
   margin: 6px 0;
   padding: 8px 10px;
   border: 1px solid var(--yap-border-subtle);
@@ -800,6 +832,39 @@ pre.md-code code {
   /* Code stays monospace whatever the reading font; Text size scales it. */
   font-size: calc(11.5px * var(--yap-reading-step));
   line-height: 1.5;
+}
+/* An answer's code block's Copy (ui/codeCopy.js): quiet in the corner, clearer on hover. */
+pre.md-code > .md-codecopy {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: var(--yap-s1);
+  color: var(--yap-muted);
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+pre.md-code:hover > .md-codecopy,
+pre.md-code > .md-codecopy:focus-visible {
+  opacity: 1;
+}
+pre.md-code > .md-codecopy:hover {
+  color: var(--yap-fg);
+  background: var(--yap-border-subtle);
+}
+pre.md-code > .md-codecopy:focus-visible {
+  outline: 1.5px solid var(--yap-primary-line);
+}
+pre.md-code > .md-codecopy svg {
+  width: 14px;
+  height: 14px;
 }
 a.md-link {
   color: var(--yap-primary);
