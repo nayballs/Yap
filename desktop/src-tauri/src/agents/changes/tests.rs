@@ -358,6 +358,26 @@ fn a_git_repository_clean_files_from_git_the_persons_work_said_new_ones_deleted(
 }
 
 #[test]
+fn a_workspace_the_repository_around_it_ignores_is_walked() {
+    let Some(git) = find_git() else {
+        eprintln!("(no Git on this PC: skipped)");
+        return;
+    };
+    let repo = scratch("git-ignored");
+    git_here(&git, &repo, &["init", "-q"]);
+    write(&repo, ".gitignore", "scratch/\n");
+    let ws = repo.join("scratch").join("garden");
+    write(&ws, "notes.md", "Draft notes\n");
+    let before = super::before(&ws).unwrap();
+    assert!(!before.git(), "Git sees nothing in an ignored folder: walked instead");
+    assert_eq!(before.files_read(), 1);
+    let windows = running();
+    write(&ws, "costs.xlsx", "PK-fake-workbook");
+    assert_eq!(rels(&after(&before, &windows).unwrap()), [("costs.xlsx".into(), true, false)]);
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
 fn a_git_repository_with_too_much_to_list_skips_the_check() {
     let Some(git) = find_git() else {
         eprintln!("(no Git on this PC: skipped)");

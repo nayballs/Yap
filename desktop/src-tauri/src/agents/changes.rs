@@ -223,6 +223,11 @@ pub fn before(folder: &Path) -> Result<Before, Skip> {
 fn git_before(git: Program, folder: &Path) -> Result<Option<Before>, Skip> {
     let Ok(out) = git_out(&git, folder, &["rev-parse", "--show-prefix"], None) else { return Ok(None) };
     let prefix = String::from_utf8_lossy(&out).trim_end_matches(['\r', '\n']).to_string();
+    // A workspace the repository around it ignores (a scratch folder in an ignored one, a home folder's dotfiles
+    // repository that ignores everything): Git sees none of its files, so a walk does.
+    if !prefix.is_empty() && git_out(&git, folder, &["--no-literal-pathspecs", "check-ignore", "-q", "."], None).is_ok() {
+        return Ok(None);
+    }
     let head = commit_at_head(&git, folder);
     let listed = match git_status(&git, folder, &prefix) {
         Ok(l) => l,

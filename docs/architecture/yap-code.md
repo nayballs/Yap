@@ -2811,7 +2811,10 @@ commands"). So each turn reads its workspace before and after:
   status check, before its process does: no command can have run yet):
   - **A Git repository** (the person's own Git, and `git rev-parse
     --show-prefix` answers in the workspace, which may be a folder inside the
-    repository): `git status --porcelain=v1 -z --untracked-files=all
+    repository — unless the repository ignores the workspace itself, `git
+    check-ignore`, as for a scratch folder in an ignored one or a home folder's
+    dotfiles repository that ignores everything: Git sees none of its files,
+    so a walk then): `git status --porcelain=v1 -z --untracked-files=all
     --no-renames --ignore-submodules=all -- .` (`.gitignore` kept), each file
     it lists with its size and times, and the commit at `HEAD`. Every other
     file is as Git has it there.
