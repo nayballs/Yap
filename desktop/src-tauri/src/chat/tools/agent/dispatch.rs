@@ -356,6 +356,12 @@ impl Loop<'_> {
             // out loud: said and on the bar too); the box and a chapter go to
             // the page at once.
             Source::Cards => crate::chat::cards::execute(name, &args, self.live, crate::chat::cards::by_voice(), crate::chat::cards::answers_in(self.extra.conversation)).await,
+            // **A new document's outline, seen first** (chat/cards/outline.rs):
+            // its card waits for Go or Edit before the document is made.
+            Source::Notes if name == "create_document" && self.extra.cards.outline && self.extra.docs.is_some() => {
+                let reviews = self.extra.docs.map_or(0, crate::chat::documents::Turn::reviewed);
+                crate::chat::cards::outline::create(self.live, &args, crate::chat::cards::by_voice(), reviews, |a| execute(name, a)).await
+            }
             Source::Notes => execute(name, &args),
         }
     }
@@ -386,7 +392,7 @@ mod tests {
         assert_eq!(Source::of("open_app", false, &none, false, true), Source::Apps);
         assert_eq!(Source::of("open_app", false, &none, false, false), Source::Notes);
         // The cards in the thread while they're offered.
-        let cards = Extra { cards: crate::chat::cards::Cards { ask: true, next_step: false, chapters: true }, ..Default::default() };
+        let cards = Extra { cards: crate::chat::cards::Cards { ask: true, next_step: false, chapters: true, outline: false }, ..Default::default() };
         assert_eq!(Source::of("ask_user", false, &cards, false, false), Source::Cards);
         assert_eq!(Source::of("mark_chapter", true, &cards, false, false), Source::Cards);
         assert_eq!(Source::of("suggest_next_step", false, &cards, false, false), Source::Notes);

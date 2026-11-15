@@ -169,7 +169,8 @@ impl Gates {
         let evaluated = tools && provider != crate::ai::claude_plan::PROVIDER && crate::ai::eval::connectors_forced();
         let connectors = !meetings && (evaluated || crate::chat::tools::connectors::may(provider, strong)) && (here.connectors)();
         let (apps, past_chats, picture_tools) = (cfg.open_apps, cfg.memory_search_chats, true);
-        let cards = crate::chat::cards::Cards::for_turn(tools, meetings, scope, chat_in_view, (here.phone)());
+        // (A new document's outline is shown first where a question could be asked: chat/cards/outline.rs.)
+        let cards = crate::chat::cards::Cards::for_turn(tools, meetings, scope, chat_in_view, (here.phone)()).with_outline(cfg.chat_outline_review);
         let visuals = crate::chat::made::offered(tools, strong, scope, meetings, chat_in_view);
         let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, screen_takes, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true, cards, visuals };
         if provider == crate::ai::claude_plan::PROVIDER {

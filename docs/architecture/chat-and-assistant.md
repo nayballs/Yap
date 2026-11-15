@@ -2104,7 +2104,11 @@ for the on-device model and small ones, which make things up more readily:
   the pages that requirements, levels, numbers and locations come from, and
   cite the pages you read", "a guide for another build or an older version
   isn't a source for this one"; `rich::INSTRUCTIONS` says the outline comes
-  "first, before any search" too.
+  "first, before any search" too. **The person sees that outline first**
+  (15 Nov 2026, "Show the outline before writing"): its card waits for Go or
+  Edit before the document is made ([The outline before the
+  writing](#the-outline-before-the-writing-2026-11-15)), so the research starts
+  after their answer.
 - **At its effort**: the turn thinks as every question to that model does,
   at the effort chosen for it in the model picker (`ai/effort.rs`; adaptive
   thinking for Claude, its summary folded above the answer). Until 31 Oct
@@ -5816,6 +5820,95 @@ now on the same form, and its run lists the next-step box and chapters too
   kept; several sent together; Let Yap decide; chapters and the contents; the
   box's button; asked out loud and answered "the second one"), and
   `agents-direct.spec.js` for a Code chat's question on the shared form.
+
+## The outline before the writing (2026-11-15)
+
+The Claude app's plan review for Chat's documents (`chat/cards/outline.rs`):
+a new document's outline goes to the person as a card in the thread first,
+and nothing is written until they answer. Before, a strong model already
+outlined first (`web::Turn::outline_first`, [above](#strong-models-documents-researched-as-the-claude-app-does-2026-10-31))
+but the outline opened straight into the panel and the writing went on.
+
+- **The switch**: Settings → Language Models → Chat & Voice Assistant, **Show
+  the outline before writing** (`chat_outline_review`, on by default;
+  `ChatConfig.svelte`, searchable). Off: the document is written straight
+  away, as before. The e2e suite's `BASE_CONFIG` has it off (its document
+  specs see their turns as before); `chat-outline.spec.js` and a Lab run
+  turn it on.
+- **Where** (`Cards::outline`, `Cards::with_outline`, set in `turn/gates.rs`):
+  wherever a question card could ask (`Cards::ask`: a model that calls tools,
+  Chat or the Voice Assistant, never across the meetings nor a phone's
+  question), any model's tool loop — not only the strong ones' outline-first
+  turns. A small context that sheds the card tools (`fit.rs`
+  `Family::Cards`) keeps it: it isn't a tool and takes no room. A plan chat
+  makes no documents (ai-models.md), so it never comes there. Nobody to ask
+  (no page watching, Bypass permissions, an evaluation): made at once.
+- **Its place in the turn** (`tools/agent/dispatch.rs`, `outline::create`):
+  `create_document` (the tool loop's `Source::Notes`, the turn's documents
+  known) goes through `outline::review` first. The card goes through the cards
+  that ask first (`pages/act/confirm.rs`, act "outline", `Card::outline` =
+  `OutlineCard {title, summary, sections, changed, note, said, voice}`), so it
+  shows on the answer being written, a ■ Stop drops it, and the answer keeps
+  it (`ChatMessage::confirms`). The activity line says "Waiting for you: the
+  outline" (`activity::outline_waits`). The turn waits at most `outline::WAIT`
+  (10 minutes, a question's), then writes it as outlined. A same-titled
+  second call this turn is the one made already (`documents::Turn::made_already`,
+  no card); the web held for the outline step (`outline_first`) is the
+  turn's again once the step's calls are done, so the research starts after
+  Go.
+- **On screen** (`OutlineCard.svelte` in `PageConfirm`'s chunk, above the
+  answer as a question card is; `outlineEdit.js` the edit's pure parts): "The
+  outline · *title*", the summary, then each heading in bold with its one
+  line under it, **Go** and **Edit**. **Edit**: each heading and its line in
+  a box, ↑ ↓ to reorder, ✕ to take one out (never the last), **+ Add a
+  section**, and **A note for the writing** — then **Go with these changes**
+  (or Cancel back). Answered, it stays in the thread, quiet: "Outline ·
+  *title*", the headings it was written with ("Equipment · Talents · Costs"),
+  "Your note: …", "You said: …", and how it ended (Written as outlined,
+  Written with your changes, You asked for changes: a new outline follows,
+  Not written, Not answered in time: written as outlined). The panel isn't
+  told (`chatDoc` `setAsking` leaves it to the thread).
+- **Answered** (`chat_outline_answer {id, outline}`): nothing (Go) →
+  `Reply::Once`, written as outlined; `{sections: [{key, intent}], note}`
+  (Edit's Go; `null` when nothing changed and no note) → `Reply::Picked`,
+  the document made with those sections in that order (`outline::edited`,
+  `with_sections`; each heading once, at most `MAX_SECTIONS`). The model
+  reads the tool's result as ever plus `data.outline` (`go_result`): "The
+  user read the outline and said go…", or "The user changed the outline
+  before you wrote it: the sections are now "Skills", "Gear" and "Costs", in
+  this order… one with no line of its own is theirs… Don't add back a
+  section they removed.", their note "to follow in every section", what
+  they said, or "didn't answer in time".
+- **Asked out loud** (the Voice Assistant, `assistant/spoken_ok.rs`, as a
+  question card is): "Here's the outline for “Lone wolf ranger”: Gear, Skills
+  and Talents. Say go ahead, or what to change." (`outline::spoken_line`); the
+  Yap bar lists the headings with **Go ahead** and **Edit in Chat**
+  (`outline::bar_card`, the buttons every card that asks has: `allow:<id>`,
+  `open:<id>`). Any words answer it (`spoken_ok::Waiting::words`, set for a
+  question card and an outline), read by `outline::heard`:
+  - "go ahead", "yes please", "looks good" — written as it is;
+  - "drop the second part", "go ahead but skip the last one", "remove parts
+    two and four", "skip the tips" (a heading's words, or a word only that
+    heading has) — those taken out, then written (`Heard::Without`);
+  - "no thanks", "never mind", "don't write it" — not made, the model told to
+    ask what they'd like instead (`stop_result`, chip "Didn't start the
+    document: you said not to");
+  - anything else ("add a part on costs", a drop with more asked) — nothing
+    made yet: the model is told their words and to call `create_document`
+    again (`again_result`, no chip), and that outline is shown too; at most
+    `REVIEWS_MAX` (3) outlines a turn, then it's written as it is.
+- An older Yap's save drops a card's `outline` (the card stays, its title as
+  its label). The log has the card's id, how many sections and how it ended,
+  never a heading, a line or a note.
+- Tests: `cargo test chat::cards::outline` (the card of a call, Edit's
+  sections and note, settling a reply, the spoken replies, the spoken line
+  and the bar card, what the model reads, who's asked) and the tool loop's
+  turns (`chat::tools::agent` `a_new_documents_outline_is_edited_before_the_writing…`,
+  `go_writes_the_outline_as_it_is…`, `a_change_said_out_loud…`,
+  `with_the_outline_off…`); e2e `chat-outline.spec.js` (the card before any
+  writing and Go, light and dark; Edit renamed, moved, taken out, added and a
+  note, the writing following it; switched off; the Settings switch; asked
+  out loud from another app and "Go ahead, but drop the second part").
 
 ## Styles (2026-11-15)
 

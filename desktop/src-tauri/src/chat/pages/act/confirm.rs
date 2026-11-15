@@ -40,6 +40,11 @@
 //! ([`Reply::Picked`]) or the words said ([`Reply::Said`]), and is kept
 //! with the answer, answered.
 //!
+//! **A document's outline** (act "outline", 15 Nov 2026,
+//! `chat/cards/outline.rs`): `create_document`'s outline ([`Card::outline`])
+//! waits here before the writing, for Go ([`Reply::Once`]), Edit's sections
+//! and note ([`Reply::Picked`]) or the words said ([`Reply::Said`]).
+//!
 //! The log has the question's id and the answer, never the button's words,
 //! the typed text or the page.
 
@@ -144,6 +149,12 @@ pub struct Card {
     /// it (the card stays, with the first question's header as its label).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub question: Option<Box<crate::chat::cards::ask::QuestionCard>>,
+    /// **A document's outline, before the writing** (act "outline",
+    /// `chat/cards/outline.rs`): the outline, and once answered what the
+    /// person made of it. An older Yap's save drops it (the card stays, with
+    /// the title as its label).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outline: Option<Box<crate::chat::cards::outline::OutlineCard>>,
 }
 
 /// **The connector's tool a card asks about** (act "connector"): "Use
@@ -381,6 +392,7 @@ async fn ask_with(live: Option<crate::chat::stream::Live<'_>>, what: Ask<'_>, co
             agent: what.agent.clone(),
             connector: connector.clone().map(Box::new),
             question: None,
+            outline: None,
         })
     };
     live.sink.send(card("asking"));

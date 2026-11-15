@@ -106,6 +106,33 @@ const PLANNING = [
   result(PLAN_SAID, 0.01),
   { _wait_user: true },
 ];
+/** Its plan sent back with comments (Revise the plan): the answer's words, as Claude Code read them. */
+const REVISE_DUMP = path.join(HERE, 'revise-approve.jsonl');
+const PLAN_MD2 = [
+  '## Watering schedule',
+  '',
+  'Add a **Watering** section to `notes.md`:',
+  '',
+  '1. Tomatoes twice a week, seedlings every other morning',
+  '2. A line for the rain barrel',
+  '3. The herbs on Sundays',
+  '4. Run the tests',
+].join('\n');
+/** Plan mode, its plan sent back with comments: it shows a revised plan (a second card), then ends its turn with it. */
+const REVISING = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init('plan'),
+  said('r1', [{ type: 'text', text: "I'll read notes.md first." }, { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }]),
+  toolResult('toolu_read', 'Draft notes'),
+  said('r2', [{ type: 'tool_use', id: 'toolu_plan', name: 'ExitPlanMode', input: { plan: PLAN_MD } }]),
+  { _mcp: { tool: 'approve', arguments: { tool_name: 'ExitPlanMode', input: { plan: PLAN_MD }, tool_use_id: 'toolu_plan' }, result_for: 'toolu_plan', dump: REVISE_DUMP } },
+  said('r3', [{ type: 'text', text: 'Revised for your comments.' }, { type: 'tool_use', id: 'toolu_plan2', name: 'ExitPlanMode', input: { plan: PLAN_MD2 } }]),
+  { _mcp: { tool: 'approve', arguments: { tool_name: 'ExitPlanMode', input: { plan: PLAN_MD2 }, tool_use_id: 'toolu_plan2' }, result_for: 'toolu_plan2' } },
+  said('r4', [{ type: 'text', text: PLAN_SAID }], 'end_turn'),
+  result(PLAN_SAID, 0.01),
+  { _wait_user: true },
+];
 /** Says what it was told (the go-ahead's turn). */
 const ECHO = [{ _wait_user: true }, { _dump_args: ARGS }, init('auto'), result('Got: {{user_text}}', 0.002), { _wait_user: true }];
 
@@ -198,9 +225,9 @@ async function theme(yap, main, which) {
  * ExitPlanMode card is answered. `reports`: the chat model's words for the
  * reports to come. The agent, as listed.
  */
-async function planAgent(yap, main, fakeLlm, reports) {
+async function planAgent(yap, main, fakeLlm, reports, planning = PLANNING) {
   fs.rmSync(ARGS, { force: true });
-  await script(yap, PLANNING, 'planning');
+  await script(yap, planning, 'planning');
   const before = (await agents(yap)).length;
   await codeChat(main);
   fakeLlm.scriptChat([
@@ -500,6 +527,107 @@ test('Not yet keeps it a plan; the report card’s Go ahead carries it out, once
   await expect(yap.invoke('agent_go_ahead', { id: started.id })).rejects.toThrow(/no plan waiting/);
   await messagesOf(yap, agent.conversation, 6);
   expect((await agentOf(yap, started.id)).turnList).toHaveLength(2);
+});
+
+// ---------------------------------------------------------------- comments on a plan
+
+test('comments on the plan: words selected and commented on, Revise the plan, a new plan in Plan mode, the old one folded; Go ahead as ever', async ({ yap, main, fakeLlm, shot }) => {
+  fs.rmSync(REVISE_DUMP, { force: true });
+  const started = await planAgent(yap, main, fakeLlm, ['It made a plan and is building it now.', 'Done: notes.md has its watering schedule.'], REVISING);
+  const card = planCard(main);
+  await expect(card).toHaveCount(1);
+  await expect(card.locator('.aq')).toContainText("The agent's plan is ready · garden-planner");
+  const plan = card.getByTestId('chat-agent-plan');
+  await card.getByRole('button', { name: 'Show more' }).click();
+  // Words of the plan selected: their own Comment button, by them.
+  const QUOTE = 'seedlings every morning';
+  await plan.locator('li', { hasText: 'Tomatoes' }).evaluate((li, quote) => {
+    const t = [...li.childNodes].find((n) => n.nodeType === Node.TEXT_NODE && n.data.includes(quote));
+    const at = t.data.indexOf(quote);
+    const r = document.createRange();
+    r.setStart(t, at);
+    r.setEnd(t, at + quote.length);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+    li.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  }, QUOTE);
+  const commentBtn = card.getByTestId('chat-plan-comment-selection');
+  await expect(commentBtn).toBeVisible();
+  await commentBtn.click();
+  const draft = card.getByTestId('chat-plan-draft');
+  await expect(draft.locator('.pquote')).toHaveText(`“${QUOTE}”`);
+  await expect(draft.getByRole('textbox', { name: 'Your comment on the plan' })).toBeFocused();
+  await draft.getByRole('textbox').fill('Every other morning is enough for the seedlings.');
+  await draft.getByRole('button', { name: 'Add comment' }).click();
+  // A comment on the whole plan (nothing selected), from the keyboard's Enter.
+  await main.evaluate(() => getSelection().removeAllRanges());
+  await card.getByTestId('chat-plan-add-comment').click();
+  await expect(card.getByTestId('chat-plan-draft').locator('.pquote')).toHaveText('On the whole plan');
+  await card.getByTestId('chat-plan-draft').getByRole('textbox').fill('Water the herbs on Sundays too.');
+  await card.getByTestId('chat-plan-draft').getByRole('textbox').press('Enter');
+  const comments = card.getByTestId('chat-plan-comments').locator('li');
+  await expect(comments).toHaveCount(2);
+  await expect(comments.nth(0)).toContainText(`“${QUOTE}”`);
+  await expect(comments.nth(1)).toContainText('The whole plan');
+  await expect(plan.locator('mark.pmark')).toHaveText(QUOTE);
+  // Revise the plan leads; Go ahead and Not yet stay.
+  await expect(card.getByTestId('chat-plan-revise')).toHaveText('Revise the plan · 2');
+  await expect(card.getByRole('button', { name: 'Go ahead' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Not yet' })).toBeVisible();
+  await shot(main, '09-plan-comments-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '10-plan-comments-dark');
+  await theme(yap, main, 'light');
+  // A comment taken back, and put back.
+  await comments.nth(1).getByRole('button', { name: 'Remove this comment' }).click();
+  await expect(comments).toHaveCount(1);
+  await card.getByTestId('chat-plan-add-comment').click();
+  await card.getByTestId('chat-plan-draft').getByRole('textbox').fill('Water the herbs on Sundays too.');
+  await card.getByTestId('chat-plan-draft').getByRole('button', { name: 'Add comment' }).click();
+  await expect(comments).toHaveCount(2);
+
+  // Revise the plan: Claude Code reads ExitPlanMode refused with the comments, stays in Plan mode, and shows a new plan.
+  await card.getByTestId('chat-plan-revise').click();
+  await expect.poll(() => (fs.existsSync(REVISE_DUMP) ? fs.readFileSync(REVISE_DUMP, 'utf8') : ''), { timeout: 20_000 }).toContain('left comments on it');
+  const back = fs.readFileSync(REVISE_DUMP, 'utf8');
+  expect(back).toContain('Stay in plan mode and change nothing yet');
+  expect(back).toContain(`1. On “${QUOTE}”: Every other morning is enough for the seedlings.`);
+  expect(back).toContain('2. On the whole plan: Water the herbs on Sundays too.');
+  expect(back).toContain('call ExitPlanMode again with the whole revised plan');
+  // The new plan's card, a revision; the old plan folded with its comments, in the thread.
+  await expect(card).toHaveCount(1);
+  await expect(card.locator('.aq')).toContainText("The agent's revised plan is ready · garden-planner");
+  await expect(card.getByTestId('chat-agent-plan')).toContainText('The herbs on Sundays');
+  await expect(card.getByTestId('chat-plan-comments')).toHaveCount(0);
+  const before = thread(main).getByTestId('chat-plan-before');
+  await expect(before).toHaveCount(1);
+  await expect(before.locator('summary')).toHaveText('Plan before your comments · 2 comments');
+  await expect(before).not.toHaveAttribute('open', '');
+  let agent = await agentOf(yap, started.id);
+  expect(agent.turnList[0].plansBefore).toHaveLength(1);
+  expect(agent.turnList[0].plansBefore[0]).toMatchObject({ plan: PLAN_MD, comments: [{ quote: QUOTE }, { quote: '' }] });
+  expect(agent.status).toBe('asking');
+  await before.locator('summary').click();
+  await expect(before.locator('mark.pmark')).toHaveText(QUOTE);
+  await expect(before.locator('.pcomments li')).toHaveCount(2);
+  await shot(main, '11-plan-revised-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '12-plan-revised-dark');
+  await theme(yap, main, 'light');
+
+  // Go ahead, as ever: the revised plan carried out at the chat's Mode, on the same session.
+  await card.getByRole('button', { name: 'Go ahead' }).click();
+  await expect(card).toHaveCount(0);
+  const went = await wentAhead(yap, started.id);
+  agent = went.agent;
+  expect(agent.turnList[0]).toMatchObject({ plan: true, planAllowed: true, mode: 'plan' });
+  expect(agent.turnList[0].denials ?? []).toEqual([]);
+  expect(agent.turnList[1]).toMatchObject({ title: 'Go ahead with the plan', mode: 'auto', status: 'done' });
+  expect(after(went.args[1], '--resume')).toBe(after(went.args[0], '--session-id'));
+  await messagesOf(yap, agent.conversation, 6);
+  // The old plan stays folded where it was.
+  await expect(thread(main).getByTestId('chat-plan-before')).toHaveCount(1);
 });
 
 // ---------------------------------------------------------------- on the Yap bar
