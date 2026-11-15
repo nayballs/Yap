@@ -6,6 +6,7 @@
   // finds in it (SummaryFind); under it, 👍 / 👎 (SummaryRating, on this PC
   // only).
   import { renderMarkdown } from '../../core/markdown.js';
+  import { markdownVisuals } from '../../ui/markdownVisuals.js';
   import { withTaskMark, newSinceLine } from '../../core/notepadText.js';
   import { taskToggled, setTask } from '../../core/noteEdits.js';
   import { canRestore, restoreSummary } from '../../core/summaryTools.js';
@@ -109,7 +110,7 @@
        passes no raw HTML and sanitises its output (core/markdown.js);
        its tasks tick in place (notes/tasks.rs) -->
   <div class="sumscroll">
-    <div class="rendered" bind:this={notes.renderedEl} onchange={onTaskChange}>{@html renderMarkdown(notes.selected.enhancedContent, { tickable: true })}</div>
+    <div class="rendered" bind:this={notes.renderedEl} onchange={onTaskChange} use:markdownVisuals>{@html renderMarkdown(notes.selected.enhancedContent, { tickable: true })}</div>
     <SummaryRating note={notes.selected} origin={LABEL} look="app" changing={() => notes.changing('summaryRating')} />
   </div>
 {/if}
