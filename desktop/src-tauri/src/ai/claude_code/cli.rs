@@ -54,6 +54,14 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 /// `CLAUDE` or `ANTHROPIC_` is taken off ([`clean_env`]).
 pub const KEPT_ENV: &[&str] = &["CLAUDE_CONFIG_DIR"];
 
+/// **Claude Code's own switches a run of Yap's may set** (never kept from
+/// Yap's environment, never about signing in or paying): its to-do list on
+/// every model (`CLAUDE_CODE_ENABLE_TODO_TOOLS`, documented in Claude Code's
+/// tools reference: since 2.1.268 newer models get no task-tracking tool
+/// unless a session opts in), as `TodoWrite` (`CLAUDE_CODE_ENABLE_TASKS=0`),
+/// the list Yap reads (`agents/steps.rs`).
+pub const RUN_SETS_ENV: &[&str] = &["CLAUDE_CODE_ENABLE_TODO_TOOLS", "CLAUDE_CODE_ENABLE_TASKS"];
+
 // ---- Version ----
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]

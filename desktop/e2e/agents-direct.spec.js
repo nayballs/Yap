@@ -54,7 +54,7 @@ import { RUNS } from './support/yap.js';
 import { newCodeChat, toSide } from './support/code-chats.js';
 import { writePng } from './support/png.js';
 import { startFakeWeb, FORT_JOY_URL, LEVELING_URL } from './support/fake-web.js';
-import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine } from '../src/lib/core/agents.js';
+import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine, turnParts, notesAfter, workOf, turnPictures, todosIn } from '../src/lib/core/agents.js';
 import { panelRows, panelGroups, panelTotals } from '../src/lib/core/agentPanel.js';
 import { workingLine } from '../src/lib/core/working.js';
 import { sayingOver, questionAnswers, questionsAnswered } from '../src/lib/core/agentNow.js';
@@ -457,6 +457,62 @@ const SENDS_A_HELPER = [
   { _wait_user: true },
 ];
 
+/** A tool call's answer carrying a picture, as Claude Code hands a picture file `Read` back. */
+const pictureBack = (id, png) => ({
+  type: 'user',
+  message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') } }] }] },
+  parent_tool_use_id: null,
+  session_id: '{{session_id}}',
+});
+/** Its to-do list with the first `done` ticked off (the next in progress). */
+const bedsPlan = (done) =>
+  ['Look at the beds', 'Look at the path', 'Place the herbs'].map((content, i) => ({ content, activeForm: `${content.replace(/^Look/, 'Looking').replace(/^Place/, 'Placing')}`, status: i < done ? 'completed' : i === done ? 'in_progress' : 'pending' }));
+const THOUGHT = 'They want the beds laid out. Plan first, then look at each picture.';
+const LOOK_FIRST = "I'll make a plan, then look at the beds.";
+const LOOK_NEXT = 'The beds are in two rows. Now the path.';
+const NOTED = "Noted: I'll keep the herbs by the door.";
+const LAID_OUT = 'Laid out: two rows of beds, the path between them, the herbs by the door.';
+const BEDS_PNG = writePng(120, 80, [92, 140, 70]);
+const PATH_PNG = writePng(90, 90, [170, 150, 120]);
+const HERBS_PNG = writePng(80, 120, [60, 110, 90]);
+/**
+ * A long turn with words between its steps (as Claude Code works): it thinks, says what it'll do, makes a plan,
+ * looks at a picture, says something, looks at another — taking its time there, so the person writes — and after
+ * reading their message plans again, says so, looks at a third, and answers.
+ */
+const IN_ORDER = [
+  { _wait_user: true },
+  init(),
+  said('o0', [{ type: 'thinking', thinking: THOUGHT, signature: 'sig-o0' }]),
+  said('o1', [{ type: 'text', text: LOOK_FIRST }]),
+  said('o2', [{ type: 'tool_use', id: 'toolu_todo1', name: 'TodoWrite', input: { todos: bedsPlan(0) } }]),
+  toolResult('toolu_todo1', 'Todos have been modified successfully.'),
+  said('o3', [{ type: 'tool_use', id: 'toolu_beds', name: 'Read', input: { file_path: '{{cwd}}\\beds.png' } }]),
+  pictureBack('toolu_beds', BEDS_PNG),
+  said('o4', [{ type: 'tool_use', id: 'toolu_todo2', name: 'TodoWrite', input: { todos: bedsPlan(1) } }]),
+  toolResult('toolu_todo2', 'Todos have been modified successfully.'),
+  said('o5', [{ type: 'text', text: LOOK_NEXT }]),
+  said('o6', [{ type: 'tool_use', id: 'toolu_path', name: 'Read', input: { file_path: '{{cwd}}\\path.png' } }]),
+  { _sleep_ms: 7000 },
+  // (The person's message is read as this call ends.)
+  pictureBack('toolu_path', PATH_PNG),
+  said('o7', [{ type: 'tool_use', id: 'toolu_todo3', name: 'TodoWrite', input: { todos: bedsPlan(2) } }]),
+  toolResult('toolu_todo3', 'Todos have been modified successfully.'),
+  said('o8', [{ type: 'text', text: NOTED }]),
+  said('o9', [{ type: 'tool_use', id: 'toolu_herbs', name: 'Read', input: { file_path: '{{cwd}}\\herbs.png' } }]),
+  pictureBack('toolu_herbs', HERBS_PNG),
+  said('o10', [{ type: 'tool_use', id: 'toolu_todo4', name: 'TodoWrite', input: { todos: bedsPlan(3) } }]),
+  toolResult('toolu_todo4', 'Todos have been modified successfully.'),
+  said('o11', [{ type: 'text', text: LAID_OUT }], 'end_turn'),
+  result(LAID_OUT, 0.02),
+  { _wait_user: true },
+];
+
+async function theme(yap, main, which) {
+  await setConfig(yap, main, { theme: which });
+  await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe(which);
+}
+
 function writeScript(name, lines) {
   fs.mkdirSync(SCRIPTS, { recursive: true });
   const file = path.join(SCRIPTS, `${name}.jsonl`);
@@ -792,6 +848,125 @@ test('a message while it works is handed to it at once: the same turn, one answe
   // (A tool call was out: it went at once, never queued — and shows it was read.)
   await expect(queuedBubble(main)).toHaveCount(0);
   await expect(ticksOf(main)).toHaveAttribute('data-state', 'read');
+});
+
+// 15 Nov 2026, the Claude app's Code tab side by side with a Code chat: its work and words in order — several folded
+// lines a turn, each followed by what Claude said —, a message sent mid-turn where Claude read it with the work after it
+// under it, the plan as it stood kept above that message, a step's picture paged across the turn's, and the
+// transcript view (Normal, Thinking, Verbose) from the chat's ⋯.
+test('a long turn reads in order: its words between its lines, a message sent meanwhile where Claude read it, the plan from before it, pictures paged, the transcript view', async ({ yap, main, shot }) => {
+  test.setTimeout(120_000);
+  await script(yap, IN_ORDER, 'in-order');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Lay out the beds from the three pictures.');
+  const agent = await newAgent(yap, before);
+  // On the path's picture, it takes its time: the person writes meanwhile (a call is out: it goes at once).
+  await expect(thread(main).getByTestId('chat-agent-work').locator('[data-busy="true"] .wtext')).toHaveText('Reading path.png', { timeout: 20_000 });
+  // The plan, live, under the message that asked.
+  await expect(thread(main).getByTestId('chat-agent-todo-card')).toHaveAttribute('data-live', 'true');
+  await shot(main, '70-a-long-turn-at-work');
+  await send(main, 'Keep the herbs by the door.');
+  const done = await ended(yap, agent.id, 40_000);
+  expect(done.turnList.map((t) => [t.n, t.status])).toEqual([[1, 'done']]);
+  // (Both messages, its report's marker — a plain reply's, not drawn —, its answer.)
+  expect((await messagesOf(yap, done.conversation, 4)).map((m) => m.kind || m.role)).toEqual(['user', 'user', 'agentReport', 'assistant']);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText([LAID_OUT]);
+
+  // **In order**: the message, the work up to where Claude read the next one, that message, the work after it, the answer.
+  await expect.poll(() => laidOut(main)).toEqual(['you', 'work', 'you', 'work', 'answer']);
+  const parts = thread(main).getByTestId('chat-agent-work');
+  const first = parts.nth(0);
+  const second = parts.nth(1);
+  await expect(first).toHaveAttribute('data-part', '0');
+  await expect(second).toHaveAttribute('data-part', '1');
+  // Several folded lines a turn, each after the words Claude said before it.
+  const rows = (work) =>
+    work.locator('[data-testid="chat-agent-work-said"], [data-testid="chat-agent-work-steps"]').evaluateAll((els) => els.map((e) => (e.dataset.testid === 'chat-agent-work-said' ? `said: ${e.textContent.trim()}` : `line: ${e.querySelector('.wtext').textContent.trim()}`)));
+  expect(await rows(first)).toEqual([`said: ${LOOK_FIRST}`, 'line: Read beds.png', `said: ${LOOK_NEXT}`, 'line: Read path.png']);
+  expect(await rows(second)).toEqual([`said: ${NOTED}`, 'line: Read herbs.png']);
+  // (Its final words are the answer's alone; its thinking isn't shown in the Normal view.)
+  await expect(thread(main).getByTestId('chat-agent-work-thought')).toHaveCount(0);
+
+  // **The plan from before the message**: as it stood when Claude read it, just above it; the live one under it.
+  const was = first.getByTestId('chat-agent-todo-before');
+  await expect(was).toHaveCount(1);
+  await expect(was).toHaveAttribute('aria-label', 'Plan from before your last message');
+  const statuses = (card) => card.locator('.item').evaluateAll((els) => els.map((e) => `${e.querySelector('.text').textContent}: ${e.dataset.status}`));
+  await was.getByTestId('chat-agent-todo-head').click();
+  await expect(was).toHaveAttribute('data-open', 'true');
+  expect(await statuses(was)).toEqual(['Look at the beds: completed', 'Look at the path: in_progress', 'Place the herbs: pending']);
+  await expect(first.getByTestId('chat-agent-todo-card')).toHaveCount(0);
+  const now = second.getByTestId('chat-agent-todo-card');
+  await expect(now).toHaveCount(1);
+  await now.getByTestId('chat-agent-todo-head').click();
+  await expect.poll(() => statuses(now)).toEqual(['Look at the beds: completed', 'Look at the path: completed', 'Place the herbs: completed']);
+  // (Once the turn is over both fold, as a turn's record does; the one from before says what it is.)
+  await was.getByTestId('chat-agent-todo-head').click();
+  await expect(was.getByTestId('chat-agent-todo-summary')).toHaveText('Plan from before your last message · 3 to-dos · 1 done');
+  await was.getByTestId('chat-agent-todo-head').click();
+  await shot(main, '71-in-order-with-the-plan-from-before');
+
+  // **A step's picture opens the viewer, paged across the turn's**: ‹ 3 of 3 ›, the step's name in the corner.
+  await second.getByTestId('agent-step-picture').click();
+  const viewer = main.getByTestId('shot-viewer');
+  await expect(viewer).toBeVisible();
+  await expect(viewer.getByTestId('shot-viewer-count')).toHaveText('3 of 3');
+  await expect(viewer.getByTestId('shot-viewer-caption')).toHaveText('Read herbs.png');
+  await shot(main, '72-a-picture-paged');
+  await main.keyboard.press('ArrowLeft');
+  await expect(viewer.getByTestId('shot-viewer-count')).toHaveText('2 of 3');
+  await expect(viewer.getByTestId('shot-viewer-caption')).toHaveText('Read path.png');
+  await viewer.getByRole('button', { name: 'Previous picture' }).click();
+  await expect(viewer.getByTestId('shot-viewer-caption')).toHaveText('Read beds.png');
+  // (Round from the first to the last; the arrows never close it.)
+  await main.keyboard.press('ArrowLeft');
+  await expect(viewer.getByTestId('shot-viewer-count')).toHaveText('3 of 3');
+  await viewer.getByRole('button', { name: 'Next picture' }).click();
+  await expect(viewer.getByTestId('shot-viewer-count')).toHaveText('1 of 3');
+  await expect.poll(() => viewer.locator('img').evaluate((el) => el.naturalWidth), { message: 'the picture to load' }).toBeGreaterThan(0);
+  await main.keyboard.press('Escape');
+  await expect(viewer).toHaveCount(0);
+
+  // **The transcript view**, from the chat's ⋯: Thinking adds its thinking, in order.
+  const view = async (name) => {
+    await main.getByRole('button', { name: /^More for Lay out the beds/ }).click();
+    const menu = main.locator('[data-context-menu]');
+    await menu.getByRole('menuitem', { name: 'Transcript view' }).click();
+    await main.locator('[data-context-menu]').last().getByRole('menuitemradio', { name }).click();
+    await expect(main.locator('[data-context-menu]')).toHaveCount(0);
+  };
+  await view('Thinking');
+  await expect(first).toHaveAttribute('data-view', 'thinking');
+  await expect(first.getByTestId('chat-agent-work-thought')).toHaveText([new RegExp(`^Thinking\\s*${THOUGHT}`)]);
+  // (First, before its words: as it came.)
+  expect((await rows(first))[0]).toBe(`said: ${LOOK_FIRST}`);
+  await expect(first.locator('[data-testid="chat-agent-work-thought"] + [data-testid="chat-agent-work-said"]')).toHaveCount(1);
+  await expect(first.getByTestId('chat-agent-work-steps').first()).toHaveAttribute('data-open', 'false');
+  await shot(main, '73-the-thinking-view');
+  // Verbose: every line open, and every row with something to show.
+  await view('Verbose');
+  await expect(parts.getByTestId('chat-agent-work-steps')).toHaveCount(3);
+  for (const g of await parts.getByTestId('chat-agent-work-steps').all()) await expect(g).toHaveAttribute('data-open', 'true');
+  await expect(parts.getByTestId('chat-agent-work-step-picture')).toHaveCount(3);
+  await shot(main, '74-the-verbose-view');
+  await theme(yap, main, 'dark');
+  await shot(main, '75-the-verbose-view-dark');
+  await theme(yap, main, 'light');
+  // Kept for this chat (its ⋯ says which); Normal again.
+  await main.getByRole('button', { name: /^More for Lay out the beds/ }).click();
+  await main.locator('[data-context-menu]').getByRole('menuitem', { name: 'Transcript view' }).click();
+  await expect(main.locator('[data-context-menu]').last().getByRole('menuitemradio', { name: 'Verbose' })).toHaveAttribute('aria-checked', 'true');
+  await main.keyboard.press('Escape');
+  await main.keyboard.press('Escape');
+  await view('Normal');
+  await expect(thread(main).getByTestId('chat-agent-work-thought')).toHaveCount(0);
+  await expect(parts.getByTestId('chat-agent-work-step-picture')).toHaveCount(0);
+
+  // Its log kept the thinking (never a phone's: link/code/view.rs) — its own event, no words said.
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  expect(log.filter((e) => e.thought).map((e) => [e.thought, e.said ?? null, e.step ?? null])).toEqual([[THOUGHT, null, null]]);
+  expect(log.filter((e) => e.read).length).toBe(1);
 });
 
 // The maintainer, 14 Nov 2026: a message sent while Claude wrote a paragraph came back joined to that answer, and the
@@ -1963,6 +2138,47 @@ test('the bar’s “Claude replied” card: none while its chat is in view besi
   } finally {
     await yap.invoke('e2e_focus', { focused: true });
   }
+});
+
+test('core/agents.js: a turn in parts at the messages it read, its thinking in order, its pictures, the plan as it stood', () => {
+  const ev = (o) => ({ id: 'ab12', status: 'running', turn: 1, ts: 1, ...o });
+  const events = [
+    ev({ step: 'Thinking' }),
+    ev({ thought: 'Plan first.' }),
+    ev({ said: 'Looking first.' }),
+    ev({ step: 'Planning the steps', call: 'c0', todos: [{ content: 'Look', status: 'in_progress' }] }),
+    ev({ step: 'Reading a.png', call: 'c1' }),
+    ev({ picture: { id: 'p1', w: 4, h: 3 }, call: 'c1' }),
+    ev({ step: 'Read your note', read: 'chat:9:1' }),
+    ev({ step: 'Reading b.png', call: 'c2' }),
+    ev({ picture: { id: 'p2', w: 4, h: 3 }, call: 'c2' }),
+    ev({ read: 'chat:9:7' }),
+    ev({ status: 'done', text: 'Done.' }),
+  ];
+  // Split where each message of the thread's was read; a read of one the thread doesn't have splits nothing.
+  const parts = turnParts(events, ['chat:9:1', 'chat:9:3']);
+  expect(parts.map((p) => [p.after, p.events.length])).toEqual([[null, 6], ['chat:9:1', 5]]);
+  expect(turnParts(events, []).map((p) => p.after)).toEqual([null]);
+  expect(turnParts([], ['chat:9:1'])).toEqual([{ after: null, events: [] }]);
+  // The plan as it stood in a part; none written there: null.
+  expect(todosIn(parts[0].events)).toEqual([{ content: 'Look', status: 'in_progress' }]);
+  expect(todosIn(parts[1].events)).toBeNull();
+  // Thinking: an item only when asked for, and then it splits the stretches round it.
+  expect(workOf(parts[0].events).map((x) => x.kind)).toEqual(['said', 'work']);
+  expect(workOf(parts[0].events, '', false, { thinking: true }).map((x) => (x.kind === 'thought' ? `thought: ${x.text}` : x.kind))).toEqual(['thought: Plan first.', 'said', 'work']);
+  const split = [ev({ step: 'Reading a.png' }), ev({ thought: 'Then b.' }), ev({ step: 'Reading b.png' })];
+  expect(workOf(split).map((x) => x.kind)).toEqual(['work']);
+  expect(workOf(split, '', false, { thinking: true }).map((x) => x.kind)).toEqual(['work', 'thought', 'work']);
+  // Every picture of the turn, in order, each with its step's words.
+  expect(turnPictures(events).map((p) => [p.id, p.caption])).toEqual([
+    ['agent/ab12/p1', 'Read a.png'],
+    ['agent/ab12/p2', 'Read b.png'],
+  ]);
+  // The thread's messages a direct turn may have read: the person's, up to the next that started a turn.
+  const messages = [{ role: 'user', id: 'chat:9:0' }, { role: 'user', id: 'chat:9:1' }, { role: 'assistant', id: 'chat:9:2' }, { role: 'user', id: 'chat:9:3' }, { role: 'user', id: 'chat:9:4' }, { role: 'user', id: 'chat:9:5' }];
+  expect(notesAfter(messages, 0, (k) => k === 4)).toEqual(['chat:9:1', 'chat:9:3']);
+  expect(notesAfter(messages, 4)).toEqual(['chat:9:5']);
+  expect(notesAfter([...messages, { role: 'assistant', kind: 'agentReport', id: 'chat:9:6' }], 5)).toEqual([]);
 });
 
 test('core/agents.js: the Code chat’s own session at work is what the message box’s ■ stops', () => {
