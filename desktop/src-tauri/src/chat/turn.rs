@@ -536,6 +536,8 @@ fn sent_directly(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, Str
     let shots: Vec<String> = images.iter().filter(|i| !i.as_text).map(|i| i.id.clone()).collect();
     // (Its attached files' text after its words: chat/attachments.rs.)
     let text = crate::chat::attachments::after_text(&t.text);
+    // (…and the side questions kept since its session last heard from the chat: chat/side.rs.)
+    let text = crate::chat::side::with_kept(opened.conv.id, text);
     let sent = crate::agents::direct::send(opened.conv.id, folder, &text, &shots, message_id, t.by_voice, phone, &t.ep.model, effort.as_deref())?;
     Ok(Some(ChatTurn {
         conversation_id: opened.conv.id,

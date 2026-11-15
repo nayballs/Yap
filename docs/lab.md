@@ -267,6 +267,19 @@ shows, in Yap's own window only, never a page beside the chat.
 {"ok":true,"window":"thread","css":"[data-testid=\"chat-queued-send-now\"]","clicked":true}
 ```
 
+### `side "<question>" [--keep] [--close] [--timeout 180]`
+
+A side question (Ctrl+;, 15 Nov 2026, `chat/side.rs`) about the chat shown, asked as the
+person asks one: the key, the words in the box over the thread, Enter. The answer is read
+back from the box. Nothing of it is in the chat unless `--keep` presses Keep it, waiting
+first while the chat's own answer, or its Claude's work, is still going
+(`keptAfterWaiting`). `--close` presses Esc after. `shot` takes the box with the thread.
+Ask one while a Code chat's Claude works with `ask … --no-wait`, then `side`.
+
+```json
+{"ok":true,"question":"Which file holds the schedule?","answer":"notes.md, going by the chat so far.","error":null,"seconds":6.2,"conversation":3,"keptAfterWaiting":true,"kept":true}
+```
+
 ### `pick "<words on the page>"` or `pick --css <selector>`
 
 Selects an element on the page beside the chat as a person does (14 Nov 2026; the

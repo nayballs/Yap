@@ -134,8 +134,12 @@
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
   import { agents, initAgents, agentById } from '../../stores/agents.svelte.js';
   import { workingDirectly } from '../../core/agents.js';
-  import { initChatStatus, setShown, markSeen } from '../../stores/chatStatus.svelte.js';
+  import { initChatStatus, setShown, markSeen, chatStatus } from '../../stores/chatStatus.svelte.js';
   import { lastAnswerAt } from '../../core/chatStatus.js';
+  import { toast } from '../../ui/toast.svelte.js';
+  import { onSideQuestionKey } from '../../stores/sideQuestionKey.js';
+  import { createSideQuestion } from './sideQuestion.svelte.js';
+  import SideQuestion from './SideQuestion.svelte';
   // A message a kept page's button sends (chat/made/pages.rs): into its own chat, as a visual's.
   import { promptFromVisual } from './made.svelte.js';
 
@@ -213,6 +217,47 @@
       chat.refreshList();
     });
   });
+
+  // **A side question** (Ctrl+;, chat/side.rs; the Claude app's side chat): a
+  // box over the thread asks Chat's model about this chat, and nothing of it
+  // goes in the thread unless it's kept. The key comes through the in-page
+  // hotkey fallback (stores/sideQuestionKey.js); never from Settings, a
+  // dialog or a menu over Chat. Another chat opened: the box goes.
+  const side = createSideQuestion();
+  function sideKey(e) {
+    const modal = [...document.querySelectorAll('[aria-modal="true"]')].some((m) => m.getClientRects().length > 0);
+    if (modal || e.target?.closest?.('[role="dialog"]:not([data-testid="chat-sideq"]), [role="alertdialog"], [role="menu"]')) return false;
+    if (side.open) {
+      side.close();
+      tick().then(() => chat.inputEl?.focus());
+      return true;
+    }
+    if (chat.activeId == null || chat.page) {
+      toast({ title: 'Nothing to ask about yet', description: 'A side question is about the chat open here: start one first.' });
+      return true;
+    }
+    side.show(chat.activeId);
+    return true;
+  }
+  $effect(() => onSideQuestionKey(sideKey));
+  $effect(() => {
+    const id = chat.activeId;
+    const page = chat.page;
+    untrack(() => {
+      if (side.open && (side.conversation !== id || page)) side.close();
+    });
+  });
+  onDestroy(() => side.close());
+  // The thread answering: a turn being written there (any surface's), or a Code chat's own Claude at work.
+  const sideBusy = $derived(
+    side.conversation != null &&
+      ((chat.sending && chat.activeId === side.conversation) || chatStatus.answering.includes(String(side.conversation)) || !!workingDirectly(agents.list, side.conversation))
+  );
+  function sideKept() {
+    chat.reloadActive();
+    chat.refreshList();
+    tick().then(() => chat.inputEl?.focus());
+  }
 
   // **The browser** (the title bar's button, Ctrl+Shift+B; as Claude Code's):
   // the panel's page tabs — the last page shown, unless its tab was closed,
@@ -693,6 +738,9 @@
     {:else}
       <ChatThread {chat} {code} {onopensettings} />
       <Composer {chat} {code} {onopensettings} {onopenusage} />
+      {#if side.open}
+        <SideQuestion {side} busy={sideBusy} code={!!code.current} onkept={sideKept} onclose={() => tick().then(() => chat.inputEl?.focus())} />
+      {/if}
     {/if}
   </section>
 

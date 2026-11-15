@@ -502,6 +502,9 @@ const COMMAND_SCREEN = 'You decide whether an instruction someone gave a writing
 // "OK" unless a spec says otherwise (`reply('styleWrite', fn)`).
 const STYLE_WRITE = "You write a style for an AI assistant's answers";
 
+/** A side question's own line (chat/side.rs INSTRUCTIONS): kind "side", "A side answer to: …" unless a spec says otherwise. */
+export const SIDE_QUESTION = 'This is a side question.';
+
 const KINDS = [
   [DIGEST, 'digest'],
   [ACTION_PLAN, 'actionPlan'],
@@ -1018,7 +1021,8 @@ export async function startFakeLlm() {
       const images = messages.flatMap((m) =>
         Array.isArray(m.content) ? m.content.filter((p) => p.type === 'image_url').map((p) => p.image_url?.url ?? '') : []
       );
-      const kind = KINDS.find(([prefix]) => system.startsWith(prefix))?.[1] ?? 'other';
+      // A side question (desktop/src-tauri/src/chat/side.rs) starts with the chat's persona: known by its line.
+      const kind = system.includes(SIDE_QUESTION) ? 'side' : (KINDS.find(([prefix]) => system.startsWith(prefix))?.[1] ?? 'other');
       const offered = (body.tools ?? []).map((t) => t.function?.name);
       // A strict chat format (`strictTurns`), as llama.cpp says Gemma 2's
       // refused a conversation: the person and the model must take turns,
@@ -1156,6 +1160,7 @@ export async function startFakeLlm() {
         screenQuestion: () => 'no',
         askOrEdit: () => '{"action": "answer"}',
         commandScreen: () => 'no',
+        side: (user) => `A side answer to: ${user}`,
       };
       // (The system prompt too: a Skill's name is in it.)
       const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user, system);
