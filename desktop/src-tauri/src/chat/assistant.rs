@@ -361,6 +361,52 @@ pub fn answer_in_view(seen: crate::notices::policy::Seen, viewing: Viewing, conv
     }
 }
 
+/// `yap-chat-spoken`: a question asked out loud while Claude works in the
+/// Code chat shown (`{conversation, text}`), for Chat's own queue to send
+/// ([`to_chat_queue`]).
+pub const SPOKEN_FOR_QUEUE: &str = "yap-chat-spoken";
+
+/// What a spoken question comes with, as [`to_chat_queue`] weighs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Spoken {
+    /// Asked with the shortcut on this PC (not from a phone).
+    pub pc: bool,
+    /// Asked with Chat in view ([`answer_in_view`]).
+    pub in_chat: bool,
+    /// What Chat shows.
+    pub viewing: Viewing,
+    /// The conversation it goes to.
+    pub conversation: Option<u64>,
+    /// Its words alone: no screenshots, quote, selection, Skill, app to
+    /// open, nor a phone's pictures (a typed message with any of those
+    /// goes at once too, never queued).
+    pub alone: bool,
+    /// It goes straight to its Code chat's session
+    /// (`turn::goes_to_session`, `agents/direct.rs`).
+    pub direct: bool,
+    /// What a message for that conversation's own session does now
+    /// (`runner::queue_state`: `"taking"`, `"writing"` or `"idle"`).
+    pub session: &'static str,
+}
+
+/// **Does a spoken question go through Chat's own queue?** (15 Nov 2026,
+/// the maintainer: "it's just text".) A question asked out loud with Chat
+/// in view, to the Code chat it shows, while that chat's Claude works, is
+/// the person's words for its session as a typed message is — so it goes
+/// as they do: the page's queue (`chatState`'s: Queued, × Cancel and edit,
+/// Send now, ✓ then ✓✓ Read) sends it as typed, marked spoken (its answer
+/// read aloud, `turn/report.rs`). Before, it went into the turn at once,
+/// and one Claude read only after its answer came back joined to that
+/// answer. The conversation, when it does. Pure.
+pub fn to_chat_queue(s: Spoken) -> Option<u64> {
+    let shown = match s.viewing {
+        Viewing::Conversation(id) => id,
+        Viewing::New | Viewing::Closed => return None,
+    };
+    let working = s.session != "idle";
+    (s.pc && s.in_chat && s.conversation == Some(shown) && s.alone && s.direct && working).then_some(shown)
+}
+
 /// Does the answer get its card on the Yap bar? Never while it's in view in
 /// Chat ([`answer_in_view`]); else as the person chose ("Show the answer on
 /// the Yap bar", `assistant_answer_card`) while it's read aloud, and always
@@ -1479,6 +1525,27 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // quoted in, as a typed or dictated question takes it
     // (`documents::quote_goes`); the box's quote goes.
     let quote = if opens_an_app || !pc || about_selection || said.is_some() { None } else { crate::chat::documents::take_waiting_quote(&app, in_chat, conversation_id) };
+    // **Claude is working in the Code chat shown** ([`to_chat_queue`]): the
+    // question joins Chat's own queue, as a typed one would — the page sends
+    // it from there, so nothing more happens here.
+    let alone = !shots_wait && quote.is_none() && !about_selection && said.is_none() && !opens_an_app && !with_pictures;
+    let queued = conversation_id.filter(|_| pc && in_chat && alone).and_then(|conv| {
+        to_chat_queue(Spoken {
+            pc,
+            in_chat,
+            viewing,
+            conversation: Some(conv),
+            alone,
+            direct: crate::chat::turn::goes_to_session(&cfg, Some(conv), false, false),
+            session: crate::agents::runner::queue_state(conv),
+        })
+    });
+    if let Some(conv) = queued {
+        tracing::info!(conversation = conv, "Voice Assistant: Claude is working in the Code chat shown; the question joins Chat's queue");
+        let _ = app.emit(SPOKEN_FOR_QUEUE, serde_json::json!({ "conversation": conv, "text": question }));
+        asker.give_up(&app);
+        return;
+    }
     // A question whose words point at the screen (screen.rs: "what's this
     // error?", "summarise this page"): the window in front goes with it —
     // its picture, or its text read on this PC — or a line tells the model
@@ -2267,6 +2334,33 @@ mod tests {
         // shows.
         for viewing in [chat, Viewing::New, Viewing::Closed] {
             assert!(!answer_in_view(Seen::No, viewing, Some(7)));
+        }
+    }
+
+    #[test]
+    fn a_spoken_question_waits_in_chats_queue_as_a_typed_one_would() {
+        let base = Spoken { pc: true, in_chat: true, viewing: Viewing::Conversation(7), conversation: Some(7), alone: true, direct: true, session: "writing" };
+        // Claude writing its answer, or a step under way: Chat's queue sends it (Queued, or at once with ✓✓).
+        assert_eq!(to_chat_queue(base), Some(7));
+        assert_eq!(to_chat_queue(Spoken { session: "taking", ..base }), Some(7));
+        // Nothing working: straight to the session, as ever.
+        assert_eq!(to_chat_queue(Spoken { session: "idle", ..base }), None);
+        // Not words for that chat's session alone: as before.
+        for s in [
+            // From a phone (its own turn there).
+            Spoken { pc: false, ..base },
+            // Asked from another app: Chat's model answers it.
+            Spoken { in_chat: false, ..base },
+            // Chat shows another conversation, a new chat, or isn't open: no queue of its there.
+            Spoken { viewing: Viewing::Conversation(8), ..base },
+            Spoken { viewing: Viewing::New, ..base },
+            Spoken { viewing: Viewing::Closed, ..base },
+            // Screenshots, a quote, a selection, a Skill: they go at once (a typed one's too).
+            Spoken { alone: false, ..base },
+            // A chat Chat's model answers (off the plan, the switch off, not a Code chat).
+            Spoken { direct: false, ..base },
+        ] {
+            assert_eq!(to_chat_queue(s), None, "{s:?}");
         }
     }
 

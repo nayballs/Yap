@@ -739,6 +739,40 @@ test('a message while Claude writes waits in the queue, a bubble of its own, the
   await shot(main, '91-each-its-own-answer');
 });
 
+// The maintainer, 15 Nov 2026: "it's just text" — a question asked out loud (the Voice Assistant's shortcut, the Code
+// chat in view) while Claude wrote went into its turn at once, past the queue. It goes through the same queue now.
+test('asked out loud while Claude writes: it waits in the queue as a typed message does, then its own turn, its answer read aloud', async ({ yap, main, shot }) => {
+  test.setTimeout(90_000);
+  await script(yap, WRITES_SLOWLY, 'writes-slowly');
+  await setConfig(yap, main, { speakReplies: true, agentsSpeak: 'voice' });
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Write a paragraph.');
+  const agent = await newAgent(yap, before);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  await askAloud(yap, 'Hello next');
+  // Waiting as a typed one would: its own bubble, Queued, the mic a spoken message has; nothing sent to Claude yet.
+  await expect(queuedBubble(main)).toHaveCount(1);
+  await expect(queuedBubble(main)).toContainText(/hello next/i);
+  await expect(queuedBubble(main)).toContainText('Queued');
+  await expect(queuedBubble(main).getByTestId('chat-queued-voice')).toBeVisible();
+  expect((await agents(yap)).find((j) => j.id === agent.id).turnList).toHaveLength(1);
+  await shot(main, '92-a-spoken-message-queued');
+  // The first turn's answer is its own; then it goes as the next turn, its own answer.
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 40_000 }).toBe(2);
+  await expect(queuedBubble(main)).toHaveCount(0);
+  const done = await ended(yap, agent.id, 40_000);
+  expect(done.turnList[1].request).toMatch(/^hello next/i);
+  const messages = await messagesOf(yap, done.conversation, 6);
+  expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'agentReport', 'assistant', 'user', 'agentReport', 'assistant']);
+  expect([!!messages[0].voice, messages[3].voice]).toEqual([false, true]);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: Write a paragraph.', /^Answer to: hello next/i]);
+  await expect(ticksOf(main)).toHaveAttribute('data-state', 'read');
+  // Asked out loud, its answer read aloud (as said: a full stop added); the typed one's isn't.
+  await expect.poll(() => spoken(yap), { timeout: 30_000 }).toEqual([expect.stringMatching(/^Answer to: hello next/i)]);
+});
+
 test('a message queued in one chat waits while another is shown, and goes once its chat opens again', async ({ yap, main }) => {
   test.setTimeout(120_000);
   await script(yap, WRITES_SLOWLY, 'writes-slowly');
