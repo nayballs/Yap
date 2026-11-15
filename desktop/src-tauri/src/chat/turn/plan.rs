@@ -444,6 +444,11 @@ fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude
         s.push(' ');
         s.push_str(&agents_lines());
     }
+    // How this chat's answers are written (chat/styles.rs), as Chat's own prompt has it.
+    if !built.style.is_empty() {
+        s.push_str("\n\n");
+        s.push_str(&built.style);
+    }
     s.push_str("\n\n");
     s.push_str(crate::chat::chats::CONTEXT_NOTE);
     let profile = crate::ai::about_you::profile_block(&built.profile);

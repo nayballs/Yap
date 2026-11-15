@@ -642,7 +642,12 @@ fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chat::c
             } else {
                 text.to_string()
             };
-            crate::chat::chats::create(&title)
+            let conv = crate::chat::chats::create(&title);
+            // Its style: the one its new chat had (chat/styles.rs); never a Code chat's.
+            if crate::agents::code_chat::new_chat_folder().is_none() {
+                crate::chat::styles::adopt_new(conv.id);
+            }
+            conv
         }
     }
 }

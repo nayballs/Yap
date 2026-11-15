@@ -27,7 +27,8 @@ pub(super) async fn answer(
     // The web pipeline's own prompt ends as this one does: About you,
     // then memory's "You".
     let (about, memory_you) = (&built.about, &built.memory_you);
-    let about_and_memory = if memory_you.is_empty() { about.clone() } else { format!("{about}\n\n{memory_you}") };
+    // (This chat's style first, as the prompt's end has it: chat/styles.rs.)
+    let about_and_memory = [built.style.as_str(), about.as_str(), memory_you.as_str()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
     let SmallAnswer { reply, chips, sources, looked, pages, stopped, handoff } = small_model_answer(
         cfg,
         &ep.persona,

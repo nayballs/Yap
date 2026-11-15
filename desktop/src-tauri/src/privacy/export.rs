@@ -13,7 +13,8 @@
 //!   `notes/versions.json`, each note's earlier versions (`notes/versions.rs`);
 //! - `tasks.json`, `skills.json` (the person's own Skills), `chats/chats.json` with each chat as Markdown
 //!   (and `chats/claude_sessions.json`, each chat's Claude Code session on your Claude plan, when any, and
-//!   `chats/connector_chats.json`, the connectors each chat switched off, by id, when any), and
+//!   `chats/connector_chats.json`, the connectors each chat switched off, by id, when any, and
+//!   `chats/chat_styles.json`, the person's answer styles and each chat's, when any), and
 //!   `memory/` — Memory's own export (`memory::export`) and `memory.json`;
 //! - `agents/` — Yap Code's agents, the tasks Chat handed to Claude Code
 //!   (`agents.json`), the workspaces (`workspaces.json`), each agent's log and the pictures its
@@ -373,6 +374,9 @@ pub struct Inputs {
     /// connector_chats.json: the connectors each chat switched off (ids
     /// only; `connectors::chats::snapshot`), when any.
     pub connector_chats: Option<Value>,
+    /// chat_styles.json: the person's answer styles and each chat's pick
+    /// (chat/styles.rs), when there are any.
+    pub chat_styles: Option<Value>,
     /// config.json as `YapConfig` serialises.
     pub config: Value,
     /// Whether the audio is in it (the README says).
@@ -466,6 +470,10 @@ screenshots/: Chat's screenshots (PNG).\n"
     // The connectors each chat switched off (Connectors ▸), when any did.
     if let Some(c) = &i.connector_chats {
         files.push(("chats/connector_chats.json".into(), pretty(c)));
+    }
+    // The answer styles, the person's own and each chat's (chat/styles.rs).
+    if let Some(c) = &i.chat_styles {
+        files.push(("chats/chat_styles.json".into(), pretty(c)));
     }
 
     // Tasks, your Skills, memory.
@@ -733,6 +741,7 @@ fn inputs(audio: bool) -> Inputs {
         writing_samples: crate::ai::writing_samples::snapshot().samples,
         connectors: crate::integrations::connectors::privacy::export(),
         connector_chats: crate::integrations::connectors::chats::snapshot().and_then(|f| serde_json::to_value(f).ok()),
+        chat_styles: crate::chat::styles::snapshot(),
         config: serde_json::to_value(&cfg).unwrap_or(Value::Null),
         audio,
     }
@@ -985,6 +994,7 @@ mod tests {
                 added_ms: 1,
             }],
             connector_chats: Some(json!({ "version": 1, "chats": { "3": { "off": ["c1"] } } })),
+            chat_styles: Some(json!({ "styles": [{ "id": "s-1", "name": "Like a friend", "instructions": "Warm and brief.", "createdMs": 1 }], "chats": { "3": "s-1" } })),
             connectors: Some(json!({ "connectors": [{ "id": "c1", "name": "Allotment tracker", "reached": { "kind": "link", "address": "https://mcp.example.com/mcp", "headerNames": ["X-Api-Key"] } }] })),
             config: serde_json::to_value(cfg).unwrap(),
             audio: false,
@@ -1010,6 +1020,7 @@ mod tests {
             "chats/chats.json",
             "chats/claude_sessions.json",
             "chats/connector_chats.json",
+            "chats/chat_styles.json",
             "tasks.json",
             "skills.json",
             "memory/You.md",

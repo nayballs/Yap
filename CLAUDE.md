@@ -188,6 +188,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `chat/documents.rs` (+ `documents/rich.rs`, `blocks.rs`) — documents beside the chat; the person's edits win (`merge3`).
 - `chat/pictures.rs` (+ `pictures/local.rs`: a picture file on this PC, by its path) — find and show pictures.
 - `chat/shares.rs` — `share_files`: files shared into the conversation (a picture inline, other files as cards to open), an agent's report showing its turn's pictures.
+- `chat/styles.rs` — Styles: how a chat's answers are written (Normal, Concise, Explanatory, Formal, your own), from the composer's Style chip; `chat_styles.json`.
 - `chat/export.rs` — Export a chat (a conversation's ⋯): a Markdown file and its pictures in a folder beside it, never uploaded.
 - `chat/made.rs` (+ `made/serve.rs`) — `show_visual`: an SVG diagram or small HTML widget in the answer, a sandboxed frame (`yapmade` scheme, its CSP in the response, no Yap IPC); kept in `chat-made/<chat>/`, never chats.json.
 
@@ -472,7 +473,7 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`); what each holds:
 `model_catalog.json`, `groq_usage.json`, `ai_usage.json`, `dictation_stats.json`,
 `dictionary_usage.json`, `hints.json`, `onboarding.json`, `mic_tips.json`,
 `word_suggestions.json`, `snippet_suggestions.json`, `language_nudges.json`, `notices.json`,
-`memory.json`, `writing_samples.json`, `chat-images/` (+ `thumbs/`), `connections.json`,
+`memory.json`, `writing_samples.json`, `chat_styles.json`, `chat-images/` (+ `thumbs/`), `connections.json`,
 `quieted_apps.json`, `stt_speed.json`, `recent-audio/`, `meeting-audio/` (+ `cuts.json`),
 `search-index/`, `link_devices.json`, `link/`, `claude_sessions.json`, `claude/`,
 `agents.json`, `agents/`, `workspaces.json`, `remote_control.json`, `connectors.json`,

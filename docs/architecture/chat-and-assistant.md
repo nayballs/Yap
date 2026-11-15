@@ -1866,6 +1866,11 @@ one side.
   ⋯ → Export… as a Markdown file and its pictures beside it, never uploaded
   ([below](#export-a-chat-2026-11-15)).
 
+- **`chat/styles.rs`** — **Styles** (15 Nov 2026): how a chat's answers are
+  written (Normal, Concise, Explanatory, Formal, your own), picked from the
+  composer's Style chip, a block in the system prompt
+  ([below](#styles-2026-11-15)).
+
 ## Questions about selected text (2026-10-31)
 
 Wispr Flow's Command Mode ("Wispr Lens": "select text and ask Flow") by
@@ -5143,3 +5148,45 @@ The toast says where, and how many pictures went in which folder.
 - The log says counts only. Tests: `cargo test chat::export`;
   `chat-export.spec.js` (the menu, then the file and its folder);
   `right-click.spec.js` (the row's menu).
+
+## Styles (2026-11-15)
+
+The Claude app's styles, from Anthropic's help pages: how answers are
+written, picked per chat. Chat's side only (a Code chat's answers are
+Claude Code's own).
+
+- **Picking one** (`StyleChip.svelte`, under the message box beside the
+  model): the chip names the chat's style; its menu has Yap's four —
+  Normal, Concise ("Shorter and more direct"), Explanatory ("For learning
+  something new") and Formal ("Clear and polished") — then the person's own,
+  the one in use ticked, and "Create & edit styles…". A pick is kept for the
+  chat shown (`chat_style_set`) and is the last one picked: a new chat
+  starts with it (`chat_style_of(null)`), as the Claude app's selection
+  stays; the conversation the first question makes takes it
+  (`turn_conversation` → `styles::adopt_new`, never a Code chat).
+- **In the prompt** (`styles::prompt_block`, `prompt::build` → `Prompt::end`):
+  one block in the system prompt just before About you — "How to write in
+  this chat (the user picked the "Concise" style): … This shapes how you
+  write only — tone, length and layout — never what's true, what you do, or
+  the rules above." — stable from turn to turn, so a model re-uses its
+  cache. The small web pipeline's prompt ends with it too (`small.rs`), and
+  so does your Claude plan's session prompt (`plan.rs` `system_prompt`: a
+  new style restarts the warm session). A question asked out loud into the
+  chat has it (the same build). Normal adds nothing. (Not in
+  `stable_prompt`'s measure: a few dozen tokens.)
+- **Your own** (`StylesDialog.svelte`, its own chunk): "Create a style",
+  then "Describe it" (a sentence or two) or "From your writing" (a pasted
+  sample, at most 6,000 characters read); "Write the style" asks Chat's own
+  model (`chat_style_write`, `WRITE_PROMPT`: JSON `{name, instructions}`,
+  2–5 sentences on tone, length, vocabulary and layout, never the sample's
+  topic, names or facts) and fills Name and How to write, which the person
+  edits before Save style. With no model set up, a description is the
+  instructions as it is. The sample is never kept or logged. Use, Edit and
+  Delete… (asked first; its chats go back to Normal) on each of yours.
+- **Kept** in `chat_styles.json` ([config-and-data.md](./config-and-data.md)),
+  never chats.json: an older Yap's save can't lose a pick. A deleted chat's
+  pick goes with it (`chat_delete`, `chat_delete_many`, Delete some of your
+  data); Download your data has the file.
+- Tests: `cargo test chat::styles`; `chat-styles.spec.js` (the menu, the
+  block in the request, kept per chat and for a new one; one written from a
+  description, edited, used and deleted; light and dark).

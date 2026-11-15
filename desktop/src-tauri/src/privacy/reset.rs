@@ -948,6 +948,13 @@ fn clear_stores(c: &Choice, done: &mut Done) -> Gone {
     } else {
         crate::integrations::connectors::chats::chats_deleted(&gone.chats);
     }
+    // Their styles (chat/styles.rs): each chat's pick goes with it (the
+    // person's own styles stay: settings, as About you is).
+    if c.connector_chats() == Cut::Whole {
+        crate::chat::styles::reset_chats();
+    } else {
+        crate::chat::styles::chats_deleted(&gone.chats);
+    }
     // Memory: all of it (Undo's copies too), or what it read of what went.
     match c.memory() {
         Cut::Whole => done.memory = crate::memory::reset(),

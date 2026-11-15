@@ -33,6 +33,7 @@
   import { workingDirectly } from '../../core/agents.js';
   import SkillMenu from '../../components/SkillMenu.svelte';
   import ModelChip from './ModelChip.svelte';
+  import StyleChip from './StyleChip.svelte';
   // A Code chat's workspace chip and Yap Code's Mode chip, before it, and its
   // box's edge (codeChats.svelte.js, codeChat.css).
   import CodeChips from './CodeChips.svelte';
@@ -517,6 +518,10 @@
   <div class="composerfoot">
     <CodeChips {chat} {code} />
     <ModelChip bind:this={chipRef} {onopensettings} quiet conversationId={chat.activeId} />
+    {#if !code?.current && !code?.onCode}
+      <!-- How this chat's answers are written (chat/styles.rs): Chat's side only. -->
+      <StyleChip conversationId={chat.activeId} />
+    {/if}
     <!-- How much of the model's context this chat uses (bottom right, as
          Claude's chat box shows it); its panel has the day's AI use. -->
     <span class="footgap"></span>
