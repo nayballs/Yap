@@ -206,6 +206,10 @@ pub fn browser_line(tool: &str, input: &Value) -> Option<String> {
         pictures::LOOK => beside("Looking at a picture"),
         pictures::SHOW => beside("Showing a picture"),
         shares::NAME => "Sharing files in the chat".to_string(),
+        crate::chat::made::SHOW_VISUAL => match text("title") {
+            Some(t) => format!("Made a visual: {}", one_line(&t, 60)),
+            None => "Made a visual".to_string(),
+        },
         see_screen::LOOK => "Looking at your screen".to_string(),
         _ => return None,
     })

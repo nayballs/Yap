@@ -46,7 +46,9 @@
    * opened (a `ShownPicture`). `pagethumb(url)`: a page's picture taken
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, branch = null, retry = null, editing = null, onedited = null, oneditcancel = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null, branch = null, retry = null, editing = null, onedited = null, oneditcancel = null } = $props();
+  // `visuals`: what the answer made to be seen, not read (chat/made.rs: "Made a visual", above its words;
+  // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends.
   // **Retry, Edit and ‹ ›** (15 Nov 2026, the Claude app's; chat/chats/branches.rs): `branch` — `{ fork, why, onbranch }`,
   // this message's versions (‹ 2/3 ›; `why` it can't switch now) —; `retry` — `{ why, onretry }`, under an answer —;
   // `actions.onedit` (and `actions.edit`, why not now) under the person's message; `editing` — `{ text }` — it's open in
@@ -127,6 +129,14 @@
   {:else}
     <p class="thoughtline" data-testid="chat-thought">{thoughtLabel(m.thinking?.ms)}</p>
   {/if}
+{/if}
+{#if m.role === 'assistant' && visuals?.length}
+  <!-- The visuals it made (show_visual), above its words: each a sandboxed frame of its own. -->
+  {#await import('./VisualFrame.svelte') then { default: VisualFrame }}
+    {#each visuals as v (v.id)}
+      <VisualFrame {v} {conversation} onprompt={onvisualprompt} />
+    {/each}
+  {/await}
 {/if}
 {#if m.role === 'user' && editing}
   <!-- Edit: open in place with its words (its own small chunk). -->

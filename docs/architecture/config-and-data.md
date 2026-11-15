@@ -815,6 +815,17 @@
   next start puts back each fork that still fits a conversation with none
   (its shown branch's first message there at its time). It goes with the
   chats in Delete some of your data and Reset app.
+- What a chat made (15 Nov 2026, `chat/made.rs`): `%APPDATA%/yap/chat-made/` —
+  a folder per conversation (`<chat id>/`) with its `made.json` (`{version,
+  created, items: [{id, kind, title, format, after: {index, ts}, at,
+  outside?, bytes}]}`: `created` the conversation's `createdTs`, so a
+  reused id's folder is another chat's; fields a later Yap adds are kept
+  as they are) and each visual's code (`v_<16 hex>.svg` / `.html`); never
+  in chats.json, so an older Yap's save can't drop it. `chat-made/lib/`
+  keeps the chart libraries a visual loaded (Chart.js, D3: checked against
+  their pinned SHA-256). Deleted with its chat, and whole with the chats
+  in Delete some of your data and Reset app; in Download your data as
+  `chat-made/<chat>/…`.
 - The Chat document panel's width: the main window's `localStorage`
   (`yapChatDocWidth`, px), a convenience of that window, never config.json.
 - Model lists: `%APPDATA%/yap/model_catalog.json` — each keyed AI provider's
