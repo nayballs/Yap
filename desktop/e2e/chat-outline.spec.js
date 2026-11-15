@@ -254,7 +254,8 @@ test('asked out loud: the headings said, on the Yap bar, and “drop the second 
   await said("It's in Chat.");
   await expect.poll(barCard).toBeNull();
   // Written without the part dropped (notes.json as saved).
-  const docText = () => (yap.readJson('notes.json')?.notes ?? []).find((n) => n.title === OUTLINE.title)?.content ?? '';
+  // (The newest of that title: the earlier tests' documents share it.)
+  const docText = () => (yap.readJson('notes.json')?.notes ?? []).filter((n) => n.title === OUTLINE.title).sort((a, b) => a.id - b.id).at(-1)?.content ?? '';
   await expect.poll(docText, { timeout: 10_000 }).toContain('Talents');
   expect(docText()).toContain('Gear');
   expect(docText()).not.toContain('Skills');
