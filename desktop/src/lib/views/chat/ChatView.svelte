@@ -113,7 +113,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
-  import { onMount, onDestroy, untrack, tick } from 'svelte';
+  import { onMount, onDestroy, untrack, tick, setContext } from 'svelte';
   import { chatRequest } from '../../stores/chatRequest.svelte.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { createChatState } from './chatState.svelte.js';
@@ -126,6 +126,9 @@
   import { LIST_MIN } from './chatRoom.js';
   import { createChatLayout } from './chatLayout.svelte.js';
   import { chatBrowser } from '../../stores/chatBrowser.svelte.js';
+  import { chatSummary } from '../../stores/chatSummary.svelte.js';
+  import { CODE_FILES } from '../../ui/fileLinks.js';
+  import { runCommand } from './codeRuns.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
   import { agents, initAgents, agentById } from '../../stores/agents.svelte.js';
   import { workingDirectly } from '../../core/agents.js';
@@ -143,6 +146,22 @@
   // **Code chats** (codeChats.svelte.js): with Yap Code on, the list's Chat |
   // Code switch, a Code chat's workspace and its look.
   const code = createCodeChats(chat, { opensettings: () => onopensettings });
+  // **A Code chat's files and ▶ Run** (15 Nov 2026, agents/files.rs, agents/run_block.rs): its
+  // answers and rows read this (ui/fileLinks.js, ui/codeRun.js, StepRows): a path in the workspace
+  // opens the file beside the chat; ▶ on a one-line shell block runs it (asked first but in Bypass),
+  // its output in the Runs tab. `conversation` is null outside a Code chat: nothing is a link.
+  setContext(CODE_FILES, {
+    get conversation() {
+      return code.current ? (chat.activeId ?? null) : null;
+    },
+    open: (ref) => doc.showFile(ref),
+    run: (block) => runCommand(chat.activeId, block, () => doc.showRuns()),
+    addToMessage: (text) => {
+      chat.input = chat.input.trim() ? `${chat.input.trimEnd()}\n\n${text}` : text;
+      tick().then(() => chat.inputEl?.focus());
+    },
+    openSettings: (section) => onopensettings?.(section),
+  });
   // A message sent while a Code chat's own session works waits in the queue (chatState's `queued`).
   // (A Code chat: Rust says whether its own session works — the page's list of agents lags a moment behind.)
   chat.setQueueGate(() => code.current != null);
@@ -213,6 +232,24 @@
     chatBrowser.open = doc.open && doc.showing === 'page';
   });
   onDestroy(() => (chatBrowser.open = false));
+
+  // **The summary** (the title bar's button while a Code chat shows, as the Claude app's): its tab,
+  // or the panel closed while it shows.
+  let summaryPresses = untrack(() => chatSummary.presses);
+  $effect(() => {
+    const n = chatSummary.presses;
+    if (n === summaryPresses) return;
+    summaryPresses = n;
+    untrack(() => doc.toggleSummary());
+  });
+  $effect(() => {
+    chatSummary.shown = !!code.current;
+    chatSummary.open = doc.open && doc.showing === 'summary';
+  });
+  onDestroy(() => {
+    chatSummary.shown = false;
+    chatSummary.open = false;
+  });
 
   // **Chat's layout** (chatLayout.svelte.js, the rules chatRoom.js's): the
   // conversation list shown or hidden (its button, Ctrl+B; stepped aside

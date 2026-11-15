@@ -38,6 +38,8 @@
   import { placed, shown } from './chatImages.js';
   import { screenPixels } from './chatShots.svelte.js';
   import StepPictures from './StepPictures.svelte';
+  import { getContext } from 'svelte';
+  import { CODE_FILES } from '../../ui/fileLinks.js';
   // (A helper's steps are rows too: this component inside itself.)
   import StepRows from './StepRows.svelte';
 
@@ -47,6 +49,27 @@
 
   /** `steps`: a stretch's (`workOf`); `busy`: the agent is on its last one now; `onview(picture)`: open a step's picture. */
   let { steps = [], busy = false, onview = null } = $props();
+  // **A step's file opens beside the chat** (a Code chat's: ChatView's context, agents/files.rs): an
+  // edit's path over its diff, a read's name (at the first line it read).
+  const codeFiles = getContext(CODE_FILES) ?? null;
+  const canOpen = $derived(codeFiles?.conversation != null);
+  /**
+   * The file a step names, relative to the workspace: an edit's, a read's (`null`: none). A path
+   * outside the workspace (agents/steps.rs `shown_path` leaves it whole) or one cut short is no link.
+   */
+  function stepFile(s) {
+    const read = !s?.file && stepKind(s) === 'read' ? /^Reading (.+)$/.exec(String(s.step || '')) : null;
+    const f = s?.file || (read && read[1] !== 'a file' ? read[1] : null);
+    return f && !/^([A-Za-z]:)?[\\/]/.test(f) && !f.includes('…') ? f : null;
+  }
+  /** The line a step is about: a read's first, an edit's first changed. */
+  function stepLine(s) {
+    const r = parseInt(String(s?.range || ''), 10);
+    if (r > 0) return r;
+    const first = s?.diff ? diffRows(s.diff).find((x) => x.mark !== 'gap' && x.mark !== 'ctx' && x.no) : null;
+    return first?.no ?? null;
+  }
+  const openFile = (s) => codeFiles?.open?.({ rel: String(stepFile(s)).replace(/\\/g, '/'), line: stepLine(s) });
 
   /** The rows the person opened (by their place: a row keeps it as more come). */
   let open = $state({});
@@ -66,10 +89,11 @@
   const lineWord = (n) => `${Number(n).toLocaleString('en-GB')} more ${Number(n) === 1 ? 'line' : 'lines'}`;
 </script>
 
-{#snippet words(r, now)}
+{#snippet words(r, now, s = null)}
   {#if now}<span class="spin" aria-hidden="true"></span>{/if}
   <span class="rtext"
-    >{r.text}{#if r.name}{' '}<span class="rname">{r.name}</span>{/if}{#if r.tail}{' '}<span class="rtail">{r.tail}</span>{/if}</span
+    >{r.text}{#if r.name}{' '}{#if s}<button type="button" class="rname rlink" title={`Open ${stepFile(s)}`} data-testid="chat-agent-work-file" onclick={() => openFile(s)}>{r.name}</button
+        >{:else}<span class="rname">{r.name}</span>{/if}{/if}{#if r.tail}{' '}<span class="rtail">{r.tail}</span>{/if}</span
   >
   {#if r.added}<span class="plus">+{r.added}</span>{/if}
   {#if r.removed}<span class="minus">−{r.removed}</span>{/if}
@@ -93,7 +117,7 @@
             <svg class="chev" class:down={isOpen} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
           </button>
         {:else}
-          <div class="rhead still">{@render words(r, going)}</div>
+          <div class="rhead still">{@render words(r, going, canOpen && !going && stepFile(s) ? s : null)}</div>
         {/if}
         {#if pics.length && !isOpen}<StepPictures pictures={pics} max={2} {onview} />{/if}
       </div>
@@ -102,7 +126,9 @@
           {#if s.diff?.lines?.length}
             {@const rows = colourDiff(colours, pairChanges(diffRows(s.diff)), languageOf(s.file))}
             {@const digits = Math.max(1, ...rows.map((x) => String(x.no ?? '').length))}
-            <p class="rpath">{s.file}{#if s.diff.all}<span class="rnote"> · every match replaced</span>{/if}</p>
+            <p class="rpath">
+              {#if canOpen && stepFile(s)}<button type="button" class="rlink" title={`Open ${s.file}`} data-testid="chat-agent-work-file" onclick={() => openFile(s)}>{s.file}</button>{:else}{s.file}{/if}{#if s.diff.all}<span class="rnote"> · every match replaced</span>{/if}
+            </p>
             <!-- (A box that scrolls takes the keyboard's focus, so its arrows can scroll it.) -->
             <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
             <div class="dbox" role="group" aria-label={`Changes to ${s.file}`} tabindex="0" data-testid="chat-agent-work-diff" style:--digits={digits}>
@@ -229,6 +255,27 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* A file that opens beside the chat (a Code chat's). */
+  .rlink {
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .rlink:hover {
+    color: var(--yap-primary);
+    text-decoration-color: currentColor;
+  }
+  .rlink:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+    border-radius: 3px;
   }
   /* The file's name, set apart from the words round it. */
   .rname {

@@ -48,7 +48,13 @@ const md = new MarkdownIt('default', {
   breaks: true,
   typographer: false,
 });
-md.validateLink = (url) => SAFE_URL.test(url.trim());
+// A file's path as a link's address (`[convert.js](src/convert.js:12)`): no
+// scheme, no `/`, `\` or `#` before it (a drive's `C:\` or `C:/` aside).
+// It renders as `a.md-file` with the path, no address: text everywhere, a
+// link that opens the file beside a Code chat (ui/fileLinks.js asks Rust
+// whether it's a file in the chat's workspace: agents/files.rs).
+const FILE_HREF = /^(?![a-z][a-z0-9+.-]+:)(?![a-z]:(?![\\/]))(?![\\/#])[^\s<>"]{1,512}$/i;
+md.validateLink = (url) => SAFE_URL.test(url.trim()) || FILE_HREF.test(url.trim());
 // No images: a model's ![x](https://…) would make Yap fetch the address.
 md.disable('image');
 // Bare links: http(s) and mail addresses only (linkify-it's defaults also
@@ -275,9 +281,20 @@ function lineAttr(token) {
 const rules = md.renderer.rules;
 
 rules.link_open = (tokens, idx) => {
-  const href = escapeHtml(tokens[idx].attrGet('href') || '');
+  const raw = tokens[idx].attrGet('href') || '';
+  if (!SAFE_URL.test(raw.trim())) return `<a class="md-file" data-path="${escapeHtml(filePath(raw))}">`;
+  const href = escapeHtml(raw);
   return `<a class="md-link" href="${href}" title="${href}">`;
 };
+
+/** A file link's path as written (markdown-it encodes its address: `%20`, `%5C`). */
+function filePath(href) {
+  try {
+    return decodeURI(href);
+  } catch {
+    return href;
+  }
+}
 
 rules.yap_cite = (tokens, idx) => {
   const pills = tokens[idx].meta.sources.map((s) => {
@@ -343,18 +360,18 @@ const PURIFY = {
     'ul', 'ol', 'li', 'h2', 'h3', 'h4', 'h5', 'blockquote', 'hr',
     'div', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
   ],
-  ALLOWED_ATTR: ['class', 'href', 'title', 'aria-label', 'start', 'type', 'checked', 'disabled', 'data-line'],
+  ALLOWED_ATTR: ['class', 'href', 'title', 'aria-label', 'start', 'type', 'checked', 'disabled', 'data-line', 'data-path'],
   // (DOMPurify's own URI check stays: it tests every attribute's value, so a
   // web-and-mail-only pattern here would drop start="3"; `href` is held to
   // SAFE_URL in the hook below.)
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
 };
-const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-passage', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'md-pending', 'md-pending-key', 'md-pending-intent', 'task', 'c', 'r']);
+const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-passage', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'md-pending', 'md-pending-key', 'md-pending-intent', 'md-file', 'task', 'c', 'r']);
 // The one in-page address: a passage pill's (rendered by yap_cite only).
 const PASSAGE_HREF = /^#passage-\d{1,2}$/;
 // Which elements may carry which of the narrower attributes.
-const ONLY_ON = { href: ['A'], 'aria-label': ['A', 'INPUT'], start: ['OL'], type: ['INPUT'], checked: ['INPUT'], disabled: ['INPUT'] };
+const ONLY_ON = { href: ['A'], 'data-path': ['A'], 'aria-label': ['A', 'INPUT'], start: ['OL'], type: ['INPUT'], checked: ['INPUT'], disabled: ['INPUT'] };
 
 let purifier = null;
 let purifierWindow = null;

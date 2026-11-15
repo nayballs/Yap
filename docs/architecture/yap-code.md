@@ -711,6 +711,50 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
   - Its lines: "Starting the dev server ‘web’", "Reading a dev server's output".
 - **Not yet**: the app's auto-verify setting (`autoVerify`), a card in the chat with Open for a server Claude started, and a server picked by the app from `package.json` by itself.
 
+## Files, ▶ Run and the summary beside a Code chat
+
+15 Nov 2026, from the comparison of the Claude app's Code tab with Yap (`yap-private/docs/claude-app-chat-gaps-2026-11.md`, A7, A12, F1), built from what the app shows on screen and Yap's own contracts, never from its files.
+
+### File links and the file view
+
+- **What's a link** (`ui/fileLinks.js`, an action on an answer's body beside `colourCode`; ChatMessage, and AgentWork's words as Claude works): in a Code chat, a path that names a file in the chat's workspace:
+  - a link to a file (`[the lab notes](docs/lab.md:3)`): `core/markdown.js` renders a link with no scheme as `a.md-file` with its path (`data-path`) and no address, so it's only text everywhere else (before, the raw `[x](y)` showed);
+  - inline code that reads as a path (`src/convert.js:5`);
+  - a path in the words (`src/convert.js`, `CLAUDE.md`).
+
+  A line can follow: `:105`, `:105:7`, `#L105`. Code blocks never.
+- **Only files in the chat's workspace** (`agents/files.rs`): the candidates go to Rust in one call (`code_files_check`), which takes the workspace from the conversation (`code_chat::folder_of`), never from the page, and resolves each (`resolve`):
+  - relative to the workspace, or a full path inside it;
+  - refused: `..` that climbs out (any `..` in a full path), device and network paths (`\\?\`, `\\.\`, `\\server`), a drive-relative one (`\x`, `C:x`), a scheme, a colon past the drive (a stream), wildcards and control characters;
+  - then both sides `canonicalize`d (symlinks, junctions and short names followed): the file's real place must be under the workspace's, so a link inside the workspace to a folder outside never opens;
+  - files only, never a folder.
+
+  What Rust said is kept while the window lives (a miss for 8 s: a file a turn is writing turns up). A Chat (non-Code) chat has no context, and nothing is looked for.
+- **The file view** (`FileTab.svelte`, a `file:<rel>` tab of the panel, `chatDoc.svelte.js` `showFile`): read only, numbered, in colour (`core/codeColours.js`, as the rows: tokens as text, never markup), scrolled to the line and that line marked; read again each time it's opened and with ↻. At most 1 MB and 20,000 lines (said: "only its start is shown"); a file with a NUL in its first 8 KB is "not text".
+  - **Copy path**: its full path.
+  - **Open in editor** (`code_file_open_editor`): VS Code or Cursor at the line (`-g file:line`), else Notepad++ (`-n`), else Notepad, started directly: never through a shell, never the file's own default app (which for a `.js` or `.ps1` would run it).
+- **The rows**: a read's file name ("Read lab.md") and an edit's path over its diff open it too, at the first line read or changed (`StepRows.svelte`; a path outside the workspace, which `steps.rs` `shown_path` leaves whole, is no link).
+
+### ▶ Run on a one-line shell block
+
+- **Design: run here, not by the session** (`agents/run_block.rs`). The button runs exactly the line in the workspace and shows what it prints beside the chat, as the Claude app's ▶ runs it in its terminal. Asking the chat's own Claude to run it would cost a turn, wait behind its work and run what the model makes of the line. What it printed stays out of the conversation unless the person puts it there (Add to message).
+- **Which blocks** (`ui/codeRun.js`, only on an answer that's whole): a fence naming a shell (`bash`, `sh`, `shell`, `console`, `zsh`; `powershell`, `pwsh`, `ps1`; `cmd`, `bat`) holding one line, a `$ ` or `PS> ` prompt before it dropped (`one_line`). Never in a Chat (non-Code) chat, never a block of two lines.
+- **Asked first, but in Bypass**: at the chat's Mode as `modes::effective` gives it (its chip, the workspace's cap, Bypass once confirmed), anything but Bypass permissions asks (`code_run_check`, then the page's dialog: the line, the workspace, the shell, why it asks), and `code_run_start` refuses a run that wasn't asked. Under Bypass nothing asks (the maintainer's rule).
+- **The shells**: bash in Git Bash (fed on its input, so nothing to quote; Claude Code's own `CLAUDE_CODE_GIT_BASH_PATH` first, never WSL's `bash.exe`), else PowerShell, and the run says so; PowerShell 7 when installed, else Windows PowerShell (`-NoProfile -NonInteractive -EncodedCommand`, UTF-8 out); `cmd` with `/d /s /c` at code page 65001.
+- **Running**: in the workspace, no window, `NO_COLOR` and `FORCE_COLOR=0` (colours left are taken out), `GIT_TERMINAL_PROMPT=0`, tied to Yap's kill-on-close job; its output to the page every 120 ms (`yap-code-run`), the newest 200,000 characters kept, the newest 40 runs remembered while Yap runs. No time limit: a dev server started this way is a background task with its own Stop. Stop ends it and what it started (`servers::kill_tree`).
+- **The Runs tab** (`RunsTab.svelte`, `codeRuns.svelte.js`): each run oldest first, `garden-planner $ npm test` in colour, its output as it comes, "Exit 0 · 4.2 s" or "Stopped"; Stop while it runs, then Run again (asked as ▶ is), Copy output, **Add to message** (the line and its output, its newest 6,000 characters, into the message box).
+
+### The summary
+
+`SummaryTab.svelte`, a `summary` tab opened from the list button at the right of the panel's tab row (a Code chat always has the row) or the title bar's (`stores/chatSummary.svelte.js`, a Code chat's only; it closes the panel while the summary shows, as the browser button does). After the Claude app's right column:
+
+- **Environment** (`code_chat_environment`): the workspace's name and path, its git branch (a detached HEAD's commit), **Worktree** for a linked worktree, "Runs on this PC". Read from `.git` itself: a `.git` file whose `gitdir:` points into `<repo>/.git/worktrees/` is a worktree; no git is run.
+- **Context**: how full the chat's context is, from what Yap knows already: its own Claude's latest turn (a Code chat that works directly: `agents/usage.rs`), else the plan's count for the chat, else the context ring's (`chat_context`).
+- **Connectors**: the chat's own (`connector_chat_list`), on or off here, and Manage connectors….
+- **Outputs** (`outputs.js` `outputItems`, drawn by `OutputsList.svelte`: **one list** that any kind adds its rows to): the files its work changed (its agents' turns' `files`, newest first; they open in the file view) and the files it shared (a picture in the picture tab, a file in the workspace in the file view, any other as its card opens it).
+- **Background tasks**: its helpers and the agents Chat sent that are at work now (the Agent panel's own rows, `panelRows`), each with its clock (a helper's since it was handed its part: `helpersOf`'s `ts`) and Stop (a helper's stops the turn that sent it); its running ▶ Runs with theirs; then "N finished" (it opens the Agent panel, or the Runs tab).
+- **Not yet**: Remote Control's switch in the Environment (the "Code · garden-planner" card has it), and a right-click menu on an output.
+
 ## Turns: one agent per Code chat
 
 2026-11-07, after the maintainer's real use: a follow-up on the same project
@@ -2535,7 +2579,8 @@ Rust (`desktop/src-tauri/src/`):
   `voice.rs` (the spoken yes or no) · `approve_card.rs` (a permission prompt
   on the Yap bar) · `remote.rs` (Remote Control's records: the phones'
   ticks, the workspaces' switches, a phone's turns, the audit trail;
-  `remote_control.json`) · `commands.rs`.
+  `remote_control.json`) · `files.rs` (a Code chat's files: links, the file
+  view, Open in editor, the Environment) · `run_block.rs` (▶ Run) · `commands.rs`.
 - `link/code.rs` (+ `code/`) — Remote Control's side of Yap Link: the phone's
   Code messages through their gates ([link.md](./link.md)).
 - `chat/tools/agents.rs` — the four tools, for the tool loop and a plan chat.
@@ -2548,7 +2593,8 @@ Rust (`desktop/src-tauri/src/`):
 Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 `codeChats.svelte.js`, `WorkspacePicker`, `CodeChips`, `CodeEdge`,
 `codeChat.css`, `CodeEmpty`, `ModeChip`, `AgentTab`, `AgentPanel`, `AgentTimeline`, `AgentFiles`,
-`AgentPills`, `AgentTodoCard`, `AgentWork`, `StepRows`, `StepPictures`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`),
+`AgentPills`, `AgentTodoCard`, `AgentWork`, `StepRows`, `StepPictures`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`,
+`FileTab`, `RunsTab`, `codeRuns.svelte.js`, `SummaryTab`, `OutputsList` + `outputs.js`), `ui/fileLinks.js`, `ui/codeRun.js`, `stores/chatSummary.svelte.js`,
 `core/codeChats.js`, `core/agents.js`, `core/codeColours.js` (+ `codeColours.hljs.js`), `core/intralineDiff.js`, `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
 `stores/agents.svelte.js`, `settings/YapCodePage.svelte`,
 `settings/ClaudeCodeStatus.svelte`.
@@ -2566,6 +2612,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 | `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs, questions?}` (`questions`: a question card's, `tool` "AskUserQuestion": `[{question, header, options: [{label, description}], multiSelect}]`, its `summary` the first question) — `run` is the agent's id; a plan's (`tool` "ExitPlanMode"): `summary` "The plan is ready", `detail` the plan |
 | `yap-claude-approve-done` | `{id, run, outcome, by, byName?, byDevice?}` — outcome allowed \| denied \| timedOut \| ended \| cancelled; `by` "pc", "phone" (a paired phone: its name and id, Remote Control) or null |
 | `yap-agent-mode` | `{conversation, mode}` — a chat's Mode changed (the chip, or a phone) |
+| `yap-code-run` | `{id, conversation, text?, run?}`: a ▶ Run's news (`agents/run_block.rs`): `run` when it starts and ends (`{id, conversation, command, shell, ranIn, note?, state, code?, startedMs, endedMs, cut}`, state running \| done \| failed \| stopped), `text` its new output |
 | `yap-code-chat` | `{conversations, folder, removed?}` — those chats are Code chats in `folder` now (`null`: plain); `removed`: a workspace removed in Settings, its name; no conversations: the workspaces changed |
 
 **Chat's stream**: `{kind: "agent", agent: {id, folder, status, mode, conversation?, turn?}}`
@@ -2598,6 +2645,11 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 | `code_chats_list` | `{chats: {id: folder}, workspaces: [folder + usedTs]}`: every Code chat, and the workspaces most recently used first |
 | `chat_send {…, codeFolder?}` | (Chat's) a new chat's first question, made a Code chat in that workspace |
 | `claude_approve_answer {id, allow}` / `claude_approve_pending` | a permission prompt's answer; the prompts waiting (`integrations/claude_live.rs`) |
+| `code_files_check {conversation, paths}` | (`agents/files.rs`) each path a file in the Code chat's workspace (`{rel, abs, line?}`) or `null`; at most 200 |
+| `code_file_read {conversation, path}` | the file view's `{rel, abs, line?, text, size, truncated, binary}`; refused outside the workspace |
+| `code_file_open_editor {conversation, path, line?}` | Open in editor; which editor it was |
+| `code_chat_environment {conversation?, workspace?}` | the summary's Environment: `{name, path, exists, repo, branch?, detached, worktree}` |
+| `code_run_check {conversation, lang}` / `code_run_start {conversation, command, lang, asked}` / `code_run_stop {id}` / `code_runs {conversation}` | (`agents/run_block.rs`) ▶ Run: whether it asks (`{asks, mode, workspace, path, ranIn, note?}`), the run started (refused unasked outside Bypass), Stop, a Code chat's runs with their output |
 | `claude_approve_reply {id, answers}` | a question card's answers (`AskUserQuestion`): each question's text → the label picked, a list of labels, or the person's own words; `true` when it was still waiting and something was answered |
 
 Debug builds, test mode only: `e2e_claude_script {script?}` (Claude Code is
@@ -2660,6 +2712,20 @@ the build's own stand-in replaying `script` from now on),
   environment, as Claude Code does), write the file and ask `approve`. The
   workspaces are in the run's own folder: nobody's real Claude Code, account
   or files.
+  - `code-chat-files.spec.js` (15 Nov 2026): a Code chat's answer's paths as
+    links (inline code, a link to a file, a path in the words) that open the
+    file view at the line, one outside the workspace never a link nor
+    readable; Open in editor; a row's file; ▶ Run asked under Auto, refused
+    unasked, its output in the Runs tab, Add to message, nothing asked under
+    Bypass, a long run's clock and Stop in the summary's Background tasks;
+    the summary's Environment (branch, Worktree), Context, Connectors and
+    Outputs, from the title bar and the row; a Chat (non-Code) chat with none
+    of it. Unit (`cargo test agents::files`, `agents::run_block`): every
+    escape refused (`..`, full paths outside, device and network paths,
+    streams, a junction to a folder outside), a file read capped and binary
+    said, editors' line arguments, the branch and worktree from `.git`; one
+    line and its prompt, the shells by language, asked first but in Bypass,
+    a real run in the workspace and Stop.
   - `agents-rename.spec.js`: a data folder Jobs left (its files, `jobs…`
     settings and a chat with a report and a card) read by today's Yap,
     nothing lost; the old Settings link lands on Yap Code.
