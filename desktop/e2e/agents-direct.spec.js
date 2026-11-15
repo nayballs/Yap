@@ -567,7 +567,7 @@ test.beforeEach(async ({ yap, main }) => {
 
 // ---- @-mention a file (agents/mention.rs, 15 Nov 2026, as Claude Code's own @)
 
-test('the mention being typed, the mention written, and a sent message's mentions found again', () => {
+test("the mention being typed, the mention written, and a sent message's mentions found again", () => {
   expect(mentionAt('Tidy @no', 8)).toEqual({ start: 5, query: 'no' });
   expect(mentionAt('@', 1)).toEqual({ start: 0, query: '' });
   expect(mentionAt('Mail sam@example.com', 20)).toBeNull();
@@ -584,6 +584,9 @@ test('the mention being typed, the mention written, and a sent message's mention
     { text: ', not sam@example.com or @Sam.' },
   ]);
   expect(mentionedPaths('@a.md and @a.md and @src/')).toEqual(['a.md', 'src/']);
+  // A sentence's full stop isn't the file's.
+  expect(mentionedPaths('Compare @beds/north.md and @beds/south.md.')).toEqual(['beds/north.md', 'beds/south.md']);
+  expect(mentionedPaths('See @beds/. Then')).toEqual(['beds/']);
 });
 
 test('@ in a Code chat opens a picker of its workspace files; Enter puts one in, and it goes with the message as Claude Code reads it', async ({ yap, main, shot }) => {
@@ -624,7 +627,7 @@ test('@ in a Code chat opens a picker of its workspace files; Enter puts one in,
   await box.fill('Compare @beds/north.md and @beds/south.md.');
   await main.getByRole('button', { name: 'Send', exact: true }).click();
   // Claude Code gets the mentions as written; the sent message shows each as a pill.
-  await expect.poll(lastUserText, { timeout: 20_000 }).toBe('Compare @beds/north.md and @beds/south.md.');
+  await expect.poll(() => (fs.existsSync(ARGS) ? lastUserText() : ''), { timeout: 20_000 }).toBe('Compare @beds/north.md and @beds/south.md.');
   const pills = thread(main).locator('.cbubble.user').last().getByTestId('chat-mention');
   await expect(pills).toHaveText(['@beds/north.md', '@beds/south.md']);
   await shot(main, '95-a-message-with-mentions');

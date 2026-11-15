@@ -2,8 +2,9 @@
 //! `@`): typing `@` in a Code chat's box opens a picker of its workspace's
 //! files, best match first, keyboard first; the one picked goes in the
 //! message as `@path/to/file` (quoted when it has a space, as Claude Code
-//! writes it), relative to the workspace, which is how Claude Code reads a
-//! mention: the file, from the folder it works in.
+//! writes it: the page's `chatMentions.js`), relative to the workspace,
+//! which is how Claude Code reads a mention: the file, from the folder it
+//! works in.
 //!
 //! - **Which files** ([`list`]): `git ls-files` (tracked, and untracked ones
 //!   not ignored) when the workspace is a Git repository — what the repo
@@ -101,19 +102,11 @@ pub fn best(paths: &[String], query: &str) -> Vec<Hit> {
     scored.into_iter().take(SHOWN).map(|(_, p)| Hit::of(p)).collect()
 }
 
-/// How a mention of `path` is written in the message: `@path`, or
-/// `@"path"` when it has a space (Claude Code's own way). Pure.
-pub fn written(path: &str) -> String {
-    if path.contains(char::is_whitespace) {
-        format!("@\"{path}\"")
-    } else {
-        format!("@{path}")
-    }
-}
-
 // ---- a workspace's files -----------------------------------------------------------------------
 
-static CACHE: Mutex<Option<HashMap<PathBuf, (Instant, std::sync::Arc<Vec<String>>)>>> = Mutex::new(None);
+/// Each workspace's files, and when they were read.
+type Lists = HashMap<PathBuf, (Instant, std::sync::Arc<Vec<String>>)>;
+static CACHE: Mutex<Option<Lists>> = Mutex::new(None);
 
 /// **The files of the workspace at `folder`**, relative and `/`-separated,
 /// sorted; read again after [`FRESH`]. Blocking.
@@ -233,11 +226,9 @@ mod tests {
     }
 
     #[test]
-    fn a_hit_knows_its_folder_and_a_spaced_path_is_quoted() {
+    fn a_hit_knows_its_folder() {
         assert_eq!(Hit::of("src/main.rs"), Hit { path: "src/main.rs".into(), name: "main.rs".into(), dir: "src".into() });
         assert_eq!(Hit::of("plan.md").dir, "");
-        assert_eq!(written("src/main.rs"), "@src/main.rs");
-        assert_eq!(written("notes/bed plan.md"), "@\"notes/bed plan.md\"");
     }
 
     #[test]

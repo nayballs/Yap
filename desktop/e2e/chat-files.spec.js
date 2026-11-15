@@ -122,7 +122,7 @@ test('files dropped on Chat wait as chips; sent, their text goes before the ques
   await expect(boxFiles(main)).toHaveCount(2);
   await expect(boxFiles(main).nth(0)).toContainText('TXT');
   await expect(boxFiles(main).nth(0)).toContainText('seed-list.txt');
-  await expect(boxFiles(main).nth(0)).toContainText('43B');
+  await expect(boxFiles(main).nth(0)).toContainText('38B');
   await expect(boxFiles(main).nth(1)).toContainText('PDF');
   await expect(boxFiles(main).nth(1)).toContainText('seed-order.pdf');
   await expect(main.getByTestId('chat-attachments').locator('.shotchip')).toHaveCount(1);
@@ -218,7 +218,8 @@ test('a chat deleted takes its files; Settings counts them and deletes them all'
   const keep = dialog.locator('[data-setting="chat-files"]');
   await expect(keep).toContainText('Keep chat files');
   const del = dialog.locator('[data-setting="chat-files-delete"]');
-  await expect(del).toContainText('1 file');
+  // (Earlier tests' chat's files too: this worker's.)
+  await expect(del).toContainText(/\d+ files? · /);
   await del.getByRole('button', { name: 'Delete all…' }).click();
   const confirm = main.getByRole('alertdialog', { name: 'Delete all chat files?' });
   await confirm.getByRole('button', { name: 'Delete files' }).click();

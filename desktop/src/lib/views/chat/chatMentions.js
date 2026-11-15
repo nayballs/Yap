@@ -28,11 +28,13 @@ export function withMention(text, at, path, caret) {
   const tail = t.slice(end);
   const put = `${written(path)}${tail.startsWith(' ') ? '' : ' '}`;
   const out = t.slice(0, at.start) + put + tail;
-  return { text: out, caret: at.start + put.length };
+  // (The caret after the space that follows it, its own or the one already there.)
+  return { text: out, caret: at.start + put.length + (tail.startsWith(' ') ? 1 : 0) };
 }
 
-/** A path-like mention: a name with an ending, or a folder (a `/` in it). Never an email (`a@b.c`) or `@Sam`. */
-const MENTION = /(^|\s)@(?:"([^"\n]+)"|((?:[\w.\-]+\/)*[\w\-]+\.[\w]+|(?:[\w.\-]+\/)+[\w.\-]*))(?=$|[\s,;:!?)\]])/g;
+/** A path-like mention: a name with an ending, or a folder (a `/` in it). Never an email (`a@b.c`) or `@Sam`; a
+ * sentence's full stop after it isn't part of it. */
+const MENTION = /(^|\s)@(?:"([^"\n]+)"|((?:[\w.\-]+\/)*[\w\-]+\.[\w]+|(?:[\w.\-]+\/)+(?:[\w.\-]*[\w\-])?))(?=$|[\s,;:!?)\]]|\.(?:\s|$))/g;
 
 /** A sent message's text in parts: plain text, and `{ path }` for each file mentioned (its pill). */
 export function mentionParts(text) {
