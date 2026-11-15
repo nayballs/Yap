@@ -21,6 +21,7 @@ pub mod pictures;
 pub mod see_screen;
 pub mod shares;
 pub mod skills;
+pub mod styles;
 pub mod stream;
 pub mod think;
 pub mod tools;

@@ -498,6 +498,9 @@ const ASK_OR_EDIT = 'You decide what someone wants done with text they selected'
 // as the rewrite's, with "This instruction is about the window in front"
 // after it, and the window between <window> tags in the user's turn.)
 const COMMAND_SCREEN = 'You decide whether an instruction someone gave a writing assistant';
+// A style written from a description or a writing sample (chat/styles.rs `WRITE_PROMPT`):
+// "OK" unless a spec says otherwise (`reply('styleWrite', fn)`).
+const STYLE_WRITE = "You write a style for an AI assistant's answers";
 
 const KINDS = [
   [DIGEST, 'digest'],
@@ -521,6 +524,7 @@ const KINDS = [
   [SCREEN_QUESTION, 'screenQuestion'],
   [ASK_OR_EDIT, 'askOrEdit'],
   [COMMAND_SCREEN, 'commandScreen'],
+  [STYLE_WRITE, 'styleWrite'],
 ];
 
 /** The numbers of the `<passage n="…">` blocks a request gives (search/ask.rs's layout). */

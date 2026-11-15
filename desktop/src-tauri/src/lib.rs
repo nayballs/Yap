@@ -496,6 +496,12 @@ pub fn run() {
             chat::incognito::chat_incognito_end,
             #[cfg(debug_assertions)]
             chat::incognito::e2e_chat_incognito_ids,
+            chat::styles::chat_styles,
+            chat::styles::chat_style_of,
+            chat::styles::chat_style_set,
+            chat::styles::chat_style_save,
+            chat::styles::chat_style_delete,
+            chat::styles::chat_style_write,
             chat::commands::chat_delete,
             chat::commands::chat_delete_many,
             chat::commands::chat_rename,
