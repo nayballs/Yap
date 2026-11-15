@@ -226,6 +226,7 @@ impl Prompt {
         past_chats: Option<String>,
         calendar_zone: crate::chat::tools::calendar::Zone,
         code: bool,
+        no_memory: bool,
     ) -> (Vec<crate::chat::tools::calendar::Cited>, Option<String>) {
         let g = t.gates;
         let rag = if t.meetings || code { String::new() } else { rag_context(&t.text, self.in_message) };
@@ -253,8 +254,9 @@ impl Prompt {
         }
         // How the person wants answers, again last in the context, where a
         // small tool model heeds it (a model without tools has it at the end
-        // of its system prompt, in memory's "You" block). Not in a Code chat.
-        if self.in_message && !code {
+        // of its system prompt, in memory's "You" block). Not in a Code chat,
+        // nor an incognito one (`no_memory`: memory unused there).
+        if self.in_message && !code && !no_memory {
             if let Some(note) = crate::memory::answer_note() {
                 self.context.push(note);
             }
@@ -423,6 +425,9 @@ pub(super) struct Built {
     /// A Code chat's workspace (`Opened::code`): no memory in this turn, and
     /// on the Claude plan its session runs there (`plan.rs`).
     pub(super) code: Option<crate::agents::workspaces::Folder>,
+    /// An incognito chat (chat/incognito.rs): no memory in this turn, its
+    /// tools neither, and on the Claude plan a session Claude Code never saves.
+    pub(super) incognito: bool,
     /// The person's time zone, for the calendar tool.
     pub(super) calendar_zone: crate::chat::tools::calendar::Zone,
 }
@@ -464,15 +469,19 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     // with its tools when asked.
     let code = opened.code.is_some();
     let profile = code_profile(&t.profile, code);
+    // **An incognito chat** (chat/incognito.rs): memory unused — none of it
+    // here (its "You", its passages, past chats) nor its tools; About you
+    // whole (a setting, not something learned).
+    let no_memory = code || opened.conv.incognito;
     // Memory (memory.rs): the "You" part in the system prompt with About
     // you (stable from turn to turn), what this question is about with it.
-    let memory_you = if code { String::new() } else { crate::memory::you_block() };
+    let memory_you = if no_memory { String::new() } else { crate::memory::you_block() };
     // By its words, and by meaning when that's on (search/library.rs).
-    let memory_here = if code { None } else { crate::search::library::memory_block(&t.text).await };
+    let memory_here = if no_memory { None } else { crate::search::library::memory_block(&t.text).await };
     // "Search and reference past chats": a tool for a model with tools; for
     // one without, the chats a question points back to ("what did we say
     // about Lisbon?"), a couple of lines each.
-    let past_chats = if !code && t.cfg.memory_search_chats && !g.tools && crate::chat::chats::refers_to_past(&t.text) {
+    let past_chats = if !no_memory && t.cfg.memory_search_chats && !g.tools && crate::chat::chats::refers_to_past(&t.text) {
         crate::search::library::past_chats_block(&t.text, conv.id).await
     } else {
         None
@@ -487,7 +496,7 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     let (replay, history_note) = web_history_mode(g.tools && g.web_on && !g.claude_in_chat);
     let about = crate::ai::about_you::prompt_block(&profile, t.now);
     let calendar_zone = crate::chat::tools::calendar::Zone::of(t.profile.region.time_zone.as_deref());
-    let mut prompt = Prompt::start(t, !code);
+    let mut prompt = Prompt::start(t, !no_memory);
     // A Code chat (agents/code_chat.rs): its folder, and that the person's own
     // request is enough there — in the question's context, so the tool loop
     // and a plan chat both have it.
@@ -502,7 +511,7 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     let here = crate::ai::ai_model::runs_here(&t.ep.provider, &t.ep.base_url);
     let first = first_step(&t.text, &g, here, outline_first, t.about_selection.is_some(), tabs_open);
     let across = prompt.across_meetings(t, &doc_turn).await;
-    let (small_calendar, calendar_chip) = prompt.library(t, &chat_docs, memory_here, past_chats, calendar_zone, code);
+    let (small_calendar, calendar_chip) = prompt.library(t, &chat_docs, memory_here, past_chats, calendar_zone, code, no_memory);
     prompt.end(&about, &memory_you, &profile);
     let spoken = t.by_voice && (t.scope == Some("assistant") || t.cfg.speak_replies);
     prompt.how_to_answer(t, spoken, &chat_docs, selection, sizing.context_size);
@@ -530,6 +539,7 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
         memory_you,
         profile,
         code: opened.code.clone(),
+        incognito: opened.conv.incognito,
         calendar_zone,
     }
 }

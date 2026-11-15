@@ -74,6 +74,9 @@ pub(crate) fn shutdown_cleanup() {
     // Your Claude plan's warm spares (claude_plan/spare.rs): ended now (the
     // kill-on-close job would anyway).
     ai::claude_plan::spare::end_all("Yap quits");
+    // Incognito chats (chat/incognito.rs): their pictures go with them (their
+    // words were only ever in memory).
+    chat::chats::end_all_incognito();
     // Yap Link: no more phones (link.rs).
     link::stop();
     // Connectors' programs and links (integrations/connectors.rs): stopped,
@@ -475,6 +478,9 @@ pub fn run() {
             chat::commands::chats_list,
             chat::commands::chat_get,
             chat::export::chat_export,
+            chat::incognito::chat_incognito_end,
+            #[cfg(debug_assertions)]
+            chat::incognito::e2e_chat_incognito_ids,
             chat::commands::chat_delete,
             chat::commands::chat_delete_many,
             chat::commands::chat_rename,

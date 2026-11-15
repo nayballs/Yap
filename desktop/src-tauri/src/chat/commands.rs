@@ -142,6 +142,10 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// offers none of theirs, and the conversation it makes keeps them off.
 /// Ignored for an existing conversation (its own switches are saved as
 /// they're flipped, `connector_chat_set`).
+///
+/// `incognito`: a new chat's ghost was on (chat/incognito.rs): the
+/// conversation it makes is kept in memory only. Ignored for an existing
+/// conversation (it is one or it isn't, from its start).
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -161,6 +165,7 @@ pub async fn chat_send(
     elements: Option<Vec<crate::chat::pages::pick::Picked>>,
     code_folder: Option<String>,
     connectors_off: Option<Vec<String>>,
+    incognito: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     // A Skill (`/decisions`, a one-tap prompt): asked across the meetings,
     // its own passages and instructions (chat/skills.rs).
@@ -190,10 +195,17 @@ pub async fn chat_send(
     // a turn's whole future overflows.)
     let send = Box::pin(crate::chat::assistant::selected::with(page_quote.and_then(|q| q.selected()), Box::pin(send)));
     // A new chat made a Code chat before its first question (agents/code_chat.rs).
-    let send = Box::pin(crate::agents::code_chat::with_new(code_folder.filter(|_| conversation_id.is_none()), send));
+    let code_folder_none = code_folder.as_deref().is_none_or(|f| f.trim().is_empty());
+    // (Its type erased here: the layers' nesting stays under the compiler's
+    // recursion limit for proving the command's future is Send.)
+    let send: std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, String>> + Send>> =
+        Box::pin(crate::agents::code_chat::with_new(code_folder.filter(|_| conversation_id.is_none()), send));
     // A new chat's connectors switched off in its + menu (connectors/chats.rs).
     let new_off = conversation_id.is_none().then(|| connectors_off.unwrap_or_default().into_iter().collect());
     let send = Box::pin(crate::integrations::connectors::chats::with_new(new_off, send));
+    // A new chat asked incognito (never a Code chat: its folder wins).
+    let ghost = conversation_id.is_none() && code_folder_none && incognito.unwrap_or(false);
+    let send = Box::pin(crate::chat::incognito::with_new(ghost, send));
     // Chat's own turn: Think pressed (the model on this PC), or a cloud
     // model at its effort (`ai/effort.rs`): what it thought comes back.
     let (out, thought) = crate::chat::think::scoped(think.unwrap_or(false), send).await;

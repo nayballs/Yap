@@ -207,6 +207,13 @@
 {#if chat.messages.length === 0 && (code?.current || code?.onCode)}
   <!-- An empty Code chat: the Code side's own greeting. -->
   <CodeEmpty {chat} {code} {onopensettings} />
+{:else if chat.messages.length === 0 && chat.incognito}
+  <!-- A new chat with its ghost on (chat/incognito.rs): what that means. -->
+  <div class="empty" data-testid="chat-incognito-empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11a7 7 0 0 1 14 0v9l-2.33-1.5L14.33 20 12 18.5 9.67 20l-2.34-1.5z" /><circle cx="9.5" cy="11" r="1" fill="currentColor" stroke="none" /><circle cx="14.5" cy="11" r="1" fill="currentColor" stroke="none" /></svg>
+    <p class="across">Incognito chat</p>
+    <p class="asknote">It isn't saved to your chats, and memory isn't used or updated. It's gone when you leave it.</p>
+  </div>
 {:else if chat.messages.length === 0}
   <div class="empty">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8M8 13h5" /></svg>
@@ -248,6 +255,13 @@
     </p>
   </div>
 {:else}
+  {#if chat.incognito}
+    <!-- An incognito chat says so over its thread (chat/incognito.rs). -->
+    <p class="scopeline ghostline" data-testid="chat-incognito-line" style:--thread-gutter="{chat.threadGutter}px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11a7 7 0 0 1 14 0v9l-2.33-1.5L14.33 20 12 18.5 9.67 20l-2.34-1.5z" /></svg>
+      Incognito chat · not saved, not remembered · gone when you leave it
+    </p>
+  {/if}
   {#if chat.scope === 'meetings'}
     <!-- This conversation asks across the meetings, follow-ups too. -->
     <p class="scopeline" data-testid="chat-across-meetings" style:--thread-gutter="{chat.threadGutter}px">
@@ -547,6 +561,12 @@
     width: 12px;
     height: 12px;
     color: var(--yap-primary);
+  }
+  .ghostline {
+    color: var(--yap-fg-80);
+  }
+  .ghostline svg {
+    color: var(--yap-fg);
   }
   .asknote kbd {
     padding: 1px 6px;
