@@ -74,7 +74,8 @@ fn each_kind_is_read_or_said_plainly() {
     assert_eq!(read("notes.md", b"# Garden".to_vec()).unwrap().kind, "markdown");
     // An ending Yap doesn't know, but text inside: text.
     assert_eq!(read("Makefile", b"all:\n\techo hi".to_vec()).unwrap().kind, "text");
-    assert_eq!(read("budget.xlsx", vec![0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0]).unwrap_err(), "Chat can't read budget.xlsx (a spreadsheet: save it as CSV to attach it). It reads text, code, PDF and Word files, and pictures.");
+    assert_eq!(read("budget.xlsx", vec![0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0]).unwrap_err(), "Yap couldn't read the cells of budget.xlsx.");
+    assert_eq!(read("seeds.zip", vec![0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0]).unwrap_err(), "Chat can't read seeds.zip (an archive). It reads text, code, PDF, Word and spreadsheet files, and pictures.");
     assert!(read("photo.png", b"\x89PNG".to_vec()).unwrap_err().contains("is a picture"));
     assert_eq!(read("empty.txt", Vec::new()).unwrap_err(), "empty.txt is empty.");
     assert_eq!(read("blank.txt", b" \n\n ".to_vec()).unwrap_err(), "blank.txt is empty.");
@@ -219,5 +220,5 @@ fn files_an_older_yaps_save_dropped_come_back() {
 fn what_cant_be_read_says_what_it_is() {
     assert!(cant_read("a.zip", "zip").contains("(an archive)"));
     assert!(cant_read("talk.mp3", "mp3").contains("Upload transcribes it"));
-    assert_eq!(cant_read("thing.bin", "bin"), "Chat can't read thing.bin. It reads text, code, PDF and Word files, and pictures.");
+    assert_eq!(cant_read("thing.bin", "bin"), "Chat can't read thing.bin. It reads text, code, PDF, Word and spreadsheet files, and pictures.");
 }

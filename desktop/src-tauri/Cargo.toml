@@ -161,6 +161,16 @@ zip = { version = "9.2", default-features = false, features = ["deflate-flate2"]
 # A PDF attached to a Chat question is read on this PC, never uploaded to be
 # read (chat/attachments/pdf.rs): its text, through lopdf. Pure Rust, MIT.
 pdf-extract = "0.12"
+# Spreadsheets (chat/sheets.rs, chat/attachments/sheet.rs): an .xlsx/.xlsm is
+# read and calculated by IronCalc (MIT OR Apache-2.0: its styles, merges,
+# frozen panes, and formulas a script wrote with no results in the file);
+# .xls, .xlsb and .ods by calamine (MIT: values and formulas as the file
+# keeps them). Both pure Rust, on the zip 9 above.
+ironcalc = "0.9.1"
+calamine = "0.38"
+# A .csv / .tsv attached or shown beside the chat (chat/sheets/delimited.rs):
+# RFC 4180 quoting. Already in the tree through IronCalc.
+csv = "1"
 
 # Multi-engine STT (whisper.cpp + ONNX) via transcribe-rs. Optional so the
 # default build ships the STUB and `cargo check` stays fast.

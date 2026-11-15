@@ -808,6 +808,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
   - **Copy path**: its full path.
   - **Open in editor** (`code_file_open_editor`): VS Code or Cursor at the line (`-g file:line`), else Notepad++ (`-n`), else Notepad, started directly: never through a shell, never the file's own default app (which for a `.js` or `.ps1` would run it).
 - **The rows**: a read's file name ("Read lab.md") and an edit's path over its diff open it too, at the first line read or changed (`StepRows.svelte`; a path outside the workspace, which `steps.rs` `shown_path` leaves whole, is no link).
+- **A spreadsheet opens as a sheet** (15 Nov 2026: `.xlsx`, `.xlsm`, `.xls`, `.xlsb`, `.ods`, `.csv`, `.tsv`; ChatView's `CODE_FILES` `open`, `outputsOpen.js`): a link to one, its row, or its Outputs row opens the **sheet view** instead of the file view (`SheetTab.svelte`, a `sheet:ws:<rel>` tab, `chatDoc.svelte.js` `showSheet`; Rust `chat/sheets/view.rs`, the same workspace-only `resolve`), drawn as Excel draws it, with Open in Excel. It's **live**: every 1.2 s the page asks for the file's size and time (`sheet_stamp`, nothing read) and, changed, opens it again on the same sheet, scrolled where it was, the same cell selected, "Updated" for a moment — so the person watches Claude build a workbook (openpyxl, exceljs: formulas with no results in the file are calculated by IronCalc). A file caught half-written keeps what's shown ("Changing…") until it changes again. The whole view: [chat-and-assistant.md, Spreadsheets](./chat-and-assistant.md#spreadsheets-2026-11-15).
 
 ### ▶ Run on a one-line shell block
 
@@ -825,7 +826,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
 - **Environment** (`code_chat_environment`): the workspace's name and path, its git branch (a detached HEAD's commit), **Worktree** for a linked worktree, "Runs on this PC". Read from `.git` itself: a `.git` file whose `gitdir:` points into `<repo>/.git/worktrees/` is a worktree; no git is run.
 - **Context**: how full the chat's context is, from what Yap knows already: its own Claude's latest turn (a Code chat that works directly: `agents/usage.rs`), else the plan's count for the chat, else the context ring's (`chat_context`).
 - **Connectors**: the chat's own (`connector_chat_list`), on or off here, and Manage connectors….
-- **Outputs** (`outputs.js` `outputItems`, drawn by `OutputsList.svelte`, opened by `outputsOpen.js` `openOutput`: **one list** that any kind adds its rows to, the same as any chat's Outputs tab, [chat-and-assistant.md](./chat-and-assistant.md)): the pages it keeps and the documents it wrote first (both open beside the chat), then the files its work changed (its agents' turns' `files`, newest first; they open in the file view) and the files it shared (a picture in the picture tab, a file in the workspace in the file view, any other as its card opens it).
+- **Outputs** (`outputs.js` `outputItems`, drawn by `OutputsList.svelte`, opened by `outputsOpen.js` `openOutput`: **one list** that any kind adds its rows to, the same as any chat's Outputs tab, [chat-and-assistant.md](./chat-and-assistant.md)): the pages it keeps and the documents it wrote first (both open beside the chat), then the files its work changed (its agents' turns' `files`, newest first; they open in the file view, a spreadsheet in the sheet view) and the files it shared (a picture in the picture tab, a file in the workspace in the file view, any other as its card opens it).
 - **Background tasks**: its helpers and the agents Chat sent that are at work now (the Agent panel's own rows, `panelRows`), each with its clock (a helper's since it was handed its part: `helpersOf`'s `ts`) and Stop (a helper's stops the turn that sent it); its running ▶ Runs with theirs; then "N finished" (it opens the Agent panel, or the Runs tab).
 - **Not yet**: Remote Control's switch in the Environment (the "Code · garden-planner" card has it), and a right-click menu on an output.
 
@@ -2756,7 +2757,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 `codeChats.svelte.js`, `WorkspacePicker`, `CodeChips`, `CodeEdge`,
 `codeChat.css`, `CodeEmpty`, `ModeChip`, `AgentTab`, `AgentPanel`, `AgentTimeline`, `AgentFiles`,
 `AgentPills`, `AgentTodoCard`, `AgentWork`, `StepRows`, `StepPictures`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`,
-`FileTab`, `RunsTab`, `codeRuns.svelte.js`, `SummaryTab`, `OutputsList` + `outputs.js`), `ui/fileLinks.js`, `ui/codeRun.js`, `stores/chatSummary.svelte.js`,
+`FileTab`, `SheetTab` + `sheetView.js`, `RunsTab`, `codeRuns.svelte.js`, `SummaryTab`, `OutputsList` + `outputs.js`), `ui/fileLinks.js`, `ui/codeRun.js`, `stores/chatSummary.svelte.js`,
 `core/codeChats.js`, `core/agents.js`, `core/codeColours.js` (+ `codeColours.hljs.js`), `core/intralineDiff.js`, `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
 `stores/agents.svelte.js`, `settings/YapCodePage.svelte`,
 `settings/ClaudeCodeStatus.svelte`.
@@ -2810,6 +2811,7 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 | `code_files_check {conversation, paths}` | (`agents/files.rs`) each path a file in the Code chat's workspace (`{rel, abs, line?}`) or `null`; at most 200 |
 | `code_file_read {conversation, path}` | the file view's `{rel, abs, line?, text, size, truncated, binary}`; refused outside the workspace |
 | `code_file_open_editor {conversation, path, line?}` | Open in editor; which editor it was |
+| `sheet_open {src}` / `sheet_rows {id, sheet, from, to}` / `sheet_stamp {src}` / `sheet_open_app {src}` | (`chat/sheets/view.rs`) the sheet view: `src` is `{from: "workspace", conversation, rel}` (refused outside the workspace) or `{from: "attachment", id}`; a workbook opened without its cells (sheets, styles, widths, merges, frozen panes), its rows a stretch at a time (at most 1,000; "gone" once it isn't kept), the file's `{len, ms}`, Open in Excel |
 | `code_chat_environment {conversation?, workspace?}` | the summary's Environment: `{name, path, exists, repo, branch?, detached, worktree}` |
 | `code_run_check {conversation, lang}` / `code_run_start {conversation, command, lang, asked}` / `code_run_stop {id}` / `code_runs {conversation}` | (`agents/run_block.rs`) ▶ Run: whether it asks (`{asks, mode, workspace, path, ranIn, note?}`), the run started (refused unasked outside Bypass), Stop, a Code chat's runs with their output |
 | `claude_approve_reply {id, answers}` | a question card's answers (`AskUserQuestion`): each question's text → the label picked, a list of labels, or the person's own words; `true` when it was still waiting and something was answered |
@@ -2882,7 +2884,12 @@ the build's own stand-in replaying `script` from now on),
     Bypass, a long run's clock and Stop in the summary's Background tasks;
     the summary's Environment (branch, Worktree), Context, Connectors and
     Outputs, from the title bar (the row has no copy); a Chat (non-Code) chat with none
-    of it. Unit (`cargo test agents::files`, `agents::run_block`): every
+    of it.
+  - `chat-sheets.spec.js` (15 Nov 2026): a Code chat's workbook from a link
+    in its answer and its Outputs row, the view following the file as the
+    test rewrites it (same sheet, same cell; a half-written one kept), one
+    outside the workspace refused; a 5,000-row sheet scrolled, its rows
+    asked for as they show; and an attached one (chat-and-assistant.md). Unit (`cargo test agents::files`, `agents::run_block`): every
     escape refused (`..`, full paths outside, device and network paths,
     streams, a junction to a folder outside), a file read capped and binary
     said, editors' line arguments, the branch and worktree from `.git`; one

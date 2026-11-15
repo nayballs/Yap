@@ -4,6 +4,8 @@
   // the file (Markdown in Yap's own window, anything else in its app; what could run a program shows its text).
   // Past "Keep chat files": greyed, "removed".
   import { invoke } from '@tauri-apps/api/core';
+  import { getContext } from 'svelte';
+  import { SHEETS } from './sheetView.js';
   import { toast } from '../../ui/toast.svelte.js';
   import { badgeOf, fileSize, fileTitle } from './chatFiles.js';
 
@@ -12,9 +14,15 @@
 
   const badge = $derived(badgeOf(file));
   let opening = $state(false);
+  // A spreadsheet opens beside the chat (SheetTab), where Chat has the panel.
+  const sheets = getContext(SHEETS) ?? null;
 
   async function open() {
     if (file.gone || opening) return;
+    if (file.kind === 'sheet' && sheets) {
+      sheets.open(file);
+      return;
+    }
     opening = true;
     try {
       await invoke('chat_attachment_open', { id: file.id });

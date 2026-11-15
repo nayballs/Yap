@@ -755,7 +755,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   async function dropFiles(dropped) {
     dragging = false;
     const others = (dropped || []).filter((p) => !isPicturePath(p));
-    if (others.length) await attachFiles(others);
+    if (others.length) {
+      const added = await attachFiles(others);
+      // A spreadsheet dropped opens beside the chat, as Excel draws it (SheetTab).
+      const sheet = added.find((f) => f.kind === 'sheet');
+      if (sheet) doc.showSheet({ src: { from: 'attachment', id: sheet.id }, name: sheet.name });
+    }
     const paths = (dropped || []).filter(isPicturePath);
     if (!paths.length) return;
     const room = MAX_SHOTS - waitingShots.list.length;
@@ -778,14 +783,19 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
   }
 
-  /** Files added to the box (their paths): read by Rust, kept, waiting; any it can't read said plainly, each. */
+  /**
+   * Files added to the box (their paths): read by Rust, kept, waiting; any it can't read said plainly, each. A
+   * spreadsheet's text is cut to the model's room left (`budget`). The files added.
+   */
   async function attachFiles(paths) {
     const list = (paths || []).filter(Boolean);
-    if (!list.length) return;
+    if (!list.length) return [];
     const room = 20 - files.length;
+    const budget = limits?.questionMax ? Math.max(0, limits.questionMax - inputTokens) : null;
+    let fresh = [];
     try {
-      const got = await invoke('chat_files_add', { paths: list, room: Math.max(0, room) });
-      const fresh = (got?.files || []).filter((f) => f?.id && !files.some((x) => x.id === f.id));
+      const got = await invoke('chat_files_add', { paths: list, room: Math.max(0, room), budget });
+      fresh = (got?.files || []).filter((f) => f?.id && !files.some((x) => x.id === f.id));
       if (fresh.length) files = [...files, ...fresh];
       const why = skippedLine(got?.skipped);
       if (why) {
@@ -800,6 +810,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
     await tick();
     inputEl?.focus();
+    return fresh;
   }
 
   /** + → Attach files…: Windows' file picker, several at once. */

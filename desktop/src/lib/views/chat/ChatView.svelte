@@ -130,6 +130,7 @@
   import { chatSummary } from '../../stores/chatSummary.svelte.js';
   import { chatOutputs } from '../../stores/chatOutputs.svelte.js';
   import { CODE_FILES } from '../../ui/fileLinks.js';
+  import { SHEETS, isSheetName } from './sheetView.js';
   import { runCommand } from './codeRuns.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
   import { agents, initAgents, agentById } from '../../stores/agents.svelte.js';
@@ -158,7 +159,8 @@
     get conversation() {
       return code.current ? (chat.activeId ?? null) : null;
     },
-    open: (ref) => doc.showFile(ref),
+    // (A spreadsheet opens as a sheet, as Excel draws it: SheetTab.)
+    open: (ref) => (isSheetName(ref?.rel) ? doc.showSheet({ src: { from: 'workspace', conversation: chat.activeId, rel: ref.rel }, name: String(ref.rel).split('/').pop() }) : doc.showFile(ref)),
     run: (block) => runCommand(chat.activeId, block, () => doc.showRuns()),
     addToMessage: (text) => {
       chat.input = chat.input.trim() ? `${chat.input.trimEnd()}\n\n${text}` : text;
@@ -166,6 +168,8 @@
     },
     openSettings: (section) => onopensettings?.(section),
   });
+  // **An attached spreadsheet** (chat/attachments/sheet.rs): its chip opens it beside the chat, as Excel draws it.
+  setContext(SHEETS, { open: (file) => doc.showSheet({ src: { from: 'attachment', id: file.id }, name: file.name }) });
   // A message sent while a Code chat's own session works waits in the queue (chatState's `queued`).
   // (A Code chat: Rust says whether its own session works — the page's list of agents lags a moment behind.)
   chat.setQueueGate(() => code.current != null);

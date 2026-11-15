@@ -5,8 +5,10 @@
 //! - **Which files** ([`read`]): text and code (by their bytes: UTF-8, or
 //!   UTF-16 with its mark; no NUL bytes), Markdown, a PDF's text read on this
 //!   PC (`pdf.rs`, never uploaded to be read), a Word document's text
-//!   (`word.rs`). Anything else — a spreadsheet, a zip, a program — is said
-//!   plainly ("Chat can't read budget.xlsx…"), never added. At most
+//!   (`word.rs`), a spreadsheet's cells as tables (`sheet.rs`: `.xlsx`,
+//!   `.xlsm`, `.xls`, `.xlsb`, `.ods`, `.csv`, `.tsv`, read and calculated
+//!   here, cut to the box's room). Anything else — a zip, a program — is said
+//!   plainly ("Chat can't read archive.zip…"), never added. At most
 //!   [`MAX_BYTES`] a file and [`MAX_CHARS`] of text; [`MAX_FILES`] a
 //!   question.
 //! - **Kept** like Chat's screenshots: the file's copy and its text in
@@ -39,6 +41,7 @@
 //! chat's follow-ups); nothing reads it but Chat.
 
 pub mod pdf;
+pub mod sheet;
 pub mod word;
 
 use std::collections::{HashMap, HashSet};
@@ -73,7 +76,7 @@ pub struct Attachment {
     pub id: String,
     /// Its name ("seed-order.pdf").
     pub name: String,
-    /// "text" | "code" | "markdown" | "pdf" | "word".
+    /// "text" | "code" | "markdown" | "pdf" | "word" | "sheet".
     pub kind: String,
     /// The file's size.
     #[serde(default)]
@@ -155,6 +158,14 @@ fn copy_path(a: &Attachment) -> Option<PathBuf> {
     is_id(&a.id).then(|| dir().join(&a.id).join(safe_name(&a.name)))
 }
 
+/// **The kept copy of attachment `id`** (waiting in the box, or carried by
+/// a question), when it's still there: the sheet view's (`sheets/view.rs`).
+pub fn copy_of(id: &str) -> Option<(Attachment, PathBuf)> {
+    let a = find(id).filter(|_| is_id(id))?;
+    let path = copy_path(&a).filter(|p| p.is_file())?;
+    Some((a, path))
+}
+
 /// Whether a file's text is still there.
 pub fn exists(id: &str) -> bool {
     text_path(id).is_some_and(|p| p.is_file())
@@ -201,6 +212,7 @@ pub fn read(name: &str, bytes: Vec<u8>) -> Result<Read, String> {
         return Err(format!("{name} is empty."));
     }
     let (kind, text, pages) = match ending.as_str() {
+        _ if crate::chat::sheets::Format::of(name).is_some() => ("sheet", sheet::text(name, bytes)?, None),
         "pdf" => match pdf::text(bytes) {
             Ok((text, pages)) => ("pdf", text, Some(pages)),
             Err(pdf::Why::Locked) => return Err(format!("{name} is password-protected, so Yap can't read it.")),
@@ -237,7 +249,6 @@ pub fn read(name: &str, bytes: Vec<u8>) -> Result<Read, String> {
 /// What's said for a file whose text isn't readable. Pure.
 pub fn cant_read(name: &str, ending: &str) -> String {
     let what = match ending {
-        "xlsx" | "xls" | "xlsm" | "ods" => " (a spreadsheet: save it as CSV to attach it)",
         "doc" => " (an older Word document: save it as .docx to attach it)",
         "pptx" | "ppt" | "odp" | "key" => " (a presentation)",
         "zip" | "7z" | "rar" | "tar" | "gz" => " (an archive)",
@@ -245,7 +256,7 @@ pub fn cant_read(name: &str, ending: &str) -> String {
         "mp4" | "mov" | "mkv" | "webm" | "avi" => " (a video)",
         _ => "",
     };
-    format!("Chat can't read {name}{what}. It reads text, code, PDF and Word files, and pictures.")
+    format!("Chat can't read {name}{what}. It reads text, code, PDF, Word and spreadsheet files, and pictures.")
 }
 
 /// Tokens said roughly ("12k", "1.2M", "800"). Pure.
@@ -419,6 +430,7 @@ pub fn block_of(files: &[(Attachment, Option<String>)]) -> String {
         let source = match a.kind.as_str() {
             "pdf" => format!("{} (a PDF{}: its text, read on the person's PC)", a.name, a.pages.map(|p| format!(", {p} page{}", if p == 1 { "" } else { "s" })).unwrap_or_default()),
             "word" => format!("{} (a Word document: its text)", a.name),
+            "sheet" => format!("{} ({}: its cells as tables, read on the person's PC)", a.name, crate::chat::sheets::Format::of(&a.name).map(|f| f.said()).unwrap_or("a spreadsheet")),
             _ => a.name.clone(),
         };
         out.push_str(&format!("<document index=\"{}\">\n<source>{source}</source>\n<document_content>\n{}\n</document_content>\n</document>\n", i + 1, text.trim_end()));
@@ -696,11 +708,12 @@ pub struct AddResult {
 
 /// **Files added to Chat's box** (+ → Attach files…, or dropped on Chat):
 /// each read and kept, at most `room` of them (the box's room); the others
-/// said, each with why.
+/// said, each with why. `budget`: the tokens the model has left for the
+/// question, which a spreadsheet's text is cut to (`sheet::with_budget`).
 #[tauri::command]
-pub async fn chat_files_add(paths: Vec<String>, room: Option<usize>) -> Result<AddResult, String> {
+pub async fn chat_files_add(paths: Vec<String>, room: Option<usize>, budget: Option<u64>) -> Result<AddResult, String> {
     let room = room.unwrap_or(MAX_FILES).min(MAX_FILES);
-    tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || sheet::with_budget(budget, || {
         let mut out = AddResult::default();
         for p in paths {
             let path = PathBuf::from(&p);
@@ -718,7 +731,7 @@ pub async fn chat_files_add(paths: Vec<String>, room: Option<usize>) -> Result<A
             tracing::info!(added = out.files.len(), skipped = out.skipped.len(), "Chat: some files weren't attached");
         }
         out
-    })
+    }))
     .await
     .map_err(|e| e.to_string())
 }
