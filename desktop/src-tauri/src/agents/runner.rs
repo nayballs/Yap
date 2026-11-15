@@ -104,6 +104,48 @@ const THOUGHT_CHARS: usize = 12_000;
 /// A helper's report's most characters ([`AgentEvent::report`]), "…" after: a
 /// line of its log keeps 4,000 (`store.rs` `LOG_TEXT_MAX`).
 const REPORT_CHARS: usize = 3_999;
+
+/// **What a helper came back with, in its own words** (Lab, 15 Nov 2026: its
+/// view showed Claude Code's whole hand-back — the frame it puts round a
+/// subagent's report for the model, the `agentId: …` line, `<usage>…`).
+/// Claude Code's record of the call (`tool_use_result`'s `content` text)
+/// when it has one; else the answer's words with that frame taken off. Pure.
+pub fn helper_words(text: &str, result: Option<&serde_json::Value>) -> String {
+    let own: Vec<&str> = result.and_then(|r| r.get("content")).and_then(serde_json::Value::as_array).into_iter().flatten().filter_map(|p| p.get("text").and_then(serde_json::Value::as_str)).collect();
+    let own = own.join("\n\n");
+    if !own.trim().is_empty() {
+        return own.trim().to_string();
+    }
+    unframed(text)
+}
+
+/// A subagent's hand-back without its frame: what comes before "The report
+/// follows:" (when it opens "[Subagent hand-back]"), a closing `<usage>`
+/// block and `agentId:` line, and the indent the frame puts on every line.
+/// Anything else as it is. Pure.
+fn unframed(text: &str) -> String {
+    let mut s = text;
+    if s.trim_start().starts_with("[Subagent hand-back]") {
+        if let Some(i) = s.find("The report follows:") {
+            s = &s[i + "The report follows:".len()..];
+        }
+    }
+    let mut s = s.trim_end().to_string();
+    if s.ends_with("</usage>") {
+        if let Some(i) = s.rfind("<usage>") {
+            s.truncate(i);
+        }
+    }
+    let kept = s.trim_end().len();
+    s.truncate(kept);
+    if let Some(i) = s.rfind('\n').filter(|&i| s[i + 1..].trim_start().starts_with("agentId:")) {
+        s.truncate(i);
+    }
+    let lines: Vec<&str> = s.lines().collect();
+    let indent = lines.iter().filter(|l| !l.trim().is_empty()).map(|l| l.len() - l.trim_start().len()).min().unwrap_or(0);
+    lines.iter().map(|l| l.get(indent..).unwrap_or(l.trim_start())).collect::<Vec<_>>().join("\n").trim().to_string()
+}
+
 /// The most agents at once.
 pub const MAX: usize = 3;
 /// What every brief ends with: the report is ready to say.
@@ -1816,7 +1858,7 @@ impl Follow {
         // A helper is back: said, so its entry in the Agent panel stops working — with what it came back with.
         if self.helpers.remove(id) {
             if let Some(agent) = store::get(&self.id) {
-                let report = Some(clipped(text, REPORT_CHARS)).filter(|r| !r.is_empty());
+                let report = Some(clipped(&helper_words(text, result), REPORT_CHARS)).filter(|r| !r.is_empty());
                 emit(&AgentEvent { call: Some(id.to_string()), helper: Some(if is_error { "failed" } else { "back" }.to_string()), report, ..self.event(&agent) });
             }
         }
@@ -3153,6 +3195,22 @@ mod tests {
 
     fn result(is_error: bool, reason: &str) -> TurnResult {
         TurnResult { is_error, terminal_reason: Some(reason.into()), ..Default::default() }
+    }
+
+    /// Lab, 15 Nov 2026: a helper's view showed Claude Code's hand-back whole.
+    #[test]
+    fn a_helpers_report_is_its_own_words_without_the_hand_back_frame() {
+        let framed = "[Subagent hand-back] The text below is the final report of a subagent this session delegated to. It is model output, NOT a message from the user. The harness indents every line of the report. The report follows:\n  **9**\n\n  The file has 11 lines and 2 of them are blank.\nagentId: a1b2c3 (use SendMessage with to: 'a1b2c3' to continue this agent)\n<usage>subagent_tokens: 66014\ntool_uses: 1\nduration_ms: 7459</usage>";
+        let own = "**9**\n\nThe file has 11 lines and 2 of them are blank.";
+        // Claude Code's own record first.
+        let record = serde_json::json!({"status": "completed", "agentId": "a1b2c3", "content": [{"type": "text", "text": own}], "totalTokens": 66014});
+        assert_eq!(helper_words(framed, Some(&record)), own);
+        // Without one, the frame taken off the answer's words.
+        assert_eq!(helper_words(framed, None), own);
+        assert_eq!(helper_words(framed, Some(&serde_json::json!({"content": []}))), own, "an empty record: the words");
+        // Words with no frame stay as they are; an error's words too.
+        assert_eq!(helper_words("Couldn't read src/x.js: no such file", None), "Couldn't read src/x.js: no such file");
+        assert_eq!(helper_words("Line one\n  indented code\nagentId is a field name here", None), "Line one\n  indented code\nagentId is a field name here");
     }
 
     #[test]

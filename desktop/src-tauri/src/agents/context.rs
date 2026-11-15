@@ -13,7 +13,9 @@
 //!   the person's hooks off (`disableAllHooks`, a settings file: nothing of
 //!   theirs runs because the summary opened) and the Claude Code
 //!   `ai/claude_code/cli.rs` finds. Checked on 2.1.296 (15 Nov 2026): the
-//!   command answers locally (`num_turns: 0`, `total_cost_usd: 0`), and
+//!   command answers locally (`num_turns: 0`, its message's model
+//!   `<synthetic>`; `total_cost_usd` is the resumed session's spend so far,
+//!   not this run's: Lab, a chat with three turns said $0.61), and
 //!   with `--no-session-persistence` the session's transcript is left
 //!   byte for byte as it was. Without it, `/context` and its whole answer
 //!   are written into the session (about 5k tokens the model would read on
@@ -27,8 +29,9 @@
 //!   `**Tokens:** 31k / 1m (3%)`, then tables). Neither is a documented
 //!   contract, so both are read tolerantly: the object first, the markdown
 //!   if it's missing or unreadable ([`parse_markdown`]), nothing if neither.
-//! - **Never a cost**: an answer that took a model turn or cost anything
-//!   (a Claude Code that sent `/context` to the model) is thrown away, and
+//! - **Never a cost**: an answer that took a model turn, or that cost
+//!   anything without Claude Code's own marker ([`parse_output`]: a Claude
+//!   Code that sent `/context` to the model), is thrown away, and
 //!   that program and version is never asked again while Yap runs.
 //! - **Not counted**: Yap's own tools for the session (its browser, its
 //!   cards: a turn's endpoint, `claude_live`), which only a turn has. A
@@ -158,22 +161,34 @@ pub struct Skill {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Answer {
     pub breakdown: Option<Breakdown>,
-    /// Answered by Claude Code itself: a result with no model turn and no
-    /// cost. `false` also when there was no result at all.
+    /// Answered by Claude Code itself: a result with no model turn, and
+    /// either Claude Code's own answer in the stream or no cost at all.
+    /// `false` also when there was no result at all.
     pub local: bool,
 }
 
 /// **`/context`'s stream-json output, read**: the assistant message's
 /// `context_usage` first, else the markdown (the result's, or that
 /// message's text). Lines that aren't JSON are skipped. Pure.
+///
+/// **Local**: `num_turns: 0`, not an error, and Claude Code's own answer —
+/// its message's model `<synthetic>` or a `context_usage` object — or, with
+/// neither, `total_cost_usd: 0`. A resumed session's result carries the
+/// session's spend so far in `total_cost_usd` (Lab, 15 Nov 2026: $0.61 on
+/// a chat with three turns, no model called), so the cost alone would call
+/// every real chat's answer a model's and the breakdown would never show.
 pub fn parse_output(stdout: &str) -> Answer {
     let mut usage = None;
     let mut text = None;
     let mut local = false;
+    let mut its_own = false;
     for line in stdout.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { continue };
         match v.get("type").and_then(Value::as_str) {
             Some("assistant") => {
+                if v.pointer("/message/model").and_then(Value::as_str) == Some("<synthetic>") || v.get("context_usage").is_some() {
+                    its_own = true;
+                }
                 if let Some(b) = v.get("context_usage").and_then(from_usage) {
                     usage = Some(b);
                 }
@@ -183,8 +198,8 @@ pub fn parse_output(stdout: &str) -> Answer {
             }
             Some("result") => {
                 let turns = v.get("num_turns").and_then(Value::as_u64).unwrap_or(u64::MAX);
-                let cost = v.get("total_cost_usd").and_then(Value::as_f64).unwrap_or(f64::MAX);
-                local = turns == 0 && cost == 0.0 && !v.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+                let free = v.get("total_cost_usd").and_then(Value::as_f64) == Some(0.0);
+                local = turns == 0 && (its_own || free) && !v.get("is_error").and_then(Value::as_bool).unwrap_or(false);
                 if let Some(r) = v.get("result").and_then(Value::as_str).filter(|r| !r.trim().is_empty()) {
                     text = Some(r.to_string());
                 }

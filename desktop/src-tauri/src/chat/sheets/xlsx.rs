@@ -23,15 +23,112 @@ const LOCALE: &str = "en";
 const TZ: &str = "UTC";
 
 /// **Read an `.xlsx`.** Blocking (the caller's own thread: `sheets::read`).
+///
+/// IronCalc takes six parts of `xl/styles.xml` for granted that the format
+/// leaves out when they'd be empty (a file a small writer made: no
+/// `<cellStyles>`, say) and panics without one (Lab, 15 Nov 2026: the file
+/// left out of Chat altogether). So a file lacking one is read with those
+/// parts filled in ([`with_full_styles`]) — before IronCalc sees it, so it
+/// never panics over them (a panic is in the log as an error) — and any
+/// panic of its own is a failure like any other, so `sheets::read_now`'s
+/// values-only reader still has its turn.
 pub fn read(bytes: &[u8]) -> Result<Book, Why> {
     if super::is_encrypted_office(bytes) {
         return Err(Why::Locked);
     }
-    let workbook = ironcalc::import::load_from_xlsx_bytes(bytes, "workbook", LOCALE, TZ).map_err(|_| Why::Failed)?;
-    let mut model = Model::from_workbook(workbook, LANGUAGE).map_err(|_| Why::Failed)?;
-    let kept = file_results(&model);
-    model.evaluate();
-    Ok(book_of(&model, &kept))
+    match with_full_styles(bytes) {
+        Some(fixed) => {
+            tracing::info!("Chat: an .xlsx's missing style parts filled in for its reader");
+            load(&fixed)
+        }
+        None => load(bytes),
+    }
+}
+
+/// IronCalc reading and calculating `bytes`, its panic an error.
+fn load(bytes: &[u8]) -> Result<Book, Why> {
+    std::panic::catch_unwind(|| {
+        let workbook = ironcalc::import::load_from_xlsx_bytes(bytes, "workbook", LOCALE, TZ).map_err(|_| Why::Failed)?;
+        let mut model = Model::from_workbook(workbook, LANGUAGE).map_err(|_| Why::Failed)?;
+        let kept = file_results(&model);
+        model.evaluate();
+        Ok(book_of(&model, &kept))
+    })
+    .unwrap_or(Err(Why::Failed))
+}
+
+/// The parts of `xl/styles.xml` IronCalc can't do without, each with the
+/// empty workbook's own (Excel's defaults), in the order the format lists them.
+const STYLE_PARTS: [(&str, &str); 6] = [
+    ("fonts", r#"<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>"#),
+    ("fills", r#"<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>"#),
+    ("borders", r#"<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>"#),
+    ("cellStyleXfs", r#"<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>"#),
+    ("cellXfs", r#"<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>"#),
+    ("cellStyles", r#"<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>"#),
+];
+
+/// **`styles` with every part of [`STYLE_PARTS`] it lacks**, added before
+/// its end tag (in its root's prefix, if it has one); `None` when it lacks
+/// none, or has no end tag to add them before. Pure.
+pub fn full_styles(styles: &str) -> Option<String> {
+    let start = styles.find("styleSheet")?;
+    let open = styles[..start].rfind('<')?;
+    let prefix = &styles[open + 1..start];
+    if prefix.contains(['/', '>', ' ']) {
+        return None;
+    }
+    let has = |part: &str| {
+        let tag = format!("<{prefix}{part}");
+        styles.match_indices(&tag).any(|(i, _)| matches!(styles[i + tag.len()..].chars().next(), Some(' ' | '>' | '/' | '\t' | '\r' | '\n')))
+    };
+    let missing: String = STYLE_PARTS
+        .iter()
+        .filter(|(part, _)| !has(part))
+        .map(|(_, xml)| if prefix.is_empty() { xml.to_string() } else { xml.replace('<', &format!("<{prefix}")).replace(&format!("<{prefix}/"), &format!("</{prefix}")) })
+        .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    let end = styles.rfind(&format!("</{prefix}styleSheet"))?;
+    Some(format!("{}{missing}{}", &styles[..end], &styles[end..]))
+}
+
+/// **The workbook `bytes` with `xl/styles.xml` complete** ([`full_styles`];
+/// a whole one when it has none), every other part as it was; `None` when
+/// there's nothing to fill in or it isn't a zip.
+fn with_full_styles(bytes: &[u8]) -> Option<Vec<u8>> {
+    use std::io::{Read, Write};
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
+    let styles = match zip.by_name("xl/styles.xml") {
+        Ok(mut f) => {
+            let mut s = String::new();
+            f.read_to_string(&mut s).ok()?;
+            full_styles(&s)?
+        }
+        Err(_) => {
+            let parts: String = STYLE_PARTS.iter().map(|(_, xml)| *xml).collect();
+            format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">{parts}</styleSheet>"#)
+        }
+    };
+    let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let mut wrote = false;
+    for i in 0..zip.len() {
+        let file = zip.by_index_raw(i).ok()?;
+        if matches!(file.name().as_deref(), Ok("xl/styles.xml")) {
+            drop(file);
+            out.start_file("xl/styles.xml", zip::write::SimpleFileOptions::default()).ok()?;
+            out.write_all(styles.as_bytes()).ok()?;
+            wrote = true;
+        } else {
+            out.raw_copy_file(file).ok()?;
+        }
+    }
+    if !wrote {
+        out.start_file("xl/styles.xml", zip::write::SimpleFileOptions::default()).ok()?;
+        out.write_all(styles.as_bytes()).ok()?;
+    }
+    Some(out.finish().ok()?.into_inner())
 }
 
 /// What a formula's result says, as the file kept it: `(text, kind)`.

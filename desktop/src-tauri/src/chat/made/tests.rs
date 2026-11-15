@@ -152,6 +152,25 @@ fn the_scripts_it_loads() {
     assert!(!pointed.contains("cdnjs") && !pointed.contains("d3js.org"));
 }
 
+/// Lab, 15 Nov 2026: a kept page's Chart.js chart stayed blank — its sandboxed
+/// frame's request for `/lib/…` never reached Yap. The library goes inside
+/// the document now.
+#[test]
+fn a_documents_libraries_are_put_inside_it() {
+    let chart = LIBS.iter().find(|l| l.file == "chart.umd.min.js").unwrap();
+    let doc = document(r#"<canvas id="c"></canvas><script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script><script>new Chart(c, {})</script><script src="/lib/d3.min.js"></script>"#, "html");
+    let have = [(chart, b"var Chart=function(){};var s='</script>';".to_vec())];
+    let inlined = serve::inline_libraries(&doc, &have);
+    assert!(inlined.contains("<script>/* Chart.js 4.4.1 */\nvar Chart=function(){};var s='<\\/script>';\n</script>"), "{inlined}");
+    assert!(!inlined.contains("/lib/chart.umd.min.js"), "no request left for it");
+    assert!(inlined.contains("<script>new Chart(c, {})</script>"), "the page's own script after it, as it was");
+    assert!(inlined.contains(r#"<script src="/lib/d3.min.js"></script>"#), "a library not had stays as it was");
+    // The library before the page's own code, in the order the page wrote them.
+    assert!(inlined.find("var Chart=").unwrap() < inlined.find("new Chart(").unwrap());
+    // Nothing to put in: the document as it was.
+    assert_eq!(serve::inline_libraries(&doc, &[]), doc);
+}
+
 #[test]
 fn the_policy_keeps_the_frame_apart() {
     let p = csp("http://yapmade.localhost");

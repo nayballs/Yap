@@ -135,6 +135,10 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   '[data-testid="chat-branch-count"]'`). No words needed. `--edit`: **Edit** the
   person's last message to `<text>` — the pencil, the words in place, Save and send —
   a new version from there. Both are turns of the lab's own, waited on as `ask` is.
+  In a Code chat both go through Rewind (no versions kept) and ask first ("Retry from
+  this message?"): the lab presses its confirm, as the person would. There the turn's
+  `answer` comes back empty (the session's new answer isn't read back yet): `shot
+  --window thread` or `probe --text` shows it.
 - `--cards allow|deny`: answer every card this turn asks at once (otherwise `ask`
   returns `status: "waiting"` and you `answer` it).
 - `shots`: the turn's screenshots ([Screenshots](#screenshots)) — after it ends, and

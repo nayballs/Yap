@@ -1271,6 +1271,14 @@ one side.
   `privacy/net.rs` ("A chart library for a visual", `VisualLibrary`) and
   keeps it in `chat-made/lib/` only when its SHA-256 is the one pinned
   (`verified`); a failure is a 502 and the visual's chart doesn't draw.
+  **Inside the document since 15 Nov 2026** (`inline_libraries`,
+  `with_libraries`; the Lab pass: a kept page's Chart.js chart stayed blank):
+  WebView2 runs a sandboxed frame in a process of its own, and its request
+  for `/lib/<file>` never reached the scheme's handler (it failed at once,
+  status 0, nothing in the log). So a visual's and a page's document carries
+  each pinned library it names as its own `<script>` (the policy's
+  `'unsafe-inline'`), its bytes had as before (kept, else fetched once and
+  checked); one that can't be had stays a `/lib/` address and doesn't draw.
   Logs: ids, kinds, counts and sizes, never a title or the code. Tests:
   unit (`made/tests.rs`: the format, ids, kept and read back by chat, a
   reused id, an unreadable index, the anchor, where it's offered and its
@@ -4620,7 +4628,15 @@ a follow-up). Rust: `chat/sheets.rs` (+ `sheets/xlsx.rs`, `xls.rs`,
     heights as Excel draws them at 100% (7 px a character, 4/3 px a point),
     merged cells, frozen panes, grid lines on or off, tab colours, hidden
     sheets, whole-row and whole-column styles. One IronCalc can't open:
-    its values by calamine.
+    its values by calamine. **Style parts filled in first** (15 Nov 2026,
+    the Lab pass: a small writer's file with no `<cellStyles>` made IronCalc
+    panic and the file was left out of Chat): IronCalc takes six parts of
+    `xl/styles.xml` for granted that the format lets a file leave out
+    (`fonts`, `fills`, `borders`, `cellStyleXfs`, `cellXfs`, `cellStyles`),
+    so a file lacking one is read with Excel's empty-workbook defaults put in
+    (`xlsx::full_styles`, `with_full_styles`; a whole `styles.xml` when it has
+    none) before IronCalc sees it, and a panic of IronCalc's own is a failure
+    like any other, so calamine still has its turn.
   - **`.xls`, `.xlsb`, `.ods` by calamine** (0.38, MIT): values and
     formulas as the file keeps them (the app that saved it calculated
     them), numbers as Excel's General shows them, dates as `2026-11-15`;
