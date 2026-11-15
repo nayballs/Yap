@@ -173,25 +173,6 @@ pub enum Nth {
     Last,
 }
 
-impl Nth {
-    /// "2nd", "last". Pure.
-    fn word(self) -> String {
-        match self {
-            Nth::Last => "last".into(),
-            Nth::At(n) => format!("{n}{}", ordinal_suffix(n)),
-        }
-    }
-}
-
-fn ordinal_suffix(n: u32) -> &'static str {
-    match (n % 10, n % 100) {
-        (1, x) if x != 11 => "st",
-        (2, x) if x != 12 => "nd",
-        (3, x) if x != 13 => "rd",
-        _ => "th",
-    }
-}
-
 /// **A part a description says it's in** ("inside the navigation", "in the
 /// sign-up form", "the second result's", "under Delivery").
 #[derive(Debug, Clone, Default, PartialEq)]
