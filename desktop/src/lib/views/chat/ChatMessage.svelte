@@ -15,6 +15,11 @@
   import { renderMarkdown } from '../../core/markdown.js';
   import { colourCode } from '../../ui/colourCode.js';
   import { codeCopy } from '../../ui/codeCopy.js';
+  import { markdownVisuals } from '../../ui/markdownVisuals.js';
+  import { getContext } from 'svelte';
+  // A Code chat's file paths as links and ▶ Run on a one-line shell block (ChatView's context; none elsewhere).
+  import { fileLinks, CODE_FILES } from '../../ui/fileLinks.js';
+  import { codeRun } from '../../ui/codeRun.js';
   import { paidLine, whereItRuns } from '../../core/aiModel.js';
   import { closePartial, settle } from '../../core/streaming.js';
   import { menuKey, openContextMenu } from '../../ui/contextMenu.svelte.js';
@@ -45,6 +50,7 @@
    * opened (a `ShownPicture`). `pagethumb(url)`: a page's picture taken
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
+  const codeFiles = getContext(CODE_FILES) ?? null;
   let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null } = $props();
   // `visuals`: what the answer made to be seen, not read (chat/made.rs: "Made a visual", above its words;
   // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends.
@@ -160,7 +166,7 @@
     <!-- (Its passage pills are links: Enter on one clicks it.) -->
     <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="cbody" onclick={clickAnswer} use:colourCode use:codeCopy>{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, { sources })}</div>
+    <div class="cbody" onclick={clickAnswer} use:colourCode use:codeCopy use:markdownVisuals use:fileLinks={codeFiles} use:codeRun={m.streaming ? null : codeFiles}>{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, { sources })}</div>
     {#if m.streaming && m.waiting}
       <p class="cwait" aria-live="polite">Waiting for your dictation to finish…</p>
     {/if}
@@ -630,10 +636,30 @@
     margin: 4px 0;
     padding-left: 18px;
   }
+  /* Headings (markdown.js draws `#` as h2 … `####` as h5): four sizes, as
+     the Claude app's answers have them. */
   .cbubble.assistant :global(h2),
+  .cbubble.assistant :global(h3),
+  .cbubble.assistant :global(h4),
+  .cbubble.assistant :global(h5) {
+    margin: 12px 0 4px;
+    font-weight: 650;
+    line-height: 1.3;
+  }
+  .cbubble.assistant :global(h2) {
+    font-size: calc(18px * var(--yap-reading-scale));
+  }
   .cbubble.assistant :global(h3) {
-    margin: 8px 0 4px;
-    font-size: calc(13px * var(--yap-reading-scale));
+    font-size: calc(15.5px * var(--yap-reading-scale));
+  }
+  .cbubble.assistant :global(h4) {
+    font-size: calc(13.5px * var(--yap-reading-scale));
+  }
+  .cbubble.assistant :global(h5) {
+    font-size: calc(12.5px * var(--yap-reading-scale));
+  }
+  .cbubble.assistant :global(.cbody > :is(h2, h3, h4, h5):first-child) {
+    margin-top: 2px;
   }
   .cbubble.assistant :global(code) {
     font-family: ui-monospace, Consolas, monospace;

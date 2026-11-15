@@ -44,6 +44,7 @@ import HardBreak from '@tiptap/extension-hard-break';
 import { BulletList, OrderedList, ListItem, ListKeymap } from '@tiptap/extension-list';
 import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table';
 import { UndoRedo, Dropcursor, Gapcursor, Placeholder } from '@tiptap/extensions';
+import { RichVisuals } from './richVisuals.js';
 
 /** The blocks that can come back verbatim: their markdown as read, and the lines before them. */
 const SOURCED = ['paragraph', 'heading', 'blockquote', 'bulletList', 'orderedList', 'listItem', 'codeBlock', 'horizontalRule', 'table', 'tableRow', 'yapSection', 'rawBlock'];
@@ -312,7 +313,8 @@ export function richExtensions({ editing = true, placeholder = null, rawTitle = 
     Source,
   ];
   if (!editing) return base;
-  const out = [...base, UndoRedo, Dropcursor.configure({ class: 'docdrop', color: false, width: 2 }), Gapcursor];
+  // (RichVisuals: maths and diagrams drawn on the page, decorations only — richVisuals.js.)
+  const out = [...base, UndoRedo, Dropcursor.configure({ class: 'docdrop', color: false, width: 2 }), Gapcursor, RichVisuals];
   if (placeholder) out.push(Placeholder.configure({ placeholder, showOnlyWhenEditable: false }));
   return out;
 }

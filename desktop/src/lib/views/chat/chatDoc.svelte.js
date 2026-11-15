@@ -108,6 +108,10 @@ export const picKey = (id) => `pic:${id}`;
 /** A page's: its address without its fragment or a trailing slash (one tab a page). */
 /** An agent's tab (Yap Code: AgentTab.svelte). */
 export const agentKey = (id) => `agent:${id}`;
+/** A Code chat's file, its Runs and its summary (FileTab, RunsTab, SummaryTab: 15 Nov 2026). */
+export const fileKey = (rel) => `file:${rel}`;
+export const RUNS_KEY = 'runs';
+export const SUMMARY_KEY = 'summary';
 export const pageKey = (url) => `page:${String(url || '').trim().replace(/#.*$/, '').replace(/\/+$/, '')}`;
 /** A page tab's key: a new tab's own (`page:new:1`), else its page's. */
 export const tabKeyOf = (p) => p?.tabKey || pageKey(p?.url);
@@ -133,6 +137,9 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
   // conversation, turn?}`; its Agent tab).
   let agent = $state(null);
   let agentSeq = 0;
+  // A Code chat's file beside the chat (agents/files.rs: `{rel, line, seq}`; its File tab).
+  let file = $state(null);
+  let fileSeq = 0;
   // Each page tab as it is now (tab key → { title, url, went }): its title
   // and address as Rust says, and where the address bar last took it (a
   // tab shown again opens there). New tabs are counted for their keys.
@@ -197,6 +204,14 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
             ? agent
               ? agentKey(agent.id)
               : null
+          : showing === 'file'
+            ? file
+              ? fileKey(file.rel)
+              : null
+          : showing === 'runs'
+            ? RUNS_KEY
+          : showing === 'summary'
+            ? SUMMARY_KEY
           : id != null
             ? docKey(id)
             : null
@@ -381,6 +396,43 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
   }
 
   /**
+   * **A Code chat's file** (`{rel, line}`: a link in an answer or a row,
+   * agents/files.rs): its File tab, scrolled to the line and marked. One tab
+   * a file; `seq` tells the tab it was asked again (another line).
+   */
+  function showFile(ref) {
+    if (!ref?.rel) return;
+    if (showing === 'doc') flushSave();
+    fileSeq += 1;
+    const f = { rel: ref.rel, line: Number(ref.line) || null, seq: fileSeq };
+    inRow({ key: fileKey(f.rel), kind: 'file', file: f });
+    extra = extra.map((t) => (t.key === fileKey(f.rel) ? { ...t, file: f } : t));
+    file = f;
+    showing = 'file';
+    open = true;
+  }
+
+  /** **The Runs tab**: what ▶ Run ran in this Code chat (RunsTab.svelte). */
+  function showRuns() {
+    if (showing === 'doc') flushSave();
+    inRow({ key: RUNS_KEY, kind: 'runs' });
+    showing = 'runs';
+    open = true;
+  }
+
+  /** **The summary** of a Code chat (SummaryTab.svelte): shown, or (showing) the panel closed, as the browser button does. */
+  function toggleSummary() {
+    if (open && showing === 'summary') {
+      close();
+      return;
+    }
+    if (showing === 'doc') flushSave();
+    inRow({ key: SUMMARY_KEY, kind: 'summary' });
+    showing = 'summary';
+    open = true;
+  }
+
+  /**
    * Yap is acting on page tab `key` (a turn's `acting` event, chat/pages/act.rs):
    * its tab says "Yap is using this page", with Stop (`stop`: the turn's ■),
    * until the turn ends.
@@ -443,6 +495,13 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     if (t?.kind === 'picture') showPicture(t.picture);
     else if (t?.kind === 'page') showPage(t.page);
     else if (t?.kind === 'agent') showAgent(t.agent);
+    else if (t?.kind === 'file') showFile(t.file);
+    else if (t?.kind === 'runs') showRuns();
+    else if (t?.kind === 'summary') {
+      inRow(t);
+      showing = 'summary';
+      open = true;
+    }
     else if (t?.kind === 'doc') show(t.id, { title: t.title });
   }
 
@@ -552,6 +611,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     showing = 'doc';
     picture = null;
     agent = null;
+    file = null;
     if (page || Object.keys(pageNow).length) closePages();
     page = null;
     pageNow = {};
@@ -686,6 +746,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     get picture() { return picture; },
     get page() { return page; },
     get agent() { return agent; },
+    get file() { return file; },
     get pageNow() { return pageNow; },
     get extra() { return extra; },
     get hidden() { return hidden; },
@@ -714,6 +775,9 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     showPicture,
     showPage,
     showAgent,
+    showFile,
+    showRuns,
+    toggleSummary,
     showTab,
     setActing,
     stopUsing,

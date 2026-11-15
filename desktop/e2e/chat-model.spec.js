@@ -404,9 +404,11 @@ test('a message keeps its line breaks; an answer has Copy, its code blocks too, 
   await expect(answer).not.toContainText('[^1]');
   // A task's checkbox stands where the bullet was: no bullet as well.
   expect(await answer.locator('li.task').first().evaluate((el) => getComputedStyle(el).listStyleType)).toBe('none');
-  // A markdown image: a link to the picture, no stray "!".
-  await expect(answer.getByRole('link', { name: 'The garden plan' })).toHaveAttribute('href', 'https://plans.example.com/garden.png');
+  // A markdown image: a "Show image" box naming its site (ui/markdownVisuals.js; markdown-visuals.spec.js
+  // fetches one on its click), no stray "!".
+  await expect(answer.getByRole('button', { name: 'Show image: The garden plan, from plans.example.com' })).toBeVisible();
   await expect(answer).not.toContainText('!The garden plan');
+  await expect(answer).not.toContainText('!Show image');
   // The table's short header stays whole: its cell no wider than its word needs, never broken mid-word.
   const size = answer.getByRole('columnheader', { name: 'Size' });
   expect(await size.evaluate((el) => getComputedStyle(el).overflowWrap)).toBe('break-word');

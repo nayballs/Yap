@@ -223,7 +223,7 @@ fn a_chat_run_connects_lists_and_reads_over_real_http() {
         // (show_visual keeps a visual in the chat's own folder: never destructive, but not read only.)
         let reads = t["name"] != "show_visual";
         assert_eq!(t["annotations"]["readOnlyHint"], reads, "{}", t["name"]);
-        assert_eq!(t["annotations"]["destructiveHint"] == true, false, "{}", t["name"]);
+        assert_ne!(t["annotations"]["destructiveHint"], true, "{}", t["name"]);
         assert!(t["inputSchema"].is_object());
     }
     assert_eq!(
