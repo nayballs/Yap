@@ -21,6 +21,8 @@
   import { splitElements } from '../../core/selectedElements.js';
   import { copyText } from '../../core/itemMenus.js';
   import ElementChip from './ElementChip.svelte';
+  import FileChip from './FileChip.svelte';
+  import { mentionParts } from './chatMentions.js';
   import { screenPixels } from './chatShots.svelte.js';
   import { thoughtLabel } from './chatThink.svelte.js';
   import { appLabel } from '../../core/appNames.js';
@@ -201,6 +203,14 @@
         {/each}
       </div>
     {/if}
+    {#if m.attachments?.length}
+      <!-- The files it carried (chat/attachments.rs): a chip each, as the Claude app's; a click opens it. -->
+      <div class="elchips" data-testid="chat-files-sent">
+        {#each m.attachments as f (f.id)}
+          <FileChip file={f} />
+        {/each}
+      </div>
+    {/if}
     {#if hasText}
       <div class="utext">
         {#if m.quote?.text}
@@ -215,7 +225,7 @@
             <span class="viavoice" title="Asked by voice" aria-label="Asked by voice">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
             </span>
-          {/if}{said.question}
+          {/if}{#each mentionParts(said.question) as part, pi (pi)}{#if part.path}<span class="mention" title={part.path} data-testid="chat-mention">@{part.path}</span>{:else}{part.text}{/if}{/each}
         </p>
         {#if said.screenText}
           <!-- What Windows read from the screenshot, sent in its place. -->
@@ -368,6 +378,15 @@
 {/if}
 
 <style>
+  /* A workspace file the message mentions (@path, a Code chat's: agents/mention.rs). */
+  .mention {
+    padding: 0 4px;
+    border-radius: 5px;
+    background: var(--yap-primary-wash);
+    color: var(--yap-fg);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
   .elchips {
     display: flex;
     flex-wrap: wrap;

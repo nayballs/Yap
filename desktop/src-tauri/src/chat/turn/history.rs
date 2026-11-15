@@ -56,7 +56,9 @@ impl Sizing {
         // by its size where it goes (`budget::image_tokens_at`).
         let question_tokens = counter.count(&t.text).await
             + crate::chat::budget::MESSAGE_OVERHEAD
-            + crate::snip::turn::images().iter().filter(|i| !i.as_text).map(|i| counter.picture(i.w, i.h)).sum::<u64>();
+            + crate::snip::turn::images().iter().filter(|i| !i.as_text).map(|i| counter.picture(i.w, i.h)).sum::<u64>()
+            // …and the files it carries, their text (chat/attachments.rs).
+            + crate::chat::attachments::current_tokens();
         let rate_cap = crate::chat::budget::rate_cap(provider);
         let connectors = t.gates.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, provider, model, t.scope, context_size, conversation_id)).flatten();
         let parts = super::fit::Parts { persona: &t.ep.persona, profile: &t.profile, now: t.now, code, connectors: connectors.as_ref(), conversation: conversation_id };

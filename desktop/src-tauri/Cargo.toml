@@ -158,6 +158,9 @@ tar = "0.4"
 # its Deflate entries are read (flate2 is above). 9.0.5+: older versions
 # have the zip-cloaking and symlink advisories (Dependabot, 31 Oct 2026).
 zip = { version = "9.2", default-features = false, features = ["deflate-flate2"] }
+# A PDF attached to a Chat question is read on this PC, never uploaded to be
+# read (chat/attachments/pdf.rs): its text, through lopdf. Pure Rust, MIT.
+pdf-extract = "0.12"
 
 # Multi-engine STT (whisper.cpp + ONNX) via transcribe-rs. Optional so the
 # default build ships the STUB and `cargo check` stays fast.

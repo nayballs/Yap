@@ -188,6 +188,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `chat/documents.rs` (+ `documents/rich.rs`, `blocks.rs`) — documents beside the chat; the person's edits win (`merge3`).
 - `chat/pictures.rs` (+ `pictures/local.rs`: a picture file on this PC, by its path) — find and show pictures.
 - `chat/shares.rs` — `share_files`: files shared into the conversation (a picture inline, other files as cards to open), an agent's report showing its turn's pictures.
+- `chat/attachments.rs` (+ `attachments/pdf.rs`, `word.rs`) — files attached to a question (+ or dropped): text, code, a PDF's and a Word file's text read on this PC, sent before the question and in its history; kept in `chat-files/` like screenshots ("Keep chat files"); anything else said plainly.
 
 **Snip to Chat** — [snip.md](./docs/architecture/snip.md)
 - `snip.rs` — drag a box over any screen into Chat (Shift as you let go keeps it and snips another; Ctrl copies, Ctrl+S saves); never sent by itself; the `yapsnip` scheme.
@@ -266,6 +267,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `agents/servers.rs` — a Code chat's dev servers from its `.claude/launch.json` (Claude Code's own format): started, ports, output, stopped, never outliving Yap; a running one's localhost page the one exception to "never this PC" (`running_origin`); `chat/pages/preview.rs` its Claude's `preview_*` tools.
 - `agents/usage.rs` — what each agent turn used: tokens, the context's fill, its cost estimated (the Agent panel's numbers).
 - `agents/output.rs` — what a command printed, its start and its end, for its row in the thread; in the agent's own log, never sent to a phone.
+- `agents/mention.rs` — `@` in a Code chat: the workspace's files (`git ls-files`, else a walk past build output), fuzzy, for the picker; `@path` goes in the words as Claude Code reads it.
 - `agents/pictures.rs` — a picture a step's answer carried (a picture file read, a screenshot), kept in `agents/<id>/pictures/`, never `chat-images/`; shown at the end of its line.
 
 **Yap Link (the phone)** — [link.md](./docs/architecture/link.md)
@@ -316,7 +318,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `components/richtext/` — the rich editor for Chat's documents and notes (`richEditor.js`, `richMarkdown.js`, `RichNote.svelte`); the note stays markdown exactly ([notes.md](./docs/architecture/notes.md#notes-as-pages-you-can-format-componentsrichtext-2026-10-31)).
 - `core/codeColours.js` (+ `codeColours.hljs.js`, `ui/colourCode.js`) — code colours in a Code chat's rows and in an answer's fenced code that names its language: highlight.js in a chunk of its own, loaded when first needed; its output drawn as text tokens, never HTML; `--yap-syn-*` ([yap-code.md](./docs/architecture/yap-code.md#an-opened-stretch-a-row-a-step)).
 - `core/markdown.js` — every rendered answer and note: markdown-it + DOMPurify ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
-- `views/chat/` — Chat ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)): `ChatView.svelte` + `chatState.svelte.js`, `ConversationList`, `ChatThread`, `Composer`, the model picker over `core/chatPicker.js` (shared with the phone), the panel (`DocPanel`, `PageTab`); screenshots: [snip.md](./docs/architecture/snip.md#how-a-screenshot-looks-2026-10-31-after-the-claude-apps).
+- `views/chat/` — Chat ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)): `ChatView.svelte` + `chatState.svelte.js`, `ConversationList`, `ChatThread`, `Composer` (Ctrl+Enter queues for later; `FileChip` + `chatFiles.js` the attached files; `MentionMenu` + `chatMentions.js` a Code chat's `@`), the model picker over `core/chatPicker.js` (shared with the phone), the panel (`DocPanel`, `PageTab`); screenshots: [snip.md](./docs/architecture/snip.md#how-a-screenshot-looks-2026-10-31-after-the-claude-apps).
 - `views/chat/` Code side — `ChatSideSwitch`, `codeChats.svelte.js`, `ServersMenu` (the page tab's Dev servers, a Code chat's), `ElementChip` + `PageAnnotate` (Select an element or annotate: `chat/pages/pick.rs`), `ModeChip`, `AgentTab` (its panel `AgentPanel` + `core/agentPanel.js`, a turn's helpers entries of their own under its row; its rows' pixel characters, Yap's crew: `CrewAvatar`, `crew/`, `core/crew.js` `characterFor`; the chat's own Claude on its working line is **the lead**, cap and baton, never walking), `AgentTodoCard`, `QueuedMessage` (a message sent while the chat's Claude writes waits as Queued: Cancel and edit, Send now; then ✓✓ Read: chatState's queue, `runner::queue_state`), the actions under the person's message (Copy, Rewind, Fork from here: `ChatMessage` + `core/agents.js` `messageTurn`), `AgentWork` (the words and steps of a Code chat's own work in the thread, and of an agent Chat sent out in its Agent panel row, never the thread; its log from `stores/agentLogs.svelte.js`; `StepRows` a stretch opened: a row a step, an edit's to its numbered diff (the replaced part of a changed line marked: `core/intralineDiff.js`), a command's to itself and its output, a helper's own steps behind the row that sent it; `StepPictures` a step's picture at the end of its line); `stores/agents.svelte.js` ([yap-code.md](./docs/architecture/yap-code.md)).
 - `views/help/` + `views/MeetingSetup.svelte` — the title bar's Help and the "Set up meeting notes" checklist.
 - `views/MeetingsView.svelte` and `notepad/` — meetings and the notepad (`Notepad.svelte`, `stores/meetingAudio.svelte.js`; [meetings.md](./docs/architecture/meetings.md)); `components/BriefView.svelte` ([briefs](./docs/architecture/calendar.md#pre-meeting-briefs)); `components/SpeakerMenu` / `SpeakerCard`.
@@ -469,7 +471,7 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`); what each holds:
 `model_catalog.json`, `groq_usage.json`, `ai_usage.json`, `dictation_stats.json`,
 `dictionary_usage.json`, `hints.json`, `onboarding.json`, `mic_tips.json`,
 `word_suggestions.json`, `snippet_suggestions.json`, `language_nudges.json`, `notices.json`,
-`memory.json`, `writing_samples.json`, `chat-images/` (+ `thumbs/`), `connections.json`,
+`memory.json`, `writing_samples.json`, `chat-images/` (+ `thumbs/`), `chat-files/`, `chat_attachments.json`, `connections.json`,
 `quieted_apps.json`, `stt_speed.json`, `recent-audio/`, `meeting-audio/` (+ `cuts.json`),
 `search-index/`, `link_devices.json`, `link/`, `claude_sessions.json`, `claude/`,
 `agents.json`, `agents/`, `workspaces.json`, `remote_control.json`, `connectors.json`,

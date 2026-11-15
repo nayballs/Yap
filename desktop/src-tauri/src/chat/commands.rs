@@ -142,6 +142,10 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// offers none of theirs, and the conversation it makes keeps them off.
 /// Ignored for an existing conversation (its own switches are saved as
 /// they're flipped, `connector_chat_set`).
+///
+/// `files`: the files attached in Chat's box (`chat/attachments.rs`: ids
+/// from `chat_files_add`), their text sent before the question and kept
+/// with it; one gone since is said, nothing sent.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -161,7 +165,10 @@ pub async fn chat_send(
     elements: Option<Vec<crate::chat::pages::pick::Picked>>,
     code_folder: Option<String>,
     connectors_off: Option<Vec<String>>,
+    files: Option<Vec<String>>,
 ) -> Result<serde_json::Value, String> {
+    // The files attached in the box (chat/attachments.rs): each still there.
+    let files = crate::chat::attachments::taken(&files.unwrap_or_default())?;
     // A Skill (`/decisions`, a one-tap prompt): asked across the meetings,
     // its own passages and instructions (chat/skills.rs).
     let skill_turn = match skill.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
@@ -184,6 +191,7 @@ pub async fn chat_send(
     // Where each came from in the box (a page's picked element, an annotated page): kept on the question.
     let sources: Vec<(String, String)> = taken.iter().map(|i| (i.id.clone(), i.source.clone())).collect();
     let turn = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, sources, as_text);
+    let turn = crate::chat::attachments::with(files, turn);
     let send = crate::chat::skills::with(skill_turn, crate::chat::documents::with_selection(selection, turn));
     // Text selected on a page beside the chat: what the question is about.
     // (Boxed: the command's future is made on the main thread, whose stack

@@ -4085,6 +4085,82 @@ and its Undo, Preview / Source, find, copy, light and dark).
   Search by meaning — local embeddings, Ask across meetings with cited
   passages — is [search.md](./search.md) (2026-10-25; ROADMAP step 3).
 
+## Files attached to a question (2026-11-15)
+
+The Claude app's + attaches any file and its box takes them dropped (gap
+E1, and H's file uploads). Yap's Chat does too, beside the pictures it
+already takes (`chat/attachments.rs`, `views/chat/FileChip.svelte`,
+`chatFiles.js`):
+
+- **How**: + → **Attach files** (Windows' picker, several at once), or files
+  dropped on Chat (a picture among them still goes in as a screenshot,
+  `snip/attach.rs`; everything else here). Rust reads each and keeps it
+  (`chat_files_add`); the box shows a **chip** each: a small type badge
+  ("TXT", "PDF", "MD", "DOCX"), its name and its size, as the Claude app's
+  file chips; ✕ takes it out and deletes it (`chat_attachment_remove`), a
+  click opens it. The empty box asks "Ask about this file…"; Enter on it
+  empty asks "What's in this file?". At most 20 a question.
+- **What's read** (`attachments::read`): text and code by their bytes (UTF-8,
+  UTF-16 with its mark; a NUL byte or many control characters early on is
+  a binary file), Markdown, a **PDF's text read on this PC** (`pdf.rs`:
+  `pdf-extract` on lopdf, page by page under `[Page n]` lines, in its own
+  thread so a panic or a 60-second read is "couldn't read", never a crash
+  or a hang; never uploaded to be read), a **Word document's** text
+  (`word.rs`: the `.docx` zip's `word/document.xml`, a paragraph a line).
+  **Anything else is said plainly** and not added, the toast naming each:
+  "Chat can't read budget.xlsx (a spreadsheet: save it as CSV to attach
+  it). It reads text, code, PDF and Word files, and pictures."; a PDF of
+  scanned pages "has no text Yap can read… Snip a page to Chat instead";
+  password-protected, empty, over 50 MB, or over 4 million characters
+  (about a million tokens) likewise.
+- **Sized to the model**: each file's tokens (`budget::estimate`) count in
+  the question's size, on the page (`inputTooLong`: the too-long line
+  under the box, Send waits) and in Rust (`turn/history.rs`
+  `question_tokens`), so a file too big for the model is said before it's
+  sent, as a paste is. An earlier question's files count in the history
+  (`budget::message_costs`), which drops older messages first.
+- **To the model** (`attachments::block`): a `<documents>` block before the
+  question, a `<document index>` each with its `<source>` (a PDF's says it's
+  its text, read on the person's PC) and `<document_content>`, as
+  Anthropic advises long documents go first. Joined where the turn's
+  screenshots join its question (the task-local `attachments::with`, set in
+  `chat_send`): the tool loop's opening messages, a plain answer
+  (`llm::note_chat`), your Claude plan's question (`turn/plan.rs`), and a
+  Code chat's own session (after its words there: `after_text`, so its
+  turn's title stays the person's). **The history** sends them again with
+  their question (`ChatMessage::sent_text`); a file past "Keep chat files"
+  is a line, "(A file was attached here, notes.md; it was removed.)".
+- **On the question**: `ChatMessage.attachments` (id, name, kind, bytes,
+  tokens, a PDF's pages; never the text), its chips over its words
+  (`chat-files-sent`), each opening its file (`chat_attachment_open`:
+  Markdown in Yap's own window, anything else in its app, and one that
+  could run a program or a web page, an `.html`, a script, its text as a
+  `.txt`). Removed past its days: greyed, "removed".
+- **Kept** in `<data>/chat-files/`: `<id>/<name>` the file's copy and
+  `<id>.txt` its text as sent (`file_<16 hex>`, checked everywhere).
+  Deleted with its chat (`chats::delete_many`, a Rewind; not while a fork
+  still carries it), by **Settings → Privacy & data → Chat files** ("Keep
+  chat files": 7 / 30 (default) / 90 days / forever, `chat_file_days`;
+  Open folder; Delete all…), by Delete some of your data → Chats and Reset
+  app, and a file never sent after a day (`attachments::sweep`, with the
+  screenshots' daily sweep and when the setting changes). Download your
+  data takes the copies (`chat-files/<id>/<name>`). An older Yap's save
+  drops the field: every save writes `chat_attachments.json` too, put back
+  at the next start (as `chat_files.json` does for shared files).
+- **Never queued** (a Code chat while Claude works): a message with files
+  goes as one with a screenshot does.
+- **Privacy**: names, text and paths are never logged (kinds, counts,
+  sizes, tokens); a file leaves the PC only inside the Chat request it's
+  sent with and that chat's follow-ups.
+- **Not done**: a question asked out loud doesn't take the files waiting
+  in the box (typed questions only; screenshots it does take); a scanned
+  PDF isn't read with OCR; spreadsheets, presentations and old `.doc` files
+  aren't read.
+- e2e: `chat-files.spec.js` (drop, chips, what the model gets now and in a
+  follow-up, Open, ✕, too long, deleted with its chat, Settings); unit tests
+  in `chat/attachments/` (`tests.rs`, `pdf.rs`, `word.rs`: a PDF and a
+  `.docx` made in the test).
+
 ## Ctrl+Enter queues a message for after the answer (2026-11-15)
 
 The Claude app's box says "Enter to send, Ctrl+Enter to queue for later"

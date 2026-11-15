@@ -682,6 +682,44 @@ workspace, word for word, and no model of Chat's is asked.
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 
+## @-mention a file (2026-11-15)
+
+As Claude Code's own `@`: in a Code chat's box (on either side of a
+Code chat's first message), typing `@` opens a picker of its workspace's
+files (`agents/mention.rs`, `views/chat/MentionMenu.svelte`,
+`chatMentions.js`), keyboard first: ↑ ↓ move, Enter or Tab puts the file
+in, Esc closes; a click works too. A plain chat's `@` is just an `@`.
+
+- **Which files** (`mention::list`): `git ls-files --cached --others
+  --exclude-standard` when the workspace is a Git repository (what the repo
+  counts as its files, `.gitignore` kept; Git run with no window), else a
+  walk that leaves out hidden folders and build output (`node_modules`,
+  `target`, `dist`, `.venv`…), 12 folders deep at most. At most 30,000
+  files, read again after 20 seconds.
+- **The match** (`mention::score`, pure): the letters typed, in order, in the
+  file's name first — its start, a run of them, a word's start scored up —
+  then anywhere in its path; shorter paths first among equals; the best 50.
+  Nothing typed yet: the workspace's top first.
+- **In the message**: `@path/to/file`, relative to the workspace (quoted,
+  `@"bed plan.md"`, with a space in it), as Claude Code itself writes a
+  mention, so the chat's Claude reads it from the folder it works in.
+  Yap sends the words as they are; it doesn't read the file for it. A chip
+  for each file mentioned sits over the box (✕ takes the mention out of the
+  words), and the sent message shows each as a pill (`mentionParts`: a
+  path-like `@name.ext` or `@folder/…` after a space, never an email or
+  `@Sam`).
+- **On Chat's model** (a Code chat on an API key): the same words go to
+  Chat's model, which hands them to an agent working in the workspace.
+- e2e: `agents-direct.spec.js` (the picker, Enter, ↓ and Tab, Esc, the
+  stand-in seeing the mentions, the pills; a plain chat's `@`); unit tests
+  in `agents/mention.rs`.
+
+**Files attached in a Code chat** (2026-11-15, + or dropped:
+[chat-and-assistant.md](chat-and-assistant.md#files-attached-to-a-question-2026-11-15)):
+a message that works directly carries their text after its words, so the
+turn's title and brief start with the person's words (`after_text`); such a
+message is never queued.
+
 ## Dev servers
 
 A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 Nov 2026; the maintainer, on the Claude Code app's Dev servers menu in its browser pane: "Can we add this to Yap, please? And an ability to do this"). Built from Anthropic's public docs for the app ("Configure preview servers") and the preview tools as Claude Code's own session is given them, never from the app's files (Anthropic's terms forbid taking it apart).

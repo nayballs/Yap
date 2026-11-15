@@ -136,6 +136,7 @@ pub const KINDS: &[About] = &[
             "(tasks.json)",
             "(chats.json)",
             "(chat_files.json)",
+            "(chat_attachments.json)",
             "(memory.json)",
             "(search-index/)",
             "(calendar.json)",
@@ -156,6 +157,7 @@ pub const KINDS: &[About] = &[
             "(tasks.json)",
             "(chats.json)",
             "(chat_files.json)",
+            "(chat_attachments.json)",
             "(memory.json)",
             "(search-index/)",
             "(calendar.json)",
@@ -174,8 +176,8 @@ pub const KINDS: &[About] = &[
         kind: Kind::Chats,
         group: CHAT,
         label: "Chats",
-        says: "Every chat, archived ones too, with its screenshots. Documents Chat wrote stay in Notes",
-        files: &["(chats.json)", "(chat_files.json)", "chat-images/", "claude_sessions.json", "connector_chats.json", "(memory.json)", "(search-index/)"],
+        says: "Every chat, archived ones too, with its screenshots and the files attached to it. Documents Chat wrote stay in Notes",
+        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "chat-images/", "chat-files/", "claude_sessions.json", "connector_chats.json", "(memory.json)", "(search-index/)"],
         stores: &["chats", "claudeSessions", "memory"],
     },
     About {
@@ -547,7 +549,11 @@ const STORES: &[(&str, Rule)] = &[
     ("chats.json", Choice::chats),
     // (The shares' copy for an older Yap's save: rewritten with chats.json, chat/shares.rs.)
     ("chat_files.json", Choice::chats),
+    // (The attached files' copy for an older Yap's save: rewritten with chats.json, chat/attachments.rs.)
+    ("chat_attachments.json", Choice::chats),
     ("chat-images/", Choice::chat_images),
+    // (Files attached to Chat's questions: Chat's alone, as its screenshots are.)
+    ("chat-files/", Choice::chat_images),
     ("claude_sessions.json", Choice::claude_sessions),
     ("connector_chats.json", Choice::connector_chats),
     ("memory.json", Choice::memory),
@@ -981,6 +987,8 @@ fn clear_files(app: &AppHandle, c: &Choice, done: &mut Done) -> Result<(), Strin
     // Every screenshot (the ones waiting in Chat's box too).
     if c.chat_images() == Cut::Whole {
         done.screenshots = crate::snip::chat_images_delete_all(app.clone());
+        // …and every file attached to a question (chat/attachments.rs).
+        crate::chat::attachments::chat_attachments_delete_all(app.clone());
     }
     // The index's folder held (an antivirus, the indexer at work): said
     // once the rest is done.
