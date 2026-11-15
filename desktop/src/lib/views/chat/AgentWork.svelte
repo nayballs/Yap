@@ -47,6 +47,7 @@
   import { isLive } from '../../core/agentNow.js';
   import { renderMarkdown } from '../../core/markdown.js';
   import { colourCode } from '../../ui/colourCode.js';
+  import { codeCopy } from '../../ui/codeCopy.js';
   import { getContext } from 'svelte';
   import { fileLinks, CODE_FILES } from '../../ui/fileLinks.js';
   import { agentLogs, watchAgentLog, watchSaying } from '../../stores/agentLogs.svelte.js';
@@ -113,7 +114,7 @@
   <div class="agentwork" class:wide data-testid="chat-agent-work" data-agent={agent?.id} data-turn={turn} data-live={live ? 'true' : 'false'}>
     {#each items as it, i (i)}
       {#if it.kind === 'said'}
-        <div class="wsaid" data-testid="chat-agent-work-said" use:colourCode use:fileLinks={codeFiles}>{@html renderMarkdown(it.text)}</div>
+        <div class="wsaid" data-testid="chat-agent-work-said" use:colourCode use:codeCopy use:fileLinks={codeFiles}>{@html renderMarkdown(it.text)}</div>
       {:else}
         {@const busy = onStep && i === items.length - 1}
         {@const parts = busy && line ? [{ text: line }] : workSummary(it, busy)}

@@ -14,6 +14,7 @@
   // Copy.
   import { renderMarkdown } from '../../core/markdown.js';
   import { colourCode } from '../../ui/colourCode.js';
+  import { codeCopy } from '../../ui/codeCopy.js';
   import { getContext } from 'svelte';
   // A Code chat's file paths as links and ▶ Run on a one-line shell block (ChatView's context; none elsewhere).
   import { fileLinks, CODE_FILES } from '../../ui/fileLinks.js';
@@ -23,7 +24,7 @@
   import { menuKey, openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { removedLine, sizeLine, imageItems, splitScreenText, sentPlaced, shown } from './chatImages.js';
   import { splitElements } from '../../core/selectedElements.js';
-  import { copyText } from '../../core/itemMenus.js';
+  import { copyText, messageItems } from '../../core/itemMenus.js';
   import ElementChip from './ElementChip.svelte';
   import { screenPixels } from './chatShots.svelte.js';
   import { thoughtLabel } from './chatThink.svelte.js';
@@ -154,7 +155,7 @@
     <!-- (Its passage pills are links: Enter on one clicks it.) -->
     <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="cbody" onclick={clickAnswer} use:colourCode use:fileLinks={codeFiles} use:codeRun={m.streaming ? null : codeFiles}>{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, { sources })}</div>
+    <div class="cbody" onclick={clickAnswer} use:colourCode use:codeCopy use:fileLinks={codeFiles} use:codeRun={m.streaming ? null : codeFiles}>{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, { sources })}</div>
     {#if m.streaming && m.waiting}
       <p class="cwait" aria-live="polite">Waiting for your dictation to finish…</p>
     {/if}
@@ -220,7 +221,7 @@
             <span class="viavoice" title="Asked by voice" aria-label="Asked by voice">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
             </span>
-          {/if}{said.question}
+          {/if}<span class="saidtext" data-testid="chat-question-text">{said.question}</span>
         </p>
         {#if said.screenText}
           <!-- What Windows read from the screenshot, sent in its place. -->
@@ -355,6 +356,12 @@
         {:else}
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.9v14.2a1.2 1.2 0 0 0 1.8 1l11.6-7.1a1.2 1.2 0 0 0 0-2L8.8 3.9A1.2 1.2 0 0 0 7 4.9z" /></svg>
         {/if}
+      </button>
+    {/if}
+    {#if m.text?.trim()}
+      <!-- Copy, as the right-click menu's Copy (markdown marks dropped; Copy as Markdown stays in the menu). -->
+      <button class="readbtn copybtn" aria-label="Copy" title="Copy" data-testid="chat-answer-copy" onclick={() => messageItems(m)[0]?.onselect()}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
       </button>
     {/if}
     {#if reading}
@@ -634,6 +641,11 @@
   .cbubble.reading {
     border-color: color-mix(in srgb, var(--yap-primary) 45%, var(--yap-border-subtle));
   }
+  /* The person's words as they wrote them: their line breaks kept (a pasted list, a prompt in parts). */
+  .saidtext {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
   .viavoice {
     display: inline-flex;
     vertical-align: -1px;
@@ -682,6 +694,10 @@
   .readbtn svg {
     width: 10px;
     height: 10px;
+  }
+  .copybtn svg {
+    width: 12px;
+    height: 12px;
   }
   .speaking {
     display: inline-flex;

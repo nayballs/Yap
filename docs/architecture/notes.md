@@ -1020,7 +1020,24 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   same step (a MutationObserver, before the page is drawn). In Chat's
   thread, the agent's words in it and the Agent tab; a note's summary, a
   meeting's Ask thread and a document beside the chat still show code
-  plain;
+  plain. **A Copy button** sits in each such block's top-right corner
+  (15 Nov 2026, the Claude app's: `ui/codeCopy.js`, beside `colourCode`
+  wherever it's used; the look `app.css` `.md-codecopy`): it copies the
+  code element's text as written ("Code copied"), and has no text of its
+  own, so a block selected by hand copies the code alone;
+  **what's only drawn, never kept** (15 Nov 2026, `env.render`: set by
+  `renderMarkdown` alone, never by `markdownTokens`, whose tokens the
+  document editor writes back exactly): **footnotes** ("…[^1]" and a
+  paragraph "[^1]: …") are `sup.md-fnref` numbers, in the order first cited,
+  and the notes in `div.md-footnotes` under the text (a note nobody cites
+  isn't shown, a mark with no note stays as written; no links or ids,
+  several answers share a page; before the web rule, so a note in a web
+  answer keeps only its sources' links); **a markdown image** is a link to
+  the picture with no stray "!" (images stay off: "![alt](url)" reads as a
+  "!" and a link, and the "!" goes; not before a bare link). In `app.css`,
+  `li.task` has no bullet beside its checkbox, and a table's cells wrap
+  between words only (`overflow-wrap: break-word`: under an answer's
+  `anywhere`, short headers broke mid-word, "Siz e");
   `blockquote.md-quote` and `hr.md-rule`; single line breaks kept
   (`breaks: true`); "• " lines are bullets; a change of bullet mark ("- " then
   "* ") doesn't end a list; an ordered list keeps its start (`start="3"`);
