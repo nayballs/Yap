@@ -800,6 +800,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
   - Stop all;
   - **Add server** (a name, a command line and a port, written to launch.json; refused when the file has comments, which rewriting would lose: Claude adds it then).
   - The person's own click asks nothing.
+  - **Open over a live page, it's in sight** (15 Nov 2026, the maintainer's screenshot: it dropped behind the page): while it's open, a still of the page stands in for it and the page goes under Yap's own, as while the layout moves (`pageMotion.svelte.js` `coverPage`; chat-and-assistant.md, the page's place). e2e: `agents-direct.spec.js`, the Dev servers test.
 - **Claude's tools** (`chat/pages/preview.rs`; a Code chat's own session with the pages on: its run's folder is the workspace, `rpc.rs` `servers_offered`, listed and in `--allowedTools`):
   - `preview_start {name}`: started, and its page opened in a new tab beside the chat; started again (a restart) with its page still open, that page loads again, never the old server's left on screen;
   - `preview_list`;

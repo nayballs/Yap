@@ -2004,6 +2004,20 @@ test('the Dev servers menu starts the workspace’s server from .claude/launch.j
   // Running: said so in the menu; ■ stops it.
   await main.getByTestId('chat-dev-servers').click();
   await expect(row).toHaveAttribute('data-state', 'ready');
+  // Open over the live page, the menu is in sight: a still of the page stands in for it, the page under Yap's own
+  // (a window of its own, it covered the menu: the maintainer's screenshot, 15 Nov 2026).
+  const standin = main.getByTestId('chat-page-standin');
+  const devPage = async () => (await yap.invoke('e2e_page_views')).find((v) => v.loaded && /^http:\/\/localhost:\d+/.test(String(v.url || '')));
+  await expect(standin).toBeVisible({ timeout: 3_000 });
+  await expect.poll(async () => (await devPage())?.overYap).toBe(false);
+  expect((await devPage()).layer).toBe('under');
+  await shot(main, '82-dev-servers-over-the-page');
+  // Shut, the page is back in sight and the still goes.
+  await main.getByTestId('chat-dev-servers').click();
+  await expect(standin).toHaveCount(0, { timeout: 3_000 });
+  await expect.poll(async () => (await devPage())?.overYap).toBe(true);
+  await main.getByTestId('chat-dev-servers').click();
+  await expect(row).toHaveAttribute('data-state', 'ready');
   await row.getByTestId('chat-dev-server-stop').click();
   await expect(row).toHaveAttribute('data-state', 'stopped', { timeout: 15_000 });
   // Add server: written to launch.json, as the Claude Code app reads it.

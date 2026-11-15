@@ -9,12 +9,19 @@
   // Its Claude starts them too, with `preview_start` (chat/pages/preview.rs).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
+  import { coverPage, layoutMotion } from './pageMotion.svelte.js';
 
   /** `workspace`: the Code chat's folder; `onopen(url, name)`: show a server's page. */
   let { workspace, onopen = () => {} } = $props();
 
   let open = $state(false);
+  // Open, it drops over the page beside the chat (a window of its own, which would cover it): a still of the page
+  // stands in there until it shuts (pageMotion.svelte.js). The pointer coming over the button takes one ready.
+  // (Untracked: counting reads the count, and an effect that read what it writes would run for ever.)
+  $effect(() => {
+    if (open) return untrack(coverPage);
+  });
   let data = $state({ configs: [], skipped: [], exists: false, hasComments: false });
   let error = $state('');
   /** Servers being started (name → true), until Rust says. */
@@ -149,6 +156,7 @@
     class="pagebtn"
     class:on={running.length > 0}
     onclick={toggle}
+    onpointerenter={() => (layoutMotion.near += 1)}
     aria-label="Dev servers"
     aria-expanded={open}
     title="Dev servers (this workspace's .claude/launch.json)"

@@ -61,7 +61,8 @@
   import ServersMenu from './ServersMenu.svelte';
   import PageAnnotate from './PageAnnotate.svelte';
   import { addPicked } from '../../stores/pickedElements.svelte.js';
-  import { layoutMotion } from './pageMotion.svelte.js';
+  import { layoutMotion, pageCover } from './pageMotion.svelte.js';
+  import { contextMenu } from '../../ui/contextMenu.svelte.js';
   import { nextSeq, stillFits, pixelShift, edgeColour, STILL_FRESH_MS, REFRESH_MS } from './pagePlace.js';
 
   /**
@@ -169,10 +170,15 @@
     if (el.checkVisibility && !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return null;
     // Anything of Yap's over it (a menu, a dialog, Settings, a toast): out of
     // sight until it goes (the page is a window of its own: it would cover them).
-    for (const fx of [0.04, 0.5, 0.96]) {
-      for (const fy of [0.04, 0.5, 0.96]) {
-        const hit = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
-        if (!hit || !el.contains(hit)) return null;
+    // Not while a still stands in (`moving`): the page is laid out under Yap's
+    // own then, and hiding it would leave the still nothing to be taken of (a
+    // menu over the page is one of those times: `coverPage`).
+    if (!moving) {
+      for (const fx of [0.04, 0.5, 0.96]) {
+        for (const fy of [0.04, 0.5, 0.96]) {
+          const hit = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
+          if (!hit || !el.contains(hit)) return null;
+        }
       }
     }
     const dpr = window.devicePixelRatio || 1;
@@ -375,8 +381,10 @@
     showStill(null);
   }
 
+  // The stage moving, or a menu of Yap's open over the page (the Dev servers menu, any right-click menu: the page
+  // is a window of its own and would cover it): a still in the page's place, the page under Yap's own.
   $effect(() => {
-    const on = layoutMotion.held || sizing;
+    const on = layoutMotion.held || sizing || pageCover.n > 0 || contextMenu.open;
     untrack(() => (on ? moveStart() : moveEnd()));
   });
   let near = untrack(() => layoutMotion.near);
