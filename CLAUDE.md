@@ -173,6 +173,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 
 **Chat and the Voice Assistant** — [chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)
 - `chat/chats.rs` — conversations (`chats.json`) and the checks on every answer.
+- `chat/chats/branches.rs` — Retry and Edit's versions (‹ 1/2 ›): the branch shown is `messages`, the rest in `branches` + `chat_branches.json` (an older Yap's save drops them; put back if they fit). In a Code chat both are Rewind.
 - `chat/budget.rs` / `chat/compact.rs` — long chats sized to the model's real context.
 - `chat/note_chats.rs` — a meeting's Ask thread, kept with its note.
 - `chat/skills.rs` — Skills: saved instructions run with `/name`.
@@ -472,7 +473,7 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`); what each holds:
 [config-and-data.md](./docs/architecture/config-and-data.md). `config.json`,
 `models/` (`diarization/`, `tts/`, `search/`), `llm/` (`vision/`, `engine/`, `engine.json`),
 `history.json`, `notes.json`, `tasks.json`, `note-versions/`, `note_pins.json`, `skills.json`,
-`meeting_folders.json`, `chats.json`, `calendar.json`, `chatgpt.json`, `updates.json`,
+`meeting_folders.json`, `chats.json` (+ `chat_branches.json`), `calendar.json`, `chatgpt.json`, `updates.json`,
 `model_catalog.json`, `groq_usage.json`, `ai_usage.json`, `dictation_stats.json`,
 `dictionary_usage.json`, `hints.json`, `onboarding.json`, `mic_tips.json`,
 `word_suggestions.json`, `snippet_suggestions.json`, `language_nudges.json`, `notices.json`,

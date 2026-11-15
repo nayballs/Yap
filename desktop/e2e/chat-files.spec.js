@@ -168,6 +168,27 @@ test('files dropped on Chat wait as chips; sent, their text goes before the ques
   await expect.poll(() => yap.invoke('e2e_opened_urls')).toContainEqual('open-attachment:seed-list.txt');
 });
 
+test('Retry sends a question's files again, once, and the question keeps them', async ({ yap, main, fakeLlm }) => {
+  await freshChat(main);
+  await drop(yap, [SEEDS]);
+  await expect(boxFiles(main)).toHaveCount(1);
+  fakeLlm.scriptChat([{ content: 'Three crops are on it.' }]);
+  await box(main).fill('How many crops are on my list?');
+  await main.getByRole('button', { name: 'Send' }).click();
+  const answers = thread(main).locator('.cbubble.assistant');
+  await expect(answers).toHaveText(['Three crops are on it.']);
+  fakeLlm.scriptChat([{ content: 'Runner beans, sweet peas and courgettes: three.' }]);
+  await answers.first().hover();
+  await thread(main).getByTestId('chat-retry').click();
+  await expect(answers).toHaveText(['Runner beans, sweet peas and courgettes: three.']);
+  // The files went again with the question, once, before its words.
+  const asked = lastAsked(fakeLlm);
+  expect(asked.startsWith('<documents>')).toBe(true);
+  expect(asked.split('Courgettes').length - 1).toBe(1);
+  expect(asked.trimEnd().endsWith('How many crops are on my list?')).toBe(true);
+  await expect(thread(main).getByTestId('chat-files-sent').getByTestId('chat-file-chip')).toHaveCount(1);
+});
+
 test('✕ takes a file out of the box and off this PC; one too big for the model is said before it goes', async ({ yap, main }) => {
   await freshChat(main);
   const before = (await yap.invoke('chat_attachments_usage')).count;

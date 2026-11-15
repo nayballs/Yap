@@ -137,6 +137,7 @@ pub const KINDS: &[About] = &[
             "(chats.json)",
             "(chat_files.json)",
             "(chat_attachments.json)",
+            "(chat_branches.json)",
             "(memory.json)",
             "(search-index/)",
             "(calendar.json)",
@@ -158,6 +159,7 @@ pub const KINDS: &[About] = &[
             "(chats.json)",
             "(chat_files.json)",
             "(chat_attachments.json)",
+            "(chat_branches.json)",
             "(memory.json)",
             "(search-index/)",
             "(calendar.json)",
@@ -177,7 +179,7 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: "Chats",
         says: "Every chat, archived ones too, with its screenshots and the files attached to it. Documents Chat wrote stay in Notes",
-        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "chat-images/", "chat-files/", "chat-made/", "claude_sessions.json", "connector_chats.json", "(memory.json)", "(search-index/)"],
+        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "(chat_branches.json)", "chat-images/", "chat-files/", "chat-made/", "claude_sessions.json", "connector_chats.json", "(memory.json)", "(search-index/)"],
         stores: &["chats", "claudeSessions", "memory"],
     },
     About {
@@ -551,6 +553,8 @@ const STORES: &[(&str, Rule)] = &[
     ("chat_files.json", Choice::chats),
     // (The attached files' copy for an older Yap's save: rewritten with chats.json, chat/attachments.rs.)
     ("chat_attachments.json", Choice::chats),
+    // (And the branches' copy, Retry and Edit's versions: chat/chats/branches.rs.)
+    ("chat_branches.json", Choice::chats),
     ("chat-images/", Choice::chat_images),
     // (Files attached to Chat's questions: Chat's alone, as its screenshots are.)
     ("chat-files/", Choice::chat_images),

@@ -816,6 +816,18 @@
   Rewritten with chats.json, it goes with the chats in Delete some of your
   data and Reset app. Its picture a sweep took (an older Yap's, which
   doesn't know them) shows as its file's card.
+- **A conversation's other versions** (2026-11-15, Retry and Edit:
+  `chat/chats/branches.rs`, [chat-and-assistant.md](./chat-and-assistant.md#retry-edit-and-versions-2026-11-15))
+  keep `branches` on the conversation — `[{at, shown, ts?, others: [{n,
+  messages, forks?, summary?}]}]`, the forks along the branch shown, which is
+  `messages` — written only when there are some. **New field**: an older
+  Yap reads and keeps the branch shown, and its save drops `branches`; so
+  every save of chats.json also writes them to
+  `%APPDATA%/yap/chat_branches.json` (`{version, conversations: [{id,
+  forks}]}`, removed when there are none), which no older Yap touches; the
+  next start puts back each fork that still fits a conversation with none
+  (its shown branch's first message there at its time). It goes with the
+  chats in Delete some of your data and Reset app.
 - What a chat made (15 Nov 2026, `chat/made.rs`): `%APPDATA%/yap/chat-made/` —
   a folder per conversation (`<chat id>/`) with its `made.json` (`{version,
   created, items: [{id, kind, title, format, after: {index, ts}, at,

@@ -492,6 +492,8 @@ pub fn run() {
             chat::commands::chat_delete,
             chat::commands::chat_delete_many,
             chat::commands::chat_rename,
+            chat::commands::chat_retry,
+            chat::commands::chat_branch,
             chat::commands::chat_tabs_closed,
             chat::commands::chats_archived,
             chat::commands::chat_archive,

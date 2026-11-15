@@ -517,7 +517,7 @@ async function dropFiles(files) {
   await chips.nth(before + paths.length - 1).waitFor({ state: 'visible', timeout: 60_000 });
 }
 
-async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null }) {
+async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask' }) {
   if (!text?.trim()) throw new Error('Nothing to ask');
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
   readRecord();
@@ -528,7 +528,9 @@ async function startTurn({ text, spoken = false, chat = 'new', autoCards = null,
   const t = new Turn({ question: text, spoken, since, askedAt, autoCards, report, shots, themes });
   turn = t;
   try {
-    if (spoken) {
+    if (how === 'retry' || how === 'edit') {
+      await branchTurn(how, text);
+    } else if (spoken) {
       await invoke('e2e_assistant_ask', { text, listenMs: 300 });
     } else {
       if (pictures?.length) await dropPictures(pictures);
@@ -545,6 +547,24 @@ async function startTurn({ text, spoken = false, chat = 'new', autoCards = null,
     await finalize(t);
   }
   return t;
+}
+
+/**
+ * **Retry** the chat's last answer, or **Edit** the person's last message to `text` (15 Nov 2026, the Claude app's
+ * message actions: chat/chats/branches.rs), as the person does — by its buttons: ↻ under the answer; the pencil,
+ * the words in place, Save and send. A new version of the conversation from there (‹ 2/2 ›).
+ */
+async function branchTurn(how, text) {
+  const col = main().locator('[data-testid="chat-column"]');
+  if (how === 'retry') {
+    await col.locator('.cbubble.assistant').last().hover({ timeout: 10_000 });
+    await col.getByTestId('chat-retry').last().click({ timeout: 10_000 });
+    return;
+  }
+  await col.locator('.cbubble.user').last().hover({ timeout: 10_000 });
+  await col.getByTestId('chat-edit-message').last().click({ timeout: 10_000 });
+  await col.getByTestId('chat-edit-input').fill(text, { timeout: 10_000 });
+  await col.getByTestId('chat-edit-save').click({ timeout: 10_000 });
 }
 
 // ---------------------------------------------------------------- cards
@@ -988,8 +1008,11 @@ const COMMANDS = {
       await main().getByRole('button', { name: 'Send', exact: true }).click({ timeout: 10_000 });
       return { sentWhile: true, turn: turn?.n ?? null, turnStatus: turn?.status ?? null };
     }
+    // (Retry the last answer, or Edit the last message to these words: in the chat shown.)
     const attach = Array.isArray(a.attach) ? a.attach : a.attach ? String(a.attach).split(',').filter(Boolean) : null;
-    const t = await startTurn({ text: a.text, spoken: !!a.spoken, chat: a.chat ?? 'new', autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: Array.isArray(a.pictures) ? a.pictures : null, attach, ...shotsFor(a) });
+    const how = a.retry ? 'retry' : a.edit ? 'edit' : 'ask';
+    const text = how === 'retry' ? String(a.text ?? '').trim() || 'Retry' : a.text;
+    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
   wait: async (a) => {
