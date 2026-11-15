@@ -179,7 +179,7 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: "Chats",
         says: "Every chat, archived ones too, with its screenshots and the files attached to it. Documents Chat wrote stay in Notes",
-        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "(chat_branches.json)", "chat-images/", "chat-files/", "chat-made/", "claude_sessions.json", "connector_chats.json", "(memory.json)", "(search-index/)"],
+        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "(chat_branches.json)", "chat-images/", "chat-files/", "chat-made/", "claude_sessions.json", "connector_chats.json", "(chat_styles.json)", "(memory.json)", "(search-index/)"],
         stores: &["chats", "claudeSessions", "memory"],
     },
     About {
@@ -293,8 +293,9 @@ pub const STAYS: &[Part] = &[
     // Skills and meeting folder rules are setup, like folders and actions: they stay.
     Part {
         id: "settings",
-        label: "Your settings, dictionary, snippets and transforms, your Skills and meeting folder rules",
-        files: &["config.json", "dictionary_usage.json", "skills.json", "meeting_folders.json"],
+        label: "Your settings, dictionary, snippets and transforms, your Skills, answer styles and meeting folder rules",
+        // (chat_styles.json: the person's styles stay; each chat's pick goes with its chat.)
+        files: &["config.json", "dictionary_usage.json", "skills.json", "chat_styles.json", "meeting_folders.json"],
     },
     // Connectors (preview) are settings too: the list, each tool's setting,
     // their tool lists (a cache) and their programs' folders stay; their
@@ -461,6 +462,12 @@ impl Choice {
         Cut::of(self.has(Kind::Chats), false)
     }
 
+    /// chat_styles.json: each Chat conversation's style (chat/styles.rs) —
+    /// the person's own styles are settings and stay.
+    pub fn chat_styles(&self) -> Cut {
+        Cut::of(false, self.has(Kind::Chats))
+    }
+
     /// memory.json: what's remembered, or what the passes read of chats and
     /// meetings that went.
     pub fn memory(&self) -> Cut {
@@ -562,6 +569,7 @@ const STORES: &[(&str, Rule)] = &[
     ("chat-made/", Choice::chat_images),
     ("claude_sessions.json", Choice::claude_sessions),
     ("connector_chats.json", Choice::connector_chats),
+    ("chat_styles.json", Choice::chat_styles),
     ("memory.json", Choice::memory),
     ("search-index/", Choice::search_index),
     ("calendar.json", Choice::briefs),
@@ -960,7 +968,7 @@ fn clear_stores(c: &Choice, done: &mut Done) -> Gone {
     }
     // Their styles (chat/styles.rs): each chat's pick goes with it (the
     // person's own styles stay: settings, as About you is).
-    if c.connector_chats() == Cut::Whole {
+    if c.chat_styles() == Cut::Part {
         crate::chat::styles::reset_chats();
     } else {
         crate::chat::styles::chats_deleted(&gone.chats);
@@ -1284,7 +1292,7 @@ mod tests {
     fn reset_app_is_every_kind_and_every_store_goes_whole() {
         let every = Choice::every();
         for (f, cut) in STORES {
-            let want = if matches!(*f, "calendar.json" | "snippet_suggestions.json" | "remote_control.json" | "connectors.json") { Cut::Part } else { Cut::Whole };
+            let want = if matches!(*f, "calendar.json" | "snippet_suggestions.json" | "remote_control.json" | "connectors.json" | "chat_styles.json") { Cut::Part } else { Cut::Whole };
             assert_eq!(cut(&every), want, "{f}");
         }
         for f in every.touches() {
