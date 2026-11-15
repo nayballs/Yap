@@ -26,6 +26,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { renderMarkdown } from '../core/markdown.js';
+  import { markdownVisuals } from '../ui/markdownVisuals.js';
   import { loadNoteChat, openNoteChat, keepTurn, keptMessage, threadMessages, pastChatItems, renameNoteChat } from '../core/noteChat.js';
   import { asked as skillAsked, withoutCites } from '../core/skills.js';
   import { askReplaceSummary } from '../core/noteEdits.js';
@@ -600,7 +601,7 @@
                      while it's written, half-written markdown is closed off.
                      Its "[2]"s are pills that open the meeting's line. -->
                 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-                <div class="mabody" class:err={m.error} class:quiet={m.quiet} onclick={(e) => clickAnswer(e, m)}>
+                <div class="mabody" class:err={m.error} class:quiet={m.quiet} onclick={(e) => clickAnswer(e, m)} use:markdownVisuals>
                   {@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, m.sources?.length ? { sources: m.sources } : {})}
                 </div>
               {/if}

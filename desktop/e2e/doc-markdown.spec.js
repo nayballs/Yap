@@ -70,6 +70,10 @@ const ODD = [
   '<b>not html</b> &lt;tag&gt;',
   '',
   '\n\n',
+  // What a render draws (maths, a diagram, a diff, a picture: ui/markdownVisuals.js) stays text here.
+  'Inline $E = mc^2$, a price of $5 and $10, \\(a+b\\).\n\nThe area:\n$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$\n\n\\[\nc^2\n\\]',
+  '```mermaid\nflowchart LR\n  A[Hotkey] --> B[Record]\n```\n\n```diff\n- old\n+ new\n```',
+  'A map: ![Fort Joy *map*](https://wiki.example.com/images/map.png "The map") and ![](https://example.org/a.png).',
 ];
 
 test('read and written back untouched, a document comes out character for character', () => {
