@@ -58,7 +58,7 @@ pub fn of_xml(xml: &str) -> String {
 }
 
 /// XML's five entities and character references decoded. Pure.
-fn unescape(s: &str) -> String {
+pub(crate) fn unescape(s: &str) -> String {
     if !s.contains('&') {
         return s.to_string();
     }

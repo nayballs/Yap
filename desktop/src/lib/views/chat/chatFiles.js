@@ -18,7 +18,18 @@ export const isPicturePath = (path) => PICTURES.has(endingOf(path));
 export function badgeOf(file) {
   const e = endingOf(file?.name);
   if (e && e.length <= 4) return e.toUpperCase();
-  return { pdf: 'PDF', word: 'DOC', markdown: 'MD', code: 'CODE' }[file?.kind] || 'TXT';
+  return { pdf: 'PDF', word: 'DOC', powerpoint: 'PPT', markdown: 'MD', code: 'CODE' }[file?.kind] || 'TXT';
+}
+
+/** A PDF's pages read with OCR (scans: Windows' text recognition, on this PC), and those left unread: "2 pages read
+ *  with OCR", "20 pages read with OCR, 28 not read"; '' for none. */
+export function ocrLine(file) {
+  const n = Number(file?.ocrPages) || 0;
+  const left = Number(file?.unreadPages) || 0;
+  if (!n && !left) return '';
+  const read = n ? `${n} page${n === 1 ? '' : 's'} read with OCR` : '';
+  const unread = left ? `${left} page${left === 1 ? '' : 's'} with no text not read` : '';
+  return n && left ? `${read}, ${left} not read` : read || unread;
 }
 
 /** A size as the Claude app's chips say it: "572B", "2.1 KB", "14 KB", "1.4 MB". */
@@ -43,6 +54,7 @@ export function fileTitle(file) {
   if (file?.gone) return `${file.name}: removed (Settings → Privacy & data → Keep chat files)`;
   const parts = [file?.name, fileSize(file?.bytes)];
   if (file?.pages) parts.push(`${file.pages} page${file.pages === 1 ? '' : 's'}`);
+  if (ocrLine(file)) parts.push(ocrLine(file));
   if (file?.tokens) parts.push(`${tokensLine(file.tokens)} of text`);
   return parts.filter(Boolean).join(' · ');
 }

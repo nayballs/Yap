@@ -463,6 +463,24 @@ pub async fn code_file_open_editor(conversation: u64, path: String, line: Option
     tauri::async_runtime::spawn_blocking(move || open_editor(&root, &path, line).map(str::to_string)).await.map_err(|e| e.to_string())?
 }
 
+/// **Show in folder**: Explorer at a file of Code chat `conversation`'s
+/// workspace, selected (an output's right-click menu; only a file
+/// [`resolve`] finds in the workspace). A test run keeps it for the suite.
+#[tauri::command]
+pub async fn code_file_reveal(conversation: u64, path: String) -> Result<(), String> {
+    let root = root_of(conversation)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let file = resolve(&root, &path).map_err(|r| r.words().to_string())?;
+        if crate::shell::e2e::active() {
+            crate::shell::commands::e2e_kept(&format!("reveal:{}", file.rel));
+            return Ok(());
+        }
+        tauri_plugin_opener::reveal_item_in_dir(&file.abs).map_err(|e| format!("Couldn't open the folder: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// **The summary panel's Environment**: Code chat `conversation`'s workspace,
 /// or (a new code chat, no conversation yet) the workspace at `workspace`,
 /// when it's one of Yap Code's.
