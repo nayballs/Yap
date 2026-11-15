@@ -32,7 +32,8 @@
   // Code chat each turn's to-do card under its pill (AgentTodoCard), and a
   // running agent's permission prompts for this chat — each in a small chunk.
   import { agents, agentById } from '../../stores/agents.svelte.js';
-  import { pillsByAnswer, pillsByQuestion, answeredAfter, directLine, plainReport, agentOfReport, reportFolder, messageTurn } from '../../core/agents.js';
+  import { pillsByAnswer, pillsByQuestion, answeredAfter, directLine, plainReport, agentOfReport, reportFolder, messageTurn, notesAfter } from '../../core/agents.js';
+  import { threadViewOf } from './threadView.svelte.js';
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { chatStatus } from '../../stores/chatStatus.svelte.js';
   import QueuedMessage from './QueuedMessage.svelte';
@@ -84,6 +85,20 @@
   };
   /** A pill's turn has a to-do list (its card under the pill, AgentTodoCard). */
   const hasTodos = (p) => ((p.turnList || []).find((t) => t.n === (p.turn ?? 1)) ?? (p.turnList?.length ? null : p))?.todos?.length > 0;
+  // **A direct turn in order with the person's messages** (15 Nov 2026, as Claude Code's app lays a turn out): a
+  // message they sent while it worked shows where Claude read it, and the work after it under it (AgentWork's parts).
+  /** Each direct turn's messages it may have read (`notesAfter`), by the index of the message that asked. */
+  const turnNotes = $derived(new Map([...directPills.keys()].map((i) => [i, notesAfter(chat.messages, i, (k) => directPills.has(k))])));
+  /** A message it may have read → the turns whose next part may go under it. */
+  const partsUnder = $derived.by(() => {
+    const out = new Map();
+    for (const [i, notes] of turnNotes) for (const id of notes) out.set(id, [...(out.get(id) || []), ...directPills.get(i).map((p) => ({ p, i, notes }))]);
+    return out;
+  });
+  /** How Claude's work shows in this chat (its ⋯ → Transcript view). */
+  const view = $derived(threadViewOf(chat.activeId));
+  /** A step's picture, large: paged across its turn's (‹ 2 of 4 ›). */
+  const openPaged = (list, at) => (chat.viewing = { ...list[at], list, at });
 
   // The one-tap prompts (chat/skills.rs: the first three of Prepare for my
   // next meeting — with a calendar —, Write my stand-up, List my open
@@ -337,14 +352,20 @@
                 <AgentPills agents={lines} onopen={openAgent} quiet />
               {/await}
             {/if}
-            {#each directPills.get(i).filter(hasTodos) as p (`${p.id}:${p.turn ?? 1}`)}
-              {#await import('./AgentTodoCard.svelte') then { default: AgentTodoCard }}
-                <AgentTodoCard agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} />
-              {/await}
-            {/each}
+            <!-- (Its to-do list is AgentWork's: at its top, or as it stood above a message it read.) -->
             {#each directPills.get(i) as p (`work:${p.id}:${p.turn ?? 1}`)}
               {#await import('./AgentWork.svelte') then { default: AgentWork }}
-                <AgentWork agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} onview={openShared} answered={answeredAfter(chat.messages, i, (k) => directPills.has(k))} />
+                <AgentWork
+                  agent={p}
+                  turn={p.turn ?? 1}
+                  line={agents.steps[p.id] || ''}
+                  onview={openShared}
+                  onpaged={openPaged}
+                  answered={answeredAfter(chat.messages, i, (k) => directPills.has(k))}
+                  notes={turnNotes.get(i) || []}
+                  {view}
+                  cards
+                />
               {/await}
               <!-- Its cards before acting on a page (an action that would buy, send or sign in): Allow once / Don't. -->
               {#if chat.agentConfirms[`${p.id}:${p.turn ?? 1}`]?.length}
@@ -352,6 +373,25 @@
                   <PageConfirm confirms={chat.agentConfirms[`${p.id}:${p.turn ?? 1}`]} />
                 {/await}
               {/if}
+            {/each}
+          {/if}
+          {#if m.role === 'user' && m.id && partsUnder.get(m.id)?.length}
+            <!-- Sent while a turn worked: what Claude did after reading it, under it (nothing until it's read). -->
+            {#each partsUnder.get(m.id) as o (`work:${o.p.id}:${o.p.turn ?? 1}:${m.id}`)}
+              {#await import('./AgentWork.svelte') then { default: AgentWork }}
+                <AgentWork
+                  agent={o.p}
+                  turn={o.p.turn ?? 1}
+                  line={agents.steps[o.p.id] || ''}
+                  onview={openShared}
+                  onpaged={openPaged}
+                  answered={answeredAfter(chat.messages, o.i, (k) => directPills.has(k))}
+                  notes={o.notes}
+                  after={m.id}
+                  {view}
+                  cards
+                />
+              {/await}
             {/each}
           {/if}
           {#if agentPills.get(i)?.length}
