@@ -108,5 +108,14 @@ fn main() {
             "cargo:rustc-link-arg=/MANIFESTINPUT:{}",
             manifest.canonicalize().expect("windows-app-manifest.xml").display()
         );
+        // **The main thread's stack: 8 MB, not Windows' 1 MB** (15 Nov 2026).
+        // Tauri runs every sync command, and the setup, on the main thread,
+        // through one generated handler; a debug build (Yap - Dev, the e2e
+        // suite) gives each command's locals a slot of their own there, so
+        // its frame grows with every command. Routines and spreadsheets
+        // landing together took it past 1 MB: "thread 'main' has overflowed
+        // its stack" as the first window's commands came in. Only reserved,
+        // not committed: a release build uses what it always did.
+        println!("cargo:rustc-link-arg-bins=/STACK:8388608");
     }
 }
