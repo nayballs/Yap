@@ -88,6 +88,34 @@
     rowsVer += 1;
   }
 
+  /** Rows Rust sent for the block from row `from` into `into`: a merge's top-left cell from above added to its row, never over a row read whole. */
+  function takeRows(into, got, from) {
+    for (const row of got || []) {
+      if (row.r < from && into.has(row.r)) {
+        const have = into.get(row.r);
+        for (const c of row.cells) if (!have.some((x) => x.c === c.c)) have.push(c);
+        have.sort((x, y) => x.c - y.c);
+      } else into.set(row.r, row.cells);
+    }
+  }
+
+  /** The rows in view (and the frozen ones) of workbook `b`'s sheet `si`, read before it's shown: a live change never flashes empty. */
+  async function rowsAhead(b, si) {
+    const want = new Set(blocksFor(win.r0, win.r1));
+    const frozen = Number(b.sheets[si]?.frozenRows) || 0;
+    if (frozen) for (const x of blocksFor(1, frozen)) want.add(x);
+    const into = new Map();
+    const read = new Map();
+    await Promise.all(
+      [...want].map(async (blk) => {
+        const from = blk * BLOCK + 1;
+        takeRows(into, await invoke('sheet_rows', { id: b.id, sheet: si, from, to: from + BLOCK - 1 }), from);
+        read.set(blk, 'read');
+      }),
+    );
+    return { into, read };
+  }
+
   /** Open it (again): `keep` its sheet, place and selection (the same file changed, or asked again). */
   async function open({ keep = false, livePass = false } = {}) {
     const src = ref?.src;
@@ -98,15 +126,20 @@
       const b = await invoke('sheet_open', { src });
       if (mine !== opening) return;
       const was = book?.sheets?.[current]?.name;
-      if (keep && book && sheet && scroller) places.set(was, { top: scroller.scrollTop, left: scroller.scrollLeft, sel });
+      let i = keep && was != null ? b.sheets.findIndex((s) => s.name === was) : -1;
+      if (i < 0) i = firstShown(b);
+      const ahead = keep && book ? await rowsAhead(b, i).catch(() => null) : null;
+      if (mine !== opening) return;
       book = b;
       error = '';
       failed = null;
       stale = false;
-      let i = keep && was != null ? b.sheets.findIndex((s) => s.name === was) : -1;
-      if (i < 0) i = firstShown(b);
       current = i;
-      forgetRows();
+      if (ahead) {
+        rows = ahead.into;
+        blocks = ahead.read;
+        rowsVer += 1;
+      } else forgetRows();
       if (livePass) updated = Date.now();
       if (!keep) {
         places.clear();
@@ -160,14 +193,7 @@
     try {
       const got = await invoke('sheet_rows', { id, sheet: si, from, to: from + BLOCK - 1 });
       if (book?.id !== id || current !== si) return;
-      for (const row of got || []) {
-        // A merge's top-left cell from above: added to its row, never over a row read whole.
-        if (row.r < from && rows.has(row.r)) {
-          const have = rows.get(row.r);
-          for (const c of row.cells) if (!have.some((x) => x.c === c.c)) have.push(c);
-          have.sort((x, y) => x.c - y.c);
-        } else rows.set(row.r, row.cells);
-      }
+      takeRows(rows, got, from);
       blocks.set(b, 'read');
       rowsVer += 1;
     } catch (e) {
