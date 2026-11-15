@@ -5085,8 +5085,11 @@ now on the same form.
     **whatever the person says next in that conversation**, within the
     question's wait, is its answer (`spoken_ok::Spoken::Words`,
     `ask::answer_said`) — matched to an option where it names one
-    (`ask::heard`: a label's words, the label said as one word, or its place —
-    "the second one", "option three", "the last" — for a single question;
+    (`ask::heard`: a label's words without a note in brackets — "camping
+    stove" for "Camping stove (Recommended)" —, the label said as one word, a
+    label of three words or more with one left out when only one option fits
+    — "gas stove" for "Gas camping stove", Opus's own options in Lab —, or
+    its place — "the second one", "option three", "the last" — for a single question;
     "you decide", "either" leave it to the model) and the words themselves
     always given (`said`). Never during a meeting (the assistant is off then).
 - **The next-step box** (`cards/next_step.rs`, `suggest_next_step`): a one or

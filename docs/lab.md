@@ -201,8 +201,9 @@ answered `picked` and `said`): `answer confirm:<n> pick "Plain text"` picks an o
 words that aren't an option are the person's own), `allow` each question's first
 option, `deny` Let Yap decide. A single question with one answer is clicked on its card
 in the thread, as the person would; the rest go through `chat_question_answer`. It
-waits 10 minutes. Asked out loud, answer it out loud: `ask "the second one" --spoken
---chat same` (whatever is said next in that conversation is its answer).
+waits 10 minutes. Out loud: `answer confirm:<n> said "the second one"` (the Voice
+Assistant's next question in that chat: whatever is said next there is its answer),
+or the same as `ask "the second one" --spoken --chat same` while the card waits.
 
 ```json
 {"ok":true,"answered":{"id":"approve:1","how":"allow","wasWaiting":true},"agents":[{"id":"1a1bad23b2f261d619b","folder":"lab-sandbox","status":"done","conversation":1,"mode":"auto","plan":false,"text":"Done. I changed Draft to Final in notes.md and the tests pass.","files":["notes.md"],"commands":["npm test"],"denials":[],"error":null,"cost":0.041}],"pending":[],"reports":[{"conversation":1,"report":"The agent in lab-sandbox: it's done.\n…","answer":"OK"}]}

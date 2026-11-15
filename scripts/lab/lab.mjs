@@ -14,6 +14,7 @@
 //   wait [--timeout 600] [--agents [--cards allow|deny]]
 //   answer <card-id> allow|deny|always [--timeout 600] [--no-wait]
 //   answer <card-id> pick "<option>"       a question card ("A|B": several questions, "A,B": several picks)
+//   answer <card-id> said "<words>"        a question card answered out loud (or: ask "<words>" --spoken --chat same)
 //   cancel | state | agents | logs [--since N]
 //   shot [--window thread|main|bar|panel|page] [--theme light|dark|both]
 //        [--name <n>] [--selector <css>]

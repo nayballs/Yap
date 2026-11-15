@@ -383,7 +383,7 @@ export function summarize({ turn, items, conv, pages = [], approvals = [], agent
   if (out.status === 'waiting') {
     out.hint =
       pending[0].kind === 'question'
-        ? `A question is waiting (10 minutes): npm run lab -- answer ${pending[0].id} pick "<option>" (several questions: "A|B"; several picks: "A,B"), allow (each one's first option), deny (Let Yap decide); or out loud: ask "<answer>" --spoken --chat same`
+        ? `A question is waiting (10 minutes): npm run lab -- answer ${pending[0].id} pick "<option>" (several questions: "A|B"; several picks: "A,B"), allow (each one's first option), deny (Let Yap decide); or out loud: answer ${pending[0].id} said "<words>" (or ask "<words>" --spoken --chat same)`
         : `A card is waiting (it times out after 2 minutes): npm run lab -- answer ${pending[0].id} allow|deny${pending[0].answers.includes('always') ? '|always' : ''}`;
   }
   if (out.status === 'running') out.hint = direct ? 'Claude Code is still working in the Code chat: npm run lab -- wait' : 'Still answering: npm run lab -- wait';

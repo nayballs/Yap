@@ -113,6 +113,14 @@ test('a question card: an option answers it, its preview shows, and the question
   const [result] = resultsOf(fakeLlm, from);
   expect(result).toMatchObject({ success: true, data: { answers: { [FORMAT.question]: 'Plain text' } } });
   await expect(thread.locator('.toolchip')).toContainText(['Asked you a question']);
+  await expect(thread.getByTestId('chat-steps').locator('.sumtext')).toHaveText('Asked you a question');
+  // Where it asked: above the answer that follows from it, as the Claude app keeps it.
+  const order = await thread.evaluate((el) => {
+    const card = el.querySelector('[data-testid="chat-question-card"]');
+    const answer = [...el.querySelectorAll('.cbubble.assistant')].at(-1);
+    return card && answer ? card.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING : 0;
+  });
+  expect(order).toBeTruthy();
   await shot(main, '02-answered-and-kept');
 
   // Opened again: still there, answered.

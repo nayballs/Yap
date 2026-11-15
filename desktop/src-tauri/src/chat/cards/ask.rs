@@ -184,6 +184,16 @@ fn norm(s: &str) -> String {
     crate::chat::pages::act::rules::words(s).join(" ")
 }
 
+/// An option's label as it's said: without a note in brackets at its end
+/// ("Camping stove (Recommended)" is said "camping stove"). Pure.
+fn said_label(label: &str) -> &str {
+    let t = label.trim();
+    match (t.ends_with(')'), t.rfind('(')) {
+        (true, Some(at)) if at > 0 => t[..at].trim_end(),
+        _ => t,
+    }
+}
+
 /// Words that leave the choice to the model ("you decide", "up to you").
 const LEFT_TO_YOU: &[&str] = &[
     "you decide",
@@ -228,14 +238,32 @@ fn named(q: &Question, said: &str, only: bool) -> Vec<usize> {
         .iter()
         .enumerate()
         .filter(|(_, o)| {
-            let label = norm(&o.label);
+            let label = norm(said_label(&o.label));
             let flat = label.replace(' ', "");
             has_words(&words, &label) || (flat.chars().count() >= 4 && squashed.contains(&flat))
         })
         .map(|(i, _)| i)
         .collect();
-    if !by_label.is_empty() || !only {
+    if !by_label.is_empty() {
         return by_label;
+    }
+    // A longer label said with a word left out ("gas stove" for "Gas camping
+    // stove"): all its words but one, two at least — when only one option fits.
+    let heard_words: std::collections::HashSet<&str> = words.split(' ').filter(|w| !w.is_empty()).collect();
+    let loose: Vec<usize> = q
+        .options
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| {
+            let label = norm(said_label(&o.label));
+            let label_words: Vec<&str> = label.split(' ').filter(|w| w.chars().count() > 1).collect();
+            let hits = label_words.iter().filter(|w| heard_words.contains(*w)).count();
+            label_words.len() >= 3 && hits >= 2 && hits + 1 >= label_words.len()
+        })
+        .map(|(i, _)| i)
+        .collect();
+    if loose.len() == 1 || !only {
+        return if loose.len() == 1 { loose } else { Vec::new() };
     }
     let list: Vec<&str> = words.split(' ').filter(|w| !w.is_empty()).collect();
     let n = q.options.len();
@@ -636,6 +664,14 @@ mod tests {
         // Several to pick: each named.
         let sections = vec![q("Which sections?", &["Summary", "Actions", "Risks"], true)];
         assert_eq!(heard(&sections, "summary and risks").unwrap().values().next().map(String::as_str), Some("Summary, Risks"));
+        // A note in brackets isn't said: "camping stove" is "Camping stove (Recommended)".
+        let stove = vec![q("What will you cook on?", &["Camping stove (Recommended)", "Campfire"], false)];
+        assert_eq!(heard(&stove, "on the camping stove").unwrap().values().next().map(String::as_str), Some("Camping stove (Recommended)"));
+        assert_eq!(said_label("(Recommended)"), "(Recommended)");
+        // A longer label with a word left out, when only one option fits.
+        let cookers = vec![q("What will you cook on?", &["Gas camping stove", "Campfire", "Portable barbecue"], false)];
+        assert_eq!(heard(&cookers, "something vegetarian, on the gas stove").unwrap().values().next().map(String::as_str), Some("Gas camping stove"));
+        assert!(heard(&cookers, "on the stove").unwrap().is_empty(), "one word of three isn't enough");
         // Two questions: only labels count (a place could be either's).
         let two = vec![q("Which format?", &["Markdown", "Plain text"], false), q("How long?", &["Short", "Detailed"], false)];
         let a = heard(&two, "plain text, and keep it short").unwrap();

@@ -79,6 +79,8 @@ const STEPS = [
   [/^(Found \d+ notes? for|No notes found for|No notes mention)/, 'notes'],
   [/^Searched your meetings/, 'meetings'],
   [/^Ran \//, 'skill'],
+  // A question to the person (chat/cards/ask.rs): "Asked you a question", "Asked you 2 questions".
+  [/^Asked you (a question|(\d+) questions)$/, 'asked', (m) => (m[2] ? Number(m[2]) : 1)],
   [/^(Edited |Wrote in |Wrote a summary for )/, 'noteEdit'],
   [/^Created note/, 'note'],
   [CALENDAR_CHIP, 'calendar'],
@@ -131,6 +133,7 @@ const SAY = {
   notes: (n) => times(n, 'searched your notes'),
   meetings: (n) => times(n, 'searched your meetings'),
   skill: (n) => n1(n, 'ran a skill', 'ran {n} skills'),
+  asked: (n) => n1(n, 'asked you a question', 'asked you {n} questions'),
   noteEdit: (n) => n1(n, 'changed a note', 'changed notes {n} times'),
   note: (n) => n1(n, 'made a note', 'made {n} notes'),
   calendar: (n) => times(n, 'checked your calendar'),

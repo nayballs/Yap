@@ -66,6 +66,9 @@
   const offers = $derived(m.role === 'assistant' ? (m.offers?.length ? m.offers : m.liveOffers || []) : []);
   // The files it shared into the conversation (chat/shares.rs): the same.
   const shared = $derived(m.role === 'assistant' ? (m.files?.length ? m.files : m.liveFiles || []) : []);
+  // Its cards that ask: a question of the model's own (above the answer, where it asked) and the rest (under it).
+  const asked = $derived(m.role === 'assistant' ? (m.confirms || []).filter((c) => c.act === 'question') : []);
+  const acts = $derived(m.role === 'assistant' ? (m.confirms || []).filter((c) => c.act !== 'question') : []);
 
   // A question whose screenshot went as its text (snip/ocr.rs): its own
   // words, and the text read from the picture, folded under them.
@@ -117,6 +120,13 @@
   {:else}
     <p class="thoughtline" data-testid="chat-thought">{thoughtLabel(m.thinking?.ms)}</p>
   {/if}
+{/if}
+{#if m.role === 'assistant' && asked.length}
+  <!-- Chat's model asked the person (ask_user, chat/cards/ask.rs): its card where it asked, above the answer that
+       follows from it — answered, the question and the choice stay here (its own chunk). -->
+  {#await import('./PageConfirm.svelte') then { default: PageConfirm }}
+    <PageConfirm confirms={asked} />
+  {/await}
 {/if}
 {#if m.role === 'assistant' && m.streaming && !m.text}
   <!-- Before the first words (tools run, a dictation waited out): no bubble
@@ -273,11 +283,11 @@
   <!-- What its tools did, folded under it (chat/activity.rs). -->
   <ChatSteps tools={m.tools} {m} {onview} />
 {/if}
-{#if m.role === 'assistant' && m.confirms?.length}
+{#if m.role === 'assistant' && acts.length}
   <!-- Yap asks before a click that buys, pays, books… on a page beside the
        chat (chat/pages/act/confirm.rs): Allow once / Don't (its own chunk). -->
   {#await import('./PageConfirm.svelte') then { default: PageConfirm }}
-    <PageConfirm confirms={m.confirms} />
+    <PageConfirm confirms={acts} />
   {/await}
 {/if}
 {#if m.role === 'user' && tick}
