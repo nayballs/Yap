@@ -534,7 +534,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
         </button>
       {/if}
-      <button type="button" class="sbtn wide" onclick={openInApp} title="Open it in your spreadsheet app" data-testid="chat-sheet-open-app" disabled={!book}>
+      <button type="button" class="sbtn wide" onclick={openInApp} title="Open it in your spreadsheet app" aria-label={appLabel} data-testid="chat-sheet-open-app" disabled={!book}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
         <span>{appLabel}</span>
       </button>
@@ -652,6 +652,13 @@
     min-width: 0;
     min-height: 0;
     color: var(--yap-paper-ink);
+    container-type: inline-size;
+  }
+  /* A narrow panel: "Open in Excel" is its icon (its name in the tooltip), so the file's name has the room. */
+  @container (max-width: 560px) {
+    .sbtn.wide span {
+      display: none;
+    }
   }
   .sheethead {
     display: flex;
