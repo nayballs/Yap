@@ -1544,7 +1544,11 @@ Pages beside the chat (2026-11-01, chat-and-assistant.md "Pages beside the
 chat"): unit-tested (the rules, the tools' refusals, the registered
 browsers' parsing) and e2e-tested on the stand-in web (`desktop/e2e/chat-pages.spec.js`:
 the page in its own webview with no Yap IPC, Save a shot, the browser toolset (scroll, find, screenshots in the steps, zoom; `chat-browse.spec.js`: clicks by ref and by point, keys, batches, tabs; `plan-eyes.spec.js` on the plan),
-`offer_browser`, Ask Yap about this), but not yet tried on real pages
+`offer_browser`, Ask Yap about this; 15 Nov 2026: a fast drag of the split and
+Yap's window resized by its edge, from Yap's window drawn whole by Windows: a
+still in the page's place mid-drag, the page exactly over its stage after;
+the window's real size-move loop stood in for by `e2e_window_sizing`, not
+yet felt by hand at other scalings), but not yet tried on real pages
 (an interactive map, a site that signs in), on the person's screen (the
 page's native window over Yap's at other scalings and on a second monitor,
 toasts hiding it), with the native menu, with a chosen browser opening a
