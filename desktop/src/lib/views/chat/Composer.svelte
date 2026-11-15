@@ -55,6 +55,9 @@
   // stops its work (Esc in the empty box too: ChatView). With something
   // typed it's Send as ever — the message goes to it at once, as a note.
   const working = $derived(workingDirectly(agents.list, chat.activeId));
+  // **Ctrl+Enter queues it for later** (chatState `send({ later })`; the Claude app's box says so while it works):
+  // said in the empty box while Claude works, or while an answer is written.
+  const queueHint = $derived(working ? 'Enter to send, Ctrl+Enter to queue for later' : chat.sending ? 'Ctrl+Enter to queue a message for after this answer' : '');
   let stoppingWork = $state(null);
   async function stopWork() {
     const id = working?.id;
@@ -459,7 +462,9 @@
           : 'Ask about this passage…'
         : chat.attached.length
           ? 'Ask about this screenshot…'
-          : code?.current
+          : queueHint
+            ? queueHint
+            : code?.current
             ? `Ask for a change in ${code.current.name}, or anything else`
             : 'Ask about your notes, or type / for Skills'}
       aria-label="Message"
@@ -467,7 +472,7 @@
       aria-autocomplete="list"
       aria-controls={chat.skills.open ? 'skill-list' : undefined}
       aria-activedescendant={chat.skills.open ? `skill-opt-${chat.skills.active}` : undefined}
-      onkeydown={(e) => chat.skillKey(e) || (e.key === 'Enter' && !e.isComposing && chat.send())}
+      onkeydown={(e) => chat.skillKey(e) || (e.key === 'Enter' && !e.isComposing && chat.send(e.ctrlKey || e.metaKey ? { later: true } : undefined))}
       onpaste={chat.pasteImage}
       oninput={() => {
         if (!chat.input.trim()) {
@@ -498,7 +503,7 @@
         disabled={chat.sending || chat.visionBlocked || chat.inputTooLong}
         onclick={chat.send}
         aria-label="Send"
-        title={chat.visionBlocked ? "This model can't read images" : chat.inputTooLong ? 'Too long for this model' : 'Send (Enter)'}
+        title={chat.visionBlocked ? "This model can't read images" : chat.inputTooLong ? 'Too long for this model' : working ? 'Send (Enter) · Ctrl+Enter queues it for later' : 'Send (Enter)'}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10 4 15l5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>
       </button>
