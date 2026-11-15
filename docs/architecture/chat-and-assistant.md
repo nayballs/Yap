@@ -1783,6 +1783,10 @@ one side.
   shows when asked out loud (`line`, `card`: "Use Notion: Create page?" and
   its first arguments), for `spoken_ok.rs`.
 
+- **`chat/export.rs`** — **Export a chat** (15 Nov 2026): a conversation's
+  ⋯ → Export… as a Markdown file and its pictures beside it, never uploaded
+  ([below](#export-a-chat-2026-11-15)).
+
 ## Questions about selected text (2026-10-31)
 
 Wispr Flow's Command Mode ("Wispr Lens": "select text and ask Flow") by
@@ -2763,11 +2767,42 @@ of sight. What they share is said once, in the line.
   it in place too — Google's sponsored results — opened it twice; a mail
   link to their mail app), **downloads off**, **every permission denied**, DevTools only in a
   debug build. It's a child window of the main window ("the host") laid over
-  the tab's stage: the page measures the stage every 150 ms (and on resize)
-  and sends its place in physical pixels (`page_view_place`), or `null` when
+  the tab's stage: the page measures the stage in the frame it changes size
+  (a `ResizeObserver`), on the window's resize, every frame of a move, and
+  every 150 ms besides, and sends its place in physical pixels
+  (`page_view_place`), or `null` when
   something of Yap's covers it (a 3 × 3 grid of `elementFromPoint`: a menu,
   a dialog, Settings, a toast) or it's out of sight — the native window would
-  cover Yap's own UI otherwise. So the page **keeps its place** (scroll, a
+  cover Yap's own UI otherwise. **Resizing smoothly** (15 Nov 2026: a fast
+  drag of the split left the page trailing the layout, over the thread one
+  way, a gap beside the split the other, until the 150 ms check caught up):
+  every place carries a number that only rises (`pagePlace.js` `nextSeq`, the
+  view's clock) and Rust applies only the newest (`view::Latest`: two sends
+  can reach the main thread out of order, and an older one last left the page
+  out of place). A native window placed over IPC is always a frame or two
+  behind the web layout around it, so **while the stage moves** — the split or
+  the list's edge held (`pageMotion.svelte.js`, set by ChatView), Yap's
+  window resized by its edge (its size-move loop, watched by a subclass:
+  `view::SizeLoop`, `yap-window-sizing` `on` / `sizing` / `off`) — **a still
+  of the page stands in for it** in the stage: Yap's own page draws it, so it
+  moves with everything else in every frame. The still is `page_view_still`
+  (the page's `CapturePreview` PNG as bytes, ~25–30 ms), taken ready when the
+  pointer comes over a handle or the window's edge is pressed, else at the
+  press (the live page follows every frame meanwhile); it sits at the stage's
+  top left at the screen's own pixels, clipped to the stage, the page's own
+  background (`edgeColour`, read off its right edge) past it. Meanwhile the
+  live page is laid out over the stage every frame but **under Yap's page**
+  (`Layer::Under`, `HWND_BOTTOM`: drawn, never seen), and a newer still of it
+  replaces the old at most every 50 ms, so what's in the still reflows as it
+  goes. Let go, it's laid out at its last place, comes up in sight (just
+  under Tauri's resizing edges, `TAURI_DRAG_RESIZE_BORDERS`, so the window's
+  edge still resizes it where the page reaches it), and the still goes two
+  frames later. A resize in one go (maximise, restore) just follows. Each place
+  also tells WebView2 its window moved (`NotifyParentWindowPositionChanged`:
+  a list's options open where the page is). The suite (`chat-pages.spec.js`) checks it from the
+  screen's own pixels: `e2e_window_picture` (Yap's window drawn whole by
+  Windows, the page's window in it) against CDP's shot of Yap's page.
+  So the page **keeps its place** (scroll, a
   map's zoom) while another tab shows, and **closes with its tab**
   (`page_view_close`); another conversation or leaving Chat closes them all;
   at most four stay alive (the least recently shown goes; when a new tab
@@ -4992,7 +5027,8 @@ thrown away), memory learning (`memory::read_again_from`: what a pass read
 past the fork is read again, it says something else now), search by meaning
 (its index sees the change: `chats::stamp` hashes each message's time; the
 branch set aside's passages let go, `search::removed`), past-chats search,
-the phone's view (`link/chats.rs`), the context ring and Chat's status dots.
+the phone's view (`link/chats.rs`), a chat exported as Markdown
+(`chat/export.rs`), the context ring and Chat's status dots.
 Only the screenshot sweep and deleting look further: a version not shown
 keeps its screenshots (`Conversation::every_message`: `image_ids`,
 `delete_many`, `unshown`), and they go with it.
@@ -5066,3 +5102,38 @@ summary over messages that changed is dropped); `chat-branches.spec.js`
 (Retry, Edit, switching, the history sent, a retry with no answer, after a
 restart and after an older Yap's save) and `agents-direct.spec.js` (a Code
 chat's Edit and Retry through Rewind).
+
+## Export a chat (2026-11-15)
+
+The Claude app's Share, made local (Yap keeps chats on this PC, so there's
+no link to share): a conversation's ⋯ (its row's, a right-click, or an
+archived one's) → **Export…** asks where (Save as, `chatExport.js`), and
+`chat_export(id, path)` (`chat/export.rs`) writes it there in the background.
+The toast says where, and how many pictures went in which folder.
+
+- **The file** (`export::render`, pure): `# Title`, "_Exported from Yap ·
+  15 November 2026 · 6 messages_", then each message under who wrote it and
+  when — "**You** · 15 Nov 2026, 10:42", "**Yap** · claude-opus-5-5 · …"
+  (the model's name when it has one, the on-device model's), "**Agent
+  report**" for an agent's report — and its words as written: an answer's
+  markdown as it was, the person's line breaks kept (`"  
+"`). A question's
+  quoted passage goes above it as a `>` quote; a stopped answer says so.
+  After the words: its pictures, its Sources as numbered links (a meeting's
+  passage has no address: its title alone), and the files it shared that
+  aren't pictures as `file:///` links to their paths. Never its thinking
+  or its steps' chips: what was said, not how. An empty message isn't one.
+- **Its pictures**: a question's screenshots, the pictures an answer
+  showed (never a step's shot for the model, `chip` set), the ones it
+  shared and its pages' pictures, copied into "<file name> pictures/"
+  beside the file as `1.png`, `2.png`… in the order they show, each copied
+  once (a fork's shared screenshot is one file) and linked by a relative,
+  percent-encoded path (`link_path`). One whose copy is gone (kept past
+  "Keep chat screenshots") is "_A picture that's no longer kept._". No
+  folder when there are none.
+- **Copy as Markdown** stays as it was (`core/itemMenus.js`: the words
+  only, to paste); Download your data's chats stay its own
+  (`privacy/export.rs` `chat_markdown`, with every screenshot in the zip).
+- The log says counts only. Tests: `cargo test chat::export`;
+  `chat-export.spec.js` (the menu, then the file and its folder);
+  `right-click.spec.js` (the row's menu).
