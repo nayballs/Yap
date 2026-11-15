@@ -120,6 +120,14 @@ pub fn run_fake_claude() -> i32 {
     ai::claude_code::fake::main(std::env::args().skip(2).collect())
 }
 
+/// `yap.exe fake-gh <script.json> …` (main.rs, debug builds): a stand-in
+/// for GitHub's `gh`, for tests (`agents/prs/fake.rs`). Nothing of the app
+/// itself starts.
+#[cfg(debug_assertions)]
+pub fn run_fake_gh() -> i32 {
+    agents::prs::fake::main(std::env::args().skip(2).collect())
+}
+
 /// `yap.exe eval …` (main.rs): the model evaluation harness (`eval.rs`,
 /// docs/model-evals.md). Debug builds only; a release build says so and
 /// exits. Returns the exit code (0 = every scenario passed).
@@ -598,6 +606,9 @@ pub fn run() {
             agents::files::code_file_read,
             agents::files::code_file_open_editor,
             agents::files::code_chat_environment,
+            agents::files::code_file_reveal,
+            agents::context::code_chat_context,
+            agents::prs::code_chat_pull_requests,
             agents::run_block::code_run_check,
             agents::run_block::code_run_start,
             agents::run_block::code_run_stop,
@@ -897,6 +908,8 @@ pub fn run() {
             shell::e2e::e2e_claude_approve_auto,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_claude_script,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_gh_script,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_agents_seed,
             #[cfg(debug_assertions)]

@@ -5,16 +5,31 @@
   // `outputItems`, the one list every kind adds to; `onopen(item)` opens one.
   // Shown first in a Code chat's summary (SummaryTab.svelte); usable
   // anywhere that lists what a chat made.
-  /** `items`: outputs.js's rows; `onopen(item)`; `max`: rows shown before "Show N more". */
-  let { items = [], onopen = null, max = 8 } = $props();
+  // A right-click (or the ContextMenu key, Shift+F10) on a row: `onmenu(event, item)` opens its menu
+  // (outputsOpen.js `outputMenuItems`: Open, Show in folder, Copy path, Open in editor).
+  import { menuKey, menuOpenFor } from '../../ui/contextMenu.svelte.js';
+  /** `items`: outputs.js's rows; `onopen(item)`; `onmenu(event, item)`: its menu; `max`: rows shown before "Show N more". */
+  let { items = [], onopen = null, onmenu = null, max = 8 } = $props();
   let all = $state(false);
+  const rowEls = $state({});
   const shown = $derived(all ? items : items.slice(0, max));
 </script>
 
 <ul class="outputs" data-testid="chat-outputs">
   {#each shown as it (it.key)}
     <li>
-      <button type="button" class="orow" data-testid="chat-output" data-kind={it.kind} title={[it.detail, it.name].filter(Boolean).join('/')} onclick={() => onopen?.(it)}>
+      <button
+        type="button"
+        class="orow"
+        class:menuopen={onmenu && menuOpenFor(rowEls[it.key])}
+        data-testid="chat-output"
+        data-kind={it.kind}
+        title={[it.detail, it.name].filter(Boolean).join('/')}
+        bind:this={rowEls[it.key]}
+        onclick={() => onopen?.(it)}
+        oncontextmenu={(e) => onmenu?.(e, it)}
+        onkeydown={(e) => onmenu && menuKey(e, (ev) => onmenu(ev, it))}
+      >
         {#if it.kind === 'page'}
           <svg class="oicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="13" height="13" rx="2" /><path d="M16 16v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h3" /></svg>
         {:else if it.kind === 'doc'}
@@ -58,7 +73,8 @@
     text-align: left;
     cursor: pointer;
   }
-  .orow:hover {
+  .orow:hover,
+  .orow.menuopen {
     background: var(--yap-paper-s2);
   }
   .orow:focus-visible,
