@@ -812,6 +812,163 @@ a.md-link:hover {
   color: var(--yap-primary-hover);
 }
 
+/* What ui/markdownVisuals.js draws in rendered markdown (15 Nov 2026, after
+   the Claude app's answers): maths, diagrams, a diff's lines and pictures.
+   Until it has (or where it never does: a toast, the bar), each shows as
+   the model wrote it. */
+.md-math-display {
+  display: block;
+  margin: 8px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+.md-math-display:not([data-drawn='true']) {
+  text-align: left;
+  white-space: pre-wrap;
+}
+.md-math-display > .katex-display {
+  margin: 0;
+}
+/* A diagram: in a quiet box, its `</>` switch at the top right (the code,
+   and back). The drawing itself is in a shadow root (its own sheet). */
+.md-diagram {
+  position: relative;
+  margin: 6px 0;
+}
+.md-diagram[data-drawn='true']:not(.md-diagram-code) {
+  padding: 14px 34px 14px 14px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: 8px;
+  background: var(--yap-s1);
+}
+.md-diagram[data-drawn='true']:not(.md-diagram-code) > pre.md-code,
+.md-diagram.md-diagram-code > .md-diagram-view {
+  display: none;
+}
+.md-diagram-switch {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--yap-muted);
+  cursor: pointer;
+}
+.md-diagram-switch:hover {
+  background: var(--yap-s3);
+  color: var(--yap-fg);
+}
+.md-diagram-switch[aria-pressed='true'] {
+  color: var(--yap-primary);
+}
+.md-diagram-switch:focus-visible {
+  outline: 2px solid var(--yap-primary-line);
+  outline-offset: 1px;
+}
+/* The editor's page (components/richtext/richVisuals.js): a drawn formula's
+   or diagram's text is hidden until the caret is at it. */
+.rich-hidden-source {
+  display: none !important;
+}
+.rich-math {
+  cursor: text;
+}
+.rich-diagram {
+  margin: 6px 0 2px;
+  cursor: pointer;
+  user-select: none;
+}
+/* A ```diff fence: a line each, removed in red and added in green across
+   the block (its widest line), as a Code chat's diffs are. */
+pre.md-code.md-diff {
+  padding: 6px 0;
+}
+pre.md-code.md-diff > code {
+  display: inline-block;
+  min-width: 100%;
+  box-sizing: border-box;
+}
+.md-dl {
+  display: block;
+  padding: 0 10px;
+  box-shadow: inset 2px 0 0 transparent;
+}
+.md-dl.md-add {
+  background: color-mix(in srgb, var(--yap-success) 14%, transparent);
+  box-shadow: inset 2px 0 0 var(--yap-success);
+}
+.md-dl.md-del {
+  background: color-mix(in srgb, var(--yap-danger) 13%, transparent);
+  box-shadow: inset 2px 0 0 var(--yap-danger);
+}
+.md-dl.md-hunk {
+  color: var(--yap-syn-function);
+}
+.md-dl.md-meta {
+  color: var(--yap-muted);
+  font-weight: 600;
+}
+/* A markdown picture: "Show image" and its site, fetched only on a click. */
+.md-imgbox {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 168px;
+  height: 112px;
+  margin: 4px 0;
+  padding: 8px;
+  vertical-align: middle;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: 10px;
+  background: var(--yap-s3);
+  color: var(--yap-fg-80);
+  font: inherit;
+  cursor: pointer;
+}
+.md-imgbox:hover {
+  border-color: var(--yap-border-hover);
+  color: var(--yap-fg);
+}
+.md-imgbox:focus-visible {
+  outline: 2px solid var(--yap-primary-line);
+  outline-offset: 1px;
+}
+.md-imgshow {
+  font-size: 12.5px;
+}
+.md-imghost {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--yap-muted);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.md-imgbox.loading {
+  cursor: progress;
+}
+.md-imgbox.failed .md-imgshow {
+  color: var(--yap-danger);
+}
+img.md-img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  height: auto;
+  margin: 6px 0;
+  border-radius: 8px;
+}
+
 /* The words a search found, marked where its result opens (core/findWords.js:
    the CSS Custom Highlight API), and in a result's own line (<mark class="found">). */
 ::highlight(yap-found) {

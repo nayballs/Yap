@@ -42,10 +42,15 @@
 //! Yap's ranked short list, and says it went by the description. A model
 //! without tools (the small models' fixed web pipeline) gets neither.
 //!
+//! - **A picture an answer's or a note's markdown names** ([`markdown`],
+//!   15 Nov 2026): "Show image" in the page, fetched the same way only when
+//!   clicked, never kept.
+//!
 //! **Privacy**: the log never has an address, a caption or a page — counts,
 //! sizes and ids only.
 
 pub mod local;
+pub mod markdown;
 
 use std::collections::HashMap;
 use std::sync::Arc;
