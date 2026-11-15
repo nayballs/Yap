@@ -94,6 +94,11 @@ pub(super) struct Gates {
     /// path — the web's pictures' gate, or the picture files' —: off only in
     /// a turn fitted to a small context without the files' family (`fit.rs`).
     pub share_tools: bool,
+    /// **`show_visual`** (chat/made.rs): a strong model with a thread to
+    /// show it in — Chat, or the Voice Assistant with Chat in view; never
+    /// across the meetings (`made::offered`). Off only in a turn fitted to a
+    /// small context (`fit.rs` `Family::Visuals`).
+    pub visuals: bool,
 }
 
 /// What [`Gates::for_turn`] reads of this PC: Yap Code offered
@@ -156,7 +161,8 @@ impl Gates {
         let evaluated = tools && provider != crate::ai::claude_plan::PROVIDER && crate::ai::eval::connectors_forced();
         let connectors = !meetings && (evaluated || crate::chat::tools::connectors::may(provider, strong)) && (here.connectors)();
         let (apps, past_chats, picture_tools) = (cfg.open_apps, cfg.memory_search_chats, true);
-        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, screen_takes, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true };
+        let visuals = crate::chat::made::offered(tools, strong, scope, meetings, chat_in_view);
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, screen_takes, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true, visuals };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();
         }
@@ -183,6 +189,8 @@ impl Gates {
         Gates {
             strong: false,
             connectors: false,
+            // (A plan run's visuals go over the run endpoint: `plan.rs`.)
+            visuals: false,
             claude_in_chat: false,
             own_search: false,
             web_lines: crate::chat::tools::WebLines::of(false, false, false),
@@ -226,6 +234,7 @@ impl Gates {
             files: self.files,
             file_pictures: None,
             share: crate::chat::shares::Offer::of(self.pictures, self.files, self.share_tools && self.tools),
+            visuals: self.visuals && self.tools,
         }
     }
 
