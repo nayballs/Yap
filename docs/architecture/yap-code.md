@@ -867,7 +867,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
   - **Not in it**: Yap's own tools for the session (its browser, its cards), which only a turn's endpoint has.
   - **Without a breakdown** (no session yet, a Code chat Chat's model answers, no Claude Code): how full the chat's context is, from what Yap knows already: its own Claude's latest turn (a Code chat that works directly: `agents/usage.rs`), else the plan's count for the chat, else the context ring's (`chat_context`). A plain chat keeps its ring; a breakdown of Chat's own prompt (`chat/budget.rs`) isn't done.
 - **Connectors**: the chat's own (`connector_chat_list`), on or off here, and Manage connectors….
-- **Outputs** (`outputs.js` `outputItems`, drawn by `OutputsList.svelte`, opened by `outputsOpen.js` `openOutput`: **one list** that any kind adds its rows to, the same as any chat's Outputs tab, [chat-and-assistant.md](./chat-and-assistant.md)): the pages it keeps and the documents it wrote first (both open beside the chat), then the files its work changed (its agents' turns' `files`, newest first; they open in the file view, a spreadsheet in the sheet view) and the files it shared (a picture in the picture tab, a file in the workspace in the file view, any other as its card opens it).
+- **Outputs** (`outputs.js` `outputItems`, drawn by `OutputsList.svelte`, opened by `outputsOpen.js` `openOutput`: **one list** that any kind adds its rows to, the same as any chat's Outputs tab, [chat-and-assistant.md](./chat-and-assistant.md)): the pages it keeps and the documents it wrote first (both open beside the chat), then the files its work changed (its agents' turns' `files`, newest first, its commands' files too, one a command made saying "New"; they open in the file view, a spreadsheet in the sheet view) and the files it shared (a picture in the picture tab, a file in the workspace in the file view, any other as its card opens it).
   - **A row's right-click menu** (and the ContextMenu key, Shift+F10; Yap's own menus, `outputsOpen.js` `outputMenuItems`), here and in the Outputs tab: Open; for a file, Show in folder (`code_file_reveal` for a workspace file, `chat_file_reveal` for a shared one) and Copy path (its full path); for a file in the workspace, Open in editor (`code_file_open_editor`). Which rows are workspace files Rust says (`code_files_check`, `outputRefs`), from the conversation's own workspace.
 - **Background tasks**: its helpers and the agents Chat sent that are at work now (the Agent panel's own rows, `panelRows`), each with its clock (a helper's since it was handed its part: `helpersOf`'s `ts`) and Stop (a helper's stops the turn that sent it); its running ▶ Runs with theirs; then "N finished" (it opens the Agent panel, or the Runs tab).
 - **Tests**: `agents/context/tests.rs` (a recording's shape with a fictional setup, its markdown, a reordered table, a broken answer, one that cost a turn), `agents/prs/tests.rs` (`gh`'s JSON, checks, its own words when it can't, no `gh`, no git, branch or remote, a worktree's remotes, finding `gh.exe`), and `code-chat-files.spec.js` (the stand-in's `_context` and `yap.exe fake-gh`: the breakdown, the run's arguments, the pull requests, Remote Control's ask, an output's menu, Archive; light and dark).
@@ -1923,6 +1923,14 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   line; past them "…N more lines". A diff goes out with the call's result, so
   a refused or failed edit has none. An agent marked `noBackups` says "No
   backups were made, so Undo can't put these files back." and offers no Undo.
+  A file one of its commands made or changed (the turn's `byCommand`,
+  [Files a command made or changed](#files-a-command-made-or-changed)) says
+  "New · By a command", "By a command", or "By a command · No backup", with
+  "Undo can't put back data.csv: a command changed it, and Yap had no copy of
+  it from before." under the list; Undo's confirm says the same instead of
+  "Yap kept their backups for this", its line says what it left ("lab.md left
+  as it is (…)"), and a turn whose only files can't be put back offers no
+  Undo (`core/agents.js` `undoableFiles`).
 - **Commands run**: each with its description above and the command whole
   below (its `cd` into the folder gone); three, then "Show N more".
 - **What wasn't allowed**: the denials.
@@ -2717,7 +2725,11 @@ saves ([config-and-data.md](./config-and-data.md)).
     the report then says it as usual). Each turn's `reportHeld`
     (2026-11-11: its report waits for the next turn's, [Reports](#reports);
     left out while false; dropped by an older Yap's save, that turn is left
-    out of the report). The page's copies also carry
+    out of the report). Each turn's `byCommand` (2026-11-15: the files its
+    commands made or changed, `[{file, new, kept}]`, [Files a command made or
+    changed](#files-a-command-made-or-changed); left out while empty; dropped
+    by an older Yap's save, the files then read as any it changed). The
+    page's copies also carry
     `active` (the runner has it now, for Move to finished), never saved;
   - `modes`: each chat's Mode (conversation id → mode);
   - `codeChats`: each Code chat's folder (conversation id → `{path, ts}`);
@@ -2729,7 +2741,8 @@ saves ([config-and-data.md](./config-and-data.md)).
   PNGs by id, and their thumbnails in `thumbs/`
   ([A step's pictures](#a-steps-pictures)).
 - **`agents/<id>/backup/<turn>/`**: the files each turn changed, as they were
-  before it (`manifest.json` and `0001-<name>`…). An agent from before turns
+  before it (`manifest.json` and `0001-<name>`…), its commands' files among
+  them (`command`, `after`; a clean file's copy from Git). An agent from before turns
   has one right in `backup/`, read as its turn 1's (`store::backup_dirs`).
 - **`workspaces.json`** (`agents/workspaces.rs`): the workspaces.
 - An agent id is Yap's own: the time and four random bytes in hex, letters and
@@ -2781,10 +2794,112 @@ The run endpoint's backup hook (`integrations/claude_live/backup.rs`,
   the older copy first.
 - **Kept 7 days** after the agent ended, then swept: "Its backups are gone: Yap
   keeps them 7 days."
-- **Limits**: a file changed another way (a command, a script, `sed`) isn't
-  backed up: only Claude Code's edit tools go through the hook. A denied Write
-  is still noted as created (the hook runs before the permission check), so
-  Undo would delete a file of that name made later by something else.
+- **Limits**: a denied Write is still noted as created (the hook runs before
+  the permission check), so Undo would delete a file of that name made later
+  by something else. A file a command deleted isn't listed, and Undo doesn't
+  bring it back.
+
+### Files a command made or changed
+
+15 Nov 2026 (`agents/changes.rs`). Claude Code's edit tools go through the
+hook; a command never does — a script (exceljs, Python), `npm`, a formatter.
+The Lab pass after the parity round found it: an exceljs script wrote
+`costs.xlsx`, Outputs said "Nothing made yet", Undo didn't know the file, and
+the report still said a backup was kept. Claude Code's own checkpoints have
+the same gap (its docs: "Checkpointing does not track files modified by bash
+commands"). So each turn reads its workspace before and after:
+
+- **Before** (`changes::before`, as the turn starts, alongside Claude Code's
+  status check, before its process does: no command can have run yet):
+  - **A Git repository** (the person's own Git, and `git rev-parse
+    --show-prefix` answers in the workspace, which may be a folder inside the
+    repository — unless the repository ignores the workspace itself, `git
+    check-ignore`, as for a scratch folder in an ignored one or a home folder's
+    dotfiles repository that ignores everything: Git sees none of its files,
+    so a walk then): `git status --porcelain=v1 -z --untracked-files=all
+    --no-renames --ignore-submodules=all -- .` (`.gitignore` kept), each file
+    it lists with its size and times, and the commit at `HEAD`. Every other
+    file is as Git has it there.
+  - **Elsewhere** (or Git can't say): a walk that leaves out build output and
+    hidden folders as the @ picker's does (`mention::SKIPPED`, a name starting
+    with `.`, Windows' hidden and system folders), links and junctions, and
+    Yap's own data folder; every file with its size and times.
+  - **Caps**: a walk stops at 20,000 entries or 2 s; Git at 5 s a command or
+    20,000 files listed. Past them (a drive root like `E:\`, a home folder)
+    the check is skipped for that turn and the log says why with counts only
+    ("too many files", 20001) — never a stall, never a guess.
+- **After** (`changes::settle`, once its process is gone, before its end is
+  said; nothing at all when no command ran): the same again, compared, and
+  **only what changed while a command ran counts** (`changes::classify`):
+  each `Bash` or `PowerShell` call from its start to its result (the runner's
+  `command_windows`; a helper's too; one in the background to the turn's
+  end), 2 s either side — a new file by its birth time (unpacking an archive
+  sets a file's last write back, never its birth), a changed one by its last
+  write. So the person's own edits in the workspace meanwhile are never the
+  turn's. A file Yap hadn't seen before whose birth is older than any command
+  (it was there, out of the scan's sight) is changed, never new; with no
+  birth time, never new either. With Git, `HEAD` moving (Claude committed)
+  adds the files between the two commits (`git diff --name-only`). At most
+  500 files; past that nothing is noted (logged).
+- **What Undo can do with each** — decided, not guessed:
+  - **New** (not there before): noted `Created`, so Undo deletes it.
+  - **Changed, and clean in Git at the turn's start**: Git's own copy
+    (`git cat-file --filters <commit>:<path>`, line endings and filters as a
+    checkout writes them; `git cat-file --batch-check` says which files the
+    commit has) copied into the turn's backups: Undo puts it back. Over
+    50 MB, too big, as the hook's.
+  - **Changed, anything else** (the person's uncommitted work, a folder with
+    no Git): no backup — `Failed` with the note "a command changed it, and
+    Yap had no copy of it from before" (an older Yap's Undo skips a `Failed`
+    as it should) — and it's said: the Files changed list, Undo's confirm and
+    what it did, and the report.
+  - **Why not a copy before each command**: a command's words don't say
+    which files it will write (an exceljs script names its file inside the
+    script); a snapshot of "the files it's about to touch" from the command
+    line (what some hooks for Claude Code do for `rm` and `mv`) would be a
+    guess, and copying the whole workspace before every command (a shadow
+    Git repository, as Cline's checkpoints do) costs every turn in a big
+    folder. Git already holds every clean file as it was.
+- **Claude Code's copy that came too late**: a file a command made that
+  Claude Code then edited is new (its hook copied the command's file, so that
+  copy is dropped and the entry is `Created`); one a command changed before
+  Claude Code's copy (the hook's copy now carries the original's size and
+  time, `was`, which no longer match the turn's start) has no copy from
+  before — unless it was clean in Git, when Git's copy replaces the hook's.
+- **Kept**: in the turn's `manifest.json`, marked `command` (`tool:
+  "command"`), each with `after` (its size and time as the turn left it,
+  refreshed at every turn's end, a Continue's too); and in the turn's `files`
+  and `byCommand` (`[{file, new, kept}]`, `store::CommandFile`), so Outputs,
+  the summary, the file view (a spreadsheet in the sheet view), Files changed
+  and the report have them, and the report card shows a new file as any.
+- **Undo leaves a command's file alone once it changed after the turn**
+  (`backup::restore_all`: the latest entry's `after` against the file now):
+  "it changed after the turn, so it was left as it is". The person's own work
+  since is never deleted or written over.
+- **The hook's `noBackups` check** counts only its own entries (a command's
+  files aren't the hook running).
+- **Git runs as the person's own** (`changes::find_git`: `git.exe` in an
+  absolute folder on `PATH`, else Git for Windows' own `cmd\git.exe`; never one
+  in the workspace), no window, in the kill-on-close job, its environment
+  Yap's with nothing pointing it at another repository, `GIT_OPTIONAL_LOCKS=0`
+  (`git status` never refreshes the index: Claude Code may be running Git
+  there at the same time), `-c core.fsmonitor=false`, literal pathspecs, no
+  prompts.
+- **The report's words** (`changes::file_facts`, the report's facts and
+  `agent_status`'s `undo`): "Files it changed: notes.md (backed up first).",
+  "Files its commands made: costs.xlsx (new: Undo deletes them).", "Files its
+  commands changed: package-lock.json (backed up first, from Git).", "Files
+  its commands changed with no backup: data.csv (Undo can't put them back)."
+  The report's rules have the model say what Undo can do as the facts say it,
+  and never a backup they don't mention.
+- **Tests**: `agents/changes/tests.rs` (the compare and its windows, Git's
+  answers, the caps, a folder with no Git, a real Git repository in a
+  subfolder with a clean file, the person's uncommitted work, an ignored log
+  and a commit in the turn, Undo's guard, Claude Code's late copies, finding
+  Git), `chat/turn/report.rs` (the facts), and `code-chat-files.spec.js` (the
+  stand-in's `Bash` call writes `costs.csv` and rewrites `docs/lab.md`: Outputs
+  "New", the sheet view, the tags, the report, Undo's confirm and what it
+  did).
 - **When hooks don't run**: a managed policy can turn them off
   (`disableAllHooks`, `allowManagedHooksOnly`, `allowedHttpHookUrls`, or
   `httpHookAllowedEnvVars` keeping the run's key out of the header), and they

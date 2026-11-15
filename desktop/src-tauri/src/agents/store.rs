@@ -88,6 +88,20 @@ pub struct Denial {
     pub detail: String,
 }
 
+/// **A file one of a turn's commands made or changed** (a script, `npm`, a
+/// formatter: `agents/changes.rs`), not Claude Code's own edit tools.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CommandFile {
+    /// As the turn's `files` say it (relative to the workspace).
+    pub file: String,
+    /// It wasn't there before the turn: Undo deletes it.
+    pub new: bool,
+    /// (Changed) Yap kept a copy from before (Git's own, for a file that was
+    /// clean in Git): Undo puts it back. False: it can't.
+    pub kept: bool,
+}
+
 /// What went wrong with Claude Code itself (`claude_code::events::Problem`),
 /// kept: its kind, the words for the person, and when a limit resets.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -402,6 +416,14 @@ pub struct TurnNote {
     pub beside: Beside,
     /// Undo this turn put its files back.
     pub undone: bool,
+    /// **The files its commands made or changed** (15 Nov 2026, found by
+    /// comparing the workspace before and after: `agents/changes.rs`), each
+    /// also in `files`: whether it's new (Undo deletes it) and whether a copy
+    /// from before was kept (Undo puts it back). A new field of the turn's
+    /// own: an older Yap drops it on its save, and the files then read as
+    /// any it changed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub by_command: Vec<CommandFile>,
     /// **Its to-do list**, as its latest `TodoWrite` left it (the Agent
     /// panel's row, the thread's to-do card). New fields of the turn's own
     /// (2026-11-08), as `usage`: an older Yap drops them on its save, and the

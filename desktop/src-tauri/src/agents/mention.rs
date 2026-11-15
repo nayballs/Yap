@@ -32,7 +32,7 @@ pub const SHOWN: usize = 50;
 /// A workspace's list is read again after this long.
 const FRESH: Duration = Duration::from_secs(20);
 /// Folders a walk never goes into.
-const SKIPPED: &[&str] = &[".git", "node_modules", "target", "dist", "build", "out", ".next", ".nuxt", ".svelte-kit", ".turbo", "__pycache__", ".venv", "venv", ".idea", ".vs", "bin", "obj", "coverage", ".cache"];
+pub(crate) const SKIPPED: &[&str] = &[".git", "node_modules", "target", "dist", "build", "out", ".next", ".nuxt", ".svelte-kit", ".turbo", "__pycache__", ".venv", "venv", ".idea", ".vs", "bin", "obj", "coverage", ".cache"];
 
 /// One file the picker offers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

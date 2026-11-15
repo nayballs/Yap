@@ -11,7 +11,7 @@
   import { colourCode } from '../../ui/colourCode.js';
   import { codeCopy } from '../../ui/codeCopy.js';
   import { markdownVisuals } from '../../ui/markdownVisuals.js';
-  import { timelineOf, latestStep, todosOf, todoCount, diffsOf, commandsOf, NO_BACKUPS } from '../../core/agents.js';
+  import { timelineOf, latestStep, todosOf, todoCount, diffsOf, commandsOf, NO_BACKUPS, unbackedFiles, unbackedLine } from '../../core/agents.js';
   import AgentTimeline from './AgentTimeline.svelte';
   import AgentFiles from './AgentFiles.svelte';
 
@@ -45,6 +45,8 @@
     return commandsOf(agent, events);
   });
   const shownCommands = $derived(allCommands ? commands : commands.slice(0, FEW_COMMANDS));
+  // What its commands changed that Undo can't put back (agents/changes.rs).
+  const unbacked = $derived(unbackedLine(unbackedFiles([turn])));
 </script>
 
 {#if latest}
@@ -78,9 +80,12 @@
 {#if turn?.files?.length}
   <div class="section" data-testid="chat-agent-files">
     <h3>Files changed <span class="count">{turn.files.length}</span></h3>
-    <AgentFiles files={turn.files} {diffs} />
+    <AgentFiles files={turn.files} {diffs} byCommand={turn.byCommand} />
     {#if agent?.noBackups}
       <p class="nobackups" data-testid="chat-agent-no-backups">{NO_BACKUPS}</p>
+    {/if}
+    {#if unbacked}
+      <p class="nobackups" data-testid="chat-agent-command-unbacked">{unbacked}</p>
     {/if}
     {#if undoable}
       <button type="button" class="undoturn" data-testid="chat-agent-undo-turn" onclick={() => onundo?.()} disabled={busy}>Undo this turn</button>

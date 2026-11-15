@@ -59,6 +59,7 @@
 //! ([`offered`]).
 
 pub mod approve_card;
+pub mod changes;
 pub mod code_chat;
 pub mod commands;
 pub mod consent;
