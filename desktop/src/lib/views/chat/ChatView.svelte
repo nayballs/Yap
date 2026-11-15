@@ -168,6 +168,8 @@
   // A message sent while a Code chat's own session works waits in the queue (chatState's `queued`).
   // (A Code chat: Rust says whether its own session works — the page's list of agents lags a moment behind.)
   chat.setQueueGate(() => code.current != null);
+  // **@ in a Code chat** (agents/mention.rs): its workspace's files; a plain chat's @ is just an @.
+  chat.setMentionGate(() => (code.current ? { folder: code.current.path || code.current.name || null } : null));
 
   // **Yap Code** (stores/agents.svelte.js): the bar card's or a notification's
   // Open (`yap-agent-open`) shows the agent's chat and its tab (a Code chat at

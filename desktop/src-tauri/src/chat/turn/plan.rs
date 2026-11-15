@@ -794,7 +794,8 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
     // has no screen or panel) and its screenshots.
     let mut context = built.prompt.context.clone();
     context.extend(away_line(eyes, this_turn, t.gates.screen_takes).map(str::to_string));
-    let question = crate::chat::chats::with_context(&context, &t.text);
+    // (Its attached files' text first: chat/attachments.rs.)
+    let question = crate::chat::attachments::with_text(&crate::chat::chats::with_context(&context, &t.text));
     let images = if crate::snip::vision::reads_images(plan::PROVIDER, &model) == Some(false) { Vec::new() } else { question_images() };
 
     // The conversation's warm process when it fits; another model, effort
