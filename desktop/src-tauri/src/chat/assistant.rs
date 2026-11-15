@@ -597,6 +597,15 @@ fn view() -> Viewing {
     *VIEW.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// The conversation the Chat view shows now, if any (auto-archive never
+/// takes it from under the person: `chat/auto_archive.rs`).
+pub fn shown_conversation() -> Option<u64> {
+    match view() {
+        Viewing::Conversation(id) => Some(id),
+        Viewing::New | Viewing::Closed => None,
+    }
+}
+
 fn code_chat_shown() -> Option<String> {
     NEW_CODE_CHAT.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }

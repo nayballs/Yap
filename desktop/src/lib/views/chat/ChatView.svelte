@@ -546,6 +546,8 @@
       // A long chat's older messages were summarised (chat/compact.rs).
       listen('yap-chat-summary', (e) => chat.onSummary(e.payload)),
       listen('yap-chat-images-deleted', chat.reloadActive),
+      // Chats auto-archived, or brought back by its Undo (chat/auto_archive.rs).
+      listen('yap-chats-archived', () => chat.refreshList()),
       // The document beside the chat, changed in another window or by Chat's
       // tools (its sections landing), or deleted.
       listen('yap-note-changed', (e) => doc.onNoteChanged(e.payload)),

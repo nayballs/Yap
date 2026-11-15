@@ -29,7 +29,8 @@ test('the index: every entry has a page, a label and an anchor, and no anchor is
     expect(e.label.trim().length, 'label').toBeGreaterThan(0);
     expect(e.anchor, `${e.label}: anchor`).toMatch(/^[a-z0-9-]+$/);
     if (e.scope) expect(SCOPES).toContain(e.scope);
-    const key = `${e.page}/${e.scope ?? ''}/${e.label}`;
+    // (By section too: two sections of a page may each have a "Where they're kept".)
+    const key = `${e.page}/${e.scope ?? ''}/${e.section}/${e.label}`;
     expect(seen.has(key), `${key} twice`).toBe(false);
     seen.add(key);
   }
