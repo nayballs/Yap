@@ -12,6 +12,7 @@
   import { renderMarkdown } from '../../core/markdown.js';
   import { colourCode } from '../../ui/colourCode.js';
   import { codeCopy } from '../../ui/codeCopy.js';
+  import { markdownVisuals } from '../../ui/markdownVisuals.js';
   import { stepKind, longSaid } from '../../core/agents.js';
   import { followEnd, jumpToEnd } from '../../ui/followEnd.js';
   import StepPictures from './StepPictures.svelte';
@@ -35,7 +36,7 @@
           {@const folds = longSaid(t.text)}
           <li class="said" class:folded={folds && !unfolded[i]} data-testid="chat-agent-said">
             <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
-            <div class="md" use:colourCode use:codeCopy>{@html renderMarkdown(t.text)}</div>
+            <div class="md" use:colourCode use:codeCopy use:markdownVisuals>{@html renderMarkdown(t.text)}</div>
             {#if folds}
               <button type="button" class="fold" aria-expanded={!!unfolded[i]} onclick={() => (unfolded = { ...unfolded, [i]: !unfolded[i] })}>
                 {unfolded[i] ? 'Show less' : 'Show more'}

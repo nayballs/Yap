@@ -6,8 +6,9 @@
 //   opaque origin), a card in its answer ("Tip calculator · Saved ›").
 // - A change asked for: save_page with its id makes version 2 — a card of its own ("Version 2"), the panel
 //   on the newest, ‹ › between versions; the first card opens version 1.
-// - The chat's Outputs (the panel's button, the conversation's ⋯ → Outputs): the page ("Page · 2
-//   versions"), the documents it wrote and the files it shared, each opening where it lives.
+// - The chat's Outputs (the panel's button, the conversation's ⋯ → Outputs; the one list, outputs.js, as a
+//   Code chat's summary has it): the page ("Page · 2 versions"), the documents it wrote and the files it
+//   shared, each opening where it lives.
 // - Kept: shown again when the chat opens again.
 // - Refused: an id that isn't this chat's page.
 // The model is the scripted fake AI (support/fake-llm.js), named like a strong model. Fictional content
@@ -232,7 +233,7 @@ test('Outputs: every page, document and file the chat made, from its ⋯', async
   await expect(rows.nth(1)).toContainText('Weekend plan');
   await expect(rows.nth(1)).toContainText('Document');
   await expect(rows.nth(2)).toContainText('packing.md');
-  await expect(rows.nth(2)).toContainText('Markdown');
+  await expect(rows.nth(2)).toContainText('Shared');
   await shot(main, '04-outputs');
   // The page opens beside the chat.
   await rows.nth(0).click();

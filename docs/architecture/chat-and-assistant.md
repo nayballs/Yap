@@ -2388,7 +2388,7 @@ opens in the person's browser; a visual made after outside content (seeded)
 fills the box instead.
 
 **Pages Yap keeps** (15 Nov 2026, `PageCard.svelte`, `KeptPageTab.svelte`,
-`OutputsTab.svelte`, `outputs.js`; `chat/made/pages.rs`). **A card a
+`OutputsTab.svelte`, `outputs.js` + `outputsOpen.js`; `chat/made/pages.rs`). **A card a
 version** in the answer that saved it (`placeMade`: each `PageVersion` by
 its question, above the answer's words, after its visuals): the page icon,
 its title, "Saved" (version 1) or "Version 2", and › — as the Claude app's
@@ -2401,12 +2401,16 @@ it) and ↻ to start it again; under it the page in the sandboxed frame
 (`pageSrc`, the colours, `sendPrompt` as a visual's, a page navigating
 away put back), filling the panel and scrolling in itself. **The chat's
 Outputs** (the Claude app's Outputs list; `chatDoc` `showOutputs`, tab
-`outputs`): every page it kept, then every document it wrote, then every
-file it shared, newest first in each (`outputsOf`), a row each — its icon,
-its name, what it is ("Page · 2 versions", "Document", "Markdown",
-"Picture"…) — that opens it where it lives (a page or a document beside the
-chat, a picture in its tab, a file in its app: `chat_file_open`); nothing
-yet says what will show there. Opened by the panel's row (the layers
+`outputs`): **the one list** a Code chat's summary shows too (outputs.js
+`outputItems`, drawn by `OutputsList.svelte`: each kind adds its rows there)
+— every page it kept, then every document it wrote (both added here), then
+the files its work changed and the files it shared, newest first in each, a
+row each — its icon, its name, what it is ("Page · 2 versions",
+"Document", "Changed", "Shared", "Picture") — that opens it where it lives
+(`outputsOpen.js` `openOutput`, the summary's too: a page or a document
+beside the chat, a changed file in the file view, a picture in its tab, a
+shared file in the file view when it's in the workspace, else in its app);
+nothing yet says what will show there. Opened by the panel's row (the layers
 button beside +, whatever shows) and the conversation's ⋯ → **Outputs**
 (the chat opened first). e2e `chat-kept-pages.spec.js`: "a tip calculator I
 can keep" saved, beside the chat at once in the sandboxed frame (an opaque
