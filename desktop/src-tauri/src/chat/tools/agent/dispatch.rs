@@ -43,6 +43,9 @@ pub(super) enum Source {
     Apps,
     /// `start_agent`, `agent_status`, `message_agent`, `stop_agent` (`tools/agents.rs`).
     Agents,
+    /// `ask_user`, `suggest_next_step`, `mark_chapter`: the cards in the
+    /// thread (`chat/cards.rs`).
+    Cards,
     /// Every other name: the note and document tools (`tools/notes.rs`),
     /// which say so for a name they don't know.
     Notes,
@@ -82,6 +85,8 @@ impl Source {
             Source::Apps
         } else if extra.agents.is_some() && crate::chat::tools::agents::NAMES.contains(&name) {
             Source::Agents
+        } else if extra.cards.offers(name) {
+            Source::Cards
         } else {
             Source::Notes
         }
@@ -346,6 +351,10 @@ impl Loop<'_> {
                 }
                 ran.result
             }
+            // A question waits for the person's answer on its card (asked
+            // out loud: said and on the bar too); the box and a chapter go to
+            // the page at once.
+            Source::Cards => crate::chat::cards::execute(name, &args, self.live, crate::chat::cards::by_voice(), crate::chat::cards::answers_in(self.extra.conversation)).await,
             Source::Notes => execute(name, &args),
         }
     }
@@ -375,6 +384,12 @@ mod tests {
         // Apps while they're offered.
         assert_eq!(Source::of("open_app", false, &none, false, true), Source::Apps);
         assert_eq!(Source::of("open_app", false, &none, false, false), Source::Notes);
+        // The cards in the thread while they're offered.
+        let cards = Extra { cards: crate::chat::cards::Cards { ask: true, next_step: false, chapters: true }, ..Default::default() };
+        assert_eq!(Source::of("ask_user", false, &cards, false, false), Source::Cards);
+        assert_eq!(Source::of("mark_chapter", true, &cards, false, false), Source::Cards);
+        assert_eq!(Source::of("suggest_next_step", false, &cards, false, false), Source::Notes);
+        assert_eq!(Source::of("ask_user", false, &none, false, false), Source::Notes);
         // Agents while they're offered.
         let agents = Extra { agents: Some(crate::chat::tools::AgentsTurn::default()), ..Default::default() };
         assert_eq!(Source::of("start_agent", false, &agents, false, false), Source::Agents);

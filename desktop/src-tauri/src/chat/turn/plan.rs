@@ -422,7 +422,7 @@ impl map::Out for ToChat<'_> {
 /// tools the session lists, `eyes`; and the agent tools, while offered), the
 /// context's note, About you, memory's "You" (none in a Code chat:
 /// `prompt.rs` left it out, and About you's note).
-fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude_live::eyes::Eyes, connectors: bool) -> String {
+fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude_live::eyes::Eyes, connectors: bool, cards: crate::chat::cards::Cards) -> String {
     let mut s = t.ep.persona.trim().to_string();
     s.push_str("\n\n");
     match &built.code {
@@ -444,6 +444,11 @@ fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude
         s.push(' ');
         s.push_str(&agents_lines());
     }
+    // The cards in Yap's thread (chat/cards.rs): a question, the next-step box, chapters.
+    if cards.any() {
+        s.push(' ');
+        s.push_str(&cards_lines(cards));
+    }
     s.push_str("\n\n");
     s.push_str(crate::chat::chats::CONTEXT_NOTE);
     let profile = crate::ai::about_you::profile_block(&built.profile);
@@ -454,6 +459,24 @@ fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude
     if !built.memory_you.is_empty() {
         s.push_str("\n\n");
         s.push_str(&built.memory_you);
+    }
+    s
+}
+
+/// **The cards a plan chat's session lists** (`chat/cards.rs`): what any of
+/// its turns could use — Chat's, wherever this one was asked, so the
+/// session's list stays the same from a typed question to a spoken one or a
+/// phone's; each turn uses what its own gates say (`run_context`).
+fn session_cards(t: &Asked<'_>) -> crate::chat::cards::Cards {
+    crate::chat::cards::Cards::for_turn(t.gates.tools, t.meetings, None, true, false)
+}
+
+/// The tool loop's lines for the cards, with Claude Code's names
+/// (`mcp__yap__ask_user`…). Pure.
+fn cards_lines(cards: crate::chat::cards::Cards) -> String {
+    let mut s = cards.instructions();
+    for n in crate::chat::cards::NAMES {
+        s = s.replace(n, &format!("mcp__yap__{n}"));
     }
     s
 }
@@ -516,6 +539,8 @@ fn run_context(
         unattended: false,
         // Nor a workspace: no dev servers (a Code chat's own session has them, `agents/runner.rs`).
         workspace: None,
+        // The cards in the thread, as this turn's gates have them (never a phone's question).
+        cards: t.gates.cards,
         // Visuals in the thread (chat/made.rs): asked in Chat, typed or out loud with Chat in view.
         visuals: !t.meetings && (t.scope.is_none() || (t.scope == Some("assistant") && crate::chat::assistant::asked_in_chat())),
     }
@@ -592,6 +617,7 @@ fn start(
     agents: bool,
     eyes: crate::integrations::claude_live::eyes::Eyes,
     connectors: Option<crate::integrations::claude_live::connectors::Listed>,
+    cards: crate::chat::cards::Cards,
     code: Option<&std::path::Path>,
     print: u64,
     resume: Option<&str>,
@@ -599,7 +625,7 @@ fn start(
     total_before: Option<f64>,
 ) -> Result<(Arc<sessions::Warm>, bool), String> {
     use crate::integrations::claude_live::{register_run, RunSpec, Tools};
-    let run = register_run(RunSpec::new("Chat", Tools::Chat).with_agents(agents).with_memory(code.is_none()).with_eyes(eyes).with_connectors(connectors))?;
+    let run = register_run(RunSpec::new("Chat", Tools::Chat).with_agents(agents).with_memory(code.is_none()).with_eyes(eyes).with_connectors(connectors).with_cards(cards))?;
     let conversation = match resume {
         Some(id) => Conversation::Resume(id.to_string()),
         None => Conversation::fresh(),
@@ -750,7 +776,9 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
     // The person's connectors (claude_live/connectors.rs): listed for the
     // session, this turn's own for its calls.
     let connectors = plan_connectors(t, built.code.is_some(), conv.id);
-    let system = system_prompt(t, built, eyes, connectors.is_some());
+    // The cards in the thread (claude_live/cards.rs): listed for the session.
+    let cards = session_cards(t);
+    let system = system_prompt(t, built, eyes, connectors.is_some(), cards);
     let web = t.gates.web_on;
     let agents = t.gates.agents;
     // A Code chat's session runs in its workspace (`spec`): that folder
@@ -801,7 +829,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
                     (Some(_), None) => None,
                     (None, _) => Some(0.0),
                 };
-                start(conv.id, &model, effort, &system, web, agents, eyes, connectors.clone(), workspace.as_deref(), print, resume.as_deref(), total_before)?
+                start(conv.id, &model, effort, &system, web, agents, eyes, connectors.clone(), cards, workspace.as_deref(), print, resume.as_deref(), total_before)?
             }
         };
         // One turn at a time on it: a turn still answering (stopped, or

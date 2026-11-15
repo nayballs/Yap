@@ -146,7 +146,10 @@ pub(super) async fn save(
     // The pages it brought up (their tabs come back with the chat) and the
     // buttons it offered.
     crate::chat::chats::set_pages(conv_id, index, &shown_pages, &offers);
-    crate::chat::chats::set_confirms(conv_id, index, &watch.map(|w| w.seen().confirms).unwrap_or_default());
+    let seen = watch.map(|w| w.seen()).unwrap_or_default();
+    crate::chat::chats::set_confirms(conv_id, index, &seen.confirms);
+    // The next-step box it ended with, the chapter it started (chat/cards.rs).
+    crate::chat::chats::set_cards(conv_id, index, seen.next_step.as_ref(), seen.chapter.as_ref());
     // Read for lasting facts once the chat goes quiet ("Learn from my chats").
     crate::memory::learn::after_turn(conv_id);
     // Filling the room? The older messages summarised in the background

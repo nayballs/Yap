@@ -1182,6 +1182,12 @@ one side.
   report), `eyes/tests.rs` (listed with the web's pictures and with picture
   files alone, refused away from Chat), `gates.rs` and `fit.rs` (offered
   with show_picture, kept last); e2e `chat-share.spec.js` (below).
+- **`chat/cards.rs`** (+ `cards/`: `ask.rs`, `next_step.rs`, `chapters.rs`) —
+  **the cards Chat's model puts in the thread** (15 Nov 2026, three of the
+  Claude app's): a question to the person (`ask_user`), the next-step box at
+  the end of a turn (`suggest_next_step`), chapters in a long chat
+  (`mark_chapter`). The gate (`Cards::for_turn`), the tools, running a call;
+  [below](#cards-in-the-thread-a-question-the-next-step-box-chapters-2026-11-15).
 - **`chat/made.rs`** (+ `made/serve.rs`) — **visuals in the answer** (15
   Nov 2026, after the Claude app's inline widgets, "Made a visual": its
   look and words, nothing of its code). Asked for a diagram and a tip
@@ -5260,3 +5266,97 @@ The toast says where, and how many pictures went in which folder.
 - The log says counts only. Tests: `cargo test chat::export`;
   `chat-export.spec.js` (the menu, then the file and its folder);
   `right-click.spec.js` (the row's menu).
+
+## Cards in the thread: a question, the next-step box, chapters (2026-11-15)
+
+Three of the Claude app's cards for Chat's own model (`chat/cards.rs`), each a
+tool the model calls when it has a reason to, never something shown every
+turn. Chat and Code chats alike, wherever Chat's model answers: the tool loop
+(`tools/agent/offer.rs`, `dispatch.rs` `Source::Cards`) and a plan chat's
+Claude Code over Yap's run endpoint (`integrations/claude_live/cards.rs`), the
+same code. A Code chat that works directly is Claude Code's own session:
+its questions are Claude Code's `AskUserQuestion` ([yap-code.md](./yap-code.md#the-agent-tab)),
+now on the same form.
+
+- **Where** (`Cards::for_turn`, the turn's `Gates::cards`): a model that calls
+  tools, in Chat or the Voice Assistant, never across the meetings. A
+  question needs someone to answer it: never a phone's question (its page
+  shows no cards; `cards::from_phone`, the turn's network receipts), and a
+  Code chat's turn in Bypass permissions asks nothing (left to the model). The
+  next-step box needs Chat in view (its buttons are in the thread). A chapter
+  goes anywhere in a chat. A plan session lists what any of its turns could
+  use (`plan.rs` `session_cards`), each turn using what its own gates say
+  (`turn::Context::cards`). A small context sheds them first (`fit.rs`
+  `Family::Cards`). The prompt's lines say when (`Cards::instructions`).
+- **A question** (`cards/ask.rs`, `ask_user`; Claude Code's own
+  `AskUserQuestion` shape): one to four questions (`questions_of`: each with
+  its text and a header, two to four options with a label and a description,
+  an option's `preview` in markdown, `multiSelect`), the recommended option
+  first. Its card goes through the cards that ask first
+  (`pages/act/confirm.rs`, act "question", `Card::question` =
+  `QuestionCard {questions, answers, said, voice}`), so it shows on the
+  answer being written, a ■ Stop drops it, and the answer keeps it
+  (`ChatMessage::confirms`). The turn waits for the answer, at most
+  `ask::WAIT` (10 minutes, a Code chat's question's own wait).
+  - **On screen** (`ChatQuestion.svelte` in `PageConfirm`'s chunk, the form
+    `QuestionForm.svelte` shared with a Code chat's `AgentApprove`): "A
+    question for you", each question with its header chip, its options as
+    buttons with their descriptions, the preview of the one pointed at or
+    focused (else the one picked, else the first) beside them (under them on
+    a narrow card), **Something else…** for the person's own words, **Let Yap
+    decide**. One question with one answer: the click on an option answers
+    it; several, or several picks: **Send** (`core/agentNow.js`
+    `questionAnswers`). Once answered **the question and the choice stay in
+    the thread**, quiet, as the Claude app keeps them: each question in bold,
+    what was picked under it, "You said: …" for a spoken answer, or "Left to
+    Yap to decide".
+  - **Answered** (`chat_question_answer {id, answers}`, `answers` null: Let
+    Yap decide): `confirm::Reply::Picked` → each question's text → a label,
+    several joined with ", ", or the person's own words (`answers_for`, only
+    the card's own questions). The model reads `{answers}` (and `said`), or —
+    left to it, or nobody answering in time — "make the most sensible choice
+    yourself… say what you chose" (`ask::CHOOSE`).
+  - **Asked out loud** (the Voice Assistant, `assistant/spoken_ok.rs`): Yap
+    says the first question and its options ("Which format should the trip
+    notes use: Markdown or Plain text? Say one, or pick on the card.",
+    `ask::spoken_line`) and the bar shows it (`ask::bar_card`: one question
+    of two options, the two as its buttons; otherwise its options listed and
+    **Answer in Chat**; **Let Yap decide** under them). Not a yes or no:
+    **whatever the person says next in that conversation**, within the
+    question's wait, is its answer (`spoken_ok::Spoken::Words`,
+    `ask::answer_said`) — matched to an option where it names one
+    (`ask::heard`: a label's words without a note in brackets — "camping
+    stove" for "Camping stove (Recommended)" —, the label said as one word, a
+    label of three words or more with one left out when only one option fits
+    — "gas stove" for "Gas camping stove", Opus's own options in Lab —, or
+    its place — "the second one", "option three", "the last" — for a single question;
+    "you decide", "either" leave it to the model) and the words themselves
+    always given (`said`). Never during a meeting (the assistant is off then).
+- **The next-step box** (`cards/next_step.rs`, `suggest_next_step`): a one or
+  two sentence recap and, when there's something to decide, one question and
+  one or two buttons (`{label, reply?}`, the model's pick first, drawn as
+  the primary). `Event::NextStep`, kept with the answer
+  (`ChatMessage::next_step`, `chats::set_cards`); shown under the
+  conversation's **latest** answer only (`NextStepBox.svelte`), once it's
+  written. A click sends the button's words (its `reply`, else its label) as
+  the person's next message (`chatState.sendNextStep`), as if typed; the box
+  goes once anything follows. No chip of its own.
+- **Chapters** (`cards/chapters.rs`, `mark_chapter`): a short title (and a
+  line on what it covers) where the talk or the work moves on.
+  `Event::Chapter`, kept with the answer (`ChatMessage::chapter`); refused on
+  a chat's first question (its start is the first chapter already); one a
+  turn. The thread draws a divider with the title above the question that
+  started it (`views/chat/chapters.js` `chaptersOf`), and while the chat has
+  any, **the contents** float at its top right (`ChatChapters.svelte`): the
+  chapter being read, opening to Start and each title, a click scrolling to
+  its divider. No chip of its own.
+- An older Yap's save drops `next_step`, `chapter` and a card's `question`
+  (the answer stays). The log has ids, counts and outcomes, never a question,
+  an option, an answer or a title.
+- Tests: `cargo test chat::cards` (the gate, the questions read, answers and
+  spoken replies matched, the bar card, the box, chapters), `spoken_ok` (a
+  question's card takes the next words), `claude_live::cards`; e2e
+  `chat-cards.spec.js` (a question with its preview answered by a click and
+  kept; several sent together; Let Yap decide; chapters and the contents; the
+  box's button; asked out loud and answered "the second one"), and
+  `agents-direct.spec.js` for a Code chat's question on the shared form.

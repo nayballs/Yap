@@ -554,12 +554,52 @@ async function branchTurn(how, text) {
 
 // ---------------------------------------------------------------- cards
 
+/**
+ * **A question card of Chat's own model** (chat/cards/ask.rs) answered as the person would, on the card in the
+ * thread when it's there: `picks` one entry a question (its labels joined with ","), `null` Let Yap decide.
+ * A single question with one answer: its option clicked; otherwise each picked, then Send.
+ */
+async function answerQuestion(card, picks) {
+  const id = Number(card.id.split(':')[1]);
+  const box = main().locator(`[data-testid="chat-question-card"][data-state="asking"]`).first();
+  const onScreen = await box.isVisible().catch(() => false);
+  if (picks == null) {
+    if (onScreen) {
+      await box.getByRole('button', { name: 'Let Yap decide' }).click({ timeout: 5_000 });
+      return true;
+    }
+    return invoke('chat_question_answer', { id, answers: null });
+  }
+  const qs = card.questions ?? [];
+  const answers = Object.fromEntries(qs.map((q, i) => [q.question, q.multiSelect ? String(picks[i] ?? '').split(',').map((s) => s.trim()).filter(Boolean) : String(picks[i] ?? '').trim()]).filter(([, a]) => (Array.isArray(a) ? a.length : a)));
+  if (onScreen && qs.length === 1 && !qs[0].multiSelect && qs[0].options.includes(answers[qs[0].question])) {
+    await box.getByTestId('chat-question-option').filter({ has: main().locator('.qlabel', { hasText: answers[qs[0].question] }) }).first().click({ timeout: 5_000 });
+    return true;
+  }
+  return invoke('chat_question_answer', { id, answers });
+}
+
+/** The question card the current turn waits on, if one (chat/cards/ask.rs). */
+async function waitingQuestion() {
+  readRecord();
+  const cards = cardsOf(turn?.items ?? [], { approvals: [], agents: [] });
+  return pendingOf(cards).find((c) => c.kind === 'question' && !turn.answered.has(c.id)) ?? null;
+}
+
 /** Answer `card` as the person would: "allow" (Allow once / Go ahead), "deny", or "always" (a connector's Always allow). */
-async function answerCard(card, how) {
+async function answerCard(card, how, pick) {
   const [kind, raw] = card.id.split(/:(.*)/s);
   const allow = how !== 'deny';
   let answered;
-  if (kind === 'confirm') {
+  if (kind === 'confirm' && card.kind === 'question' && how === 'said') {
+    // Out loud: the Voice Assistant's next question in that chat, its words the answer (spoken_ok.rs).
+    await invoke('e2e_assistant_ask', { text: String(pick ?? ''), listenMs: 300 });
+    answered = true;
+  } else if (kind === 'confirm' && card.kind === 'question') {
+    // "allow": each question's first option; "pick": the labels given; "deny": Let Yap decide.
+    const picks = how === 'deny' ? null : how === 'pick' ? String(pick ?? '').split('|') : (card.questions ?? []).map((q) => q.options?.[0] ?? '');
+    answered = await answerQuestion(card, picks);
+  } else if (kind === 'confirm') {
     answered = card.kind === 'connector'
       ? await invoke('chat_connector_confirm', { id: Number(raw), answer: how === 'always' ? 'always' : allow ? 'once' : 'deny' })
       : await invoke('chat_page_confirm', { id: Number(raw), allow });
@@ -993,6 +1033,12 @@ const COMMANDS = {
       await main().getByRole('button', { name: 'Send', exact: true }).click({ timeout: 10_000 });
       return { sentWhile: true, turn: turn?.n ?? null, turnStatus: turn?.status ?? null };
     }
+    // **A question card waiting, answered out loud** (chat/cards/ask.rs): asked out loud in the same chat, the
+    // words are its answer and the turn it belongs to goes on, as `answer <id> said "<words>"`.
+    if (a.spoken && (a.chat ?? 'new') === 'same' && turn && !turn.finalized) {
+      const card = await waitingQuestion();
+      if (card) return COMMANDS.answer({ ...a, _: [card.id, 'said', String(a.text ?? '')] });
+    }
     // (Retry the last answer, or Edit the last message to these words: in the chat shown.)
     const how = a.retry ? 'retry' : a.edit ? 'edit' : 'ask';
     const text = how === 'retry' ? String(a.text ?? '').trim() || 'Retry' : a.text;
@@ -1016,18 +1062,23 @@ const COMMANDS = {
   pick: async (a) => pick(a),
   set: async (a) => setThings(a),
   answer: async (a) => {
-    const [id, how = 'allow'] = a._;
-    if (!id) throw new Error('Which card? answer <card-id> allow|deny|always');
-    if (!['allow', 'deny', 'always'].includes(how)) throw new Error('A card is answered allow, deny or always');
+    const [id, how = 'allow', ...rest] = a._;
+    if (!id) throw new Error('Which card? answer <card-id> allow|deny|always, or a question: pick "<option>"');
+    if (!['allow', 'deny', 'always', 'pick', 'said'].includes(how)) throw new Error('A card is answered allow, deny or always (a question: pick "<option>", or said "<words>")');
+    const pick = a.pick ?? rest.join(' ');
+    if (how === 'pick' && !String(pick).trim()) throw new Error('pick what? answer <card-id> pick "<option>" ("A|B" for several questions, "A,B" for several picks)');
+    if (how === 'said' && !String(pick).trim()) throw new Error('said what? answer <card-id> said "<words>" (a question asked out loud)');
     readRecord();
     const approvals = (await tryInvoke('claude_approve_pending', {}, [])) ?? [];
     const cards = cardsOf(turn?.items ?? [], { approvals, agents: await agentsNow() });
     // (A card the record hasn't shown: answered by its kind.)
     const prefix = /^(confirm|approve|plan):/.exec(id)?.[1];
+    // (A question card the record hasn't shown can't be answered by its labels: it must be in the turn.)
     const card = cards.find((c) => c.id === id) ?? (prefix ? { id, kind: prefix === 'confirm' ? 'page' : prefix } : null);
     if (!card) throw new Error(`No card ${id}: the cards are ${cards.map((c) => c.id).join(', ') || 'none'}`);
     if (how === 'always' && card.kind !== 'connector') throw new Error('Only a connector’s card has Always allow');
-    const answered = await answerCard(card, how);
+    if ((how === 'pick' || how === 'said') && card.kind !== 'question') throw new Error('Only a question card is answered with pick or said');
+    const answered = await answerCard(card, how, pick);
     const answeredNote = { answered: { id, how, wasWaiting: !!answered } };
     // An agent's card: the agents, as they go on.
     if (card.kind === 'approve' || card.kind === 'plan' || !turn || turn.finalized) {
