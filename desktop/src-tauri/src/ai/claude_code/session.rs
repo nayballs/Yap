@@ -466,7 +466,8 @@ pub fn environment(
     let mut env = cli::clean_env(inherited);
     env.retain(|(k, _)| !k.to_string_lossy().eq_ignore_ascii_case(RUN_KEY_VAR));
     for (name, value) in extra {
-        if name.is_empty() || name.contains('=') || !cli::keeps_env(name) {
+        let own = cli::RUN_SETS_ENV.iter().any(|v| v.eq_ignore_ascii_case(name));
+        if name.is_empty() || name.contains('=') || !(cli::keeps_env(name) || own) {
             return Err(format!("{name} can't be set for a Claude Code run: it would change how Claude Code signs in or pays."));
         }
         env.retain(|(k, _)| !k.to_string_lossy().eq_ignore_ascii_case(name));
@@ -1236,6 +1237,12 @@ mod tests {
         for sneaky in ["ANTHROPIC_API_KEY", "anthropic_auth_token", "CLAUDE_CODE_USE_BEDROCK", "CLAUDECODE", "", "A=B"] {
             assert!(environment(inherited.clone(), &Pay::Plan, &[(sneaky.into(), "x".into())]).is_err(), "{sneaky}");
         }
+        // Claude Code's to-do switches: set by a run of Yap's, never kept from Yap's own environment.
+        let mut with_todos = inherited.clone();
+        with_todos.push((OsString::from("CLAUDE_CODE_ENABLE_TASKS"), OsString::from("1")));
+        assert_eq!(get(&environment(with_todos.clone(), &Pay::Plan, &[]).unwrap(), "CLAUDE_CODE_ENABLE_TASKS"), None);
+        let todos = environment(with_todos, &Pay::Plan, &[("CLAUDE_CODE_ENABLE_TODO_TOOLS".into(), "1".into()), ("CLAUDE_CODE_ENABLE_TASKS".into(), "0".into())]).unwrap();
+        assert_eq!((get(&todos, "CLAUDE_CODE_ENABLE_TODO_TOOLS").as_deref(), get(&todos, "CLAUDE_CODE_ENABLE_TASKS").as_deref()), (Some("1"), Some("0")));
         let moved = environment(inherited.clone(), &Pay::Plan, &[("CLAUDE_CONFIG_DIR".into(), "E:\\other".into())]).unwrap();
         assert_eq!(get(&moved, "CLAUDE_CONFIG_DIR").as_deref(), Some("E:\\other"));
         assert_eq!(moved.iter().filter(|(k, _)| k.to_string_lossy().eq_ignore_ascii_case("CLAUDE_CONFIG_DIR")).count(), 1);

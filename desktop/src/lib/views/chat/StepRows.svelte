@@ -47,8 +47,11 @@
   const PIC_W = 280;
   const PIC_H = 180;
 
-  /** `steps`: a stretch's (`workOf`); `busy`: the agent is on its last one now; `onview(picture)`: open a step's picture. */
-  let { steps = [], busy = false, onview = null } = $props();
+  /**
+   * `steps`: a stretch's (`workOf`); `busy`: the agent is on its last one now; `onview(picture)`: open a step's picture;
+   * `allOpen`: every row open unless the person folds it (the thread's Verbose view).
+   */
+  let { steps = [], busy = false, onview = null, allOpen = false } = $props();
   // **A step's file opens beside the chat** (a Code chat's: ChatView's context, agents/files.rs): an
   // edit's path over its diff, a read's name (at the first line it read).
   const codeFiles = getContext(CODE_FILES) ?? null;
@@ -71,18 +74,25 @@
   }
   const openFile = (s) => codeFiles?.open?.({ rel: String(stepFile(s)).replace(/\\/g, '/'), line: stepLine(s) });
 
-  /** The rows the person opened (by their place: a row keeps it as more come). */
+  /** The rows the person opened or folded (by their place: a row keeps it as more come). */
   let open = $state({});
   /** The highlighter, once it has loaded (never made reactive inside: it's a library's object). */
   let colours = $state.raw(null);
+  const loadOnce = () => {
+    if (colours) return;
+    loadColours()
+      .then((h) => (colours = h))
+      .catch(() => {});
+  };
+  const rowOpen = (k) => open[k] ?? allOpen;
   function toggle(k) {
-    open = { ...open, [k]: !open[k] };
-    if (!colours) {
-      loadColours()
-        .then((h) => (colours = h))
-        .catch(() => {});
-    }
+    open = { ...open, [k]: !rowOpen(k) };
+    loadOnce();
   }
+  // (Verbose: its rows open at once, so their colours come too.)
+  $effect(() => {
+    if (allOpen) loadOnce();
+  });
   let gone = $state({});
   /** A piece's classes: its colour's, and "chg" on the part that was replaced. */
   const pieceClass = (p) => [p.kind ? `syn-${p.kind}` : '', p.changed ? 'chg' : ''].filter(Boolean).join(' ') || undefined;
@@ -108,7 +118,7 @@
     {@const going = now || out}
     {@const r = { ...stepRow(s, going), times }}
     {@const can = stepOpens(s)}
-    {@const isOpen = can && !!open[k]}
+    {@const isOpen = can && rowOpen(k)}
     {@const pics = (s.pictures || []).filter((p) => !gone[p.id])}
     <li class="row" data-testid="chat-agent-work-row" data-kind={stepKind(s)} data-open={isOpen ? 'true' : 'false'}>
       <div class="rline">
@@ -173,7 +183,7 @@
           {#if s.helped?.length}
             <div class="helped" data-testid="chat-agent-work-helper">
               <!-- (While the session waits on its helper, the helper's last step is the one being done.) -->
-              <StepRows steps={s.helped} busy={out || (now && !s.back)} {onview} />
+              <StepRows steps={s.helped} busy={out || (now && !s.back)} {onview} {allOpen} />
             </div>
           {/if}
           {#each pics as p (p.id)}

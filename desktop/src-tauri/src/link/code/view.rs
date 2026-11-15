@@ -52,11 +52,14 @@ pub fn worth_listing(agents: &[Agent], now: u64) -> Vec<&Agent> {
     out
 }
 
-/// What a command printed is for its row in the PC's thread: a phone's view
-/// has no such row, so its text never goes (`output` null). Pure.
+/// What a command printed is for its row in the PC's thread, and Claude's
+/// thinking for the thread's Thinking view: a phone's view has neither, so
+/// their text never goes (`output`, `thought` null). Pure.
 fn without_output(event: &mut Value) {
-    if event.get("output").is_some_and(|o| !o.is_null()) {
-        event["output"] = Value::Null;
+    for key in ["output", "thought"] {
+        if event.get(key).is_some_and(|o| !o.is_null()) {
+            event[key] = Value::Null;
+        }
     }
 }
 
@@ -246,6 +249,10 @@ mod tests {
         let printed = json!({ "id": "ab12", "call": "toolu_1", "output": { "text": "3 passed" } });
         assert_eq!(live(printed.clone()), json!({ "id": "ab12", "call": "toolu_1", "output": null }));
         assert_eq!(stripped(printed), json!({ "id": "ab12", "call": "toolu_1", "output": null }));
+        // Nor does its thinking.
+        let thought = json!({ "id": "ab12", "thought": "Check the notes first." });
+        assert_eq!(live(thought.clone()), json!({ "id": "ab12", "thought": null }));
+        assert_eq!(stripped(thought), json!({ "id": "ab12", "thought": null }));
     }
 
     #[test]

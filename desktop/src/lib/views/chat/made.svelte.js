@@ -98,6 +98,19 @@ export function questionIndex(messages, after) {
   return best;
 }
 
+/**
+ * Was `thing` (a visual, or a page's version: its `at`) made by the turn of `answer`, the version shown of
+ * `fork` (none: it has no other)? Retry and Edit keep every answer (chat/chats/branches.rs): a retried one
+ * shows only what its own turn made — after the version before it (`since`), by the time it was saved.
+ */
+function ownVersion(thing, answer, fork) {
+  if (!fork) return true;
+  const made = Math.floor((Number(thing?.at) || 0) / 1000);
+  if (!made) return true;
+  const saved = Number(answer?.ts) || 0;
+  return made > (Number(fork.since) || 0) && (!saved || made <= saved);
+}
+
 /** The answer to the question at `q`: its index, or `q` itself while there's none yet. Pure. */
 function answerOf(messages, q) {
   for (let i = q + 1; i < messages.length; i++) {
@@ -112,25 +125,27 @@ function answerOf(messages, q) {
  * **Where each thing made shows** in `messages`: in the first answer after its question (`inAnswer`, above
  * the answer's words), or — no answer yet (a Code chat's Claude still working) — under the question's
  * own work. A visual by the question it was made for; a page's card once for each version, by the
- * question whose answer saved it. `Map<index, { inAnswer, visuals, pages: [{page, version}] }>`, each in
- * the order made. Pure.
+ * question whose answer saved it. `forks`: the chat's versions (chat_get's `forks`,
+ * chat/chats/branches.rs): an answer shows only what its own version's turn made ([`ownVersion`]).
+ * `Map<index, { inAnswer, visuals, pages: [{page, version}] }>`, each in the order made. Pure.
  */
-export function placeMade(messages, items) {
+export function placeMade(messages, items, forks = []) {
   const out = new Map();
   if (!items?.length || !messages?.length) return out;
-  const slot = (q) => {
+  const place = (q, thing, add) => {
     const { at, inAnswer } = answerOf(messages, q);
+    if (inAnswer && !ownVersion(thing, messages[at], (forks || []).find((f) => f.at === at))) return;
     if (!out.has(at)) out.set(at, { inAnswer, visuals: [], pages: [] });
-    return out.get(at);
+    add(out.get(at));
   };
   for (const v of items) {
     if (v?.kind === 'visual') {
       const q = questionIndex(messages, v.after);
-      if (q >= 0) slot(q).visuals.push(v);
+      if (q >= 0) place(q, v, (s) => s.visuals.push(v));
     } else if (v?.kind === 'page') {
       for (const version of v.versions || []) {
         const q = questionIndex(messages, version.after);
-        if (q >= 0) slot(q).pages.push({ page: v, version });
+        if (q >= 0) place(q, version, (s) => s.pages.push({ page: v, version }));
       }
     }
   }
@@ -138,6 +153,6 @@ export function placeMade(messages, items) {
 }
 
 /** [`placeMade`]'s visuals alone (`Map<index, {inAnswer, visuals}>`). Pure. */
-export function placeVisuals(messages, items) {
-  return new Map([...placeMade(messages, items)].filter(([, s]) => s.visuals.length));
+export function placeVisuals(messages, items, forks = []) {
+  return new Map([...placeMade(messages, items, forks)].filter(([, s]) => s.visuals.length));
 }

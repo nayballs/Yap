@@ -569,7 +569,7 @@ fn open(t: &Asked<'_>, conversation_id: Option<u64>, asked: impl FnOnce(u64, usi
     crate::apps::moved_on(Some(conv.id));
     // The question, with the screenshots it carries (Snip to Chat, the
     // turn's `snip::turn`): kept with it in chats.json as ids.
-    let user_index = crate::chat::chats::append_question(conv.id, &t.text, t.by_voice, &crate::snip::turn::images())?;
+    let user_index = save_question(conv.id, &t.text, t.by_voice, &crate::snip::turn::images())?;
     // A passage selected in the document panel ("Change this…", documents.rs):
     // kept with the question, its quote above it.
     let selection = crate::chat::documents::selection();
@@ -634,7 +634,13 @@ fn superseded() -> String {
 /// words: a screenshot's text sent with it (`snip::ocr`) isn't the title.
 fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chat::chats::Conversation {
     match conversation_id.and_then(crate::chat::chats::get) {
-        Some(c) => c,
+        // Answered again (Retry): the conversation as it was before its question.
+        Some(mut c) => {
+            if let Some(q) = asked_again(Some(c.id)) {
+                c.messages.truncate(q);
+            }
+            c
+        }
         None => {
             let text = crate::snip::ocr::question_of(text);
             let title: String = if text.chars().count() > 50 {
@@ -644,6 +650,37 @@ fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chat::c
             };
             crate::chat::chats::create(&title)
         }
+    }
+}
+
+// **Asked again** (15 Nov 2026, Retry: `chat_retry`): the question saved
+// already, answered once more — its answer and what came after set aside as
+// a branch (`chats::begin_retry`).
+tokio::task_local! {
+    static AGAIN: (u64, usize);
+}
+
+/// **[`chat_turn`] answering conversation `conversation`'s question
+/// `question` again** (Retry): that question is the turn's, never saved a
+/// second time ([`save_question`]), and the history before it is the
+/// conversation's up to it ([`turn_conversation`]); every path a turn takes —
+/// Yap's own answers too (`fast.rs`) — saves just the answer after it.
+pub(crate) async fn again<F: std::future::Future>(conversation: u64, question: usize, turn: F) -> F::Output {
+    AGAIN.scope((conversation, question), turn).await
+}
+
+/// The question being answered again in `conversation`, if one is.
+fn asked_again(conversation: Option<u64>) -> Option<usize> {
+    AGAIN.try_with(|(c, q)| (Some(*c) == conversation).then_some(*q)).ok().flatten()
+}
+
+/// **The person's question saved** in conversation `conv` with the
+/// screenshots it carries — or, answered again ([`again`]), where it is
+/// already. Its index.
+fn save_question(conv: u64, text: &str, by_voice: bool, images: &[crate::chat::chats::ChatImage]) -> Result<usize, String> {
+    match asked_again(Some(conv)) {
+        Some(q) => Ok(q),
+        None => crate::chat::chats::append_question(conv, text, by_voice, images),
     }
 }
 
@@ -804,5 +841,26 @@ mod tests {
         let ep = Endpoint::resolve(&chat_on("groq", "https://api.groq.com/openai/v1", "openai/gpt-oss-20b")).unwrap();
         assert!(ep.persona.contains("running on GPT-OSS 20B, served by Groq."), "{}", ep.persona);
         assert_eq!(ep.persona.matches("You are Yap's assistant").count(), 1);
+    }
+}
+
+#[cfg(test)]
+mod again_tests {
+    use super::*;
+
+    /// Retry's turn (`again`): the question it answers again is never saved a
+    /// second time, and the history before it is the conversation's up to it.
+    #[test]
+    fn a_question_answered_again_is_never_saved_twice() {
+        let c = crate::chat::chats::create("Trip");
+        crate::chat::chats::append(c.id, "user", "Pack list?", &[], None, false).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let (index, before) = rt.block_on(again(c.id, 0, async {
+            (save_question(c.id, "Pack list?", false, &[]).unwrap(), turn_conversation(Some(c.id), "Pack list?").messages.len())
+        }));
+        assert_eq!((index, before), (0, 0));
+        assert_eq!(crate::chat::chats::get(c.id).unwrap().messages.len(), 1);
+        // Another conversation's question, or none answered again: saved as ever.
+        assert_eq!(save_question(c.id, "And shoes?", false, &[]).unwrap(), 1);
     }
 }

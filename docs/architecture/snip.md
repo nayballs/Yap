@@ -427,6 +427,9 @@ has the teardown and the numbers) and ported, not copied:
 - **Opened large** (ShotViewer.svelte): a darker scrim
   (`--yap-shot-scrim`), the whole picture 1:1 when it fits the window less
   32 px all round, else as big as fits; the frame and the modal shadow.
+  A Code chat's step pictures come paged (2026-11-15): ‹ 2 of 4 › at the
+  foot, ← and →, the step's name in the top corner, in
+  `--yap-shot-on-scrim` ([yap-code.md](./yap-code.md#a-steps-pictures)).
 - **Crisp**: the browser never scales a picture. `chatImages.js` `placed`
   works out, from the picture's size, the box and `devicePixelRatio`
   (followed: `chatShots.svelte.js` `screenPixels`), the exact device pixels
