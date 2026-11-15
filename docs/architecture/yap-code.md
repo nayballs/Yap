@@ -770,7 +770,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
   - the address bar (`localhost:5173` opens it);
   - Claude's own navigation (`pages::checked`, and `browser_navigate`'s `act::go`: refused before 14 Nov 2026, Yap Lab found it).
   Never another port of this PC, and never once it stops. "Not secure" isn't shown for a localhost page, as browsers count it a secure context.
-- **The Dev servers menu** (`ServersMenu.svelte`, in the panel's tab row with the page's other buttons, after its +, as the Claude Code app has them; the browser opens with Ctrl+Shift+B, and a new tab lists the servers too, each with ▶):
+- **The Dev servers menu** (`ServersMenu.svelte`, in the panel's tab row with the page's other buttons, together at its right end, as the Claude Code app has them; the browser opens with Ctrl+Shift+B, and a new tab lists the servers too, each with ▶):
   - each server with its state (a dot) and ▶ start / ■ stop;
   - a running one's name opens its page;
   - Stop all;
@@ -820,7 +820,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
 
 ### The summary
 
-`SummaryTab.svelte`, a `summary` tab opened from the list button at the right of the panel's row of tabs (the row shows with two tabs or more, as before) or the title bar's (`stores/chatSummary.svelte.js`, a Code chat's only; it closes the panel while the summary shows, as the browser button does). After the Claude app's right column:
+`SummaryTab.svelte`, a `summary` tab opened from the title bar's list button (`stores/chatSummary.svelte.js`, a Code chat's only, between Outputs and the browser; it closes the panel while the summary shows, as the browser button does). Until 15 Nov the panel's row of tabs had a copy at its right end; it went so the row keeps only its tabs, + and the page's buttons, together at its right (the copy and the page's buttons each pushed right, so the page's sat mid-row). After the Claude app's right column:
 
 - **Environment** (`code_chat_environment`): the workspace's name and path, its git branch (a detached HEAD's commit), **Worktree** for a linked worktree, "Runs on this PC". Read from `.git` itself: a `.git` file whose `gitdir:` points into `<repo>/.git/worktrees/` is a worktree; no git is run.
 - **Context**: how full the chat's context is, from what Yap knows already: its own Claude's latest turn (a Code chat that works directly: `agents/usage.rs`), else the plan's count for the chat, else the context ring's (`chat_context`).
@@ -2881,7 +2881,7 @@ the build's own stand-in replaying `script` from now on),
     unasked, its output in the Runs tab, Add to message, nothing asked under
     Bypass, a long run's clock and Stop in the summary's Background tasks;
     the summary's Environment (branch, Worktree), Context, Connectors and
-    Outputs, from the title bar and the row; a Chat (non-Code) chat with none
+    Outputs, from the title bar (the row has no copy); a Chat (non-Code) chat with none
     of it. Unit (`cargo test agents::files`, `agents::run_block`): every
     escape refused (`..`, full paths outside, device and network paths,
     streams, a junction to a folder outside), a file read capped and binary

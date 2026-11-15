@@ -201,8 +201,8 @@ test('a page to keep: saved, beside the chat, a card a version, ‹ › between 
   expect(fs.readFileSync(path.join(folder, `${id}.v1.html`), 'utf8')).toBe(page(15));
   expect(fs.readFileSync(path.join(folder, `${id}.v2.html`), 'utf8')).toBe(page(20));
 
-  // Outputs (the panel's button): the page, two versions; it opens.
-  await main.getByTestId('chat-panel-outputs').click();
+  // Outputs (the title bar's button): the page, two versions; it opens.
+  await main.getByTestId('chat-outputs-button').click();
   const outputs = main.getByTestId('chat-outputs');
   await expect(outputs).toBeVisible();
   const row = outputs.getByTestId('chat-output').filter({ hasText: 'Tip calculator' });
@@ -243,6 +243,17 @@ test('Outputs: every page, document and file the chat made, from its ⋯', async
   // Back to Outputs from its tab; then closed.
   await main.getByTestId('chat-panel-tab').filter({ hasText: 'Outputs' }).click();
   await expect(outputs).toBeVisible();
+  // The title bar's button (pressed while Outputs shows) closes the panel, and opens Outputs again from the page.
+  const button = main.getByTestId('chat-outputs-button');
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await button.click();
+  await expect(outputs).toHaveCount(0);
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await button.click();
+  await expect(outputs).toBeVisible();
+  // The panel's row has the tabs and +, and none of the chat's own buttons (they're the title bar's).
+  await expect(main.getByTestId('chat-panel-outputs')).toHaveCount(0);
+  await expect(main.getByTestId('chat-panel-summary')).toHaveCount(0);
 });
 
 test('refused: a page id that isn’t this chat’s', async ({ main, fakeLlm }) => {
