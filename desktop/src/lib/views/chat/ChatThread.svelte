@@ -37,10 +37,15 @@
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { chatStatus } from '../../stores/chatStatus.svelte.js';
   import QueuedMessage from './QueuedMessage.svelte';
+  // A long chat's chapters (chat/cards/chapters.rs): a divider above the question each starts at, and the
+  // floating contents (ChatChapters, its own chunk) to jump between them.
+  import { chaptersOf } from './chapters.js';
   // What the chat made (chat/made.rs): its visuals and its kept pages' cards, each in the answer to its question.
   import { made, followMade, onMade, placeMade, promptFromVisual } from './made.svelte.js';
 
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
+  const chapters = $derived(chaptersOf(chat.messages));
+  const chapterAt = $derived(new Map(chapters.map((c) => [c.at, c])));
   // **Visuals** (chat/made.rs, 15 Nov 2026): read with the chat, heard as they're made; each shows in the
   // answer to its question (above its words), or under the question's work while there's no answer yet.
   followMade();
@@ -369,6 +374,15 @@
               <span class="rule"></span>
             </div>
           {/if}
+          {#if chapterAt.has(i)}
+            <!-- A new chapter starts at this question (mark_chapter): its title, as a divider. -->
+            {@const c = chapterAt.get(i)}
+            <div class="chapterdiv" role="separator" aria-label={`Chapter: ${c.title}`} title={c.summary || undefined} data-testid="chat-chapter">
+              <span class="rule"></span>
+              <span class="ctitle">{c.title}</span>
+              <span class="rule"></span>
+            </div>
+          {/if}
           {#if m.kind === 'agentReport'}
             {#if !quietReport(m)}
               {#await import('./AgentReportCard.svelte') then { default: AgentReportCard }}
@@ -395,6 +409,8 @@
               conversation={chat.activeId}
               onshared={openShared}
               actions={m.role === 'user' ? actionsFor(m) : null}
+              onnext={(b) => chat.sendNextStep(b)}
+              busy={chat.sending}
               visuals={placed.get(i)?.inAnswer ? placed.get(i).visuals : null}
               keptPages={placed.get(i)?.inAnswer ? placed.get(i).pages : null}
               onvisualprompt={(text, v) => sendFromVisual(text, v, chat.activeId)}
@@ -512,6 +528,12 @@
         {/each}
       </div>
     </div>
+    {#if chapters.length}
+      <!-- The chat's contents: its chapters, to jump between (its own chunk). -->
+      {#await import('./ChatChapters.svelte') then { default: ChatChapters }}
+        <ChatChapters {chapters} thread={chat.threadEl} />
+      {/await}
+    {/if}
     {#if !pinned}
       <!-- Scrolled up: back to the newest, following it again. -->
       <button
@@ -570,6 +592,29 @@
     margin-top: 2px;
   }
   /* Where the summary takes over: a thin rule, quiet words, Show summary. */
+  /* A chapter's divider (mark_chapter): its title between two rules, a touch stronger than the summary's. */
+  .chapterdiv {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 14px 0 4px;
+    color: var(--yap-fg);
+    font-size: 12px;
+    font-weight: 600;
+    scroll-margin-top: 40px;
+  }
+  .chapterdiv .rule {
+    flex: 1 1 16px;
+    height: 1px;
+    background: var(--yap-border-subtle);
+  }
+  .chapterdiv .ctitle {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .summarised {
     display: flex;
     align-items: center;

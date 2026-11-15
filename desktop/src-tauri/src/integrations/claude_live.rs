@@ -77,6 +77,7 @@
 
 mod approve;
 pub mod backup;
+mod cards;
 pub mod connectors;
 pub mod eyes;
 mod agents;
@@ -197,11 +198,23 @@ pub struct RunSpec {
     /// the screen or connectors; never an agent Chat sent out (Chat's model
     /// reads for its brief). Its browser is [`RunSpec::eyes`]'.
     pub reads: bool,
+    /// **The cards in the thread** (`chat/cards.rs`, [`cards`]): a Chat
+    /// run's `ask_user`, `suggest_next_step` and `mark_chapter`, listed for
+    /// the whole session as its other tools are (in the session's
+    /// fingerprint, `chat/turn/plan.rs`); each turn says what it may use
+    /// (`turn::Context::cards`). Never an agent's run.
+    pub cards: crate::chat::cards::Cards,
 }
 
 impl RunSpec {
     pub fn new(label: impl Into<String>, tools: Tools) -> RunSpec {
-        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), connectors: None, reads: false }
+        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), connectors: None, reads: false, cards: crate::chat::cards::Cards::default() }
+    }
+
+    /// The same, with the cards in the thread a Chat run's turns may use.
+    pub fn with_cards(mut self, cards: crate::chat::cards::Cards) -> RunSpec {
+        self.cards = cards;
+        self
     }
 
     /// The same, offered Yap Code's tools (`on`).
@@ -249,6 +262,8 @@ pub struct RunHandle {
     reads: bool,
     /// Its workspace's dev servers offered (`preview_*`, `rpc::servers_offered`).
     servers: bool,
+    /// The cards in the thread ([`RunSpec::cards`], a Chat run's).
+    cards: crate::chat::cards::Cards,
     has_backup: bool,
     /// The chat turn its calls belong to ([`RunHandle::begin_turn`]).
     turn: Arc<turn::Slot>,
@@ -336,6 +351,7 @@ impl RunHandle {
     pub fn allowed_tools(&self) -> Vec<String> {
         rpc::tool_names(self.tools, true, self.agents, self.memory, self.eyes, self.reads)
             .into_iter()
+            .chain(if self.tools == Tools::Chat { self.cards.names() } else { Vec::new() })
             .filter(|n| *n != approve::NAME)
             .chain(if self.servers { crate::chat::pages::preview::NAMES } else { &[] }.iter().copied())
             .map(str::to_string)

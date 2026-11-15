@@ -20,7 +20,7 @@ use serde_json::{json, Map, Value};
 
 use super::reads::Via;
 use super::server::{Endpoint, Run};
-use super::{approve, connectors, eyes, agents, reads, RunSpec, Tools};
+use super::{approve, cards, connectors, eyes, agents, reads, RunSpec, Tools};
 
 /// The protocol versions Yap answers `initialize` in, newest first: the
 /// 2025 era Claude Code speaks after its `server/discover` probe.
@@ -183,8 +183,8 @@ fn instructions(spec: &RunSpec) -> String {
     let files_only = spec.eyes.files_only() && spec.eyes.screen == crate::chat::pictures::Gate::Off;
     let chat = || if files_only { format!("{base} {FILES_INSTRUCTIONS}") } else if spec.eyes.any() { format!("{base} {EYES_INSTRUCTIONS}") } else { base.clone() };
     match spec.tools {
-        Tools::Chat if spec.agents => format!("{} {AGENT_INSTRUCTIONS}", chat()),
-        Tools::Chat => chat(),
+        Tools::Chat if spec.agents => with_cards(format!("{} {AGENT_INSTRUCTIONS}", chat()), spec.cards),
+        Tools::Chat => with_cards(chat(), spec.cards),
         Tools::Agent if spec.reads => [AGENT_RUN_INSTRUCTIONS, READS_INSTRUCTIONS]
             .into_iter()
             .chain(agent_eyes_lines(spec.eyes, spec.approval.as_ref().is_some_and(|a| a.unattended)))
@@ -193,6 +193,17 @@ fn instructions(spec: &RunSpec) -> String {
             .collect::<Vec<_>>()
             .join(" "),
         Tools::Agent => AGENT_RUN_INSTRUCTIONS.to_string(),
+    }
+}
+
+/// `base`, and the lines of the cards in the thread a Chat run lists
+/// (`chat/cards.rs`). Pure.
+fn with_cards(base: String, offered: crate::chat::cards::Cards) -> String {
+    let lines = offered.instructions();
+    if lines.is_empty() {
+        base
+    } else {
+        format!("{base} {lines}")
     }
 }
 
@@ -296,6 +307,8 @@ pub fn tools(ep: &Endpoint, spec: &RunSpec) -> Vec<Value> {
                 out.extend(agents::definitions());
             }
             out.extend(eyes::definitions(spec.eyes));
+            // The cards in the thread (chat/cards.rs): a question, the next-step box, chapters.
+            out.extend(cards::definitions(spec.cards));
             // Visuals in the answer itself, pages Yap keeps (chat/made.rs): each turn says whether it may.
             out.extend(made_tools());
             out.extend(spec.connectors.iter().flat_map(connectors::Listed::definitions));
@@ -380,6 +393,11 @@ fn call(ep: &Endpoint, run: &Run, id: Value, params: &Value) -> Value {
     // Only the run's own tools; `create_note` is never one (read only).
     // (Its workspace's dev servers, where it lists them: `servers_offered`.)
     let preview = servers_offered(&run.spec) && crate::chat::pages::preview::NAMES.contains(&name);
+    // The cards in the thread (a Chat run listing them): the tool loop's code, for the turn
+    // the call belongs to; a question waits here for the answer. It logs its own outcome.
+    if run.spec.tools == Tools::Chat && run.spec.cards.offers(name) {
+        return ok(id, cards::call(run, name, &args));
+    }
     if !preview && !tool_names(run.spec.tools, true, run.spec.agents, run.spec.memory, run.spec.eyes, run.spec.reads).contains(&name) {
         return error(id, INVALID_PARAMS, &format!("Unknown tool: {name}"));
     }

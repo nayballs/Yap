@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn a_question_reads_as_one_with_its_two_options_as_the_buttons_or_answered_in_yap() {
         use crate::integrations::claude_live::{Choice, Question};
-        let option = |label: &str| Choice { label: label.into(), description: String::new() };
+        let option = |label: &str| Choice { label: label.into(), ..Default::default() };
         let question = |options: &[&str], multi_select: bool| Question { question: "Which bed should get the watering line first?".into(), header: "Bed".into(), options: options.iter().map(|o| option(o)).collect(), multi_select };
         let asks = |questions: Vec<Question>| Pending { tool: "AskUserQuestion".into(), summary: "Which bed should get the watering line first?".into(), detail: String::new(), questions, ..pending(7, "agent1") };
         // One question of two options: they're the bar's two buttons.

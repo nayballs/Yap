@@ -77,79 +77,21 @@ pub const EXIT_PLAN: &str = "ExitPlanMode";
 const PLAN_MAX: usize = 20_000;
 /// Claude Code's tool for a question to the person.
 pub const ASK: &str = "AskUserQuestion";
-/// The most questions a card has, and options a question (Claude Code's own
-/// limits).
-const QUESTIONS_MAX: usize = 4;
-const OPTIONS_MAX: usize = 4;
-/// How long an answer in the person's own words may be.
-const ANSWER_MAX: usize = 2_000;
 /// What Claude Code is told when its question goes unanswered.
 const CHOOSE: &str = "Make the most sensible choice yourself, carry on, and say in your final summary what you chose and what you'd have asked.";
 
-/// **One of Claude Code's questions**, as the card shows it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Question {
-    /// The question, whole: the answer goes back under these very words.
-    pub question: String,
-    /// A word or two for it ("Format").
-    pub header: String,
-    pub options: Vec<Choice>,
-    /// Several of them may be picked.
-    pub multi_select: bool,
-}
+/// **One of Claude Code's questions**, and one answer it offers: the very
+/// question Chat's own model asks on its card (`chat/cards/ask.rs`), so both
+/// look and read the same — an option's preview too.
+pub use crate::chat::cards::ask::{questions_of, Question};
+#[cfg(test)]
+pub use crate::chat::cards::ask::Choice;
 
-/// One answer a question offers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Choice {
-    pub label: String,
-    pub description: String,
-}
-
-/// **The questions of an `AskUserQuestion` call**: each with its text and at
-/// least one option with a label, at most [`QUESTIONS_MAX`] of
-/// [`OPTIONS_MAX`] options. Pure.
-pub fn questions_of(input: &Value) -> Vec<Question> {
-    let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string();
-    input
-        .get("questions")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|q| {
-            let question = text(q, "question");
-            let options: Vec<Choice> = q
-                .get("options")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .map(|o| Choice { label: text(o, "label"), description: one_line(&text(o, "description"), 200) })
-                .filter(|o| !o.label.is_empty())
-                .take(OPTIONS_MAX)
-                .collect();
-            (!question.is_empty() && !options.is_empty()).then(|| Question { question, header: one_line(&text(q, "header"), 24), options, multi_select: q.get("multiSelect").and_then(Value::as_bool).unwrap_or(false) })
-        })
-        .take(QUESTIONS_MAX)
-        .collect()
-}
-
-/// **The person's answers as Claude Code takes them**: `given` (each
-/// question's text → a label, their own words, or a list of labels) kept
-/// for the card's own questions only, a list joined with ", ", their own
-/// words at most [`ANSWER_MAX`]. None: nothing was answered. Pure.
+/// **The person's answers as Claude Code takes them** (`chat/cards/ask.rs`'
+/// `answers_for`, as JSON): each question's text → what was picked or written.
+/// None: nothing was answered. Pure.
 pub fn answers_for(questions: &[Question], given: &Value) -> Option<Value> {
-    let mut out = serde_json::Map::new();
-    for q in questions {
-        let said = match given.get(&q.question) {
-            Some(Value::String(s)) => s.trim().to_string(),
-            Some(Value::Array(list)) => list.iter().filter_map(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(", "),
-            _ => String::new(),
-        };
-        if !said.is_empty() {
-            out.insert(q.question.clone(), Value::String(clip(&said, ANSWER_MAX)));
-        }
-    }
-    (!out.is_empty()).then_some(Value::Object(out))
+    crate::chat::cards::ask::answers_for(questions, given).map(|a| serde_json::to_value(a).unwrap_or(Value::Null))
 }
 /// What Claude Code is told when it asks during a Bypass permissions run.
 pub const UNATTENDED: &str = "This agent runs in Bypass permissions in Yap, so nobody is asked while it works, and this step needed asking (one of Claude Code's own safety checks, or one of the user's rules), so it wasn't done. Don't try it another way: carry on without it, and say in your final summary what you couldn't do.";
