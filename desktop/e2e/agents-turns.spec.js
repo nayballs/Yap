@@ -720,6 +720,26 @@ test('core/agents.js: an agent’s turns from its log, their words, the pills a 
   expect(rowSteps(plumbed, true).map((r) => [r.step.step, r.i, r.now])).toEqual([['Reading notes.md', 2, false], ['Not allowed: Bash', 3, false], ['Finding a tool', 4, true]]);
   expect(rowSteps([{ step: 'Finding a tool', pictures: [{ id: 'p' }] }]).length).toBe(1);
   expect(rowSteps(null)).toEqual([]);
+  // Another tool's call with nothing to show, made again and again (a plugin's progress ping, 15 Nov 2026):
+  // one row where it was first made, with how often; the rows between keep their order, and a call that has
+  // something to show (a picture) or is the one going now keeps its own row.
+  const pinged = [
+    { step: 'Using savvy-progress · progress' },
+    { step: 'Reading README.md' },
+    { step: 'Using savvy-progress · progress' },
+    { step: 'Running npm test', command: 'npm test' },
+    { step: 'Using savvy-progress · progress' },
+    { step: 'Using homelights · list lights' },
+    { step: 'Using savvy-progress · progress', pictures: [{ id: 'p' }] },
+  ];
+  expect(rowSteps(pinged).map((r) => [r.step.step, r.i, r.times])).toEqual([
+    ['Using savvy-progress · progress', 0, 3],
+    ['Reading README.md', 1, 1],
+    ['Running npm test', 3, 1],
+    ['Using homelights · list lights', 5, 1],
+    ['Using savvy-progress · progress', 6, 1],
+  ]);
+  expect(rowSteps(pinged.slice(0, 3), true).map((r) => [r.i, r.now, r.times])).toEqual([[0, false, 1], [1, false, 1], [2, true, 1]]);
   // Which rows open: an edit to its diff, a command to itself; a read and another tool's call have nothing more.
   expect(fourSteps.steps.map(stepOpens)).toEqual([false, true, true, true, true, true, false]);
   // The step it's on now: as it is.

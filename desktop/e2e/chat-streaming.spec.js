@@ -490,3 +490,36 @@ test("the notepad's Ask sheet streams its answer, and ■ stops it", async ({ ya
     await pad.getByRole('button', { name: 'Close notepad' }).click();
   }
 });
+
+// Ctrl+Enter while an answer is written (15 Nov 2026; the Claude app's "Ctrl+Enter to queue for later"): Enter waits for
+// nothing then (the box types ahead); Ctrl+Enter queues the message, and it goes once the answer is in, its own question
+// and answer. With nothing going on, Ctrl+Enter sends as Enter does.
+test('Ctrl+Enter queues a message while an answer is written, and it goes once that answer is in', async ({ main, fakeLlm }) => {
+  test.setTimeout(60_000);
+  await freshChat(main);
+  fakeLlm.scriptChat([
+    { content: 'Water the beds twice a week in summer.\n\nThe herbs want a little less, and the pots a little more on hot days.', stream: { gapMs: 500 } },
+    { content: 'Mulch keeps the soil damp for longer.' },
+    { content: 'Compost goes on in autumn.' },
+  ]);
+  await send(main, 'How often should I water?');
+  await expect(streamingBubble(main)).toBeVisible();
+  await expect(box(main)).toHaveAttribute('placeholder', 'Ctrl+Enter to queue a message for after this answer');
+  await box(main).fill('And mulch?');
+  await box(main).press('Control+Enter');
+  const queued = main.getByTestId('chat-queued');
+  await expect(queued).toHaveCount(1);
+  await expect(queued).toContainText('And mulch?');
+  // (Nothing can take it before the answer is in: no Send now.)
+  await expect(queued.getByTestId('chat-queued-send-now')).toHaveCount(0);
+  await expect(box(main)).toHaveValue('');
+  const answers = thread(main).locator('.cbubble.assistant');
+  await expect(answers).toHaveText([/^Water the beds twice a week in summer\.\s+The herbs want a little less/, 'Mulch keeps the soil damp for longer.'], { timeout: 30_000 });
+  await expect(queued).toHaveCount(0);
+  await expect(thread(main).locator('.cbubble.user')).toHaveText(['How often should I water?', 'And mulch?']);
+  // Nothing going on: Ctrl+Enter sends at once.
+  await box(main).fill('When does compost go on?');
+  await box(main).press('Control+Enter');
+  await expect(answers.last()).toHaveText('Compost goes on in autumn.');
+  await expect(queued).toHaveCount(0);
+});
