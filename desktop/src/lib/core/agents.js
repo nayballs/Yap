@@ -546,14 +546,30 @@ export function stepRow(s, live = false) {
 const PLUMBING = /^(Starting Claude Code|Thinking|Picking up your request|Picking up where it left off|Finding a tool|Using yap · approve)$/;
 
 /**
- * **The rows of a stretch opened**: `[{ step, i, now }]` — its steps in
- * order (`i`: its place among them), plumbing left out ("Starting Claude
- * Code", "Finding a tool") unless it's the one the agent is on (`now`: the
- * last, while `busy`) or it came back with a picture.
+ * **The rows of a stretch opened**: `[{ step, i, now, times }]` — its
+ * steps in order (`i`: its place among them), plumbing left out ("Starting
+ * Claude Code", "Finding a tool") unless it's the one the agent is on
+ * (`now`: the last, while `busy`) or it came back with a picture. Another
+ * tool's call with nothing to show, made again and again in the stretch (a
+ * plugin of the person's own Claude Code ticking its progress bar: "Used
+ * savvy-progress · progress" five times, 15 Nov 2026), is one row where it
+ * was first made, `times` saying how often (1 for every other row).
  */
 export function rowSteps(steps, busy = false) {
   const list = steps || [];
-  return list.map((step, i) => ({ step, i, now: busy && i === list.length - 1 })).filter((r) => r.now || r.step.pictures?.length > 0 || !PLUMBING.test(String(r.step.step || '')));
+  const rows = list.map((step, i) => ({ step, i, now: busy && i === list.length - 1, times: 1 })).filter((r) => r.now || r.step.pictures?.length > 0 || !PLUMBING.test(String(r.step.step || '')));
+  const first = new Map();
+  const out = [];
+  for (const r of rows) {
+    const same = !r.now && stepKind(r.step) === 'tool' && !stepOpens(r.step) ? String(r.step.step || '') : null;
+    if (same && first.has(same)) {
+      first.get(same).times += 1;
+      continue;
+    }
+    if (same) first.set(same, r);
+    out.push(r);
+  }
+  return out;
 }
 
 /** Whether a step's row opens: it has a diff, a command (and what it printed), a picture, or a helper's own steps to show. */
