@@ -59,6 +59,16 @@ elsewhere the DLL landed in the wrong folder. Yap loads Windows' own DirectML ei
 `ort` with its default features brings it back: `cargo tree -i ort-sys -e features`
 shows `copy-dylibs` when it has.
 
+**yap.exe's main thread has an 8 MB stack** (2026-11-15; `build.rs`, `/STACK:8388608`
+for MSVC binaries). Tauri runs every sync command, and the setup, on the main thread
+through one generated handler, and a debug build gives each command's locals a slot of
+its own there, so the frame grows with every command added. With Windows' 1 MB a debug
+build (Yap - Dev, the e2e suite) crashed as its first window's commands came in —
+"thread 'main' has overflowed its stack" in the run's `stdout.log` — once routines and
+spreadsheets landed together. It's only reserved; a release build uses what it did.
+That crash again means the frame grew past 8 MB: move commands' heavy locals off the
+main thread (an `async` command runs on the async runtime) before raising it.
+
 ### Run in dev (what we use)
 Use **`scripts/dev.bat`** ("yap.dev") — it runs `npm run tauri dev -- --features engines`
 (the **real** GPU pipeline; needs the Vulkan SDK installed), or the fast no-GPU stub by itself

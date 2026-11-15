@@ -366,6 +366,15 @@ fn own() -> Vec<String> {
     super::super::own_domains()
 }
 
+/// **The companies in meeting `note` besides the person's own** (a routine
+/// "after meetings with people from outside", `chat/routines.rs`): what Yap
+/// kept when it was tied to its meeting, else its invite's. Never under the
+/// calendar's lock (each read takes and lets go of its own).
+pub fn outside_of(note: &Note) -> Vec<String> {
+    let rules = with_rules(|r| r.clone());
+    external(&domains_of_note(&rules, note, super::super::attendee_emails), &own())
+}
+
 /// Keep note `note_id`'s companies, from its attendees' `emails` (it was
 /// just tied to its meeting, or imported with them).
 pub fn remember(note_id: u64, emails: &[String]) {

@@ -11,7 +11,7 @@
 //!   (`notes::commands::export_markdown`, what "Save as .md" writes), and
 //!   `notes/notes.json`, the whole store (folders and actions too), and
 //!   `notes/versions.json`, each note's earlier versions (`notes/versions.rs`);
-//! - `tasks.json`, `skills.json` (the person's own Skills), `chats/chats.json` with each chat as Markdown
+//! - `tasks.json`, `skills.json` (the person's own Skills), `routines.json` (their routines and recent runs, when any), `chats/chats.json` with each chat as Markdown
 //!   (and `chats/claude_sessions.json`, each chat's Claude Code session on your Claude plan, when any, and
 //!   `chats/connector_chats.json`, the connectors each chat switched off, by id, when any, and
 //!   `chats/chat_styles.json`, the person's answer styles and each chat's, when any, and
@@ -358,6 +358,9 @@ pub struct Inputs {
     pub tasks: Value,
     /// skills.json: the person's own Skills (chat/skills.rs).
     pub skills: Value,
+    /// routines.json: the routines and their recent runs (chat/routines.rs),
+    /// when there are any.
+    pub routines: Option<Value>,
     pub memory: Vec<crate::memory::ops::Item>,
     /// agents.json as it is (`agents/store.rs`), workspaces.json's folders, and
     /// each agent's log (its id, the log's lines).
@@ -398,6 +401,7 @@ notes/versions.json, each note's earlier versions (Version history), newest firs
 - chats/: each chat as Markdown, and chats.json.\n\
 - tasks.json: the tasks you added and the ones you archived.\n\
 - skills.json: the Skills you made (your own instructions, run with /name).\n\
+- routines.json: your routines (Skills that run by themselves) and their recent runs, when you have any.\n\
 - memory/: what Yap remembers about you, as Markdown, and memory.json.\n\
 - agents/: Yap Code's agents, the tasks Chat handed to Claude Code (agents.json), the workspaces they may work in (workspaces.json) \
 and each agent's log (<id>.log.jsonl), with the pictures its steps read or took (<id>.pictures/). \
@@ -487,6 +491,9 @@ screenshots/: Chat's screenshots (PNG).\n"
     // Tasks, your Skills, memory.
     files.push(("tasks.json".into(), pretty(&i.tasks)));
     files.push(("skills.json".into(), pretty(&i.skills)));
+    if let Some(r) = &i.routines {
+        files.push(("routines.json".into(), pretty(r)));
+    }
     for (name, text) in crate::memory::export::files(&i.memory, &i.about) {
         files.push((format!("memory/{name}"), text.into_bytes()));
     }
@@ -755,6 +762,7 @@ fn inputs(audio: bool) -> Inputs {
         claude_sessions: crate::ai::claude_plan::sessions::all(),
         tasks: serde_json::to_value(crate::notes::task_store::snapshot()).unwrap_or(Value::Null),
         skills: serde_json::to_value(crate::chat::skills::own()).unwrap_or(Value::Null),
+        routines: Some(crate::chat::routines::snapshot()).filter(|r| !r.routines.is_empty() || !r.runs.is_empty()).and_then(|r| serde_json::to_value(r).ok()),
         memory: crate::memory::items(),
         agents: json!({ "agents": crate::agents::store::list() }),
         workspaces: serde_json::to_value(crate::agents::workspaces::list()).unwrap_or(Value::Null),
@@ -1008,6 +1016,7 @@ mod tests {
             claude_sessions: json!({ "conversations": { "3": { "session": "0b8f4c1e-6a2d-4f5e-9c1b-2d3e4f5a6b7c", "created": 1_790_000_000u64, "seen": 2, "model": "claude-haiku-5-5", "ts": 1_790_000_100u64 } } }),
             tasks: json!({ "tasks": [], "archived": [] }),
             skills: json!({ "skills": [{ "id": "s1", "name": "Budget numbers", "command": "budget-numbers", "instructions": "List every amount said.", "runsOn": "meeting" }] }),
+            routines: Some(json!({ "routines": [{ "id": "r1", "skill": "s1", "trigger": { "kind": "meetingEnd" } }], "runs": [] })),
             memory: vec![],
             agents: json!({ "agents": [{ "id": "ab12", "folder": "garden-planner", "status": "done", "text": "Done. I tidied the readme." }] }),
             workspaces: json!([{ "name": "garden-planner", "path": "D:\\Projects\\garden-planner" }]),
@@ -1052,6 +1061,7 @@ mod tests {
             "chats/projects.json",
             "tasks.json",
             "skills.json",
+            "routines.json",
             "memory/You.md",
             "memory/memory.json",
             "agents/agents.json",

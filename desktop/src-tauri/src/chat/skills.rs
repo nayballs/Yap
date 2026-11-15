@@ -614,6 +614,10 @@ pub struct SkillTurn {
     pub skill: Skill,
     /// The person's words with it (none: the Skill alone).
     pub words: String,
+    /// **The meeting it runs on** (a routine after a meeting ended,
+    /// `chat/routines.rs`): that meeting's passages, read as a Skill on one
+    /// meeting reads them, whatever the Skill gathers otherwise.
+    pub meeting: Option<u64>,
 }
 
 tokio::task_local! {
@@ -642,7 +646,7 @@ pub fn turn_for(command: &str, text: &str) -> Result<SkillTurn, String> {
         return Err(format!("/{} runs on one meeting: use it in that meeting's Ask box.", skill.command));
     }
     let words = words_of(&skill, text);
-    Ok(SkillTurn { skill, words })
+    Ok(SkillTurn { skill, words, meeting: None })
 }
 
 /// What the system prompt adds for a Skill (after Ask across meetings' own
@@ -788,7 +792,8 @@ fn questions_aid(note: &Note) -> Option<String> {
 /// the person says the answer, which runs the Skill on it
 /// (`assistant/skill.rs`), never a command to type.
 pub fn ask_first(turn: &SkillTurn, aloud: bool) -> Option<String> {
-    if !turn.words.trim().is_empty() {
+    // (A routine's on a meeting that ended has it to run on.)
+    if !turn.words.trim().is_empty() || turn.meeting.is_some() {
         return None;
     }
     if !turn.skill.asks.is_empty() {
@@ -860,6 +865,11 @@ where
 {
     let words = turn.words.trim();
     let search = |by_time: bool| Gathered::Search { query: words.to_string(), limit: GATHER_PASSAGES, about: true, by_time };
+    // A routine's run after a meeting ended: that meeting, whatever it gathers.
+    if let Some(id) = turn.meeting {
+        let Some(note) = notes.iter().find(|n| n.id == id) else { return Gathered::Found(Found::default()) };
+        return Gathered::Found(meeting_found(note, turn, "the meeting", now));
+    }
     Gathered::Found(match turn.skill.gather.as_str() {
         "tasks" => tasks_found(notes, store),
         "you" => latest_you(notes, words, now),
@@ -1080,18 +1090,28 @@ where
         return None;
     }
     let Some(note) = picked.or_else(|| meetings.first().copied()) else { return Some(Found::default()) };
-    let request = format!("{} {words}", turn.skill.instructions);
-    let Some(cited) = chips::skill_input_within(note, &request, ACROSS_ONE) else { return Some(Found::default()) };
+    let which = if picked.is_some() { "the meeting" } else { "their latest meeting," };
+    Some(meeting_found(note, turn, which, now))
+}
+
+/// One meeting's passages for a Skill run across the meetings, said so
+/// (`which`: "the meeting", "their latest meeting,"), with what the Skill
+/// goes through on it.
+fn meeting_found<Tz: TimeZone>(note: &Note, turn: &SkillTurn, which: &str, now: &DateTime<Tz>) -> Found
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let request = format!("{} {}", turn.skill.instructions, turn.words.trim());
+    let Some(cited) = chips::skill_input_within(note, &request, ACROSS_ONE) else { return Found::default() };
     let title = chunks::note_title(note);
     let with = if note.participants.is_empty() { String::new() } else { format!(", with {}", note.participants.join(", ")) };
-    let which = if picked.is_some() { "the meeting" } else { "their latest meeting," };
     let mut about = format!("The passages are from {which} \"{}\" ({}{with}).", quoted(&title), day(now, chunks::note_time(note) as i64));
     // What the Skill goes through on it, as in the meeting's own Ask box.
     if let Some(aid) = meeting_aid(&turn.skill, note) {
         about.push_str("\n\n");
         about.push_str(&aid);
     }
-    Some(Found { passages: cited.passages, about: Some(about), ..Default::default() })
+    Found { passages: cited.passages, about: Some(about), ..Default::default() }
 }
 
 /// A search for `words` ("topic"; "meeting" for words that name no
@@ -2069,7 +2089,7 @@ mod tests {
     /// What Skill `/command words` gathers over the team's meetings, the
     /// calendar and no tasks of the person's own, on Thursday at noon.
     fn gathered(command: &str, words: &str) -> Gathered {
-        let turn = SkillTurn { skill: by_command(command).unwrap(), words: words.into() };
+        let turn = SkillTurn { skill: by_command(command).unwrap(), words: words.into(), meeting: None };
         gather(&turn, &team(), &TaskStore::default(), &calendar(), &thursday())
     }
 
@@ -2122,7 +2142,7 @@ mod tests {
 
     #[test]
     fn prep_with_nothing_on_the_calendar_finds_the_meetings_the_words_name() {
-        let turn = SkillTurn { skill: by_command("prep").unwrap(), words: "Priya".into() };
+        let turn = SkillTurn { skill: by_command("prep").unwrap(), words: "Priya".into(), meeting: None };
         let Gathered::Found(f) = gather(&turn, &team(), &TaskStore::default(), &Agenda::default(), &thursday()) else { panic!() };
         assert!(f.passages.iter().all(|p| p.event.is_none()));
         assert!(titles(&f).contains(&"Supplier call") && titles(&f).contains(&"Kick-off"));
@@ -2281,7 +2301,7 @@ mod tests {
         // On a Monday: since Friday.
         use chrono::TimeZone;
         let monday = chrono::Utc.with_ymd_and_hms(2026, 11, 2, 9, 0, 0).unwrap();
-        let turn = SkillTurn { skill: by_command("standup").unwrap(), words: String::new() };
+        let turn = SkillTurn { skill: by_command("standup").unwrap(), words: String::new(), meeting: None };
         let Gathered::Found(f) = gather(&turn, &team(), &TaskStore::default(), &Agenda::default(), &monday) else { panic!() };
         assert!(f.about.as_deref().unwrap().contains("since Friday 30 Oct (there were none)"));
     }
@@ -2311,8 +2331,24 @@ mod tests {
     }
 
     #[test]
+    fn a_routine_after_a_meeting_reads_that_meeting_whatever_it_gathers() {
+        // /todos gathers the open tasks, /weekly-recap the week; on a meeting
+        // that ended (a routine's: chat/routines.rs) both read that meeting.
+        for command in ["todos", "weekly-recap", "decisions", "followup-email"] {
+            let turn = SkillTurn { skill: by_command(command).unwrap(), words: String::new(), meeting: Some(1) };
+            let Gathered::Found(f) = gather(&turn, &team(), &TaskStore::default(), &calendar(), &thursday()) else { panic!("/{command}") };
+            assert!(!f.passages.is_empty() && titles(&f).iter().all(|t| *t == "Supplier call"), "/{command}: {:?}", titles(&f));
+            assert!(f.about.as_deref().unwrap().starts_with("The passages are from the meeting \"Supplier call\""), "/{command}");
+            assert_eq!(ask_first(&turn, false), None, "/{command}: nothing to ask");
+        }
+        // A meeting deleted since: nothing.
+        let gone = SkillTurn { skill: by_command("todos").unwrap(), words: String::new(), meeting: Some(99) };
+        assert!(matches!(gather(&gone, &team(), &TaskStore::default(), &calendar(), &thursday()), Gathered::Found(f) if f.passages.is_empty()));
+    }
+
+    #[test]
     fn a_skill_with_nothing_to_run_on_asks_and_a_document_skill_says_how() {
-        let update = SkillTurn { skill: by_command("project-update").unwrap(), words: String::new() };
+        let update = SkillTurn { skill: by_command("project-update").unwrap(), words: String::new(), meeting: None };
         assert!(ask_first(&update, false).unwrap().starts_with("Which project? Add its name after the command"));
         // Out loud: its question alone.
         assert_eq!(ask_first(&update, true).as_deref(), Some("Which project?"));
@@ -2353,7 +2389,7 @@ mod tests {
             }
             // Across the meetings, in Chat: what it adds to Chat's own prompt.
             if s.runs_on.across() {
-                let turn = SkillTurn { skill: s.clone(), words: String::new() };
+                let turn = SkillTurn { skill: s.clone(), words: String::new(), meeting: None };
                 let Gathered::Found(f) = gather(&turn, &notes, &TaskStore::default(), &calendar(), &thursday()) else { continue };
                 let added = format!("{}\n{}\n{}", system_block(&turn), ask::context(&f), document_note(&turn, true).unwrap_or_default());
                 assert!(estimate_tokens(&added) < 3_000, "/{} across: {}", s.command, estimate_tokens(&added));

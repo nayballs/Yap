@@ -432,7 +432,13 @@
               {#if chat.picked.includes(c.id)}
                 <span class="pickmark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg></span>
               {/if}
-              <span class="ctitle">{c.title || 'Untitled'}{#if chat.picked.includes(c.id)}<span class="sr-only">, selected</span>{/if}</span>
+              {#if c.routine}
+                <!-- A routine's own chat (chat/routines.rs): the Skill that runs by itself there. -->
+                <span class="rmark" title={`Routine: /${c.routine} runs by itself here`} aria-hidden="true" data-testid="chat-routine-mark">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v4h-4" /><path d="M12 8v4l2.5 1.5" /></svg>
+                </span>
+              {/if}
+              <span class="ctitle">{c.title || 'Untitled'}{#if c.routine}<span class="sr-only">, a routine's chat</span>{/if}{#if chat.picked.includes(c.id)}<span class="sr-only">, selected</span>{/if}</span>
               <StatusDot s={chatStatus.byId[c.id]} code={onCode} />
               <button
                 class="more"
@@ -629,6 +635,19 @@
   .pickmark svg {
     width: 10px;
     height: 10px;
+  }
+  .rmark {
+    flex: 0 0 auto;
+    display: inline-flex;
+    margin-right: 2px;
+    color: var(--yap-muted);
+  }
+  .rmark svg {
+    width: 13px;
+    height: 13px;
+  }
+  .conv.active .rmark {
+    color: var(--yap-fg-80);
   }
   .sr-only {
     position: absolute;

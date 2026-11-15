@@ -574,6 +574,8 @@
       // The queue: a step beginning takes what waits, a message read ticks ✓✓, a turn's end lets the next go.
       listen('yap-agent', (e) => chat.agentEvent(e.payload)),
       listen('yap-agent-report', (e) => chat.agentReported(e.payload)),
+      // A routine ran (chat/routines.rs): its chat in the list, its answer in the thread shown.
+      listen('yap-routine-ran', (e) => chat.routineRan(e.payload)),
       // A question asked out loud while Claude works in the Code chat shown: through the same queue (chat/assistant.rs).
       listen('yap-chat-spoken', (e) => chat.spokenWhileWorking(e.payload)),
       // A page's picture for its card, taken once it loaded (chat/pages/thumb.rs).
