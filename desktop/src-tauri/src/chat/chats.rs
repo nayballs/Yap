@@ -142,6 +142,14 @@ pub struct ChatMessage {
     /// Yap Code says `"jobReport"`: read as today's, `agents::renamed`.)
     #[serde(default, skip_serializing_if = "String::is_empty", deserialize_with = "crate::agents::renamed")]
     pub kind: String,
+    /// **The files a question carried** (`chat/attachments.rs`, 15 Nov 2026):
+    /// ids, names, kinds, sizes and tokens; their copies and text live in
+    /// `<data>/chat-files/`. The history sends their text again
+    /// ([`ChatMessage::sent_text`]). Only written when there are some. An
+    /// older Yap's save drops the field; `chat_attachments.json` puts it
+    /// back at the next start (`attachments::restore_from_disk`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<crate::chat::attachments::Attachment>,
 }
 
 /// **Message `i` of `messages` as a model reads it** ([`ChatMessage::sent_text`])
@@ -163,8 +171,20 @@ pub fn sent_text_at(messages: &[ChatMessage], i: usize) -> String {
 impl ChatMessage {
     /// The message as a model reads it in the history: its text, after the
     /// passage a question was asked about (`quote`), so "Make this
-    /// shorter" still says what "this" was.
+    /// shorter" still says what "this" was — and a question's files before
+    /// it all (`attachments::joined`: their text, or a line once removed).
     pub fn sent_text(&self) -> String {
+        let words = self.sent_words();
+        if self.role == "user" && !self.attachments.is_empty() {
+            crate::chat::attachments::joined(&self.attachments, &words)
+        } else {
+            words
+        }
+    }
+
+    /// [`ChatMessage::sent_text`] without the files (a Retry sends those
+    /// through the turn's own, `chat_retry`).
+    pub fn sent_words(&self) -> String {
         // An agent's report: the agent's words, never the person's (web content).
         if self.kind == crate::chat::turn::AGENT_REPORT {
             return format!("{}{}", crate::chat::turn::AGENT_REPORT_PREFIX, self.text);
@@ -264,6 +284,38 @@ pub fn add_question_images(id: u64, images: &[ChatImage]) {
 /// these for their time; anything else goes after a day).
 pub fn image_ids() -> std::collections::HashSet<String> {
     with_store(|s| s.conversations.iter().flat_map(Conversation::every_message).flat_map(ChatMessage::image_ids).collect())
+}
+
+/// Every question's attached files' ids (the sweep keeps them).
+pub fn attachment_ids() -> std::collections::HashSet<String> {
+    with_store(|s| s.conversations.iter().flat_map(Conversation::every_message).flat_map(|m| m.attachments.iter().map(|a| a.id.clone())).collect())
+}
+
+/// The attached file `id`, as a question carries it.
+pub fn attachment(id: &str) -> Option<crate::chat::attachments::Attachment> {
+    with_store(|s| s.conversations.iter().flat_map(Conversation::every_message).flat_map(|m| m.attachments.iter()).find(|a| a.id == id).cloned())
+}
+
+/// **Question `index` of conversation `id` carries `files`**
+/// (`chat/attachments.rs`), kept with it.
+pub fn set_attachments(id: u64, index: usize, files: Vec<crate::chat::attachments::Attachment>) {
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "user" {
+            m.attachments = files;
+            save_to_disk(s);
+        }
+    });
+}
+
+/// Of `files`, those no conversation carries any more (a fork's questions
+/// share their original's).
+fn unshown_files(s: &Store, files: Vec<String>) -> Vec<String> {
+    if files.is_empty() {
+        return files;
+    }
+    let shown: std::collections::HashSet<&str> = s.conversations.iter().flat_map(Conversation::every_message).flat_map(|m| m.attachments.iter().map(|a| a.id.as_str())).collect();
+    files.into_iter().filter(|f| !shown.contains(f.as_str())).collect()
 }
 
 impl ChatMessage {
@@ -491,6 +543,8 @@ fn load_from_disk() -> Store {
     let mut store: Store = SAVER.load(&chats_path());
     // The shares an older Yap's save dropped (chat/shares.rs), put back.
     crate::chat::shares::restore_from_disk(&mut store.conversations);
+    // …and a question's attached files (chat/attachments.rs).
+    crate::chat::attachments::restore_from_disk(&mut store.conversations);
     // …and the branches (chats/branches.rs); a retry Yap closed during, put right.
     branches::restore_from_disk(&mut store.conversations);
     for c in store.conversations.iter_mut() {
@@ -524,14 +578,17 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     if SAVER.write_json(&chats_path(), store, false).is_ok() {
-        // The shares' and the branches' copies for an older Yap's save
-        // (chat/shares.rs, chats/branches.rs): never an incognito chat's.
+        // The shares', the attached files' and the branches' copies for an
+        // older Yap's save (chat/shares.rs, chat/attachments.rs,
+        // chats/branches.rs): never an incognito chat's.
         if store.conversations.iter().any(|c| c.incognito) {
             let kept: Vec<Conversation> = store.conversations.iter().filter(|c| !c.incognito).cloned().collect();
             crate::chat::shares::mirror_to_disk(&kept);
+            crate::chat::attachments::mirror_to_disk(&kept);
             branches::mirror_to_disk(&kept);
         } else {
             crate::chat::shares::mirror_to_disk(&store.conversations);
+            crate::chat::attachments::mirror_to_disk(&store.conversations);
             branches::mirror_to_disk(&store.conversations);
         }
     }
@@ -548,6 +605,7 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     let store = guard.get_or_insert_with(load_from_disk);
     if SAVER.any_unread() && SAVER.refresh(&chats_path(), store) {
         crate::chat::shares::restore_from_disk(&mut store.conversations);
+        crate::chat::attachments::restore_from_disk(&mut store.conversations);
         branches::restore_from_disk(&mut store.conversations);
         save_to_disk(store);
     }
@@ -1302,6 +1360,7 @@ pub fn append_message(
             next_step: None,
             chapter: None,
             kind: String::new(),
+            attachments: Vec::new(),
         });
         conv.updated_ts = now_secs();
         // Asked again in an archived chat: it's back in the list.
@@ -1353,13 +1412,14 @@ pub fn reset() -> usize {
 /// and "Delete all chats…"). Returns how many were there to delete; ids
 /// already gone are skipped.
 pub fn delete_many(ids: &[u64]) -> usize {
-    let (gone, images) = with_store(|s| {
+    let (gone, images, files) = with_store(|s| {
         let images: Vec<String> = s
             .conversations
             .iter()
             .filter(|c| ids.contains(&c.id))
             .flat_map(|c| c.every_message().flat_map(ChatMessage::image_ids))
             .collect();
+        let files: Vec<String> = s.conversations.iter().filter(|c| ids.contains(&c.id)).flat_map(Conversation::every_message).flat_map(|m| m.attachments.iter().map(|a| a.id.clone())).collect();
         let before = s.conversations.len();
         s.conversations.retain(|c| !ids.contains(&c.id));
         let gone = before - s.conversations.len();
@@ -1367,7 +1427,7 @@ pub fn delete_many(ids: &[u64]) -> usize {
             save_to_disk(s);
         }
         // (A fork's copies share them: one another chat still shows stays.)
-        (gone, unshown(s, images))
+        (gone, unshown(s, images), unshown_files(s, files))
     });
     // Their vectors in the search index go with them.
     if gone > 0 {
@@ -1376,6 +1436,10 @@ pub fn delete_many(ids: &[u64]) -> usize {
     // Their screenshots go with them, once the store no longer has them.
     if !images.is_empty() {
         crate::snip::images::delete(&images);
+    }
+    // …and the files their questions carried (chat/attachments.rs).
+    if !files.is_empty() {
+        crate::chat::attachments::delete(&files);
     }
     // What they made (their visuals: chat/made.rs) goes with them.
     if gone > 0 {
@@ -1399,28 +1463,34 @@ fn unshown(s: &Store, images: Vec<String>) -> Vec<String> {
 /// which goes with everything after it (their screenshots too, unless
 /// another chat still shows them). Returns that message, its words for the
 /// box.
-/// `keep_shots`: the message's own screenshots stay (a Code chat's Edit sends
-/// them again with the new words: `chat_send`'s `edit`). The branches past
-/// `at` go too (`branches::cut_at`).
+/// `keep_shots`: the message's own screenshots and attached files stay (a
+/// Code chat's Edit sends them again with the new words: `chat_send`'s
+/// `edit`). The branches past `at` go too (`branches::cut_at`).
 pub fn rewind(id: u64, at: usize, keep_shots: bool) -> Result<ChatMessage, String> {
-    let (message, images) = with_store(|s| {
+    let (message, images, files) = with_store(|s| {
         let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
         let m = conv.messages.get(at).filter(|m| m.role == "user" && m.kind.is_empty()).cloned().ok_or("That message isn't there any more.")?;
         let mut gone: Vec<String> = conv.messages[at..].iter().skip(usize::from(keep_shots)).flat_map(ChatMessage::image_ids).collect();
+        let files: Vec<String> = conv.messages[at..].iter().skip(usize::from(keep_shots)).flat_map(|m| m.attachments.iter().map(|a| a.id.clone())).collect();
         conv.messages.truncate(at);
         let cut = branches::cut_at(conv, at);
         gone.extend(cut.iter().flat_map(ChatMessage::image_ids));
+        let mut files = files;
+        files.extend(cut.iter().flat_map(|m| m.attachments.iter().map(|a| a.id.clone())));
         // Its summary only while it covers what's left.
         if conv.summary.as_ref().is_some_and(|sum| sum.upto > at || sum.after > at) {
             conv.summary = None;
         }
         conv.updated_ts = now_secs();
         save_to_disk(s);
-        Ok::<_, String>((m, unshown(s, gone)))
+        Ok::<_, String>((m, unshown(s, gone), unshown_files(s, files)))
     })?;
     crate::search::removed();
     if !images.is_empty() {
         crate::snip::images::delete(&images);
+    }
+    if !files.is_empty() {
+        crate::chat::attachments::delete(&files);
     }
     Ok(message)
 }
@@ -1473,6 +1543,7 @@ pub fn for_page(mut conv: Conversation) -> Conversation {
             img.gone = !crate::snip::images::exists(&img.id);
         }
         crate::chat::shares::for_page(&mut m.files);
+        crate::chat::attachments::for_page(&mut m.attachments);
     }
     conv
 }
@@ -2169,6 +2240,7 @@ mod tests {
             next_step: None,
             chapter: None,
             kind: String::new(),
+            attachments: vec![],
         };
         let messages = vec![
             msg("user", vec![]),

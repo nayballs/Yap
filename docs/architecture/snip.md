@@ -373,8 +373,10 @@ global hook never sees keys while a Yap window has the focus.
   picture of themselves: the text pastes — unless that text is only an
   address, as Firefox's copied picture has: `pastedImage`), or
   image files dropped on Chat (Tauri's drag-drop event, its paths to
-  `chat_image_drop`; the box says "Drop pictures to ask about them" while
-  they're dragged over). Only pictures (PNG, JPEG, GIF, BMP, WebP, TIFF,
+  `chat_image_drop`; the box says "Drop files or pictures to ask about
+  them" while they're dragged over: since 2026-11-15 any other file dropped
+  goes in as an attached file, its text read on this PC,
+  [chat-and-assistant.md](chat-and-assistant.md#files-attached-to-a-question-2026-11-15)). Only pictures (PNG, JPEG, GIF, BMP, WebP, TIFF,
   HEIC with Windows' codec), ≤ 50 MB a file, ≤ 100 MP, as many as the
   question has room for (100; 4 until 14 Nov 2026); the rest are left with
   a line saying so. With 100 waiting, a paste or a drop says "A question

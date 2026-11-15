@@ -103,6 +103,11 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
         let days = cfg.chat_image_days;
         std::thread::spawn(move || crate::snip::images::sweep(days));
     }
+    // "Keep chat files" shortened: the older ones go now (chat/attachments.rs).
+    if cfg.chat_file_days != prev.chat_file_days {
+        let days = cfg.chat_file_days;
+        std::thread::spawn(move || crate::chat::attachments::sweep(days));
+    }
     // "Delete meeting transcripts after" set or shortened: the older ones
     // go now (notes/retention.rs), and their audio with them.
     crate::notes::retention::on_config_saved(&app, prev, &cfg);

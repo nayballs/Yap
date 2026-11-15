@@ -534,7 +534,9 @@ fn sent_directly(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, Str
     let effort = crate::ai::effort::info(&t.cfg, &t.ep.provider, &t.ep.model).and_then(|i| i.chosen.or(i.default)).map(str::to_string);
     // (One sent as its text — "Send its text instead" — is in the words already.)
     let shots: Vec<String> = images.iter().filter(|i| !i.as_text).map(|i| i.id.clone()).collect();
-    let sent = crate::agents::direct::send(opened.conv.id, folder, &t.text, &shots, message_id, t.by_voice, phone, &t.ep.model, effort.as_deref())?;
+    // (Its attached files' text after its words: chat/attachments.rs.)
+    let text = crate::chat::attachments::after_text(&t.text);
+    let sent = crate::agents::direct::send(opened.conv.id, folder, &text, &shots, message_id, t.by_voice, phone, &t.ep.model, effort.as_deref())?;
     Ok(Some(ChatTurn {
         conversation_id: opened.conv.id,
         user_index: opened.user_index,
@@ -570,6 +572,11 @@ fn open(t: &Asked<'_>, conversation_id: Option<u64>, asked: impl FnOnce(u64, usi
     // The question, with the screenshots it carries (Snip to Chat, the
     // turn's `snip::turn`): kept with it in chats.json as ids.
     let user_index = save_question(conv.id, &t.text, t.by_voice, &crate::snip::turn::images())?;
+    // …and the files it carries (chat/attachments.rs): kept with it as ids.
+    let files = crate::chat::attachments::current();
+    if !files.is_empty() {
+        crate::chat::chats::set_attachments(conv.id, user_index, files);
+    }
     // A passage selected in the document panel ("Change this…", documents.rs):
     // kept with the question, its quote above it.
     let selection = crate::chat::documents::selection();

@@ -1,6 +1,8 @@
 //! **What Chat made, not just wrote** (15 Nov 2026, after the Claude app's
-//! inline visuals; the idea and its look only, nothing of its code): a
-//! diagram drawn or a small interactive widget, shown in the answer itself.
+//! inline visuals and its artifacts; the idea and its look only, nothing of
+//! its code): a diagram drawn or a small interactive widget, shown in the
+//! answer itself — and pages Yap keeps ([`pages`]: `save_page`, opened
+//! beside the chat, a version each change, in the chat's Outputs).
 //!
 //! - **`show_visual { title, code }`** ([`definitions`], [`show_visual`]):
 //!   `code` is SVG (it starts with `<svg`) or an HTML fragment (a full
@@ -37,6 +39,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+pub mod pages;
 pub mod serve;
 #[cfg(test)]
 mod tests;
@@ -46,7 +49,7 @@ pub const FOLDER: &str = "chat-made";
 /// The tool's name.
 pub const SHOW_VISUAL: &str = "show_visual";
 /// The tools this module answers.
-pub const NAMES: &[&str] = &[SHOW_VISUAL];
+pub const NAMES: &[&str] = &[SHOW_VISUAL, pages::SAVE_PAGE];
 /// The page's event for something made (`{conversation, made}`).
 pub const EVENT: &str = "yap-chat-made";
 /// A visual's code, at most (bytes).
@@ -59,7 +62,7 @@ pub const MAX_PER_QUESTION: usize = 8;
 /// **The model told when** (the tool loop's system prompt while it's
 /// offered, and a Claude Code session's instructions): short, every step
 /// sends it.
-pub const INSTRUCTIONS: &str = "When the user asks you to draw, diagram, chart or show something visually (\"draw…\", \"show me how…\", \"make me a small calculator\"), call show_visual with an SVG diagram or a small interactive HTML widget: it appears in the chat itself, so never paste its code into your answer, and say in a sentence or two what it shows.";
+pub const INSTRUCTIONS: &str = "When the user asks you to draw, diagram, chart or show something visually (\"draw…\", \"show me how…\", \"make me a small calculator\"), call show_visual with an SVG diagram or a small interactive HTML widget: it appears in the chat itself, so never paste its code into your answer, and say in a sentence or two what it shows. Something to keep and come back to — a small app or tool (\"a tip calculator I can keep\") — is save_page instead (beside the chat; its id again makes a new version); writing to keep stays a document.";
 
 // ---- what's kept --------------------------------------------------------------------------------
 
@@ -100,11 +103,35 @@ pub struct Made {
     /// for the person to send instead.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub outside: bool,
-    /// Its code's size.
+    /// Its code's size (a page: its newest version's).
     #[serde(default)]
     pub bytes: u64,
+    /// **A page's versions** (`kind` "page", [`pages`]), oldest first: each
+    /// with the question it answered (its card shows in that answer).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub versions: Vec<PageVersion>,
     /// What a later Yap keeps here that this one doesn't know: kept as it
     /// is when this one writes the index (never dropped).
+    #[serde(flatten, default)]
+    pub rest: serde_json::Map<String, Value>,
+}
+
+/// **One version of a page Yap keeps** ([`pages`]): `<id>.v<n>.html`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageVersion {
+    pub n: u32,
+    /// When it was saved (ms since 1970).
+    #[serde(default)]
+    pub at: u64,
+    #[serde(default)]
+    pub bytes: u64,
+    /// The question whose answer saved it.
+    #[serde(default)]
+    pub after: Anchor,
+    /// Its title when it was saved.
+    #[serde(default)]
+    pub title: String,
     #[serde(flatten, default)]
     pub rest: serde_json::Map<String, Value>,
 }
@@ -199,6 +226,18 @@ fn now_ms() -> u64 {
 /// **Keep `made`** (its code `code`) in conversation `conv` (made at
 /// `created`): its code first, then the index that names it.
 fn add(conv: u64, created: u64, made: &Made, code: &str) -> Result<(), String> {
+    with_index(conv, created, |index, folder| {
+        crate::config::atomic_write(&folder.join(code_file(&made.id, &made.format)), code).map_err(|e| format!("couldn't save it ({:?})", e.kind()))?;
+        index.items.push(made.clone());
+        Ok(())
+    })
+}
+
+/// **Change conversation `conv`'s index** (made at `created`) with `f`, one
+/// writer at a time: `f` gets the index and the chat's folder (made), writes
+/// what it keeps there first, and changes the index, which is then saved —
+/// never when `f` fails, nor over one that can't be read.
+fn with_index<T>(conv: u64, created: u64, f: impl FnOnce(&mut Index, &std::path::Path) -> Result<T, String>) -> Result<T, String> {
     let _held = LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let folder = conv_dir(conv);
     let mut index = match read_index(conv)? {
@@ -214,10 +253,10 @@ fn add(conv: u64, created: u64, made: &Made, code: &str) -> Result<(), String> {
     index.version = index.version.max(1);
     index.created = created;
     std::fs::create_dir_all(&folder).map_err(|e| format!("couldn't make its folder ({:?})", e.kind()))?;
-    crate::config::atomic_write(&folder.join(code_file(&made.id, &made.format)), code).map_err(|e| format!("couldn't save it ({:?})", e.kind()))?;
-    index.items.push(made.clone());
+    let out = f(&mut index, &folder)?;
     let json = serde_json::to_string(&index).map_err(|e| e.to_string())?;
-    crate::config::atomic_write(&index_path(conv), &json).map_err(|e| format!("couldn't save it ({:?})", e.kind()))
+    crate::config::atomic_write(&index_path(conv), &json).map_err(|e| format!("couldn't save it ({:?})", e.kind()))?;
+    Ok(out)
 }
 
 /// **What conversation `conv` (made at `created`) has made**, oldest first:
@@ -243,6 +282,19 @@ pub fn code_of(conv: u64, id: &str) -> Option<(Made, String)> {
     let made = index.items.into_iter().find(|m| m.id == id)?;
     let code = std::fs::read_to_string(conv_dir(conv).join(code_file(&made.id, &made.format))).ok()?;
     Some((made, code))
+}
+
+/// A page's version `n` (its newest for 0), by its conversation and id (the
+/// panel's frame, [`serve`]). `None`: not one of that chat's.
+pub fn page_of(conv: u64, id: &str, n: u32) -> Option<(Made, u32, String)> {
+    if !pages::is_id(id) {
+        return None;
+    }
+    let index = read_index(conv).ok().flatten()?;
+    let made = index.items.into_iter().find(|m| m.id == id && m.kind == "page")?;
+    let n = if n == 0 { made.versions.iter().map(|v| v.n).max()? } else { made.versions.iter().find(|v| v.n == n)?.n };
+    let html = std::fs::read_to_string(conv_dir(conv).join(pages::file_of(&made.id, n))).ok()?;
+    Some((made, n, html))
 }
 
 /// **Chats deleted**: what they made goes with them.
@@ -286,19 +338,31 @@ pub fn asks_for_visual(question: &str) -> bool {
     words.iter().any(|w| WORDS.contains(w)) || q.contains("show me how") || q.contains("illustrate")
 }
 
-/// The tool's schema (none when not offered). Kept short: every step sends it.
+/// The tools' schemas, `show_visual` and `save_page` (none when not
+/// offered). Kept short: every step sends them.
 pub fn definitions(offer: bool) -> Value {
     if !offer {
         return json!([]);
     }
-    json!([{
+    let mut out = vec![json!({
         "type": "function",
         "function": {
             "name": SHOW_VISUAL,
             "description": DESCRIPTION,
             "parameters": parameters()
         }
-    }])
+    })];
+    out.extend(pages::definitions(true).as_array().cloned().unwrap_or_default());
+    Value::Array(out)
+}
+
+/// **Run one of these tools** (`NAMES`) for conversation `conv`.
+pub fn execute(name: &str, conv: Option<u64>, args: &Value, outside: bool) -> Value {
+    if name == pages::SAVE_PAGE {
+        pages::save_page(conv, args, outside)
+    } else {
+        show_visual(conv, args, outside)
+    }
 }
 
 /// What the tool does, for the model.

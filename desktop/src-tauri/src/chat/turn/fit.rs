@@ -52,7 +52,8 @@ pub(super) enum Family {
     Agents,
     /// The connectors' tools and line (`tools/connectors.rs`).
     Connectors,
-    /// `show_visual` and its line (`chat/made.rs`): strong models only.
+    /// `show_visual`, `save_page` and their line (`chat/made.rs`): strong
+    /// models only.
     Visuals,
     /// The pictures' own tools (`find_pictures`, `look_at_picture`,
     /// `show_picture`) and lines; the pages beside the chat stay.
@@ -97,8 +98,8 @@ pub(super) enum Family {
 /// 3. agents, ~1,560 in a plain chat — the most of any, and a Code chat
 ///    (Chat's Code side) is where they're the point;
 /// 4. connectors, up to a tenth of the context (strong cloud models only);
-/// 5. visuals in the answer, ~280 (strong models only, 15 Nov 2026; kept
-///    when the question asks for one, [`keeps`]);
+/// 5. visuals in the answer and pages Yap keeps, ~580 (strong models only,
+///    15 Nov 2026; kept when the question asks for one, [`keeps`]);
 /// 6. pictures, ~300;
 /// 7. the documents' rich set for the simple one, ~800 (strong models);
 /// 8. the screen, ~150;

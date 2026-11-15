@@ -69,7 +69,7 @@ test('Export… writes the chat as Markdown with its pictures beside it', async 
   await openView(main, 'Chat');
   await row(main, 'Garden: spring plan').click({ button: 'right' });
   const menu = main.getByRole('menu').first();
-  await expect(menu.getByRole('menuitem')).toHaveText(['Rename', 'Copy as Markdown', 'Export…', 'Archive', 'Delete…']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Rename', 'Copy as Markdown', 'Export…', 'Outputs', 'Archive', 'Delete…']);
   await shot(main, '01-export-in-the-menu');
   await main.keyboard.press('Escape');
 

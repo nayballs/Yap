@@ -210,6 +210,10 @@ pub fn browser_line(tool: &str, input: &Value) -> Option<String> {
             Some(t) => format!("Made a visual: {}", one_line(&t, 60)),
             None => "Made a visual".to_string(),
         },
+        crate::chat::made::pages::SAVE_PAGE => match text("title") {
+            Some(t) => format!("Saved a page: {}", one_line(&t, 60)),
+            None => "Saved a page".to_string(),
+        },
         see_screen::LOOK => "Looking at your screen".to_string(),
         _ => return None,
     })

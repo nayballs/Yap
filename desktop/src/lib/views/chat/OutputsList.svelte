@@ -1,7 +1,7 @@
 <script>
   // **A chat's Outputs**, as rows (after the Claude app's right column): an
   // icon by kind, the name, its folder quieter, a word at the right
-  // ("Changed", "Shared", "Picture"). The rows come from outputs.js
+  // ("Page", "Document", "Changed", "Shared", "Picture"). The rows come from outputs.js
   // `outputItems`, the one list every kind adds to; `onopen(item)` opens one.
   // Shown first in a Code chat's summary (SummaryTab.svelte); usable
   // anywhere that lists what a chat made.
@@ -15,7 +15,11 @@
   {#each shown as it (it.key)}
     <li>
       <button type="button" class="orow" data-testid="chat-output" data-kind={it.kind} title={[it.detail, it.name].filter(Boolean).join('/')} onclick={() => onopen?.(it)}>
-        {#if it.picture}
+        {#if it.kind === 'page'}
+          <svg class="oicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="13" height="13" rx="2" /><path d="M16 16v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h3" /></svg>
+        {:else if it.kind === 'doc'}
+          <svg class="oicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
+        {:else if it.picture}
           <svg class="oicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="m21 16-5-5-9 9" /></svg>
         {:else if it.kind === 'changed'}
           <svg class="oicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="m10 13-2 2 2 2M14 13l2 2-2 2" /></svg>

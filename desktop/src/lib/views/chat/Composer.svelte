@@ -16,7 +16,9 @@
   // on-device model first offers its own projector, "Read screenshots on
   // this PC" (ai/local_llm/vision.rs: a download, or switched back on). A
   // picture pasted (Ctrl+V) or dropped on Chat joins them (snip/attach.rs);
-  // a screenshot's right-click menu copies or saves it. Nothing goes until
+  // a screenshot's right-click menu copies or saves it. + → Attach files…
+  // (or any other file dropped on Chat) puts a file's chip in the box: its
+  // text goes with the question (chat/attachments.rs). Nothing goes until
   // you send.
   import { invoke } from '@tauri-apps/api/core';
   import { toast } from '../../ui/toast.svelte.js';
@@ -40,6 +42,9 @@
   import ContextRing from './ContextRing.svelte';
   import ThinkButton from './ThinkButton.svelte';
   import ElementChip from './ElementChip.svelte';
+  import FileChip from './FileChip.svelte';
+  import MentionMenu from './MentionMenu.svelte';
+  import { mentionedPaths } from './chatMentions.js';
   import { picked, removePicked } from '../../stores/pickedElements.svelte.js';
   import ConnectorLogo from '../../settings/connectors/ConnectorLogo.svelte';
 
@@ -57,6 +62,8 @@
   const working = $derived(workingDirectly(agents.list, chat.activeId));
   // **Ctrl+Enter queues it for later** (chatState `send({ later })`; the Claude app's box says so while it works):
   // said in the empty box while Claude works, or while an answer is written.
+  // The files the words mention (`@path`, a Code chat's @: agents/mention.rs): a chip each over the box.
+  const mentioned = $derived(code?.current ? mentionedPaths(chat.input) : []);
   const queueHint = $derived(working ? 'Enter to send, Ctrl+Enter to queue for later' : chat.sending ? 'Ctrl+Enter to queue a message for after this answer' : '');
   let stoppingWork = $state(null);
   async function stopWork() {
@@ -212,7 +219,7 @@
 >
   {#if chat.dragging}
     <!-- Files dragged over Chat: a drop puts the pictures in the box. -->
-    <div class="dropnote" data-testid="chat-drop-note" aria-live="polite">Drop pictures to ask about them</div>
+    <div class="dropnote" data-testid="chat-drop-note" aria-live="polite">Drop files or pictures to ask about them</div>
   {/if}
   {#if chat.attached.length}
     <!-- Snip to Chat (snip.rs): the screenshots this question carries, three
@@ -311,6 +318,29 @@
       {/if}
     </div>
   {/if}
+  {#if chat.files.length}
+    <!-- Files attached (chat/attachments.rs): a chip each — its type, name and size, as the Claude app's — ✕ to take
+         it out, a click opens it. Their text goes before the question. -->
+    <div class="elrow filerow" data-testid="chat-files">
+      {#each chat.files as f (f.id)}
+        <FileChip file={f} onremove={chat.removeFile} />
+      {/each}
+    </div>
+  {/if}
+  {#if mentioned.length}
+    <!-- The workspace files the message mentions (@path, as Claude Code reads it): a chip each, ✕ takes it out. -->
+    <div class="elrow filerow" data-testid="chat-mentions">
+      {#each mentioned as p (p)}
+        <span class="mentionchip" title={p}>
+          <span class="mname">{p.split('/').pop() || p}</span>
+          {#if p.includes('/')}<span class="mdir">{p.slice(0, p.lastIndexOf('/'))}</span>{/if}
+          <button type="button" class="mx" aria-label={`Remove @${p}`} title="Remove" onclick={() => chat.dropMention(p)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+          </button>
+        </span>
+      {/each}
+    </div>
+  {/if}
   {#if picked.list.length}
     <!-- Elements picked on a page beside the chat (PageTab's Select, chat/pages/pick.rs): a chip each,
          its card on hover — as the Claude Code app attaches them to the prompt. -->
@@ -366,6 +396,14 @@
       </button>
       {#if chat.plusOpen}
         <div class="pluspop" role="dialog" aria-label="Chat options">
+          <!-- Attach files (chat/attachments.rs): their text goes with the question. -->
+          <button class="optrow" aria-label="Attach files" data-testid="chat-attach-files" onclick={chat.pickFiles}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.1-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8" /></svg>
+            <span class="opttext">
+              <span class="optname">Attach files</span>
+              <span class="optdesc">Text, code, PDF and Word files, read on this PC</span>
+            </span>
+          </button>
           <!-- Snip to Chat (snip.rs): this window leaves the shot. -->
           <button class="optrow" aria-label="Take a screenshot" onclick={takeScreenshot}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4 8.1 15.9" /><path d="M14.5 14.5 20 20" /><path d="M8.1 8.1 12 12" /></svg>
@@ -452,6 +490,8 @@
     </div>
     <!-- "/": Skills, run across the meetings (chat/skills.rs). -->
     <SkillMenu picker={chat.skills} onpick={chat.pickSkill} />
+    <!-- "@" in a Code chat: its workspace's files (agents/mention.rs). -->
+    <MentionMenu picker={chat.mention} onpick={chat.pickMention} />
     <input
       class="msginput"
       bind:this={chat.inputEl}
@@ -462,7 +502,11 @@
           : 'Ask about this passage…'
         : chat.attached.length
           ? 'Ask about this screenshot…'
-          : queueHint
+          : chat.files.length
+            ? chat.files.length > 1
+              ? 'Ask about these files…'
+              : 'Ask about this file…'
+            : queueHint
             ? queueHint
             : code?.current
             ? `Ask for a change in ${code.current.name}, or anything else`
@@ -470,18 +514,24 @@
       aria-label="Message"
       aria-busy={chat.sending}
       aria-autocomplete="list"
-      aria-controls={chat.skills.open ? 'skill-list' : undefined}
-      aria-activedescendant={chat.skills.open ? `skill-opt-${chat.skills.active}` : undefined}
-      onkeydown={(e) => chat.skillKey(e) || (e.key === 'Enter' && !e.isComposing && chat.send(e.ctrlKey || e.metaKey ? { later: true } : undefined))}
+      aria-controls={chat.mention.open ? 'mention-list' : chat.skills.open ? 'skill-list' : undefined}
+      aria-activedescendant={chat.mention.open && chat.mention.items.length ? `mention-opt-${chat.mention.active}` : chat.skills.open ? `skill-opt-${chat.skills.active}` : undefined}
+      onkeydown={(e) => chat.mentionKey(e) || chat.skillKey(e) || (e.key === 'Enter' && !e.isComposing && chat.send(e.ctrlKey || e.metaKey ? { later: true } : undefined))}
+      onkeyup={(e) => (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') && chat.mentionInput()}
+      onclick={() => chat.mentionInput()}
       onpaste={chat.pasteImage}
       oninput={() => {
+        chat.mentionInput();
         if (!chat.input.trim()) {
           chat.byVoice = false;
           chat.tooLong = '';
         }
       }}
       onfocus={() => chat.reportFocus(true)}
-      onblur={() => chat.reportFocus(false)}
+      onblur={() => {
+        chat.reportFocus(false);
+        chat.closeMention();
+      }}
     />
     <!-- Not `disabled` while an answer comes: disabling the focused box
          throws the caret out of it, and you'd have to click back in to
@@ -497,7 +547,7 @@
       <button class="sendbtn stopbtn" disabled={chat.stopping} onclick={chat.stopAnswer} aria-label="Stop the answer" title="Stop (Esc)">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
       </button>
-    {:else if chat.input.trim() || chat.attached.length}
+    {:else if chat.input.trim() || chat.attached.length || chat.files.length}
       <button
         class="sendbtn"
         disabled={chat.sending || chat.visionBlocked || chat.inputTooLong}
@@ -904,6 +954,56 @@
   }
   .shotchip {
     flex: 0 0 auto;
+  }
+  /* A mentioned workspace file (@path): its name, its folder quiet, ✕. */
+  .mentionchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    min-width: 0;
+    padding: 3px 4px 3px 9px;
+    border: 1px solid var(--yap-border);
+    border-radius: 9px;
+    background: var(--yap-s1);
+    font-size: 12.5px;
+  }
+  .mname {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .mdir {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--yap-muted);
+    font-size: 11.5px;
+  }
+  .mx {
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: var(--yap-muted);
+    cursor: pointer;
+  }
+  .mx:hover {
+    background: var(--yap-s3);
+    color: var(--yap-fg);
+  }
+  .mx svg {
+    width: 9px;
+    height: 9px;
+  }
+  /* The files attached: room for each chip's ✕ over its corner. */
+  .filerow {
+    gap: 10px;
+    padding: 10px 10px 2px 2px;
   }
   .thumb {
     position: absolute;

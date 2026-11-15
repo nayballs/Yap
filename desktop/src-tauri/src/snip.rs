@@ -823,6 +823,8 @@ pub fn init(app: &AppHandle) {
         .spawn(|| loop {
             std::thread::sleep(std::time::Duration::from_secs(30));
             images::sweep(crate::config::load().chat_image_days);
+            // Chat's attached files too (chat/attachments.rs), by "Keep chat files".
+            crate::chat::attachments::sweep(crate::config::load().chat_file_days);
             std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
         })
         .ok();

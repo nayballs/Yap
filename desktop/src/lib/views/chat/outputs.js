@@ -4,6 +4,11 @@
 // anywhere else that lists what a chat made. Each kind adds its own rows
 // here, so there's one list, never two:
 //
+// - `page`: a page it keeps (chat/made/pages.rs `save_page`: `made`, what
+//   it made), newest first; opens beside the chat (KeptPageTab). First, as
+//   the Claude app lists its artifact first.
+// - `doc`: a document it wrote (chat/documents.rs: an answer's
+//   `documents`), newest first; opens beside the chat.
 // - `changed`: a file the chat's work changed (its agents' turns' `files`,
 //   relative to the workspace: agents/store.rs), newest first, each once;
 //   opens in the file view beside the chat.
@@ -48,11 +53,26 @@ function changedFiles(agents) {
 }
 
 /**
- * **A chat's outputs**: `agents` (its agents, as the agents store has them)
- * and `messages` (its thread). Changed files first, then files shared.
+ * **A chat's outputs**: `agents` (its agents, as the agents store has them),
+ * `messages` (its thread) and `made` (what it made: made.svelte.js). Pages it
+ * keeps first, then documents, then changed files, then files shared.
  */
-export function outputItems({ agents = [], messages = [] } = {}) {
+export function outputItems({ agents = [], messages = [], made = [] } = {}) {
   const out = [];
+  const pages = (made || []).filter((m) => m?.kind === 'page' && m.id).sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+  for (const p of pages) {
+    const n = p.versions?.length || 1;
+    out.push({ key: `page:${p.id}`, kind: 'page', name: p.title || 'Page', detail: '', label: n > 1 ? `Page · ${n} versions` : 'Page', page: p });
+  }
+  const docs = new Set();
+  for (const m of [...(messages || [])].reverse()) {
+    if (m?.role !== 'assistant') continue;
+    for (const d of m.documents?.length ? m.documents : m.liveDocs || []) {
+      if (d?.id == null || docs.has(d.id)) continue;
+      docs.add(d.id);
+      out.push({ key: `doc:${d.id}`, kind: 'doc', name: d.title || 'Untitled document', detail: '', label: 'Document', id: d.id });
+    }
+  }
   for (const f of changedFiles(agents)) {
     const { name, folder } = splitPath(f);
     out.push({ key: `changed:${f}`, kind: 'changed', name, detail: folder, label: 'Changed', rel: String(f).replace(/\\/g, '/') });
