@@ -1,21 +1,71 @@
 use super::*;
 
-/// A one-page PDF with `text` on it, its cross-reference table right (made
-/// here: no file of anyone's).
-pub(crate) fn tiny_pdf(text: &str) -> Vec<u8> {
-    let content = format!("BT /F1 12 Tf 72 720 Td ({}) Tj ET", text.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)"));
-    let objects = [
-        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
-        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
-        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+/// A page of a PDF made here: typed text, or a scan (a picture of
+/// fictional words, `fixtures/scanned-note.png`, and no text).
+pub(crate) enum Pg<'a> {
+    Text(&'a str),
+    Scan,
+}
+
+/// The scanned page's picture: an 8-bit grey PNG, its width, height and
+/// compressed rows (a PDF's FlateDecode with PNG's predictors takes them
+/// as they are).
+fn scan_picture() -> (u32, u32, Vec<u8>) {
+    let png = include_bytes!("fixtures/scanned-note.png");
+    let (mut w, mut h, mut idat) = (0, 0, Vec::new());
+    let mut at = 8;
+    while at + 8 <= png.len() {
+        let len = u32::from_be_bytes(png[at..at + 4].try_into().unwrap()) as usize;
+        let kind = &png[at + 4..at + 8];
+        let data = &png[at + 8..at + 8 + len];
+        match kind {
+            b"IHDR" => {
+                w = u32::from_be_bytes(data[0..4].try_into().unwrap());
+                h = u32::from_be_bytes(data[4..8].try_into().unwrap());
+                assert_eq!((data[8], data[9], data[12]), (8, 0, 0), "8-bit grey, not interlaced");
+            }
+            b"IDAT" => idat.extend_from_slice(data),
+            _ => {}
+        }
+        at += 12 + len;
+    }
+    (w, h, idat)
+}
+
+/// A PDF of `pages`, its cross-reference table right (made here: no file of
+/// anyone's). A scanned page shows the picture across its top half.
+pub(crate) fn pdf_of(pages: &[Pg]) -> Vec<u8> {
+    let (w, h, rows) = scan_picture();
+    let esc = |t: &str| t.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
+    // 1 the catalog, 2 the pages, 3 the font, 4 the picture; then each page's
+    // contents and the page.
+    let kids: Vec<String> = (0..pages.len()).map(|i| format!("{} 0 R", 6 + i * 2)).collect();
+    let picture = format!(
+        "<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors 1 /BitsPerComponent 8 /Columns {w} >> /Length {} >>\nstream\n",
+        rows.len()
+    );
+    let mut objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        format!("<< /Type /Pages /Kids [{}] /Count {} >>", kids.join(" "), pages.len()).into_bytes(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        [picture.into_bytes(), rows, b"\nendstream".to_vec()].concat(),
     ];
+    for page in pages {
+        let content = match page {
+            Pg::Text(t) => format!("BT /F1 12 Tf 72 720 Td ({}) Tj ET", esc(t)),
+            Pg::Scan => "q 500 0 0 150 56 600 cm /Im1 Do Q".to_string(),
+        };
+        objects.push(format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()).into_bytes());
+        let n = objects.len();
+        objects.push(format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {n} 0 R /Resources << /Font << /F1 3 0 R >> /XObject << /Im1 4 0 R >> >> >>").into_bytes());
+    }
     let mut out = b"%PDF-1.4\n".to_vec();
     let mut offsets = Vec::new();
     for (i, o) in objects.iter().enumerate() {
         offsets.push(out.len());
-        out.extend(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+        out.extend(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend(o);
+        out.extend(b"\nendobj\n");
     }
     let xref = out.len();
     out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
@@ -24,6 +74,16 @@ pub(crate) fn tiny_pdf(text: &str) -> Vec<u8> {
     }
     out.extend(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
     out
+}
+
+/// A one-page PDF with `text` on it.
+pub(crate) fn tiny_pdf(text: &str) -> Vec<u8> {
+    pdf_of(&[Pg::Text(text)])
+}
+
+/// A PDF of `n` scanned pages.
+pub(crate) fn scanned_pdf(n: usize) -> Vec<u8> {
+    pdf_of(&(0..n).map(|_| Pg::Scan).collect::<Vec<_>>())
 }
 
 /// A zip of `files` (name, text).
@@ -75,7 +135,7 @@ fn each_kind_is_read_or_said_plainly() {
     // An ending Yap doesn't know, but text inside: text.
     assert_eq!(read("Makefile", b"all:\n\techo hi".to_vec()).unwrap().kind, "text");
     assert_eq!(read("budget.xlsx", vec![0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0]).unwrap_err(), "Yap couldn't read the cells of budget.xlsx.");
-    assert_eq!(read("seeds.zip", vec![0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0]).unwrap_err(), "Chat can't read seeds.zip (an archive). It reads text, code, PDF, Word and spreadsheet files, and pictures.");
+    assert_eq!(read("seeds.zip", vec![0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0]).unwrap_err(), "Chat can't read seeds.zip (an archive). It reads text, code, PDF, Word, PowerPoint and spreadsheet files, and pictures.");
     assert!(read("photo.png", b"\x89PNG".to_vec()).unwrap_err().contains("is a picture"));
     assert_eq!(read("empty.txt", Vec::new()).unwrap_err(), "empty.txt is empty.");
     assert_eq!(read("blank.txt", b" \n\n ".to_vec()).unwrap_err(), "blank.txt is empty.");
@@ -86,6 +146,64 @@ fn each_kind_is_read_or_said_plainly() {
     let docx = zip_of(&[("word/document.xml", "<w:document><w:body><w:p><w:r><w:t>Plot 7</w:t></w:r></w:p></w:body></w:document>")]);
     let word = read("allotment.docx", docx).unwrap();
     assert_eq!((word.kind, word.text.as_str()), ("word", "Plot 7"));
+    let empty_docx = zip_of(&[("word/document.xml", "<w:document><w:body><w:p/></w:body></w:document>")]);
+    assert_eq!(read("blank.docx", empty_docx).unwrap_err(), "blank.docx has no text in it.");
+}
+
+#[test]
+fn presentations_and_older_word_documents_are_read_and_the_rest_said_for_their_kind() {
+    let deck = read("allotment-year.pptx", super::powerpoint::tests::pptx()).unwrap();
+    assert_eq!(deck.kind, "powerpoint");
+    assert!(deck.text.starts_with("Slide 1: Allotment year\n\nSlide 2: Spring planting\n"), "{}", deck.text);
+    assert!(deck.text.ends_with("Speaker notes: Mention the frost dates."), "{}", deck.text);
+    assert_eq!(read("broken.pptx", b"not a zip".to_vec()).unwrap_err(), "Yap couldn't read the text of broken.pptx.");
+    let blank = zip_of(&[("ppt/presentation.xml", "<p:presentation/>")]);
+    assert_eq!(read("blank.pptx", blank).unwrap_err(), "blank.pptx has no text in it.");
+    // An older Word document; a locked one; one cut short; one that's really a .docx, or RTF.
+    let doc = read("rules.doc", super::doc::tests::garden_doc()).unwrap();
+    assert_eq!((doc.kind, doc.text.lines().next()), ("word", Some("Allotment rules")));
+    assert_eq!(read("secret.doc", super::doc::tests::doc_of(&[(true, "Plot 9\r")], true)).unwrap_err(), "secret.doc is password-protected, so Yap can't read it.");
+    let mut cut = super::doc::tests::garden_doc();
+    cut.truncate(700);
+    assert_eq!(read("cut.doc", cut).unwrap_err(), "Yap couldn't read the text of cut.doc (it may be from Word 95 or older): save it as .docx in Word to attach it.");
+    let docx = zip_of(&[("word/document.xml", "<w:document><w:body><w:p><w:r><w:t>Plot 8</w:t></w:r></w:p></w:body></w:document>")]);
+    assert_eq!(read("saved-as.doc", docx).unwrap().text, "Plot 8");
+    let rtf = read("letter.doc", b"{\\rtf1\\ansi Dear neighbour}".to_vec()).unwrap();
+    assert_eq!((rtf.kind, rtf.text.as_str()), ("text", "{\\rtf1\\ansi Dear neighbour}"));
+    // An older presentation: never read, said.
+    assert_eq!(
+        read("old.ppt", vec![0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]).unwrap_err(),
+        "Chat can't read old.ppt (an older PowerPoint presentation: save it as .pptx in PowerPoint to attach it). It reads text, code, PDF, Word, PowerPoint and spreadsheet files, and pictures."
+    );
+}
+
+#[test]
+fn the_source_says_what_a_files_text_is() {
+    assert_eq!(source("notes.md", "markdown", None, None, None), "notes.md");
+    assert_eq!(source("o.pdf", "pdf", Some(1), None, None), "o.pdf (a PDF, 1 page: its text, read on the person's PC)");
+    assert_eq!(
+        source("scan.pdf", "pdf", Some(48), Some(20), Some(28)),
+        "scan.pdf (a PDF, 48 pages: its text, read on the person's PC; 20 scanned pages read with OCR, which can get words wrong; 28 pages not read, named at the end)"
+    );
+    assert_eq!(source("rules.doc", "word", None, None, None), "rules.doc (a Word document: its text)");
+    assert_eq!(source("year.pptx", "powerpoint", None, None, None), "year.pptx (a PowerPoint presentation: each slide's text, then its speaker notes)");
+}
+
+/// A scanned PDF attached: its chip's fields say how many pages OCR read
+/// (where Windows has an OCR language: a PC without one says so).
+#[cfg(windows)]
+#[test]
+fn a_scanned_pdf_kept_says_its_pages_read_with_ocr() {
+    match keep("notice.pdf", scanned_pdf(1)) {
+        Ok(a) => {
+            assert_eq!((a.kind.as_str(), a.pages, a.ocr_pages, a.unread_pages), ("pdf", Some(1), Some(1), None));
+            assert!(text(&a.id).unwrap().starts_with("[Page 1, read with OCR]\n"));
+            assert!(serde_json::to_string(&a).unwrap().contains("\"ocrPages\":1"));
+            delete(&[a.id]);
+        }
+        Err(e) if e.contains("isn't set up on this PC") => eprintln!("no OCR language on this PC: skipped"),
+        Err(e) => panic!("{e}"),
+    }
 }
 
 #[test]
@@ -126,7 +244,7 @@ fn a_file_is_kept_read_back_and_deleted() {
 }
 
 fn att(id: &str, name: &str, kind: &str) -> Attachment {
-    Attachment { id: id.into(), name: name.into(), kind: kind.into(), bytes: 10, tokens: 3, pages: (kind == "pdf").then_some(2), gone: false }
+    Attachment { id: id.into(), name: name.into(), kind: kind.into(), bytes: 10, tokens: 3, pages: (kind == "pdf").then_some(2), ..Default::default() }
 }
 
 #[test]
@@ -214,11 +332,21 @@ fn files_an_older_yaps_save_dropped_come_back() {
     assert!(dropped[0].messages[0].attachments.is_empty());
     // Once back, nothing twice.
     assert_eq!(restore_from(&mut dropped, &mirror), 0);
+
+    // A Yap from before a scan's OCR pages: the file kept, its counts dropped; they come back.
+    let scan = Attachment { ocr_pages: Some(2), unread_pages: Some(1), ..att("file_00000000000000aa", "notice.pdf", "pdf") };
+    let mirror = mirror_of(&[conv(vec![q(300, vec![scan.clone()])])]);
+    let mut older = vec![conv(vec![q(300, vec![Attachment { ocr_pages: None, unread_pages: None, ..scan.clone() }])])];
+    assert_eq!(restore_from(&mut older, &mirror), 1);
+    assert_eq!(older[0].messages[0].attachments, vec![scan]);
+    assert_eq!(restore_from(&mut older, &mirror), 0);
 }
 
 #[test]
 fn what_cant_be_read_says_what_it_is() {
     assert!(cant_read("a.zip", "zip").contains("(an archive)"));
     assert!(cant_read("talk.mp3", "mp3").contains("Upload transcribes it"));
-    assert_eq!(cant_read("thing.bin", "bin"), "Chat can't read thing.bin. It reads text, code, PDF, Word and spreadsheet files, and pictures.");
+    assert_eq!(cant_read("thing.bin", "bin"), "Chat can't read thing.bin. It reads text, code, PDF, Word, PowerPoint and spreadsheet files, and pictures.");
+    assert!(cant_read("deck.odp", "odp").contains("(an OpenDocument presentation: save it as .pptx to attach it)"));
+    assert!(cant_read("deck.key", "key").contains("(a Keynote presentation: export it as PowerPoint to attach it)"));
 }

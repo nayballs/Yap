@@ -130,6 +130,7 @@
   import { chatSummary } from '../../stores/chatSummary.svelte.js';
   import { chatOutputs } from '../../stores/chatOutputs.svelte.js';
   import { CODE_FILES } from '../../ui/fileLinks.js';
+  import { archiveChats } from './chatLibrary.svelte.js';
   import { SHEETS, isSheetName } from './sheetView.js';
   import { runCommand } from './codeRuns.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
@@ -167,6 +168,8 @@
       tick().then(() => chat.inputEl?.focus());
     },
     openSettings: (section) => onopensettings?.(section),
+    // A merged pull request's Archive in the summary (SummaryTab.svelte): this chat, as the list archives it.
+    archive: (id) => archiveChats(chat, [id], true),
   });
   // **An attached spreadsheet** (chat/attachments/sheet.rs): its chip opens it beside the chat, as Excel draws it.
   setContext(SHEETS, { open: (file) => doc.showSheet({ src: { from: 'attachment', id: file.id }, name: file.name }) });
@@ -505,6 +508,8 @@
       // A long chat's older messages were summarised (chat/compact.rs).
       listen('yap-chat-summary', (e) => chat.onSummary(e.payload)),
       listen('yap-chat-images-deleted', chat.reloadActive),
+      // Chats auto-archived, or brought back by its Undo (chat/auto_archive.rs).
+      listen('yap-chats-archived', () => chat.refreshList()),
       // The document beside the chat, changed in another window or by Chat's
       // tools (its sections landing), or deleted.
       listen('yap-note-changed', (e) => doc.onNoteChanged(e.payload)),

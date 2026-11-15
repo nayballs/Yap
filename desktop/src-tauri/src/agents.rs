@@ -45,6 +45,10 @@
 //! - [`commands`]: the page's commands (Yap Code's screens).
 //! - [`approve_card`]: a running agent's permission prompt on the Yap bar
 //!   when no Yap window is in front (Allow once / Deny).
+//! - [`context`]: a Code chat's context broken down, from Claude Code's own
+//!   `/context` for its session (the summary panel's Context).
+//! - [`prs`]: the pull requests of a Code chat's branch, from the person's
+//!   own `gh` (the summary panel's Changes).
 //! - [`remote`]: Remote Control's records (`remote_control.json`, 2026-11-08):
 //!   which phones and workspaces allow it, the turns a phone asked for (run
 //!   at most at Auto, reported on that phone), the audit trail.
@@ -58,6 +62,7 @@ pub mod approve_card;
 pub mod code_chat;
 pub mod commands;
 pub mod consent;
+pub mod context;
 pub mod diff;
 pub mod direct;
 pub mod files;
@@ -66,6 +71,7 @@ pub mod workspaces;
 pub mod modes;
 pub mod output;
 pub mod pictures;
+pub mod prs;
 pub mod remote;
 pub mod rewind;
 pub mod run_block;

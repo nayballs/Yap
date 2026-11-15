@@ -111,6 +111,8 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     // "Delete meeting transcripts after" set or shortened: the older ones
     // go now (notes/retention.rs), and their audio with them.
     crate::notes::retention::on_config_saved(&app, prev, &cfg);
+    // "Archive chats you haven't used in" set or changed: a run now (chat/auto_archive.rs).
+    crate::chat::auto_archive::on_config_saved(&app, prev, &cfg);
     // "Keep history" changed: copied beside the stats at once, and "24
     // hours" applied now (dictation/history/keep.rs).
     crate::dictation::history::keep::on_config_saved(&app, prev, &cfg);

@@ -49,6 +49,8 @@ pub fn show_settings(app: &AppHandle) -> Result<(), String> {
     // it. Not left to the Focused event alone: Windows can refuse a
     // background app the foreground, and e2e test runs never take it.
     crate::updates::on_main_window_focused(app);
+    // …and chats archived meanwhile are said (chat/auto_archive.rs).
+    crate::chat::auto_archive::on_main_window_focused(app);
     Ok(())
 }
 

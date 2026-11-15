@@ -7628,6 +7628,7 @@ dependencies = [
  "arboard",
  "base64 0.23.1",
  "calamine",
+ "cfb",
  "chrono",
  "chrono-tz",
  "cpal",

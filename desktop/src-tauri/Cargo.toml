@@ -160,6 +160,8 @@ tar = "0.4"
 zip = { version = "9.2", default-features = false, features = ["deflate-flate2"] }
 # A PDF attached to a Chat question is read on this PC, never uploaded to be
 # read (chat/attachments/pdf.rs): its text, through lopdf. Pure Rust, MIT.
+# (A scanned page, no text in it: Windows' own Windows.Data.Pdf draws it and
+# Windows' OCR reads it, chat/attachments/scan.rs: windows' Data_Pdf below.)
 pdf-extract = "0.12"
 # Spreadsheets (chat/sheets.rs, chat/attachments/sheet.rs): an .xlsx/.xlsm is
 # read and calculated by IronCalc (MIT OR Apache-2.0: its styles, merges,
@@ -171,6 +173,11 @@ calamine = "0.38"
 # A .csv / .tsv attached or shown beside the chat (chat/sheets/delimited.rs):
 # RFC 4180 quoting. Already in the tree through IronCalc.
 csv = "1"
+# An older Word document (.doc) attached to a question: its Compound File
+# Binary container read (chat/attachments/doc.rs reads the text inside, by
+# the public [MS-DOC] spec). MIT; already in the tree (tauri's `infer`), so
+# no new crate. Pure Rust.
+cfb = "0.14"
 
 # Multi-engine STT (whisper.cpp + ONNX) via transcribe-rs. Optional so the
 # default build ships the STUB and `cargo check` stays fast.
@@ -231,13 +238,14 @@ tauri-plugin-updater = { version = "2", default-features = false, features = ["r
 # its text instead" (Media_Ocr, with Graphics_Imaging's SoftwareBitmap and
 # Globalization's languages), and Graphics_Imaging's decoders for pictures
 # pasted or dropped into Chat (JPEG, GIF, BMP, WebP…: no image crate).
+# Data_Pdf: a scanned PDF's pages drawn for that OCR (chat/attachments/scan.rs).
 # Yap Link (link/lan.rs): this PC's addresses on its networks (IpHelper's
 # GetAdaptersAddresses, WinSock's addresses, Ndis's interface kinds) and
 # whether Windows marks a network Public (NetworkListManager).
 # LibraryLoader: GetModuleHandleW for the windows Yap registers itself (the
 # clipboard window, read_check.rs; the snip overlay and snip-dump). Named here
 # since wry 0.57 (tauri 2.12) no longer turns it on for the copy Yap shares.
-windows = { version = "0.62", features = ["Win32_System_LibraryLoader", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi_Common", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture", "Win32_Devices_Display", "Win32_Graphics_Dwm", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Security_Authorization_AppCapabilityAccess", "Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_Security", "Foundation", "Foundation_Collections", "UI_Notifications", "Data_Xml_Dom", "Networking_Connectivity", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Power", "Win32_System_Ole", "Win32_System_SystemServices", "Win32_System_Variant", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_Globalization", "Win32_System_Time", "Media_Control", "Media_SpeechSynthesis", "Media_Core", "Storage_Streams", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Shell_PropertiesSystem", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_System_Com_StructuredStorage", "Win32_Graphics_Dxgi", "Win32_Storage_FileSystem", "Media_Ocr", "Graphics_Imaging", "Globalization", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_Networking_NetworkListManager"] }
+windows = { version = "0.62", features = ["Win32_System_LibraryLoader", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi_Common", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture", "Win32_Devices_Display", "Win32_Graphics_Dwm", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Security_Authorization_AppCapabilityAccess", "Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_Security", "Foundation", "Foundation_Collections", "UI_Notifications", "Data_Xml_Dom", "Networking_Connectivity", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Power", "Win32_System_Ole", "Win32_System_SystemServices", "Win32_System_Variant", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_Globalization", "Win32_System_Time", "Media_Control", "Media_SpeechSynthesis", "Media_Core", "Storage_Streams", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Shell_PropertiesSystem", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_System_Com_StructuredStorage", "Win32_Graphics_Dxgi", "Win32_Storage_FileSystem", "Media_Ocr", "Data_Pdf", "Graphics_Imaging", "Globalization", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_Networking_NetworkListManager"] }
 # Core Audio's device notifications (`dictation/mics/watch.rs`): the
 # `#[implement]` of an `IMMNotificationClient` names `::windows_core`. The
 # same copy the `windows` crate above is built on (already in the tree).

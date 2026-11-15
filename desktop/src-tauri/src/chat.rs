@@ -5,6 +5,7 @@
 pub mod activity;
 pub mod assistant;
 pub mod attachments;
+pub mod auto_archive;
 pub mod budget;
 pub mod cards;
 pub mod chats;
