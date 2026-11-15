@@ -196,6 +196,7 @@ pub fn doing(name: &str) -> &'static str {
         "look_at_picture" => "Looking at a picture…",
         "show_picture" => "Showing a picture…",
         "share_files" => "Sharing files…",
+        "show_visual" => "Making a visual…",
         "find_pictures" => "Looking for pictures…",
         "show_page" | "open_page" => "Bringing up a page…",
         "read_open_page" | "browser_read" => "Reading the page…",

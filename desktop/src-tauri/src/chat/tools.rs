@@ -322,6 +322,10 @@ pub struct Extra<'a> {
     /// (a path, or one of the turn's pictures: the web turn's), or the
     /// picture files' gate without it (a path: [`Extra::file_pictures`]').
     pub share: crate::chat::shares::Offer,
+    /// **`show_visual`** (`chat/made.rs`): an SVG diagram or a small HTML
+    /// widget shown in the answer itself — a strong model, with a thread to
+    /// show it in (`made::offered`).
+    pub visuals: bool,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).

@@ -102,6 +102,10 @@ pub struct Context {
     /// loop's gates have them: a phone's question never asks, the box needs
     /// Chat in view). Off: refused (`claude_live/cards.rs`).
     pub cards: crate::chat::cards::Cards,
+    /// **`show_visual` answers this turn** (`chat/made.rs`): a question
+    /// asked in Chat (typed, or out loud with Chat in view), whose thread
+    /// shows the visual. Off: refused, "answer in words".
+    pub visuals: bool,
 }
 
 /// The turn open now.

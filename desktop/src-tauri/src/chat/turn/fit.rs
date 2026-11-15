@@ -52,6 +52,8 @@ pub(super) enum Family {
     Agents,
     /// The connectors' tools and line (`tools/connectors.rs`).
     Connectors,
+    /// `show_visual` and its line (`chat/made.rs`): strong models only.
+    Visuals,
     /// The pictures' own tools (`find_pictures`, `look_at_picture`,
     /// `show_picture`) and lines; the pages beside the chat stay.
     Pictures,
@@ -95,26 +97,29 @@ pub(super) enum Family {
 /// 3. agents, ~1,560 in a plain chat — the most of any, and a Code chat
 ///    (Chat's Code side) is where they're the point;
 /// 4. connectors, up to a tenth of the context (strong cloud models only);
-/// 5. pictures, ~300;
-/// 6. the documents' rich set for the simple one, ~800 (strong models);
-/// 7. the screen, ~150;
-/// 8. the calendar, ~250;
-/// 9. past chats, ~110;
-/// 10. the browser beside the chat, ~550 (the web's search and page reads
+/// 5. visuals in the answer, ~280 (strong models only, 15 Nov 2026; kept
+///    when the question asks for one, [`keeps`]);
+/// 6. pictures, ~300;
+/// 7. the documents' rich set for the simple one, ~800 (strong models);
+/// 8. the screen, ~150;
+/// 9. the calendar, ~250;
+/// 10. past chats, ~110;
+/// 11. the browser beside the chat, ~550 (the web's search and page reads
 ///     stay);
-/// 11. apps, ~280 — after the browser: its line says websites open
+/// 12. apps, ~280 — after the browser: its line says websites open
 ///     there "never with open_app" ([`Family::waits`]);
-/// 12. picture files without the web, ~110 — last, and kept whenever
+/// 13. picture files without the web, ~110 — last, and kept whenever
 ///     they're offered (a Code chat, a question naming a picture file).
 ///
 /// Never: the notes and documents' tools, the web's, memory's `remember` /
 /// `forget` — what Chat is for.
-pub(super) const ORDER: [Family; 13] = [
+pub(super) const ORDER: [Family; 14] = [
     Family::Cards,
     Family::Acting,
     Family::Seeing,
     Family::Agents,
     Family::Connectors,
+    Family::Visuals,
     Family::Pictures,
     Family::RichDocuments,
     Family::Screen,
@@ -133,6 +138,7 @@ impl Family {
             Family::Seeing => "seeing",
             Family::Agents => "agents",
             Family::Connectors => "connectors",
+            Family::Visuals => "visuals",
             Family::Pictures => "pictures",
             Family::RichDocuments => "rich_documents",
             Family::Screen => "screen",
@@ -160,6 +166,7 @@ impl Family {
             Family::Seeing => g,
             Family::Agents => Gates { agents: false, ..g },
             Family::Connectors => Gates { connectors: false, ..g },
+            Family::Visuals => Gates { visuals: false, ..g },
             Family::Pictures => Gates { picture_tools: false, ..g },
             Family::RichDocuments => Gates { doc_tools: crate::chat::documents::ToolSet::Simple, ..g },
             Family::Screen => Gates { screen: Gate::Off, ..g },
@@ -237,6 +244,9 @@ pub(super) fn keeps(question: &str, previous: Option<&str>, code: bool, workspac
     }
     if crate::chat::tools::calendar::asks_about_calendar(question) {
         keep = keep.with(Family::Calendar);
+    }
+    if crate::chat::made::asks_for_visual(question) {
+        keep = keep.with(Family::Visuals);
     }
     if crate::chat::chats::refers_to_past(question) {
         keep = keep.with(Family::PastChats);
@@ -453,6 +463,7 @@ mod tests {
             files: Gate::Off,
             share_tools: true,
             cards: Default::default(),
+            visuals: false,
         }
     }
 
@@ -466,6 +477,7 @@ mod tests {
             screen: Gate::Look,
             act: true,
             calendar: true,
+            visuals: true,
             ..small_model()
         }
     }
@@ -584,6 +596,8 @@ mod tests {
                 agents: g.agents.then_some(crate::chat::tools::AgentsTurn::default()),
                 // (Since 8 Nov 2026 share_files too, where show_picture takes a path.)
                 share: crate::chat::shares::Offer::of(g.pictures, g.files, true),
+                // (Since 15 Nov 2026 show_visual, for a strong model: chat/made.rs.)
+                visuals: g.visuals,
                 ..Default::default()
             };
             assert_eq!(g.offered(None, Some(7), code), crate::chat::tools::offered_tools(cfg.open_apps, true, before), "code: {code}");

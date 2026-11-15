@@ -11,6 +11,7 @@ pub mod commands;
 pub mod compact;
 pub mod documents;
 pub mod export;
+pub mod made;
 pub mod note_chats;
 pub mod note_text;
 pub mod pages;

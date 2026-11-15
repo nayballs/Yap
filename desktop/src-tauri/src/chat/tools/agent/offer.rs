@@ -41,6 +41,10 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
     if let (Some(all), Some(share)) = (tools.as_array_mut(), crate::chat::shares::definitions(extra.share).as_array()) {
         all.extend(share.iter().cloned());
     }
+    // Visuals in the answer itself (chat/made.rs): a strong model with a thread to show them in.
+    if let (Some(all), Some(visuals)) = (tools.as_array_mut(), crate::chat::made::definitions(extra.visuals).as_array()) {
+        all.extend(visuals.iter().cloned());
+    }
     // Pages beside the chat (chat/pages.rs): for the same models; acting on
     // them (chat/pages/act.rs) for the ones that may.
     if let (Some(all), Some(pages)) = (tools.as_array_mut(), crate::chat::pages::definitions(extra.pictures, extra.act).as_array()) {

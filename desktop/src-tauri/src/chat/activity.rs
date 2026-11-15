@@ -165,6 +165,8 @@ pub fn describe(name: &str, args: &Value, title_of: &dyn Fn(u64) -> Option<Strin
             };
             Activity::new("picture", line)
         }
+        // A visual in the answer (chat/made.rs): its title.
+        crate::chat::made::SHOW_VISUAL => Activity::new("picture", with(text(&["title"]).map(|t| quoted(&t)), "Drawing", "Making a visual")),
         // Pages beside the chat (chat/pages.rs): the page's address, or the
         // search's words (show_page: open_page's earlier name).
         "open_page" | "show_page" => match text(&["search"]) {

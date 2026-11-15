@@ -39,10 +39,36 @@
   // A long chat's chapters (chat/cards/chapters.rs): a divider above the question each starts at, and the
   // floating contents (ChatChapters, its own chunk) to jump between them.
   import { chaptersOf } from './chapters.js';
+  // What the chat made (chat/made.rs): its visuals, each in the answer to its question.
+  import { made, followMade, placeVisuals } from './made.svelte.js';
+  import { toast } from '../../ui/toast.svelte.js';
 
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
   const chapters = $derived(chaptersOf(chat.messages));
   const chapterAt = $derived(new Map(chapters.map((c) => [c.at, c])));
+  // **Visuals** (chat/made.rs, 15 Nov 2026): read with the chat, heard as they're made; each shows in the
+  // answer to its question (above its words), or under the question's work while there's no answer yet.
+  followMade();
+  $effect(() => {
+    const id = chat.activeId;
+    if (id != null) untrack(() => made.load(id));
+  });
+  const placed = $derived(placeVisuals(chat.messages, made.of(chat.activeId)));
+  /**
+   * **A visual's button sent a message** (`sendPrompt`, visualBridge.js: the person's click, text only):
+   * into this chat as if typed — or, made after outside content (a page, the screen, a connector) or while
+   * an answer's being written, into the box for the person to read and send.
+   */
+  function sendFromVisual(text, v, conversation) {
+    if (conversation == null || chat.activeId !== conversation) return;
+    if (v.outside || chat.sending) {
+      chat.input = text;
+      chat.inputEl?.focus();
+      if (v.outside) toast({ title: 'From the visual', description: 'In the box for you to read: send it if you want to.' });
+      return;
+    }
+    chat.send({ text });
+  }
   // …and under the person's own message, in a Code chat that works directly
   // (agents/direct.rs): its session's work, with no answer of Chat's between.
   const directPills = $derived(pillsByQuestion(agents.list, chat.activeId, chat.messages));
@@ -313,6 +339,8 @@
               actions={m.role === 'user' ? actionsFor(m) : null}
               onnext={(b) => chat.sendNextStep(b)}
               busy={chat.sending}
+              visuals={placed.get(i)?.inAnswer ? placed.get(i).visuals : null}
+              onvisualprompt={(text, v) => sendFromVisual(text, v, chat.activeId)}
             />
           {/if}
           {#if directPills.get(i)?.length}
@@ -356,6 +384,14 @@
               <!-- (An agent Chat sent out works in its own panel, as a subagent does in Claude Code: its work is
                    in its row there (AgentPanel), never here. Only the chat's own work, above, shows in the thread.) -->
             {/if}
+          {/if}
+          {#if placed.get(i) && !placed.get(i).inAnswer}
+            <!-- Visuals made for this question with no answer yet (a Code chat's Claude still working). -->
+            {#await import('./VisualFrame.svelte') then { default: VisualFrame }}
+              {#each placed.get(i).visuals as v (v.id)}
+                <VisualFrame {v} conversation={chat.activeId} onprompt={(text) => sendFromVisual(text, v, chat.activeId)} />
+              {/each}
+            {/await}
           {/if}
         {/each}
         {#if asks.length || answeredRemote.length}
