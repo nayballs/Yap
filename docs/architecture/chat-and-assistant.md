@@ -250,6 +250,10 @@ one side.
   (`chat:<id>:<index>`) count only the person's own (kind empty); search by
   meaning's passages say the report is the agent's ("Agent", never "You"). An
   older Yap drops `kind` on its save.
+- **`chat/chats/branches.rs`** — **Retry and Edit's versions** (2026-11-15, ‹ 1/2 ›):
+  the branch shown is `messages`; `Conversation.branches` the forks along it,
+  each with its other branches; copied to `chat_branches.json` for an older
+  Yap's save. [Below](#retry-edit-and-versions-2026-11-15).
 - **`chat/note_chats.rs`** — **a meeting's Ask thread, kept** (Wispr Flow's
   "New chat" / "Past chats"; the private roadmap's R15): what was asked about
   a meeting in the notepad's Ask sheet or its note's "Ask anything…" bar
@@ -5108,6 +5112,119 @@ rules pure in `core/chatStatus.js`, kept live for the whole main window by
 - Tests: `chat-status.spec.js` (the pure rules, then each state in the app,
   light and dark), `cargo test chat::stream` (the list of conversations
   answering) and `chat::chats` (`answerAt` / `askedAt`).
+
+## Retry, Edit and versions (2026-11-15)
+
+The Claude app's everyday message actions, as its Chat tab has them: **Retry**
+(↻) under an answer asks its question again and keeps both answers, ‹ 1/2 ›
+on the answer; **Edit** (the pencil) on the person's message opens it in
+place with its words, and **Save and send** asks the new words in its place
+as a new version from there, the old one reachable through ‹ 1/2 › on that
+message. As many versions as are made (at most 50 at one message:
+`branches::MAX_BRANCHES`), each with everything that followed it.
+
+**The model: one shown branch, the others set aside** (`chat/chats/branches.rs`,
+pure but for its copy on disk). The branch shown *is* the conversation's
+`messages`, as ever. A `Fork` along it says where versions part (`at`: the
+answer retried, or the message edited — `messages[..at]` are all of theirs
+alike), which one is shown (`shown`, its number in the order they were made),
+the shown one's first message's time (`ts`) and the other `Branch`es: each
+its messages from the fork on, its own forks further on, and the summary of
+a long chat written while it was shown when that covers past the fork
+(`compact.rs`: it goes with its branch, as a Rewind drops it). Retry is
+`branch_off` at the answer (what's shown from there set aside; the turn
+answers the question again); Edit is `branch_off` at the message (the new
+words are appended in its place); ‹ › is `switch` (the shown branch set
+aside, the chosen one put in). `undo` goes back to the branch set aside when
+the new one never answered; `heal`, at load, puts right a fork Yap closed
+during (the old answer back) or one an older Yap cut under; `cut_at` drops the
+forks after a Code chat's Rewind. A page gets the ‹ k/n › only
+(`Conversation.forks`, set on `chat_get`'s copy, never stored), never the
+other branches.
+
+**Everything follows the branch shown**, because everything reads `messages`:
+the history a model gets (`history_messages`), a long chat's summary
+(`compact.rs`: kept only over the messages it read — `set_summary`'s
+`print_of` check — so a summary of another branch written meanwhile is
+thrown away), memory learning (`memory::read_again_from`: what a pass read
+past the fork is read again, it says something else now), search by meaning
+(its index sees the change: `chats::stamp` hashes each message's time; the
+branch set aside's passages let go, `search::removed`), past-chats search,
+the phone's view (`link/chats.rs`), a chat exported as Markdown
+(`chat/export.rs`), the context ring and Chat's status dots.
+Only the screenshot sweep and deleting look further: a version not shown
+keeps its screenshots (`Conversation::every_message`: `image_ids`,
+`delete_many`, `unshown`), and they go with it.
+
+**An older Yap on the same data** (the nightly and the dev build share
+`%APPDATA%\yap`): it reads and keeps the branch shown — it's `messages` — and
+drops `branches` when it saves. So every chats.json save also writes the
+forks to **`chat_branches.json`** (`branches::mirror_to_disk`, only when they
+changed; removed when there are none), a file an older Yap never touches,
+and the next start puts them back (`restore_from_disk`) on every
+conversation that has none, keeping each fork that still fits: its shown
+branch's first message still there at its time (or none yet, mid-retry).
+Messages the older Yap added after the fork are kept; a fork its own Rewind
+cut under is lost for good — the branch shown is then all there is, as
+before. Unit-tested (`branches::tests::an_older_yaps_save_loses_no_branch_that_still_fits`)
+and in the app (`chat-branches.spec.js`).
+
+**Retry** (`chat_retry {conversationId, index, onStream, turnId}`, streamed as
+`chat_send` is, the same reply plus `forks`): `chats::begin_retry` sets the
+answer and what followed aside (only an answer just after the person's own
+question), then the turn runs **asked again** (`turn::again`, a task-local:
+the question is never saved a second time — `save_question`, Yap's own
+answers in `fast.rs` too — and the history before it is the conversation's
+up to it, `turn_conversation`). The question goes as it was: its words with
+the passage it was about (`sent_text`), its screenshots still on this PC
+(their text instead when it went as text), as dictated (spoken answers
+follow "When to speak"), and the Skill it ran. `end_branch` keeps the new
+answer (stopped part-way too), or — no answer at all (an error, ■ before any
+of it) — puts the old one back; the page says "Couldn't try again".
+
+**Edit** (`chat_send`'s `edit: index`): `chats::begin_edit` sets the message
+and what followed aside, and the new words are asked as any question, with
+the message's screenshots (their sources kept: an element's picture stays
+its chip's), the passage it was about (a document's as its selection, other
+text as selected text, treated as web content) and its picked elements'
+blocks. An error before any answer puts it all back, and the editor opens
+again with the new words; stopped, or replaced by a newer question, it
+stays as any question does.
+
+**Not while an answer is being written** in that chat (`stream::is_answering`;
+the page greys the buttons with "Unavailable while an answer is being
+written").
+
+**In a Code chat** there's no second mechanism: Edit and Retry are Claude
+Code's own **Rewind** ([yap-code.md](./yap-code.md), `agents/rewind.rs`),
+asked first as a Rewind is ("Send the edited message?" / "Retry from this
+message?", with "Also put back the files Claude changed since" when it
+did), then the message sent — the new words, or the same ones — as the
+session's next turn, forked at the end of the turn before it. Its
+screenshots stay to go again (`chats::rewind`'s `keep_shots`,
+`rewind_for_edit`). No versions are kept there: what came after is gone from
+the chat and from Claude's session, as with Rewind. Retry sits under the
+answer of a turn the person's message started; both are unavailable while
+Claude works, as Rewind is.
+
+**The page** (`views/chat/`): `BranchSwitch.svelte` (‹ k/n ›: under an answer
+in its foot before ↻, or at the start of the person's message's actions row,
+always shown while the buttons fade in on hover), `MessageEdit.svelte` (in
+place of the bubble, its own chunk: Enter sends, Shift+Enter a new line, Esc
+cancels; "Its screenshots go again" when it has some), `chatState`'s
+`retryAt`, `startEdit` / `saveEdit` / `cancelEdit`, `switchBranch` and
+`forks` (read with every load of the conversation), `send`'s `retry` /
+`edit`; ChatThread's `retryOf` / `branchOf` / `actionsFor` and the right-click
+menu's Edit and Retry.
+
+Tests: `cargo test chats::branches` (the model: retry, edit, nested versions,
+undo, the summary, Rewind's cut, heal, the copy for an older Yap's save, the
+cap), `chats::tests::a_retry_and_an_edit_keep_every_version…` (the store),
+`turn::again_tests` (asked again, never saved twice), `compact::tests` (a
+summary over messages that changed is dropped); `chat-branches.spec.js`
+(Retry, Edit, switching, the history sent, a retry with no answer, after a
+restart and after an older Yap's save) and `agents-direct.spec.js` (a Code
+chat's Edit and Retry through Rewind).
 
 ## Export a chat (2026-11-15)
 
