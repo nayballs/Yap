@@ -32,7 +32,8 @@
   // Code chat each turn's to-do card under its pill (AgentTodoCard), and a
   // running agent's permission prompts for this chat — each in a small chunk.
   import { agents, agentById } from '../../stores/agents.svelte.js';
-  import { pillsByAnswer, pillsByQuestion, answeredAfter, directLine, plainReport, agentOfReport, reportFolder, messageTurn, notesAfter } from '../../core/agents.js';
+  import { pillsByAnswer, pillsByQuestion, answeredAfter, directLine, plainReport, agentOfReport, reportFolder, messageTurn, notesAfter, turnsOf, turnParts, cardPart } from '../../core/agents.js';
+  import { agentLogs } from '../../stores/agentLogs.svelte.js';
   import { threadViewOf } from './threadView.svelte.js';
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { chatStatus } from '../../stores/chatStatus.svelte.js';
@@ -74,6 +75,10 @@
   const quietReport = (m) => plainReport(m, agentOfReport(agents.list, m.id, chat.activeId, reportFolder(m.text)));
   const asks = $derived(chat.activeId == null ? [] : agents.approvals.filter((a) => a.conversation === chat.activeId));
   // Answered from a paired phone (Remote Control): "Allowed from Office phone".
+  // **The plans a turn sent back with comments** (Plan mode's review, PlanHistory.svelte): its `plansBefore`, and
+  // whether the new plan is still being written (the turn at work, no plan card of its agent waiting).
+  const plansOf = (p) => (p?.turnList || []).find((t) => t.n === (p.turn ?? 1))?.plansBefore || [];
+  const revisingNow = (p) => ['running', 'asking'].includes(p?.turnStatus) && !asks.some((a) => a.run === p.id && a.tool === 'ExitPlanMode');
   const answeredRemote = $derived(chat.activeId == null ? [] : agents.remoteAnswers.filter((a) => a.conversation === chat.activeId));
   const openAgent = (j) => chat.doc.showAgent(j);
   // A picture shared into the conversation (chat/shares.rs): in the panel's
@@ -97,6 +102,16 @@
   });
   /** How Claude's work shows in this chat (its ⋯ → Transcript view). */
   const view = $derived(threadViewOf(chat.activeId));
+  // **An ask-first card goes with the work it's about** (15 Nov 2026, as the Claude app lays a turn out): under
+  // the part of the turn it asked in — the latest when it came (`cardPart`), not always the message that asked.
+  /** Turn `p`'s cards before acting on a page that go under its part after message `after` (null: the first). */
+  function cardsIn(p, notes, after) {
+    const cards = chat.agentConfirms[`${p.id}:${p.turn ?? 1}`];
+    if (!cards?.length) return [];
+    const events = turnsOf(p, agentLogs.by[p.id] || []).find((t) => t.n === (p.turn ?? 1))?.events || [];
+    const parts = turnParts(events, notes);
+    return cards.filter((c) => cardPart(parts, c.after) === after);
+  }
   /** A step's picture, large: paged across its turn's (‹ 2 of 4 ›). */
   const openPaged = (list, at) => (chat.viewing = { ...list[at], list, at });
 
@@ -462,6 +477,7 @@
             {/if}
             <!-- (Its to-do list is AgentWork's: at its top, or as it stood above a message it read.) -->
             {#each directPills.get(i) as p (`work:${p.id}:${p.turn ?? 1}`)}
+              {@const here = cardsIn(p, turnNotes.get(i) || [], null)}
               {#await import('./AgentWork.svelte') then { default: AgentWork }}
                 <AgentWork
                   agent={p}
@@ -475,10 +491,17 @@
                   cards
                 />
               {/await}
-              <!-- Its cards before acting on a page (an action that would buy, send or sign in): Allow once / Don't. -->
-              {#if chat.agentConfirms[`${p.id}:${p.turn ?? 1}`]?.length}
+              {#if plansOf(p).length}
+                <!-- Its plans sent back with comments (Plan mode's review), folded above the one that followed. -->
+                {#await import('./PlanHistory.svelte') then { default: PlanHistory }}
+                  <PlanHistory plans={plansOf(p)} revising={revisingNow(p)} />
+                {/await}
+              {/if}
+              <!-- Its cards before acting on a page (an action that would buy, send or sign in): Allow once / Don't —
+                   here while this part is where the turn was when it asked. -->
+              {#if here.length}
                 {#await import('./PageConfirm.svelte') then { default: PageConfirm }}
-                  <PageConfirm confirms={chat.agentConfirms[`${p.id}:${p.turn ?? 1}`]} />
+                  <PageConfirm confirms={here} />
                 {/await}
               {/if}
             {/each}
@@ -486,6 +509,7 @@
           {#if m.role === 'user' && m.id && partsUnder.get(m.id)?.length}
             <!-- Sent while a turn worked: what Claude did after reading it, under it (nothing until it's read). -->
             {#each partsUnder.get(m.id) as o (`work:${o.p.id}:${o.p.turn ?? 1}:${m.id}`)}
+              {@const here = cardsIn(o.p, o.notes, m.id)}
               {#await import('./AgentWork.svelte') then { default: AgentWork }}
                 <AgentWork
                   agent={o.p}
@@ -500,6 +524,12 @@
                   cards
                 />
               {/await}
+              <!-- Its cards asked after Claude read this message: with this part's work. -->
+              {#if here.length}
+                {#await import('./PageConfirm.svelte') then { default: PageConfirm }}
+                  <PageConfirm confirms={here} />
+                {/await}
+              {/if}
             {/each}
           {/if}
           {#if agentPills.get(i)?.length}
@@ -511,6 +541,12 @@
               {#each agentPills.get(i).filter(hasTodos) as p (`${p.id}:${p.turn ?? 1}`)}
                 {#await import('./AgentTodoCard.svelte') then { default: AgentTodoCard }}
                   <AgentTodoCard agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} />
+                {/await}
+              {/each}
+              {#each agentPills.get(i).filter((p) => plansOf(p).length) as p (`plans:${p.id}:${p.turn ?? 1}`)}
+                <!-- An agent's plans sent back with comments, folded (Plan mode's review). -->
+                {#await import('./PlanHistory.svelte') then { default: PlanHistory }}
+                  <PlanHistory plans={plansOf(p)} revising={revisingNow(p)} />
                 {/await}
               {/each}
               <!-- (An agent Chat sent out works in its own panel, as a subagent does in Claude Code: its work is

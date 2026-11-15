@@ -389,6 +389,26 @@ export function turnParts(events, notes = []) {
   return parts;
 }
 
+/** **The message a turn had read last** (its latest `read` event's id), or null: none yet. Pure. */
+export function lastRead(events) {
+  for (let i = (events?.length ?? 0) - 1; i >= 0; i--) if (events[i]?.read) return events[i].read;
+  return null;
+}
+
+/**
+ * **Which part of a turn an ask-first card goes with** (15 Nov 2026, as the
+ * Claude app keeps a card with the work it's about): the part the turn was
+ * in when it asked — `after`, the message it had read last by then
+ * (`lastRead`, stamped as the card came: chatState's `agentShown`) — else,
+ * unstamped (`undefined`) or no part here, its latest part: where it is now.
+ * `parts`: `turnParts`'. That part's `after` (null: the first). Pure.
+ */
+export function cardPart(parts, after) {
+  const list = parts?.length ? parts : [{ after: null }];
+  if (after !== undefined && list.some((p) => p.after === after)) return after;
+  return list[list.length - 1].after;
+}
+
 /**
  * **The messages a direct turn may have read while it worked**: the ids of
  * the person's messages after the one that asked (at `i`), up to the next

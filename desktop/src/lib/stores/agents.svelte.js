@@ -36,6 +36,11 @@ export const agents = $state({
    * what they picked must still be there. Let go with the card.
    */
   questionPicks: {},
+  /**
+   * **Comments on a plan card** (ExitPlanMode's, 15 Nov 2026: Revise the plan): card id → `[{quote, text}]`.
+   * Kept here as `questionPicks` are, so a card drawn again keeps them. Let go with the card.
+   */
+  planComments: {},
   /** `{id, conversation}`: an agent to show (its chat and tab), from the bar's or a notification's Open. */
   openWanted: null,
   /** agent id → the turn whose plan a report card's Go ahead sent on (its button stays used). */
@@ -143,6 +148,24 @@ export async function replyToQuestion(id, answers) {
 }
 
 /**
+ * **A plan sent back with comments** (its card's Revise the plan: `claude_approve_revise`, `[{quote, text}]`):
+ * Claude Code stays in Plan mode and answers with a new plan. Gone once they're taken; still there when they
+ * weren't (the plan had lapsed).
+ */
+export async function revisePlan(id, comments) {
+  try {
+    const taken = await invoke('claude_approve_revise', { id, comments });
+    if (taken) {
+      agents.approvals = agents.approvals.filter((a) => a.id !== id);
+      refreshSoon(0);
+    }
+    return !!taken;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * **Go ahead with an agent's plan** (its report card's button, the Agent
  * panel's row: the person's click): its next turn now. `turn`: the plan's
  * (an earlier turn's, a Plan not used row's, starts as a turn of its own),
@@ -203,5 +226,6 @@ export function initAgents() {
     }
     agents.approvals = agents.approvals.filter((a) => a.id !== id);
     if (agents.questionPicks[id]) delete agents.questionPicks[id];
+    if (agents.planComments[id]) delete agents.planComments[id];
   }).catch(() => {});
 }

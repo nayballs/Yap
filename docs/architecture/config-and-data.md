@@ -299,6 +299,10 @@
   Assistant: a spoken question in a plain chat cleaned up as an AI prompt,
   word for word, on Dictation cleanup's model, `cleanup_styles::cleans_question`;
   true) — 2026-11-07, a new field: an older Yap drops it, on again +
+  chat_outline_review ("Show the outline before writing", Settings →
+  Language Models → Chat & Voice Assistant: a new document's outline a card
+  first, Go or Edit, `chat/cards/outline.rs`; true) — 2026-11-15, a new
+  field: an older Yap drops it, on again +
   (assistant_stop_on_pause, "Stop listening when I pause", removed
   2026-10-25: an older Yap still reads it, default on), Read aloud's read_hotkey ("" = unbound, the
   default; `voice/read_aloud.rs`: the selection in any app read aloud, its speed

@@ -341,6 +341,7 @@ pub fn run() {
             chat::pages::act::confirm::chat_page_confirm,
             chat::pages::act::confirm::chat_connector_confirm,
             chat::cards::ask::chat_question_answer,
+            chat::cards::outline::chat_outline_answer,
             dictation::commands::cancel_recording,
             shell::autostart::set_autostart,
             shell::commands::is_portable,
@@ -419,6 +420,10 @@ pub fn run() {
             chat::pictures::markdown::markdown_picture,
             snip::attach::chat_image_drop,
             chat::attachments::chat_files_add,
+            chat::sheets::view::sheet_open,
+            chat::sheets::view::sheet_rows,
+            chat::sheets::view::sheet_stamp,
+            chat::sheets::view::sheet_open_app,
             chat::attachments::chat_attachment_remove,
             chat::attachments::chat_attachment_open,
             chat::attachments::chat_attachments_usage,
@@ -537,6 +542,8 @@ pub fn run() {
             chat::shares::chat_file_preview,
             // What a chat made: its visuals (chat/made.rs).
             chat::made::chat_made_list,
+            chat::made::pages::chat_page_save_as,
+            chat::made::pages::chat_page_open_in_browser,
             chat::documents::chat_document_save,
             chat::documents::chat_quote_set,
             chat::think::chat_think_info,
@@ -591,6 +598,7 @@ pub fn run() {
             integrations::bridge::bridge_status,
             integrations::claude_live::claude_approve_answer,
             integrations::claude_live::claude_approve_reply,
+            integrations::claude_live::claude_approve_revise,
             integrations::claude_live::claude_approve_pending,
             agents::commands::agent_list,
             agents::commands::agent_queue,
@@ -1131,7 +1139,11 @@ pub fn run() {
             pasting::text_injector::init(&handle);
             // Temp files a crash mid-write left behind (config.rs): Yap's
             // own names only, off the startup thread.
-            let _ = std::thread::Builder::new().name("temp-sweep".into()).spawn(config::sweep_temp_files);
+            // And the copies of kept pages "Open in browser" wrote (chat/made/pages.rs), a day on.
+            let _ = std::thread::Builder::new().name("temp-sweep".into()).spawn(|| {
+                config::sweep_temp_files();
+                chat::made::pages::sweep_old_copies();
+            });
 
             // Register the app handle so the usage tracker can emit live
             // `groq-usage` updates after each AI-cleanup call.

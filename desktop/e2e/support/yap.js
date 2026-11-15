@@ -74,6 +74,11 @@ export const BASE_CONFIG = {
   // turns it on), so the specs of that hand-off see it as before. Yap Lab's
   // test Yap starts from this too: its scripts say which they test.
   agentsDirect: false,
+  // A new document is written straight away unless a spec asks for its
+  // outline first (on by default: chat-outline.spec.js turns it on), so the
+  // specs of Chat's documents see their turns as before. Yap Lab too: `set
+  // '{"config":{"chatOutlineReview":true}}'` for the outline card.
+  chatOutlineReview: false,
   configVersion: 1,
 };
 

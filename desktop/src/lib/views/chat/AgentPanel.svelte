@@ -18,10 +18,15 @@
   // - **Rows start folded**, the running one too; **▸ opens a row** in
   //   place: why Chat sized it so ("Opus 5.5 · High: a multi-file change",
   //   the turn's `sizing`), its to-do list, its work (what it said and did, as AgentWork shows it: a line a stretch, rows that open to a diff or a command), how many commands and files,
-  //   and **Open** — the turn's whole timeline (the tab's other view). Enter
-  //   or Space opens and folds; ↑ ↓ move between rows. Which rows are open
+  //   and **Open** — the turn's whole timeline (the tab's other view). Space
+  //   (→ ←) opens and folds; ↑ ↓ move between rows. Which rows are open
   //   and which groups folded is remembered per agent while the window stays
   //   open (agentPanelMemory.svelte.js); a pill or a report card opens its own.
+  // - **A click on a row opens its own view** (15 Nov 2026, as the Claude app
+  //   opens a background task): a tab of the panel (AgentTaskTab.svelte) with
+  //   the row's character, its work in full, its clock, Stop while it works and
+  //   its report; Enter too. ▸ (and Space, → ←) still opens it here in place.
+  //   The rows look as they did: nothing restyled.
   // - **The crew moves only on screen**: paused while the window is hidden
   //   or minimised (stores/windowShown.svelte.js) or the panel is out of
   //   view; still under reduced motion (crew.css).
@@ -73,9 +78,9 @@
    * `cards`: the agent ask-first cards waiting in its chat
    * (stores/chatStatus); `now`: unix seconds (the clock); `want`: `{key,
    * seq}`, a row to open and show (a pill's, a report card's);
-   * `onopen(row)`: Open.
+   * `onopen(row)`: Open; `ontask(row)`: a row's own view (a click on it).
    */
-  let { agent, agents = [], logs = {}, steps = {}, approvals = [], cards = [], now = Date.now() / 1000, want = null, onopen = null, onpicture = null } = $props();
+  let { agent, agents = [], logs = {}, steps = {}, approvals = [], cards = [], now = Date.now() / 1000, want = null, onopen = null, onpicture = null, ontask = null } = $props();
 
   /** Every row, the dismissed ones too (the totals count them); the ones shown. */
   const every = $derived(panelRows(agents, { logs, steps, now, approvals, cards, dismissed: true }));
@@ -204,9 +209,26 @@
     return a.finish || a.dismiss || a.restore || a.stop;
   };
 
-  /** A row's head's keys: ↑ ↓ between rows, the menu key opens its menu. */
+  /** A row with a view of its own (an agent's turn, a helper): not an ask-first card's. */
+  const hasView = (r) => !!ontask && (r.kind === 'turn' || r.kind === 'helper');
+
+  /**
+   * **A click on a row opens its own view** (15 Nov 2026, as the Claude app opens a background task: AgentTaskTab,
+   * a tab of the panel); its ▸ opens it here in place, as ever.
+   */
+  function headClick(e, r) {
+    if (hasView(r) && !e.target?.closest?.('[data-fold]')) ontask(r);
+    else toggle(r.key);
+  }
+
+  /** A row's head's keys: ↑ ↓ between rows, the menu key opens its menu; Space, → and ← open and fold it in place (Enter, its view). */
   function headKey(e, r) {
     if (menuKey(e, (ev) => rowMenu(ev, r))) return;
+    if (hasView(r) && (e.key === ' ' || ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !!open[r.key] === (e.key === 'ArrowLeft')))) {
+      e.preventDefault();
+      toggle(r.key);
+      return;
+    }
     nav(e);
   }
 
@@ -287,7 +309,7 @@
                 data-row-head
                 aria-expanded={isOpen}
                 aria-controls="more-{r.key}"
-                onclick={() => toggle(r.key)}
+                onclick={(e) => headClick(e, r)}
                 onkeydown={(e) => headKey(e, r)}
                 use:overflowTip={{ text: r.title }}
               >
@@ -301,8 +323,12 @@
                 <span class="rmain">
                   <span class="rtop">
                     <span class="ctitle rtitle" data-testid="chat-agent-row-title">{r.title}</span>
-                    <span class="sr-only">, {r.statusWord}</span>
-                    <svg class="chev rchev" class:down={isOpen} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+                    <span class="sr-only">, {r.statusWord}{hasView(r) ? '. Opens in its own tab; Space shows it here' : ''}</span>
+                    <!-- ▸: opens the row here, in place (a click elsewhere on it opens its own view). Its hit area a little
+                         bigger than it looks, nothing moved. -->
+                    <span class="rfold" data-fold data-testid="chat-agent-row-fold" title={hasView(r) ? (isOpen ? 'Fold it here' : 'Show it here') : undefined}>
+                      <svg class="chev rchev" class:down={isOpen} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+                    </span>
                   </span>
                   <span class="rsub" data-testid="chat-agent-row-sub">
                     <span class="mode tone-{r.modeTone}">{r.modeWord}</span>{[r.modelWord, r.effortWord]
@@ -913,6 +939,13 @@
   }
   .rchev {
     color: var(--yap-paper-muted);
+  }
+  /* ▸'s hit area: 24 px round its 12, the row laid out as before (the margin gives the padding back). */
+  .rfold {
+    flex: 0 0 auto;
+    display: inline-flex;
+    margin: -6px;
+    padding: 6px;
   }
   .rsub {
     overflow: hidden;

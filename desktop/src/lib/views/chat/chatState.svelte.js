@@ -9,6 +9,8 @@
 // 2026): several can be answering at once, and the thread and the composer
 // show the open one's only.
 import { isLive } from '../../core/agentNow.js';
+import { lastRead, turnsOf } from '../../core/agents.js';
+import { agentLogs } from '../../stores/agentLogs.svelte.js';
 import { splitElements } from '../../core/selectedElements.js';
 import { invoke } from '@tauri-apps/api/core';
 import { tick, untrack } from 'svelte';
@@ -762,7 +764,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   async function dropFiles(dropped) {
     dragging = false;
     const others = (dropped || []).filter((p) => !isPicturePath(p));
-    if (others.length) await attachFiles(others);
+    if (others.length) {
+      const added = await attachFiles(others);
+      // A spreadsheet dropped opens beside the chat, as Excel draws it (SheetTab).
+      const sheet = added.find((f) => f.kind === 'sheet');
+      if (sheet) doc.showSheet({ src: { from: 'attachment', id: sheet.id }, name: sheet.name });
+    }
     const paths = (dropped || []).filter(isPicturePath);
     if (!paths.length) return;
     const room = MAX_SHOTS - waitingShots.list.length;
@@ -786,16 +793,19 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   }
 
   /** Files added to the box (their paths): read by Rust, kept, waiting; any it can't read said plainly, each. While
-   *  they're read — past a moment: a scanned PDF's OCR takes seconds — each shows as "Reading…" (`reading`). */
+   *  they're read — past a moment: a scanned PDF's OCR takes seconds — each shows as "Reading…" (`reading`). A
+   *  spreadsheet's text is cut to the model's room left (`budget`). The files added. */
   async function attachFiles(paths) {
     const list = (paths || []).filter(Boolean);
-    if (!list.length) return;
+    if (!list.length) return [];
     const room = 20 - files.length;
+    const budget = limits?.questionMax ? Math.max(0, limits.questionMax - inputTokens) : null;
+    let fresh = [];
     const batch = list.map((p) => ({ key: `${++readingSeq}:${p}`, name: String(p).split(/[\\/]/).pop() || String(p), reading: true }));
     const shown = setTimeout(() => (reading = [...reading, ...batch]), READING_AFTER_MS);
     try {
-      const got = await invoke('chat_files_add', { paths: list, room: Math.max(0, room) });
-      const fresh = (got?.files || []).filter((f) => f?.id && !files.some((x) => x.id === f.id));
+      const got = await invoke('chat_files_add', { paths: list, room: Math.max(0, room), budget });
+      fresh = (got?.files || []).filter((f) => f?.id && !files.some((x) => x.id === f.id));
       if (fresh.length) files = [...files, ...fresh];
       const why = skippedLine(got?.skipped);
       if (why) {
@@ -813,6 +823,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
     await tick();
     inputEl?.focus();
+    return fresh;
   }
 
   /** + → Attach files…: Windows' file picker, several at once. */
@@ -1342,10 +1353,17 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
     const ev = p?.event;
     // Acting on its pages (14 Nov 2026): a card before an action that would buy, send or sign in — kept by its
-    // turn for the thread (`agentConfirms`, under its work), whichever chat is open.
+    // turn for the thread (`agentConfirms`, under its work), whichever chat is open. Stamped as it comes with
+    // the message the turn had read last (`after`, 15 Nov 2026): it goes with that part of the turn's work, the
+    // latest when it asked, as the Claude app keeps a card with the work it's about (core/agents.js `cardPart`).
     if (ev?.kind === 'confirm' && key) {
       const have = agentConfirms[key] || [];
-      agentConfirms = { ...agentConfirms, [key]: have.some((c) => c.id === ev.id) ? have.map((c) => (c.id === ev.id ? ev : c)) : [...have, ev] };
+      const was = have.find((c) => c.id === ev.id);
+      const turn = p.turn ?? 1;
+      const log = agentLogs.by[p.id];
+      const after = was ? was.after : log ? lastRead(turnsOf({ turnList: [{ n: turn }] }, log).find((t) => t.n === turn)?.events) : undefined;
+      const card = after === undefined ? ev : { ...ev, after };
+      agentConfirms = { ...agentConfirms, [key]: was ? have.map((c) => (c.id === ev.id ? card : c)) : [...have, card] };
     }
     if (p?.conversation == null || p.conversation !== activeId) return;
     if (ev?.kind === 'page' && (ev.page?.url || ev.page?.tabKey)) doc.showPage(ev.page);

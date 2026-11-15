@@ -2104,7 +2104,11 @@ for the on-device model and small ones, which make things up more readily:
   the pages that requirements, levels, numbers and locations come from, and
   cite the pages you read", "a guide for another build or an older version
   isn't a source for this one"; `rich::INSTRUCTIONS` says the outline comes
-  "first, before any search" too.
+  "first, before any search" too. **The person sees that outline first**
+  (15 Nov 2026, "Show the outline before writing"): its card waits for Go or
+  Edit before the document is made ([The outline before the
+  writing](#the-outline-before-the-writing-2026-11-15)), so the research starts
+  after their answer.
 - **At its effort**: the turn thinks as every question to that model does,
   at the effort chosen for it in the model picker (`ai/effort.rs`; adaptive
   thinking for Claude, its summary folded above the answer). Until 31 Oct
@@ -2426,7 +2430,27 @@ card's version. Its header: the icon, the title, "Saved", **‹ Version 2 of 3
 ›** (two or more; a turn saving another while the newest shows moves to
 it) and ↻ to start it again; under it the page in the sandboxed frame
 (`pageSrc`, the colours, `sendPrompt` as a visual's, a page navigating
-away put back), filling the panel and scrolling in itself. **The chat's
+away put back), filling the panel and scrolling in itself. **Its ⋯**
+(15 Nov 2026, as the Claude app's artifact menu has Download and Open):
+**Save as…** writes the version on screen to a file the person picks
+(the dialog plugin's Save as, "Watering chart v1.html";
+`chat_page_save_as`, `.html` added when the name has no ending) and **Open
+in browser** writes it to a copy of Yap's own in the system's temp folder
+(`%TEMP%\yap-pages\<title> <tag>.html`, swept once a day old: at each open
+and at start, `pages::sweep_copies`) and hands its `file:` address to the
+person's browser (`chat_page_open_in_browser`, `shell/browsers.rs`
+`open_file`: the browser chosen in Settings, else Windows' default
+browser's program, never whatever opens `.html` here). Either way it's the
+same document, made to keep working outside Yap (`pages::outside_document`,
+pure): the sandbox's policy as a `<meta>` (scripts inline or the pinned
+libraries only, no other network, frames, forms or `<base>`; `sandbox`
+itself can't be said in a file), Yap's colours in light and dark as the
+browser is (no bridge sends them there), each pinned library at its own
+cdnjs address with its hash as `integrity` (a page's jsDelivr, unpkg or
+`/lib/` address pointed there: the browser runs exactly the file the
+sandbox does), its title when it has none, and `sendPrompt` there but doing
+nothing. Only the chat's own page (`list` checks the chat's index); the
+log has ids, versions and sizes. **The chat's
 Outputs** (the Claude app's Outputs list; `chatDoc` `showOutputs`, tab
 `outputs`): **the one list** a Code chat's summary shows too (outputs.js
 `outputItems`, drawn by `OutputsList.svelte`: each kind adds its rows there)
@@ -2453,7 +2477,16 @@ Outputs (the title bar's button) lists it as "Page · 2 versions" and opens it;
 shown again when the chat opens again; a seeded chat's ⋯ → Outputs lists its
 page, its document and its shared file, the title bar's button pressed then,
 closing the panel and opening Outputs again, and no copy of it or of Summary
-in the panel's row; an id not this chat's is refused.
+in the panel's row; an id not this chat's is refused; a page's ⋯ (Save as…,
+Open in browser; light and dark): Open in browser on version 1 hands the
+browser a `file:` copy in `yap-pages` (kept for the suite, nothing opened)
+with the policy first, the title, no bridge; Save as… writes version 2 (and
+version 1 the same as the copy), never another chat's page or a made-up id;
+and the copy in a headless browser, light and dark: its script runs, the
+theme is the browser's, `sendPrompt` does nothing, and a page with Chart.js
+asks only its cdnjs address and refuses a stand-in served there by its hash.
+Unit tests (`chat/made/tests.rs`): the document outside Yap, the libraries
+and their hashes, a copy's name and the sweep.
 
 **Chat looks at the screen** (2026-11-01, `chat/see_screen.rs`): asked
 "here are the speakers, can you have a look?" with the page open in another
@@ -4485,12 +4518,14 @@ already takes (`chat/attachments.rs`, `views/chat/FileChip.svelte`,
     persist directory and the outline lists of [MS-PPT] to come out in
     slide order, more than a small reader; said "(an older PowerPoint
     presentation: save it as .pptx in PowerPoint to attach it)".
+  - **A spreadsheet's cells as tables** (`sheet.rs`, 15 Nov 2026: `.xlsx`,
+    `.xlsm`, `.xls`, `.xlsb`, `.ods`, `.csv`, `.tsv`; [Spreadsheets](#spreadsheets-2026-11-15)).
 
   **Anything else is said plainly** and not added, the toast naming each,
-  worded for its kind: "Chat can't read budget.xlsx (a spreadsheet: save it
-  as CSV to attach it). It reads text, code, PDF, Word and PowerPoint files,
-  and pictures." (an OpenDocument or Keynote presentation, an `.odt` or
-  Pages document likewise); password-protected, empty, over 50 MB, or over 4
+  worded for its kind: "Chat can't read seeds.zip (an archive). It reads
+  text, code, PDF, Word, PowerPoint and spreadsheet files, and pictures."
+  (an OpenDocument or Keynote presentation, an `.odt` or Pages document
+  likewise); password-protected, empty, over 50 MB, or over 4
   million characters (about a million tokens) likewise.
 - **Sized to the model**: each file's tokens (`budget::estimate`) count in
   the question's size, on the page (`inputTooLong`: the too-long line
@@ -4554,6 +4589,132 @@ already takes (`chat/attachments.rs`, `views/chat/FileChip.svelte`,
   by Windows' OCR where the PC has a language for it; a `.docx` and a
   `.pptx` made in the test; a `.doc` made by the [MS-DOC] spec in the test
   and one LibreOffice saved, `fixtures/allotment-rules.doc`).
+
+## Spreadsheets (2026-11-15)
+
+Chat reads Excel files, and a workbook shows beside the chat as Excel draws
+it — live while a Code chat's Claude builds one. Read only (editing cells is
+a follow-up). Rust: `chat/sheets.rs` (+ `sheets/xlsx.rs`, `xls.rs`,
+`delimited.rs`, `view.rs`) and `chat/attachments/sheet.rs`; the page:
+`views/chat/SheetTab.svelte` + `sheetView.js`.
+
+- **Reading a workbook** (`sheets::read`, on this PC, never uploaded to be
+  read; in its own thread for at most 60 s, so a reader that panics or a
+  huge file is "couldn't read", never a crash or a hang):
+  - **`.xlsx` / `.xlsm` by IronCalc** (`ironcalc` 0.9, MIT OR Apache-2.0):
+    the cells as shown (the file's number, date and percentage formats),
+    their formulas, and **every formula calculated here** — a file a script
+    wrote (openpyxl, exceljs) keeps no results, so this is how its values
+    show at all. A function IronCalc doesn't know yet (`#N/IMPL!`, `#NAME?`)
+    keeps the result the file had, when it had one. Its looks: fonts, sizes,
+    bold/italic/underline/strike, font colours and fills (the theme's
+    resolved), borders, alignment and wrapping, column widths and row
+    heights as Excel draws them at 100% (7 px a character, 4/3 px a point),
+    merged cells, frozen panes, grid lines on or off, tab colours, hidden
+    sheets, whole-row and whole-column styles. One IronCalc can't open:
+    its values by calamine.
+  - **`.xls`, `.xlsb`, `.ods` by calamine** (0.38, MIT): values and
+    formulas as the file keeps them (the app that saved it calculated
+    them), numbers as Excel's General shows them, dates as `2026-11-15`;
+    no looks, so columns are fitted to their cells.
+  - **`.csv` / `.tsv`**: one sheet, values as written (a CSV split on `;`
+    when its first line has more of those than commas), RFC 4180 quoting
+    (`csv`); a number right-aligned.
+  - Password-protected (an OLE file holding an `EncryptedPackage`; an
+    `.xls` or `.ods` that says so) is said; at most 1,000,000 cells a
+    workbook, the rows past it counted.
+  - Why IronCalc and not umya-spreadsheet or calamine alone: the PR that
+    added it has the comparison. Three crates added (`ironcalc`, `calamine`,
+    `csv`), all pure Rust on the zip 9 Yap had; quick-xml 0.42 beside 0.39.
+- **What the model gets** (`attachments/sheet.rs`, kind `"sheet"`): a line
+  saying what it is and its sheets ("An Excel workbook with 3 sheets:
+  "Budget", "Notes", "Old" (hidden). Values as the file formats them;
+  formulas' results calculated on this PC."), then each sheet: `## Sheet 1
+  of 3: "Budget"`, its used range, frozen panes and merged cells, then a
+  Markdown table — column letters across, row numbers down, so "C7" means
+  something — then its **formulas**, a run filled down or across said once
+  ("D3:D40: =B3*C3 (the same in each row, filled down)": two cells have one
+  formula when their references move with them, `sheet::shape`). Its
+  `<source>` says "seed-order.xlsx (an Excel workbook: its cells as tables,
+  read on the person's PC)".
+- **Sized to the model**: the text is cut to the room the model has left
+  for the question (the page's `limits.questionMax` less what's in the box,
+  sent as `chat_files_add`'s `budget`; between 1,500 and 40,000 tokens; a
+  project's file 40,000), shared between the sheets — the small ones whole,
+  the rest evenly — a cut sheet keeping its first rows and its last three
+  (its totals), with a plain note: "(Rows 202–19,998 aren't here: 19,797
+  rows left out to fit the model; the sheet's last rows follow. Ask for a
+  part of them and the person can attach it.)". Its tokens then count as
+  any file's.
+- **Where it's read**: attached in Chat (+ or dropped), a project's files,
+  a Code chat's own session (as attachments go). The chip's badge is the
+  ending ("XLSX", "CSV").
+- **The sheet view** (`SheetTab.svelte`, a `sheet:` tab of the panel,
+  `chatDoc.svelte.js` `showSheet`): **opened by** a spreadsheet dropped on
+  Chat (attached, and shown at once), an attached one's chip (the box's or
+  a sent question's: the `SHEETS` context, `sheetView.js`), and in a Code
+  chat a link to one in an answer, its row, and its Outputs row
+  ([yap-code.md](./yap-code.md#file-links-and-the-file-view)). Rust finds
+  the file from what the page names (`view::Src`): an attached file's kept
+  copy by its id, or a Code chat's file by its path in the workspace (the
+  file view's `resolve`: never outside it). It draws:
+  - sheet tabs at the foot (a hidden sheet's not shown, as in Excel; a tab
+    colour as its underline), column letters and row numbers (the selected
+    cell's lit), widths and heights, grid lines (off when the file turns
+    them off);
+  - each cell's font, bold/italic/underline/strike, colour, fill, borders
+    (thin 1 px, medium 2, thick 3, double, dotted, dashed; drawn over the
+    neighbours' last pixel, so two cells' shared line is one line),
+    alignment (General: numbers right, true/false and errors centred, text
+    left), wrapping, merged cells over their area;
+  - a text running on into the empty columns after it as far as it needs
+    (measured), the grid lines under it hidden, as Excel's overflow; a
+    number too wide for its cell as Excel's `####`, never cut short (a
+    clipped "15/11/2026" would read "5/11/2026");
+  - frozen rows and columns, stuck while the rest scrolls, with Excel's
+    line under them;
+  - **the formula bar**: the cell selected (a click; arrows, Tab, Page
+    Up/Down, Ctrl+Home/End move it; Ctrl+C copies its value), its formula,
+    else its value, in a read-only field;
+  - the facts at the foot: its used range, formulas "calculated by Yap",
+    rows not read, hidden sheets.
+- **Big sheets scroll smoothly**: only what's in view is drawn
+  (`sheetView.js` `inView`, binary search over running totals of the
+  heights and widths), a few rows either side; Rust keeps the workbook read
+  (the newest four) and the page asks for rows 200 at a time as they come
+  into view (`sheet_rows`). Frozen rows, columns and the headers are sticky
+  layers of the one scrolling box, so the browser scrolls everything itself.
+- **Live** (a Code chat's file): its size and time asked every 1.2 s while
+  the tab shows and the window is on screen (`sheet_stamp`); changed, it's
+  opened again on the same sheet, where it was scrolled, the same cell
+  selected, the pill saying "Updated" for a moment; a file caught
+  half-written keeps what's shown ("Changing…") and is tried again when it
+  changes. An attached file is Yap's own copy, so it never changes.
+- **Colours**: the file's own, as it gives them. A cell with no fill is the
+  panel's paper; Excel's "Automatic" text — no colour, the theme's "Text 1",
+  plain black — is the panel's ink, so a sheet reads in dark mode; on a
+  fill, automatic text is black as the file shows it.
+- **Open in Excel** (`sheet_open_app`): the file in the person's own
+  spreadsheet app (Windows' default for its ending; "Open in app" for an
+  `.ods`), on that click only; a test run keeps it (`open-sheet:<name>`).
+  Copy path and ↻ beside it.
+- **Not done** (follow-ups): editing cells; a Chat tool that keeps a
+  spreadsheet as it keeps pages; a picture of the sheet as shown for a Code
+  chat's Claude to check its own layout; conditional formatting, charts,
+  pictures and comments aren't drawn; rows with wrapped text aren't grown
+  to fit (their height is the file's); General numbers aren't shortened to
+  fit as Excel shortens them (they show `####`); a project's spreadsheet
+  doesn't open in the view from the project's page.
+- **Privacy**: nothing logged but counts and kinds.
+- Tests: `cargo test chat::sheets` (workbooks made in the test: a script's
+  formulas with no results calculated, number/date/percentage formats,
+  styles, theme colours, merges, frozen panes, widths, hidden sheets, a
+  30,000-row sheet, an `.ods`, CSV and TSV, locked and broken files; the
+  model's text, its formula runs and its cut); `chat-sheets.spec.js` (the
+  view's sums; a workbook dropped: its tabs, values, merge, fill, overflow,
+  formula bar, light and dark, Open in Excel, what the model gets, its chip,
+  a project's file; a Code chat's: its link and Outputs row, live as the
+  test rewrites it, a half-written one, a 5,000-row sheet scrolled).
 
 ## The message box is several lines (2026-11-15)
 
@@ -5756,6 +5917,95 @@ now on the same form, and its run lists the next-step box and chapters too
   box's button; asked out loud and answered "the second one"), and
   `agents-direct.spec.js` for a Code chat's question on the shared form.
 
+## The outline before the writing (2026-11-15)
+
+The Claude app's plan review for Chat's documents (`chat/cards/outline.rs`):
+a new document's outline goes to the person as a card in the thread first,
+and nothing is written until they answer. Before, a strong model already
+outlined first (`web::Turn::outline_first`, [above](#strong-models-documents-researched-as-the-claude-app-does-2026-10-31))
+but the outline opened straight into the panel and the writing went on.
+
+- **The switch**: Settings → Language Models → Chat & Voice Assistant, **Show
+  the outline before writing** (`chat_outline_review`, on by default;
+  `ChatConfig.svelte`, searchable). Off: the document is written straight
+  away, as before. The e2e suite's `BASE_CONFIG` has it off (its document
+  specs see their turns as before); `chat-outline.spec.js` and a Lab run
+  turn it on.
+- **Where** (`Cards::outline`, `Cards::with_outline`, set in `turn/gates.rs`):
+  wherever a question card could ask (`Cards::ask`: a model that calls tools,
+  Chat or the Voice Assistant, never across the meetings nor a phone's
+  question), any model's tool loop — not only the strong ones' outline-first
+  turns. A small context that sheds the card tools (`fit.rs`
+  `Family::Cards`) keeps it: it isn't a tool and takes no room. A plan chat
+  makes no documents (ai-models.md), so it never comes there. Nobody to ask
+  (no page watching, Bypass permissions, an evaluation): made at once.
+- **Its place in the turn** (`tools/agent/dispatch.rs`, `outline::create`):
+  `create_document` (the tool loop's `Source::Notes`, the turn's documents
+  known) goes through `outline::review` first. The card goes through the cards
+  that ask first (`pages/act/confirm.rs`, act "outline", `Card::outline` =
+  `OutlineCard {title, summary, sections, changed, note, said, voice}`), so it
+  shows on the answer being written, a ■ Stop drops it, and the answer keeps
+  it (`ChatMessage::confirms`). The activity line says "Waiting for you: the
+  outline" (`activity::outline_waits`). The turn waits at most `outline::WAIT`
+  (10 minutes, a question's), then writes it as outlined. A same-titled
+  second call this turn is the one made already (`documents::Turn::made_already`,
+  no card); the web held for the outline step (`outline_first`) is the
+  turn's again once the step's calls are done, so the research starts after
+  Go.
+- **On screen** (`OutlineCard.svelte` in `PageConfirm`'s chunk, above the
+  answer as a question card is; `outlineEdit.js` the edit's pure parts): "The
+  outline · *title*", the summary, then each heading in bold with its one
+  line under it, **Go** and **Edit**. **Edit**: each heading and its line in
+  a box, ↑ ↓ to reorder, ✕ to take one out (never the last), **+ Add a
+  section**, and **A note for the writing** — then **Go with these changes**
+  (or Cancel back). Answered, it stays in the thread, quiet: "Outline ·
+  *title*", the headings it was written with ("Equipment · Talents · Costs"),
+  "Your note: …", "You said: …", and how it ended (Written as outlined,
+  Written with your changes, You asked for changes: a new outline follows,
+  Not written, Not answered in time: written as outlined). The panel isn't
+  told (`chatDoc` `setAsking` leaves it to the thread).
+- **Answered** (`chat_outline_answer {id, outline}`): nothing (Go) →
+  `Reply::Once`, written as outlined; `{sections: [{key, intent}], note}`
+  (Edit's Go; `null` when nothing changed and no note) → `Reply::Picked`,
+  the document made with those sections in that order (`outline::edited`,
+  `with_sections`; each heading once, at most `MAX_SECTIONS`). The model
+  reads the tool's result as ever plus `data.outline` (`go_result`): "The
+  user read the outline and said go…", or "The user changed the outline
+  before you wrote it: the sections are now "Skills", "Gear" and "Costs", in
+  this order… one with no line of its own is theirs… Don't add back a
+  section they removed.", their note "to follow in every section", what
+  they said, or "didn't answer in time".
+- **Asked out loud** (the Voice Assistant, `assistant/spoken_ok.rs`, as a
+  question card is): "Here's the outline for “Lone wolf ranger”: Gear, Skills
+  and Talents. Say go ahead, or what to change." (`outline::spoken_line`); the
+  Yap bar lists the headings with **Go ahead** and **Edit in Chat**
+  (`outline::bar_card`, the buttons every card that asks has: `allow:<id>`,
+  `open:<id>`). Any words answer it (`spoken_ok::Waiting::words`, set for a
+  question card and an outline), read by `outline::heard`:
+  - "go ahead", "yes please", "looks good" — written as it is;
+  - "drop the second part", "go ahead but skip the last one", "remove parts
+    two and four", "skip the tips" (a heading's words, or a word only that
+    heading has) — those taken out, then written (`Heard::Without`);
+  - "no thanks", "never mind", "don't write it" — not made, the model told to
+    ask what they'd like instead (`stop_result`, chip "Didn't start the
+    document: you said not to");
+  - anything else ("add a part on costs", a drop with more asked) — nothing
+    made yet: the model is told their words and to call `create_document`
+    again (`again_result`, no chip), and that outline is shown too; at most
+    `REVIEWS_MAX` (3) outlines a turn, then it's written as it is.
+- An older Yap's save drops a card's `outline` (the card stays, its title as
+  its label). The log has the card's id, how many sections and how it ended,
+  never a heading, a line or a note.
+- Tests: `cargo test chat::cards::outline` (the card of a call, Edit's
+  sections and note, settling a reply, the spoken replies, the spoken line
+  and the bar card, what the model reads, who's asked) and the tool loop's
+  turns (`chat::tools::agent` `a_new_documents_outline_is_edited_before_the_writing…`,
+  `go_writes_the_outline_as_it_is…`, `a_change_said_out_loud…`,
+  `with_the_outline_off…`); e2e `chat-outline.spec.js` (the card before any
+  writing and Go, light and dark; Edit renamed, moved, taken out, added and a
+  note, the writing following it; switched off; the Settings switch; asked
+  out loud from another app and "Go ahead, but drop the second part").
+
 ## Styles (2026-11-15)
 
 The Claude app's styles, from Anthropic's help pages: how answers are
@@ -5850,8 +6100,8 @@ never an incognito chat.
   data → Chats takes every chat out; the projects stay, as Skills do.
   Download your data has projects.json.
 - Tests: `cargo test chat::projects`; `chat-projects.spec.js` (a project
-  made, its instructions saved, a Markdown file read and a spreadsheet
-  refused, a new chat in it carrying its block, another chat moved in from
+  made, its instructions saved, a Markdown file read and a broken spreadsheet
+  refused (a whole one is read: `chat-sheets.spec.js`), a new chat in it carrying its block, another chat moved in from
   its ⋯, its page listing both, deleted with its chats kept; light and
   dark).
 

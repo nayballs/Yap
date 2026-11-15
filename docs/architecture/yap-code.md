@@ -737,11 +737,23 @@ in, Esc closes; a click works too. A plain chat's `@` is just an `@`.
   words), and the sent message shows each as a pill (`mentionParts`: a
   path-like `@name.ext` or `@folder/…` after a space, never an email or
   `@Sam`).
+- **A pill is a link to the file** (15 Nov 2026, as the Claude app's sent
+  message links a mentioned file): a pill whose path names a file in the
+  chat's own workspace opens it in the file view beside the chat, by a click
+  or Enter (`ui/fileLinks.js` `mentionLinks` on the message's words, the
+  pill's path in `data-path`). It's checked the same way an answer's paths
+  are (`code_files_check`: the workspace from the conversation, `..`,
+  device paths and links out refused after `canonicalize`) and kept in the
+  same cache; a file that isn't there, one outside the workspace, or a
+  folder stays a pill. Only the pills: a path typed without an `@` stays as
+  the person wrote it.
 - **On Chat's model** (a Code chat on an API key): the same words go to
   Chat's model, which hands them to an agent working in the workspace.
 - e2e: `agents-direct.spec.js` (the picker, Enter, ↓ and Tab, Esc, the
-  stand-in seeing the mentions, the pills; a plain chat's `@`); unit tests
-  in `agents/mention.rs`.
+  stand-in seeing the mentions, the pills; the pills of files in the
+  workspace links that open the file view by a click and by Enter, one not
+  there and one outside the workspace still plain pills, light and dark; a
+  plain chat's `@`); unit tests in `agents/mention.rs`.
 
 **Files attached in a Code chat** (2026-11-15, + or dropped:
 [chat-and-assistant.md](chat-and-assistant.md#files-attached-to-a-question-2026-11-15)):
@@ -800,7 +812,9 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
   - inline code that reads as a path (`src/convert.js:5`);
   - a path in the words (`src/convert.js`, `CLAUDE.md`).
 
-  A line can follow: `:105`, `:105:7`, `#L105`. Code blocks never.
+  A line can follow: `:105`, `:105:7`, `#L105`. Code blocks never. And the
+  person's own `@`-mentions in a message they sent (`mentionLinks`:
+  [@-mention a file](#-mention-a-file-2026-11-15)).
 - **Only files in the chat's workspace** (`agents/files.rs`): the candidates go to Rust in one call (`code_files_check`), which takes the workspace from the conversation (`code_chat::folder_of`), never from the page, and resolves each (`resolve`):
   - relative to the workspace, or a full path inside it;
   - refused: `..` that climbs out (any `..` in a full path), device and network paths (`\\?\`, `\\.\`, `\\server`), a drive-relative one (`\x`, `C:x`), a scheme, a colon past the drive (a stream), wildcards and control characters;
@@ -812,6 +826,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
   - **Copy path**: its full path.
   - **Open in editor** (`code_file_open_editor`): VS Code or Cursor at the line (`-g file:line`), else Notepad++ (`-n`), else Notepad, started directly: never through a shell, never the file's own default app (which for a `.js` or `.ps1` would run it).
 - **The rows**: a read's file name ("Read lab.md") and an edit's path over its diff open it too, at the first line read or changed (`StepRows.svelte`; a path outside the workspace, which `steps.rs` `shown_path` leaves whole, is no link).
+- **A spreadsheet opens as a sheet** (15 Nov 2026: `.xlsx`, `.xlsm`, `.xls`, `.xlsb`, `.ods`, `.csv`, `.tsv`; ChatView's `CODE_FILES` `open`, `outputsOpen.js`): a link to one, its row, or its Outputs row opens the **sheet view** instead of the file view (`SheetTab.svelte`, a `sheet:ws:<rel>` tab, `chatDoc.svelte.js` `showSheet`; Rust `chat/sheets/view.rs`, the same workspace-only `resolve`), drawn as Excel draws it, with Open in Excel. It's **live**: every 1.2 s the page asks for the file's size and time (`sheet_stamp`, nothing read) and, changed, opens it again on the same sheet, scrolled where it was, the same cell selected, "Updated" for a moment — so the person watches Claude build a workbook (openpyxl, exceljs: formulas with no results in the file are calculated by IronCalc). A file caught half-written keeps what's shown ("Changing…") until it changes again. The whole view: [chat-and-assistant.md, Spreadsheets](./chat-and-assistant.md#spreadsheets-2026-11-15).
 
 ### ▶ Run on a one-line shell block
 
@@ -842,7 +857,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
   - **Not in it**: Yap's own tools for the session (its browser, its cards), which only a turn's endpoint has.
   - **Without a breakdown** (no session yet, a Code chat Chat's model answers, no Claude Code): how full the chat's context is, from what Yap knows already: its own Claude's latest turn (a Code chat that works directly: `agents/usage.rs`), else the plan's count for the chat, else the context ring's (`chat_context`). A plain chat keeps its ring; a breakdown of Chat's own prompt (`chat/budget.rs`) isn't done.
 - **Connectors**: the chat's own (`connector_chat_list`), on or off here, and Manage connectors….
-- **Outputs** (`outputs.js` `outputItems`, drawn by `OutputsList.svelte`, opened by `outputsOpen.js` `openOutput`: **one list** that any kind adds its rows to, the same as any chat's Outputs tab, [chat-and-assistant.md](./chat-and-assistant.md)): the pages it keeps and the documents it wrote first (both open beside the chat), then the files its work changed (its agents' turns' `files`, newest first; they open in the file view) and the files it shared (a picture in the picture tab, a file in the workspace in the file view, any other as its card opens it).
+- **Outputs** (`outputs.js` `outputItems`, drawn by `OutputsList.svelte`, opened by `outputsOpen.js` `openOutput`: **one list** that any kind adds its rows to, the same as any chat's Outputs tab, [chat-and-assistant.md](./chat-and-assistant.md)): the pages it keeps and the documents it wrote first (both open beside the chat), then the files its work changed (its agents' turns' `files`, newest first; they open in the file view, a spreadsheet in the sheet view) and the files it shared (a picture in the picture tab, a file in the workspace in the file view, any other as its card opens it).
   - **A row's right-click menu** (and the ContextMenu key, Shift+F10; Yap's own menus, `outputsOpen.js` `outputMenuItems`), here and in the Outputs tab: Open; for a file, Show in folder (`code_file_reveal` for a workspace file, `chat_file_reveal` for a shared one) and Copy path (its full path); for a file in the workspace, Open in editor (`code_file_open_editor`). Which rows are workspace files Rust says (`code_files_check`, `outputRefs`), from the conversation's own workspace.
 - **Background tasks**: its helpers and the agents Chat sent that are at work now (the Agent panel's own rows, `panelRows`), each with its clock (a helper's since it was handed its part: `helpersOf`'s `ts`) and Stop (a helper's stops the turn that sent it); its running ▶ Runs with theirs; then "N finished" (it opens the Agent panel, or the Runs tab).
 - **Tests**: `agents/context/tests.rs` (a recording's shape with a fictional setup, its markdown, a reordered table, a broken answer, one that cost a turn), `agents/prs/tests.rs` (`gh`'s JSON, checks, its own words when it can't, no `gh`, no git, branch or remote, a worktree's remotes, finding `gh.exe`), and `code-chat-files.spec.js` (the stand-in's `_context` and `yap.exe fake-gh`: the breakdown, the run's arguments, the pull requests, Remote Control's ask, an output's menu, Archive; light and dark).
@@ -1287,6 +1302,35 @@ turn simply ended: nothing carried on, though "yes" plainly meant go ahead.
 - **Not yet** (denied): Claude is told to change nothing and end with the
   plan as it is; it stays a plan, reported as before ("The agent's plan is
   ready").
+- **Comments on the plan** (15 Nov 2026, the Claude app's plan review;
+  `AgentApprove.svelte`, `views/chat/planComments.js`): select words of the
+  plan on its card and a **Comment** button shows by them; or **Add a
+  comment** (the selected words if there are some, else the whole plan).
+  Each comment is listed under the plan ("“seedlings every morning”" over
+  the words, × to take it back), its words marked in the plan
+  (`markQuotes`); kept in `agents.planComments` while the card waits, so a
+  redraw keeps them. With a comment, **Revise the plan · 2** leads (Go ahead
+  and Not yet stay beside it). It sends them (`claude_approve_revise {id,
+  comments: [{quote, text}]}`, `approve::Book::revise`: a plan's card only,
+  something to say only, at most 20): ExitPlanMode is refused with them
+  (`Outcome::Revised`, `approve::revise_message`: "The user reviewed your
+  plan in Yap and left comments on it. Stay in plan mode and change nothing
+  yet. Revise the plan so it answers every comment… then call ExitPlanMode
+  again with the whole revised plan." and the comments numbered, "On “…”:" or
+  "On the whole plan:"), so **Claude Code stays in Plan mode, this turn still,
+  and answers with a new plan**: another card, "The agent's revised plan is
+  ready". The old plan and its comments are kept on the turn
+  (`runner::plan_revised` → `TurnNote::plans_before` `[{plan, comments, ts}]`,
+  `yap-agent` `changed: "plan-revised"`; an older Yap's save drops it) and
+  shown **folded** in the thread under the turn's work, as "Plan from before
+  your last message" keeps the to-dos (`PlanHistory.svelte`: "Plan before your
+  comments · 2 comments", opened the plan with the commented words marked and
+  the comments; "Revising the plan with your comments…" while the new one is
+  written). Such a refusal is never a denial of the agent's
+  (`runner::revised_plan`, `approve::REVISE_LEAD`: left out of the turn's
+  denials and its steps). **Go ahead** works on the revised plan as on any.
+  The bar's card and a phone keep Go ahead / Not yet (comments are the
+  thread's).
 - **Go ahead on the report** (`AgentReportCard.svelte`, `agent_go_ahead`,
   `runner::go_ahead`): a "The agent's plan is ready" card whose plan is still the
   agent's latest turn, and still waiting (not set aside as "Plan not used":
@@ -1657,9 +1701,56 @@ used. See [Yap's crew](#yaps-crew-the-rows-characters).
   into a row a step, an edit's to its diff and a command's to itself and
   what it printed; a picture opens in the panel's picture tab; until then
   its last 8 steps as a list), "1 command · 2 files changed", and **Open**:
-  the timeline at that turn. Enter or Space opens and folds; ↑ ↓ (Home, End) move between
+  the timeline at that turn. Space (→ opens, ← folds) does it from the
+  keyboard; ↑ ↓ (Home, End) move between
   rows. Which rows are open and which groups folded is remembered per agent
   while the window stays open (`agentPanelMemory.svelte.js`; never saved).
+  ▸ is 12 px drawn and 24 px to click (`.rfold`: its padding given back by
+  its margin, so the row is laid out as before).
+- **A click on a row opens its own view** (15 Nov 2026; the maintainer's
+  catalogue of the Claude app's gaps: its background task opens into a view
+  of its own, Yap's rows only opened in place). Anywhere on a row of an
+  agent's turn or a helper but its ▸ (and Enter on its head): a tab of the
+  panel of its own (`AgentTaskTab.svelte`, `task:<row key>`,
+  `chatDoc.svelte.js` `showTask`, named by the row's title, a speech-bubble
+  icon), the panel as it was behind it; an ask-first card's row still opens
+  in place. **The rows look exactly as they did** — the crew, their walk,
+  the lead: the maintainer was explicit — and so do their characters in the
+  view. In it, from the same row the panel draws (`panelRows` on the store's
+  agent and its log, `agentLogs.svelte.js`):
+  - **Its header**: **the row's own character** (`CrewAvatar`: its model,
+    its Mode's prop, its pose — walking while it works, sitting with its ✓
+    once done, grey once stopped; paused off screen and still under reduced
+    motion, as the panel's), its title, Mode · model · effort (a helper's
+    "Helper"), **its clock** (`fmtClock`: a turn's `turnSecs`, a helper's
+    from its hand-over to its "back", `agentPanel.js` `helperSecs`; ticking
+    while it works) and **Stop while it works** (its agent at work and
+    something running it, the row menu's own rule): an agent's turn stops as
+    the tab's Stop stops it (`agent_stop`); a helper's is asked first, since
+    Claude Code can't stop one helper alone — it stops the turn that sent
+    it, Claude's own work too.
+  - **Its work in full**: the line its row says ("3/7 · Writing the
+    planting guide"), its to-do list, then `AgentWork` on the turn's events
+    with every stretch open to its rows (`stretchesOpen`; each row still
+    opens to its diff or output), a helper's own steps as `StepRows`.
+  - **Its report once it's over**: how it ended ("Agent done", "Agent
+    didn't finish" and why, "Agent stopped", "The agent's plan is ready",
+    "Plan not used"), what it changed, "1 command · 0 files changed · ctx …
+    · ≈ $ · 4:02", and **Its whole timeline** (the agent's tab at that
+    turn). A helper's: "Helper done" (or didn't finish), **what it came back
+    with** — its `Task` call's answer, kept on its "back" event as `report`
+    (`runner.rs`, at most 4,000 characters, as a log line keeps; never to a phone:
+    `link/code/view.rs`) — and how many steps it took.
+  - e2e `agents-panel.spec.js` (a running turn's view: walking with Auto's
+    flag as its row, its clock ticking, Stop; a finished one's: its to-dos,
+    its work open, "Agent done", its timeline; Enter; Stop stopping a live
+    agent, its report then; the seeded crew's rows each showing their own
+    character — Opus in Bypass's helmet failed, Haiku with Plan's glass done
+    — and no Stop on a row nothing runs; light and dark),
+    `agents-direct.spec.js` (a helper's view: its character as its row's,
+    "Helper", its clock, its steps and diff, "The notes are in order."; its
+    tab beside the agent's); `runner.rs` (a helper's report kept, cut, none
+    when empty), `link/code/view.rs` (never to a phone).
 - **Its helpers are entries of their own** (2026-11-12; the maintainer:
   "please do all of this"), as Claude Code's own app lists a session's
   subagents: under a turn's row, always in view, one for each part its
@@ -2096,9 +2187,20 @@ what didn't was the person.
     for it, and then it splits the stretch round it; in Normal it's no item
     and splits nothing.
 - **Pictures, paged** ([A step's pictures](#a-steps-pictures)).
-- **Not done**: a card asking before acting on a page stays under the
-  message that asked (not the latest part); the Agent panel's rows have no
-  view of their own.
+- **A card asking before acting on a page goes with the work it's about**
+  (15 Nov 2026, as the Claude app keeps it with the latest of the turn):
+  under the part of the turn it asked in — the latest when it came — not
+  always under the message that asked. As it comes (`yap-agent-shown`'s
+  `confirm`), chatState stamps it with the message the turn had read last
+  (`after`: `core/agents.js` `lastRead` of the turn's log); ChatThread draws
+  each card after its part's `AgentWork` (`cardsIn`, `cardPart`), the
+  first part's under the message that asked, a later part's under the
+  message read there. Answered, it stays with that part; one whose turn's
+  log wasn't followed yet when it came goes under the latest part. (Claude
+  is blocked while it asks: nothing is read until it's answered.) e2e
+  `agents-direct.spec.js`: a message read mid-turn, then buying asks — the
+  thread reads you, work, you, work, card, and still does once it's
+  answered; `core/agents.js` unit checks in the same spec.
 
 ## An opened stretch: a row a step
 
@@ -2772,9 +2874,9 @@ Rust (`desktop/src-tauri/src/`):
 
 Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 `codeChats.svelte.js`, `WorkspacePicker`, `CodeChips`, `CodeEdge`,
-`codeChat.css`, `CodeEmpty`, `ModeChip`, `AgentTab`, `AgentPanel`, `AgentTimeline`, `AgentFiles`,
+`codeChat.css`, `CodeEmpty`, `ModeChip`, `AgentTab`, `AgentPanel`, `AgentTaskTab` (a row's own view), `AgentTimeline`, `AgentFiles`,
 `AgentPills`, `AgentTodoCard`, `AgentWork`, `StepRows`, `StepPictures`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`,
-`FileTab`, `RunsTab`, `codeRuns.svelte.js`, `SummaryTab`, `OutputsList` + `outputs.js`), `ui/fileLinks.js`, `ui/codeRun.js`, `stores/chatSummary.svelte.js`,
+`FileTab`, `SheetTab` + `sheetView.js`, `RunsTab`, `codeRuns.svelte.js`, `SummaryTab`, `OutputsList` + `outputs.js`), `ui/fileLinks.js`, `ui/codeRun.js`, `stores/chatSummary.svelte.js`,
 `core/codeChats.js`, `core/agents.js`, `core/codeColours.js` (+ `codeColours.hljs.js`), `core/intralineDiff.js`, `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
 `stores/agents.svelte.js`, `settings/YapCodePage.svelte`,
 `settings/ClaudeCodeStatus.svelte`.
@@ -2785,12 +2887,12 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 
 | Event | Payload |
 |---|---|
-| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, thought?, todos?, now?, diff?, call?, under?, helper?, picture?, read?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `helper` ("back", "failed") with the `call` of a hand-over whose helper has come back (an event of its own, no step); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `read` the id of a message Claude Code has just read (with its "Read your note" step: the queue's ✓✓); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `thought` its thinking, a thinking block of its own message (2026-11-15; never to a phone); `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished; 2026-11-14: `rewound` a Rewind): the pages read it again |
+| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, thought?, todos?, now?, diff?, call?, under?, helper?, report?, picture?, read?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `helper` ("back", "failed") with the `call` of a hand-over whose helper has come back (an event of its own, no step), `report` what it came back with (2026-11-15: its `Task` call's answer, at most 4,000 characters, for its own view in the Agent panel; never to a phone); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `read` the id of a message Claude Code has just read (with its "Read your note" step: the queue's ✓✓); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `thought` its thinking, a thinking block of its own message (2026-11-15; never to a phone); `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished; 2026-11-14: `rewound` a Rewind): the pages read it again |
 | `yap-agent-saying` | `{id, turn, text}` — the message agent `id`'s turn is writing now, all of it so far: many times a second, to the page only (never logged, never to a phone); let go when a `yap-agent` event has its `said`, its `text`, a `step`, or a status that's over |
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
 | `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs, questions?}` (`questions`: a question card's, `tool` "AskUserQuestion": `[{question, header, options: [{label, description}], multiSelect}]`, its `summary` the first question) — `run` is the agent's id; a plan's (`tool` "ExitPlanMode"): `summary` "The plan is ready", `detail` the plan |
-| `yap-claude-approve-done` | `{id, run, outcome, by, byName?, byDevice?}` — outcome allowed \| denied \| timedOut \| ended \| cancelled; `by` "pc", "phone" (a paired phone: its name and id, Remote Control) or null |
+| `yap-claude-approve-done` | `{id, run, outcome, by, byName?, byDevice?}` — outcome allowed \| denied \| timedOut \| ended \| cancelled \| revised (a plan sent back with comments, 15 Nov 2026); `by` "pc", "phone" (a paired phone: its name and id, Remote Control) or null |
 | `yap-agent-mode` | `{conversation, mode}` — a chat's Mode changed (the chip, or a phone) |
 | `yap-code-run` | `{id, conversation, text?, run?}`: a ▶ Run's news (`agents/run_block.rs`): `run` when it starts and ends (`{id, conversation, command, shell, ranIn, note?, state, code?, startedMs, endedMs, cut}`, state running \| done \| failed \| stopped), `text` its new output |
 | `yap-code-chat` | `{conversations, folder, removed?}` — those chats are Code chats in `folder` now (`null`: plain); `removed`: a workspace removed in Settings, its name; no conversations: the workspaces changed |
@@ -2828,6 +2930,7 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 | `code_files_check {conversation, paths}` | (`agents/files.rs`) each path a file in the Code chat's workspace (`{rel, abs, line?}`) or `null`; at most 200 |
 | `code_file_read {conversation, path}` | the file view's `{rel, abs, line?, text, size, truncated, binary}`; refused outside the workspace |
 | `code_file_open_editor {conversation, path, line?}` | Open in editor; which editor it was |
+| `sheet_open {src}` / `sheet_rows {id, sheet, from, to}` / `sheet_stamp {src}` / `sheet_open_app {src}` | (`chat/sheets/view.rs`) the sheet view: `src` is `{from: "workspace", conversation, rel}` (refused outside the workspace) or `{from: "attachment", id}`; a workbook opened without its cells (sheets, styles, widths, merges, frozen panes), its rows a stretch at a time (at most 1,000; "gone" once it isn't kept), the file's `{len, ms}`, Open in Excel |
 | `code_chat_environment {conversation?, workspace?}` | the summary's Environment: `{name, path, exists, repo, branch?, detached, worktree}` |
 | `code_run_check {conversation, lang}` / `code_run_start {conversation, command, lang, asked}` / `code_run_stop {id}` / `code_runs {conversation}` | (`agents/run_block.rs`) ▶ Run: whether it asks (`{asks, mode, workspace, path, ranIn, note?}`), the run started (refused unasked outside Bypass), Stop, a Code chat's runs with their output |
 | `claude_approve_reply {id, answers}` | a question card's answers (`AskUserQuestion`): each question's text → the label picked, a list of labels, or the person's own words; `true` when it was still waiting and something was answered |
@@ -2900,7 +3003,12 @@ the build's own stand-in replaying `script` from now on),
     Bypass, a long run's clock and Stop in the summary's Background tasks;
     the summary's Environment (branch, Worktree), Context, Connectors and
     Outputs, from the title bar (the row has no copy); a Chat (non-Code) chat with none
-    of it. Unit (`cargo test agents::files`, `agents::run_block`): every
+    of it.
+  - `chat-sheets.spec.js` (15 Nov 2026): a Code chat's workbook from a link
+    in its answer and its Outputs row, the view following the file as the
+    test rewrites it (same sheet, same cell; a half-written one kept), one
+    outside the workspace refused; a 5,000-row sheet scrolled, its rows
+    asked for as they show; and an attached one (chat-and-assistant.md). Unit (`cargo test agents::files`, `agents::run_block`): every
     escape refused (`..`, full paths outside, device and network paths,
     streams, a junction to a folder outside), a file read capped and binary
     said, editors' line arguments, the branch and worktree from `.git`; one
@@ -2983,7 +3091,12 @@ the build's own stand-in replaying `script` from now on),
     and on the bar, Go ahead carrying the plan out at once at the chip's
     mode on `--resume`, its report "The agent is carrying out its plan"; Not yet a
     plan, the report card's Go ahead once, the bar's "The agent's plan is ready"
-    Go ahead. Light and dark.
+    Go ahead. **Comments on a plan** (15 Nov 2026): words selected and
+    commented on, a comment on the whole plan, one taken back; Revise the plan
+    (the stand-in's `_mcp approve` `dump` reads the comments Claude Code got,
+    its next ExitPlanMode the revised plan's card), the old plan folded with
+    its comments (`plansBefore` in agents.json), then Go ahead as ever. Light
+    and dark.
 - **Unit** for Code chats and memory: `chat::turn::prompt` (a Code chat's
   whole prompt built), `chat::turn::plan` (the `Spec`),
   `claude_plan::sessions` (the transcript under the workspace by its ids),

@@ -18,11 +18,17 @@
 //!   (`stream::Watch`) and the answer is saved with it
 //!   (`ChatMessage::confirms`, `next_step`, `chapter`).
 //!
+//! - **The outline before a document's writing** ([`outline`], 15 Nov
+//!   2026): not a tool of its own — `create_document`'s outline goes to the
+//!   person first, on a card, wherever a question could ([`Cards::outline`],
+//!   with "Show the outline before writing" on).
+//!
 //! The log has the tool and the outcome, never the words.
 
 pub mod ask;
 pub mod chapters;
 pub mod next_step;
+pub mod outline;
 
 use serde_json::Value;
 
@@ -37,6 +43,10 @@ pub struct Cards {
     pub next_step: bool,
     /// `mark_chapter`.
     pub chapters: bool,
+    /// **A new document's outline shown first** (`outline.rs`): where a
+    /// question could be asked, with "Show the outline before writing" on
+    /// (`turn/gates.rs`). Not a tool: `create_document` waits on it.
+    pub outline: bool,
 }
 
 /// Every card's tool, in the order they're listed.
@@ -68,7 +78,13 @@ impl Cards {
     /// next-step box with Chat in view (`chat_in_view`). Pure.
     pub fn for_turn(tools: bool, meetings: bool, scope: Option<&str>, chat_in_view: bool, phone: bool) -> Cards {
         let base = tools && !meetings && matches!(scope, None | Some("assistant"));
-        Cards { ask: base && !phone, next_step: base && chat_in_view && !phone, chapters: base }
+        Cards { ask: base && !phone, next_step: base && chat_in_view && !phone, chapters: base, outline: false }
+    }
+
+    /// These cards, a new document's outline shown first where a question
+    /// could be asked (`on`: "Show the outline before writing"). Pure.
+    pub fn with_outline(self, on: bool) -> Cards {
+        Cards { outline: on && self.ask, ..self }
     }
 
     /// Any of them offered.
@@ -111,7 +127,7 @@ impl Cards {
     /// chapters — its questions are Claude Code's own `AskUserQuestion`
     /// (`claude_live/approve.rs`). Pure.
     pub fn for_code_session(phone: bool) -> Cards {
-        Cards { ask: false, next_step: !phone, chapters: true }
+        Cards { ask: false, next_step: !phone, chapters: true, outline: false }
     }
 
     /// The lines for the model's instructions (empty: none offered).
@@ -169,13 +185,16 @@ mod tests {
     #[test]
     fn the_cards_go_where_someone_can_see_or_answer_them() {
         let chat = Cards::for_turn(true, false, None, true, false);
-        assert_eq!(chat, Cards { ask: true, next_step: true, chapters: true });
+        assert_eq!(chat, Cards { ask: true, next_step: true, chapters: true, outline: false });
+        // The outline first, where a question could be asked, with the switch on.
+        assert!(chat.with_outline(true).outline && !chat.with_outline(false).outline);
+        assert!(!Cards::for_turn(true, false, Some("assistant"), false, true).with_outline(true).outline, "never a phone's");
         assert_eq!(chat.names(), NAMES);
         assert_eq!(chat.definitions().len(), 3);
         // The Voice Assistant away from Chat: asked out loud, no box (its buttons are in the thread).
-        assert_eq!(Cards::for_turn(true, false, Some("assistant"), false, false), Cards { ask: true, next_step: false, chapters: true });
+        assert_eq!(Cards::for_turn(true, false, Some("assistant"), false, false), Cards { ask: true, next_step: false, chapters: true, outline: false });
         // A phone's question: no question, no box.
-        assert_eq!(Cards::for_turn(true, false, Some("assistant"), false, true), Cards { ask: false, next_step: false, chapters: true });
+        assert_eq!(Cards::for_turn(true, false, Some("assistant"), false, true), Cards { ask: false, next_step: false, chapters: true, outline: false });
         // Across the meetings, the Meetings view's Ask, a model without tools: none.
         assert!(!Cards::for_turn(true, true, None, true, false).any());
         assert!(!Cards::for_turn(true, false, Some("meetings"), true, false).any());
@@ -183,7 +202,7 @@ mod tests {
         assert!(Cards::default().instructions().is_empty());
         assert!(quiet(next_step::NAME) && quiet(chapters::NAME) && !quiet(ask::NAME));
         // A Code chat's own session: Claude Code asks with its own card; a phone's turn has no box.
-        assert_eq!(Cards::for_code_session(false), Cards { ask: false, next_step: true, chapters: true });
+        assert_eq!(Cards::for_code_session(false), Cards { ask: false, next_step: true, chapters: true, outline: false });
         assert_eq!(Cards::for_code_session(true).names(), [chapters::NAME]);
     }
 

@@ -143,13 +143,13 @@ export function cardsOf(items, { approvals = [], agents = [] } = {}) {
     if (ev.kind !== 'confirm' || ev.id == null) continue;
     const card = {
       id: `confirm:${ev.id}`,
-      kind: ev.act === 'connector' ? 'connector' : ev.act === 'agent' ? 'agent' : ev.act === 'question' ? 'question' : 'page',
+      kind: ev.act === 'connector' ? 'connector' : ev.act === 'agent' ? 'agent' : ev.act === 'question' ? 'question' : ev.act === 'outline' ? 'outline' : 'page',
       act: ev.act || 'press',
       label: ev.label ?? '',
       site: ev.site ?? '',
       does: ev.does ?? '',
       state: ev.state ?? '',
-      answers: ev.act === 'connector' ? ['allow', 'always', 'deny'] : ev.act === 'question' ? ['allow', 'deny', 'pick'] : ['allow', 'deny'],
+      answers: ev.act === 'connector' ? ['allow', 'always', 'deny'] : ev.act === 'question' ? ['allow', 'deny', 'pick'] : ev.act === 'outline' ? ['allow', 'edit', 'said'] : ['allow', 'deny'],
     };
     // Chat's own model's question (chat/cards/ask.rs): its questions and options, and once answered what was picked.
     if (ev.question) {
@@ -158,13 +158,23 @@ export function cardsOf(items, { approvals = [], agents = [] } = {}) {
       if (ev.question.said) card.said = ev.question.said;
       if (ev.question.voice) card.voice = true;
     }
+    // A new document's outline before the writing (chat/cards/outline.rs): its headings, and once answered what came of it.
+    if (ev.outline) {
+      card.outline = { title: ev.outline.title ?? '', sections: (ev.outline.sections ?? []).map((s) => s.key) };
+      if (ev.outline.changed?.length) card.outline.changed = ev.outline.changed.map((s) => s.key);
+      if (ev.outline.note) card.outline.note = ev.outline.note;
+      if (ev.outline.said) card.said = ev.outline.said;
+      if (ev.outline.voice) card.voice = true;
+    }
     if (ev.text) card.text = cut(ev.text, 200);
     if (ev.agent) card.agent = { folder: ev.agent.folder ?? ev.agent.name ?? '', mode: ev.agent.mode ?? '', brief: cut(ev.agent.brief ?? '', 300) };
     if (ev.connector) card.connector = { connector: ev.connector.connector ?? '', tool: ev.connector.tool ?? '', args: (ev.connector.args ?? []).map((a) => `${a.key}: ${a.value}`) };
     cards.set(card.id, card);
   }
   for (const p of approvals) {
-    cards.set(`approve:${p.id}`, { id: `approve:${p.id}`, kind: 'approve', act: 'approve', tool: p.tool, label: p.summary ?? '', detail: cut(p.detail ?? '', 300), run: p.run, state: 'asking', answers: ['allow', 'deny'], ...(p.questions?.length ? { questions: p.questions } : {}) });
+    // (A plan's card, ExitPlanMode's, may be sent back with comments: `revise`.)
+    const answers = p.tool === 'ExitPlanMode' ? ['allow', 'deny', 'revise'] : ['allow', 'deny'];
+    cards.set(`approve:${p.id}`, { id: `approve:${p.id}`, kind: 'approve', act: 'approve', tool: p.tool, label: p.summary ?? '', detail: cut(p.detail ?? '', 300), run: p.run, state: 'asking', answers, ...(p.questions?.length ? { questions: p.questions } : {}) });
   }
   for (const a of agents) {
     // (A plan set aside — "Plan not used": a newer turn began in its chat, or
@@ -174,6 +184,19 @@ export function cardsOf(items, { approvals = [], agents = [] } = {}) {
     }
   }
   return [...cards.values()];
+}
+
+/** `"quote::comment|::a comment on the whole plan"` (or JSON `[{quote, text}]`) as a plan's comments. Pure. */
+export function planCommentsOf(s) {
+  const t = String(s ?? '').trim();
+  if (t.startsWith('[')) return JSON.parse(t);
+  return t
+    .split('|')
+    .map((part) => {
+      const at = part.indexOf('::');
+      return at < 0 ? { quote: '', text: part.trim() } : { quote: part.slice(0, at).trim(), text: part.slice(at + 2).trim() };
+    })
+    .filter((c) => c.text);
 }
 
 /** The cards still waiting for an answer. Pure. */
