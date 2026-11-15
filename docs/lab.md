@@ -221,6 +221,23 @@ waits 10 minutes. Out loud: `answer confirm:<n> said "the second one"` (the Voic
 Assistant's next question in that chat: whatever is said next there is its answer),
 or the same as `ask "the second one" --spoken --chat same` while the card waits.
 
+**A new document's outline** (`chat/cards/outline.rs`, 15 Nov 2026: `confirm:<n>` with
+`kind: "outline"`, its `outline` `{title, sections}` in `cards`, and once answered `changed`,
+`note`, `said`): `answer confirm:<n> allow` is Go (clicked on the card when it's there),
+`answer confirm:<n> edit '{"sections":["Skills","Gear","Costs"],"note":"Keep it short"}'`
+Edit's Go (each section a heading, or `{key, intent}`), and `said "drop the second part"`
+(or `ask "…" --spoken --chat same`) answers it out loud. The lab seeds the e2e suite's
+config, which has "Show the outline before writing" off: `set '{"config":{"chatOutlineReview":true}}'`
+first. A plan chat makes no documents: the outline needs a model of the tool loop (`--fake`,
+or `--model anthropic:…`).
+
+**Comments on an agent's plan** (`claude_live/approve.rs`, 15 Nov 2026): `answer approve:<n>
+revise "seedlings every morning::Every other morning is enough|::Water the herbs too"` sends
+the plan card back with comments (`<words of the plan>::<comment>`, `|` between them, no words
+before `::` for one on the whole plan; or JSON `[{quote, text}]`): Claude Code stays in Plan
+mode and answers with a new plan, its card `approve:<n+1>`. `set '{"config":{"agentsDirect":true,"agentsMode":"plan"}}'`
+before a new Code chat for its chip to start at Plan.
+
 ```json
 {"ok":true,"answered":{"id":"approve:1","how":"allow","wasWaiting":true},"agents":[{"id":"1a1bad23b2f261d619b","folder":"lab-sandbox","status":"done","conversation":1,"mode":"auto","plan":false,"text":"Done. I changed Draft to Final in notes.md and the tests pass.","files":["notes.md"],"commands":["npm test"],"denials":[],"error":null,"cost":0.041}],"pending":[],"reports":[{"conversation":1,"report":"The agent in lab-sandbox: it's done.\n…","answer":"OK"}]}
 ```

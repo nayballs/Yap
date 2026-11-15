@@ -34,7 +34,7 @@ describe('a tall sheet in pages', () => {
 import { SEGMENT, TILE, parseTurns, placeShot, sheetHtml } from './sheet.mjs';
 import { shotNames, themesOf } from './shots.mjs';
 import { fillArgs, refIn, templated } from './fake.mjs';
-import { cardsOf, conversationOf, cut, endOf, summarize, toolsOf } from './turns.mjs';
+import { cardsOf, conversationOf, cut, endOf, planCommentsOf, summarize, toolsOf } from './turns.mjs';
 
 // ---------------------------------------------------------------- pure
 
@@ -154,6 +154,19 @@ describe('a turn’s record', () => {
     assert.equal(asking[0].voice, true);
     const answered = cardsOf([{ seq: 1, ts: 1, kind: 'stream', event: { kind: 'confirm', id: 4, act: 'question', state: 'answered', question: { questions: [q], answers: { 'Which format?': 'Plain text' }, said: 'the second one' } } }]);
     assert.deepEqual([answered[0].picked, answered[0].said], [{ 'Which format?': 'Plain text' }, 'the second one']);
+    // A new document's outline (chat/cards/outline.rs): its headings; answered, what came of it.
+    const outline = cardsOf([{ seq: 1, ts: 1, kind: 'stream', event: { kind: 'confirm', id: 6, act: 'outline', state: 'asking', outline: { title: 'Ranger', sections: [{ key: 'Gear', intent: 'x' }, { key: 'Skills', intent: '' }], voice: true } } }]);
+    assert.deepEqual(outline.map((c) => [c.id, c.kind, c.answers.join('|')]), [['confirm:6', 'outline', 'allow|edit|said']]);
+    assert.deepEqual(outline[0].outline, { title: 'Ranger', sections: ['Gear', 'Skills'] });
+    const edited = cardsOf([{ seq: 1, ts: 1, kind: 'stream', event: { kind: 'confirm', id: 6, act: 'outline', state: 'changed', outline: { title: 'Ranger', sections: [{ key: 'Gear' }], changed: [{ key: 'Kit' }], note: 'Short' } } }]);
+    assert.deepEqual(edited[0].outline, { title: 'Ranger', sections: ['Gear'], changed: ['Kit'], note: 'Short' });
+    // A plan's card may be sent back with comments.
+    assert.deepEqual(cardsOf([], { approvals: [{ id: 7, tool: 'ExitPlanMode', summary: 'The plan is ready', run: 'a1' }] })[0].answers, ['allow', 'deny', 'revise']);
+    assert.deepEqual(planCommentsOf('seedlings every morning::Every other morning|::Water the herbs too| '), [
+      { quote: 'seedlings every morning', text: 'Every other morning' },
+      { quote: '', text: 'Water the herbs too' },
+    ]);
+    assert.deepEqual(planCommentsOf('[{"quote":"a","text":"b"}]'), [{ quote: 'a', text: 'b' }]);
     // A plan set aside ("Plan not used") waits on nobody.
     assert.deepEqual(cardsOf([], { agents: [{ id: 'a3', folder: 'lab-sandbox', status: 'done', plan: true, planAllowed: false, planUnused: true }] }), []);
   });

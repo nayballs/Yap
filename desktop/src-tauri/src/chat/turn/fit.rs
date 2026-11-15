@@ -178,7 +178,8 @@ impl Family {
             Family::Browser => Gates { pictures: Gate::Off, act: false, ..g },
             Family::Apps => Gates { apps: false, ..g },
             Family::Files => Gates { files: Gate::Off, ..g },
-            Family::Cards => Gates { cards: crate::chat::cards::Cards::default(), ..g },
+            // (A document's outline shown first isn't a tool and takes no room: it stays.)
+            Family::Cards => Gates { cards: crate::chat::cards::Cards { outline: g.cards.outline, ..Default::default() }, ..g },
         }
     }
 

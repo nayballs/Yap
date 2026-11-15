@@ -528,6 +528,33 @@ pub fn plan_allowed(id: &str) {
     }
 }
 
+/// **The person sent agent `id`'s plan back with comments** (Plan mode's
+/// review: "Revise the plan" on ExitPlanMode's card,
+/// `claude_live/approve.rs`): Claude Code stays in Plan mode and answers with
+/// a new plan, this turn still; the plan and its comments are kept on the
+/// turn ([`store::TurnNote::plans_before`]), folded in the thread above the
+/// new one.
+pub fn plan_revised(id: &str, plan: &str, comments: &[store::PlanComment]) {
+    let now = store::now_secs();
+    let kept = store::update(id, |j| {
+        let n = j.turn_list.iter().rev().find(|t| t.status.live()).or_else(|| j.turn_list.last()).map(|t| t.n);
+        if let Some(t) = n.and_then(|n| j.turn_mut(n)) {
+            t.plans_before.push(store::PlanBefore { plan: plan.to_string(), comments: comments.to_vec(), ts: now });
+        }
+    });
+    if let Some(agent) = kept {
+        tracing::info!(id, comments = comments.len(), "Agents: its plan sent back with comments (it revises it)");
+        told_changed(&agent, "plan-revised");
+    }
+}
+
+/// An ExitPlanMode refused because the person sent the plan back with
+/// comments (`plans`: the turn's plans before): a revision, never a
+/// denial of the agent's. Pure.
+pub fn revised_plan(tool: &str, input: &serde_json::Value, plans: &[store::PlanBefore]) -> bool {
+    tool == claude_live::EXIT_PLAN && input.get("plan").and_then(serde_json::Value::as_str).is_some_and(|p| plans.iter().any(|b| b.plan.trim() == p.trim()))
+}
+
 /// Test only: agent `id` as if its turn had started (a request for it queues
 /// as its next turn), or not (`None`): no Claude Code runs.
 #[cfg(test)]
@@ -1971,6 +1998,8 @@ impl Follow {
                     emit_saying(&self.id, self.n, &self.saying);
                 }
             }
+            // (A plan the person sent back with comments isn't a denial: it's being revised.)
+            Event::PermissionDenied(d) if d.tool_name == claude_live::EXIT_PLAN && d.message.starts_with(claude_live::REVISE_LEAD) => {}
             Event::PermissionDenied(d) => {
                 let detail = if d.message.trim().is_empty() { format!("Use {}", d.tool_name) } else { steps::one_line(&d.message, 160) };
                 let line = format!("Not allowed: {}", d.tool_name);
@@ -2047,9 +2076,12 @@ impl Follow {
         let manifest: Vec<String> = claude_live::backup::read_manifest(&self.backup)
             .map(|m| m.files.iter().map(|e| steps::shown_path(&e.original.to_string_lossy(), &self.folder)).collect())
             .unwrap_or_default();
+        // (A plan sent back with comments isn't a denial: `revised_plan`.)
+        let before: Vec<store::PlanBefore> = store::get(&self.id).and_then(|j| j.turn_list.iter().find(|t| t.n == self.n).map(|t| t.plans_before.clone())).unwrap_or_default();
         let denials: Vec<Denial> = r
             .permission_denials
             .iter()
+            .filter(|d| !revised_plan(&d.tool_name, &d.tool_input, &before))
             .map(|d| Denial { tool: d.tool_name.clone(), detail: steps::denied(&d.tool_name, &d.tool_input, &self.folder) })
             .collect();
         // Its own cost: Claude Code's figure is its session's running
