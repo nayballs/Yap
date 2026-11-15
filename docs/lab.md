@@ -227,7 +227,7 @@ or the same as `ask "the second one" --spoken --chat same` while the card waits.
 `answer confirm:<n> edit '{"sections":["Skills","Gear","Costs"],"note":"Keep it short"}'`
 Edit's Go (each section a heading, or `{key, intent}`), and `said "drop the second part"`
 (or `ask "…" --spoken --chat same`) answers it out loud. The lab seeds the e2e suite's
-config, which has "Show the outline before writing" off: `set '{"chatOutlineReview":true}'`
+config, which has "Show the outline before writing" off: `set '{"config":{"chatOutlineReview":true}}'`
 first. A plan chat makes no documents: the outline needs a model of the tool loop (`--fake`,
 or `--model anthropic:…`).
 
@@ -235,7 +235,7 @@ or `--model anthropic:…`).
 revise "seedlings every morning::Every other morning is enough|::Water the herbs too"` sends
 the plan card back with comments (`<words of the plan>::<comment>`, `|` between them, no words
 before `::` for one on the whole plan; or JSON `[{quote, text}]`): Claude Code stays in Plan
-mode and answers with a new plan, its card `approve:<n+1>`. `set '{"agentsMode":"plan"}'`
+mode and answers with a new plan, its card `approve:<n+1>`. `set '{"config":{"agentsDirect":true,"agentsMode":"plan"}}'`
 before a new Code chat for its chip to start at Plan.
 
 ```json

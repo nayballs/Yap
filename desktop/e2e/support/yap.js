@@ -77,7 +77,7 @@ export const BASE_CONFIG = {
   // A new document is written straight away unless a spec asks for its
   // outline first (on by default: chat-outline.spec.js turns it on), so the
   // specs of Chat's documents see their turns as before. Yap Lab too: `set
-  // '{"chatOutlineReview":true}'` for the outline card.
+  // '{"config":{"chatOutlineReview":true}}'` for the outline card.
   chatOutlineReview: false,
   configVersion: 1,
 };
