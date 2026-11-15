@@ -43,6 +43,8 @@ describe('options', () => {
     assert.deepEqual(parseArgs(['hello there', '--spoken', '--chat', 'new', '--timeout=30']), { _: ['hello there'], spoken: true, chat: 'new', timeout: '30' });
     // (A switch never takes the next flag: `--incognito --timeout 540`, 15 Nov 2026.)
     assert.deepEqual(parseArgs(['hi', '--incognito', '--timeout', '540', '--style', 'Concise']), { _: ['hi'], incognito: true, timeout: '540', style: 'Concise' });
+    // (Nor a side question's: `side "…" --keep --timeout 360` left "360" in the question, 15 Nov 2026.)
+    assert.deepEqual(parseArgs(['Which file?', '--keep', '--timeout', '360', '--close']), { _: ['Which file?'], keep: true, timeout: '360', close: true });
     assert.throws(() => parseArgs(['--chat']), /--chat needs a value/);
     assert.equal(onOff('on', false, 'web'), true);
     assert.equal(onOff(undefined, true, 'web'), true);
