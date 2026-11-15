@@ -16,6 +16,7 @@
   import { onMount } from 'svelte';
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { toast } from '../../ui/toast.svelte.js';
+  import { REMOTE_ASK, remoteStatus, remoteOn, toggleRemote, remoteOnEverywhere } from './remoteControl.js';
 
   /** `workspace`: `{name, path}`; `conversation`: the chat's id (none: a new chat); `onclose()`. */
   let { workspace, conversation = null, onclose = null } = $props();
@@ -26,11 +27,7 @@
   let card = $state(null);
 
   async function load() {
-    try {
-      status = await invoke('link_remote_status', { workspace: workspace?.name ?? null });
-    } catch {
-      status = null;
-    }
+    status = await remoteStatus(workspace?.name);
     try {
       mode = await invoke('agent_mode_get', { conversation: conversation ?? null });
     } catch {
@@ -57,32 +54,17 @@
     };
   });
 
-  const on = $derived(!!status?.on && !!status?.workspaceAllowed);
+  const on = $derived(remoteOn(status));
   const phones = $derived((status?.phones ?? []).filter((p) => p.remote));
   const connected = $derived(phones.filter((p) => p.connected));
-
-  /** Settings → Phone's switch, patched onto a fresh config (as the Integrations view's). */
-  async function setMaster(next) {
-    const fresh = await invoke('get_config');
-    await invoke('save_config', { cfg: { ...fresh, linkRemoteControl: next }, base: fresh });
-    window.dispatchEvent(new CustomEvent('yap-config-patched', { detail: { linkRemoteControl: next } }));
-  }
-
-  async function setWorkspace(next) {
-    await invoke('link_workspace_remote', { name: workspace.name, on: next });
-  }
 
   async function toggle() {
     if (!status) return;
     try {
-      if (on) {
-        await setWorkspace(false);
-      } else if (!status.on) {
-        // Asked once, with what it allows.
+      // (Settings → Phone's switch off: asked once, with what it allows.)
+      if ((await toggleRemote(workspace.name, status)) === 'ask') {
         asking = true;
         return;
-      } else {
-        await setWorkspace(true);
       }
     } catch (e) {
       toast({ title: "Couldn't change Remote Control", description: String(e?.message ?? e), variant: 'destructive' });
@@ -92,8 +74,7 @@
 
   async function turnOnEverywhere() {
     try {
-      await setWorkspace(true);
-      await setMaster(true);
+      await remoteOnEverywhere(workspace.name);
     } catch (e) {
       toast({ title: "Couldn't turn Remote Control on", description: String(e?.message ?? e), variant: 'destructive' });
     }
@@ -169,9 +150,9 @@
 
 <ConfirmDialog
   bind:open={asking}
-  title="Turn on Remote Control?"
-  body="Your paired phones ticked for it in Settings → Phone can follow Yap Code's agents, allow their steps and send them work, on your home Wi-Fi. From a phone, agents run at most at Auto, never Bypass permissions, and every step allowed there is recorded."
-  confirmLabel="Turn on"
+  title={REMOTE_ASK.title}
+  body={REMOTE_ASK.body}
+  confirmLabel={REMOTE_ASK.confirmLabel}
   danger={false}
   onconfirm={turnOnEverywhere}
 />

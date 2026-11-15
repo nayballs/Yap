@@ -1,11 +1,15 @@
 // The small lines of Chat's Projects page (ProjectsView.svelte): a file's
 // kind and size, and when a project or chat last changed. Pure.
 
-const KINDS = { pdf: 'PDF', word: 'Word', markdown: 'Markdown', code: 'Code', text: 'Text' };
+import { ocrLine } from './chatFiles.js';
 
-/** "PDF", "Markdown"… for a project file's `kind`. */
+const KINDS = { pdf: 'PDF', word: 'Word', powerpoint: 'PowerPoint', markdown: 'Markdown', code: 'Code', text: 'Text' };
+
+/** "PDF", "Markdown"… for a project file's `kind`; a scanned PDF's "PDF, 2 pages read with OCR". */
 export function kindLabel(f) {
-  return KINDS[f?.kind] || 'File';
+  const kind = KINDS[f?.kind] || 'File';
+  const ocr = ocrLine(f);
+  return ocr ? `${kind}, ${ocr}` : kind;
 }
 
 /** "12 KB · about 3K tokens": a file's size and what it costs a model. */

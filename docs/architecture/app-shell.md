@@ -283,7 +283,14 @@ re-exported by the module, except `local_llm`'s, which callers name
   open if Yap quits. **`yap.exe fake-claude <script.jsonl> …`** (debug builds
   only; `main.rs` runs it before the app, as `mcp` and `diarize`:
   `run_fake_claude`) is the tests' stand-in for Claude Code
-  ([ai-models.md](./ai-models.md#the-stand-in-fakers-debug-builds)).
+  ([ai-models.md](./ai-models.md#the-stand-in-fakers-debug-builds)); **`yap.exe
+  fake-gh <script.json> …`** (`run_fake_gh`) the stand-in for GitHub's `gh`
+  ([build-and-test.md](./build-and-test.md#claude-code-in-tests-2026-11-07)).
+- **GitHub's `gh`** (2026-11-15, `agents/prs.rs`): a Code chat's summary runs
+  the person's own `gh pr list` in the workspace, in the kill-on-close job, no
+  window, killed after 20 s (`cli::run_captured_at`, as Claude Code's short
+  runs: `/context`, `--version`, `auth status`). Only a `gh.exe` from an
+  absolute folder on `PATH` or GitHub CLI's install folder is run.
 - **Connectors' programs** (preview, 2026-11-08, `integrations/connectors/local.rs`):
   each in a kill-on-close job **of its own** (process-wrap's `JobObject`
   under rmcp's child-process transport: started suspended, assigned,

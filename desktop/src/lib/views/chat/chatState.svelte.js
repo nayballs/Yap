@@ -48,6 +48,10 @@ const CITES = /\[\d{1,2}(?:\s*,\s*\d{1,2})*\]/;
 // which a bare "Thinking…" makes look hung.
 export const STILL_WORKING_S = 8;
 
+// Files attached show "Reading…" only once they take longer than this (a text file is read at once; a scanned PDF's
+// pages, read with OCR, take seconds).
+const READING_AFTER_MS = 400;
+
 // A turn's events for the panel beside the chat (chatState's `docEvent`):
 // its conversation's, so only while that one is open.
 const PANEL_EVENTS = new Set(['page', 'offer', 'picture', 'document', 'section', 'agent']);
@@ -508,6 +512,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // kept by Rust (`chat_files_add`), waiting here until sent; their text goes before the question. ({ id, name, kind,
   // bytes, tokens, pages? }.)
   let files = $state([]);
+  // Files Rust is still reading, shown as "Reading…" chips after a moment (`{ key, name, reading: true }`).
+  let reading = $state([]);
+  let readingSeq = 0;
   // A paste too long for the model: said under the box, never sent. (The files' text counts too.)
   const inputTokens = $derived(questionTokens(input) + filesTokens(files));
   const inputTooLong = $derived(!!limits?.questionMax && inputTokens > limits.questionMax);
@@ -778,11 +785,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
   }
 
-  /** Files added to the box (their paths): read by Rust, kept, waiting; any it can't read said plainly, each. */
+  /** Files added to the box (their paths): read by Rust, kept, waiting; any it can't read said plainly, each. While
+   *  they're read — past a moment: a scanned PDF's OCR takes seconds — each shows as "Reading…" (`reading`). */
   async function attachFiles(paths) {
     const list = (paths || []).filter(Boolean);
     if (!list.length) return;
     const room = 20 - files.length;
+    const batch = list.map((p) => ({ key: `${++readingSeq}:${p}`, name: String(p).split(/[\\/]/).pop() || String(p), reading: true }));
+    const shown = setTimeout(() => (reading = [...reading, ...batch]), READING_AFTER_MS);
     try {
       const got = await invoke('chat_files_add', { paths: list, room: Math.max(0, room) });
       const fresh = (got?.files || []).filter((f) => f?.id && !files.some((x) => x.id === f.id));
@@ -797,6 +807,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       }
     } catch (err) {
       toast({ title: "Couldn't attach the files", description: String(err), variant: 'destructive' });
+    } finally {
+      clearTimeout(shown);
+      reading = reading.filter((r) => !batch.some((b) => b.key === r.key));
     }
     await tick();
     inputEl?.focus();
@@ -2604,6 +2617,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get snipHotkey() { return snipHotkey; },
     get dragging() { return dragging; },
     get files() { return files; },
+    get readingFiles() { return reading; },
     get mention() { return mention; },
     setMentionGate,
     mentionInput,

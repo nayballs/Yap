@@ -367,12 +367,15 @@
       {/if}
     </div>
   {/if}
-  {#if chat.files.length}
+  {#if chat.files.length || chat.readingFiles.length}
     <!-- Files attached (chat/attachments.rs): a chip each — its type, name and size, as the Claude app's — ✕ to take
-         it out, a click opens it. Their text goes before the question. -->
+         it out, a click opens it. Their text goes before the question. One still being read (a scan's OCR): "Reading…". -->
     <div class="elrow filerow" data-testid="chat-files">
       {#each chat.files as f (f.id)}
         <FileChip file={f} onremove={chat.removeFile} />
+      {/each}
+      {#each chat.readingFiles as f (f.key)}
+        <FileChip file={f} />
       {/each}
     </div>
   {/if}

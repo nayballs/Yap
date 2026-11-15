@@ -730,17 +730,22 @@
   Kept by Reset app.
 - Chat's attached files (2026-11-15, `chat/attachments.rs`):
   `%APPDATA%/yap/chat-files/` — `file_<16 hex>/<name>`, the file's copy, and
-  `file_<16 hex>.txt`, its text as sent (a PDF's and a Word document's read
-  on this PC); `chats.json` keeps the question's `attachments` (id, name,
-  kind, bytes, tokens, a PDF's pages), never the text. Deleted with its
+  `file_<16 hex>.txt`, its text as sent (a PDF's — its scanned pages read
+  with Windows' OCR —, a Word document's, `.docx` or an older `.doc`, and a
+  PowerPoint presentation's, read on this PC); `chats.json` keeps the
+  question's `attachments` (id, name, kind, bytes, tokens, a PDF's pages,
+  and since 16 Nov 2026 `ocrPages` / `unreadPages`: its pages read with OCR,
+  and those with no text left unread), never the text. Deleted with its
   conversation, after "Keep chat files" (`chat_file_days`: 7 / 30 (default) /
   90 / 0 = forever; another value counts as 30), and a day after a file
   that was never sent. **New field**: an older Yap's save drops
   `attachments`, so every save also writes
   `%APPDATA%/yap/chat_attachments.json` (`{version, messages:
   [{conversation, index, ts, files}]}`, removed when there are none), put
-  back at the next start (`attachments::restore_from_disk`). Never logged;
-  leaves the PC only inside the Chat request it's sent with.
+  back at the next start (`attachments::restore_from_disk`); so are
+  `ocrPages` / `unreadPages`, which a Yap from before them drops from a
+  question's files. Never logged; leaves the PC only inside the Chat
+  request it's sent with.
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after
@@ -1098,7 +1103,8 @@
   data has it (`chats/chat_styles.json`). Never logged (counts only).
 - Projects: `%APPDATA%/yap/projects.json` (2026-11-15, `chat/projects.rs`,
   Chat's Projects) — `{projects: [{id, name, description, instructions,
-  files: [{id, name, kind, bytes, tokens, pages?, addedMs}], createdMs,
+  files: [{id, name, kind, bytes, tokens, pages?, ocrPages?, unreadPages?,
+  addedMs}], createdMs,
   updatedMs}], chats: {"<conversation id>": "<project id>"}}`: the person's
   projects (at most 100; a name at most 60 characters, what it's for 300,
   instructions 8,000; at most 50 files each) and which chat is in which.

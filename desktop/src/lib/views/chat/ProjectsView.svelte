@@ -260,7 +260,7 @@
             {/each}
           </ul>
         {:else}
-          <p class="none">Text, Markdown, code, PDFs and Word documents: every chat here reads them.</p>
+          <p class="none">Text, Markdown, code, PDFs (scans too), Word documents and PowerPoint presentations: every chat here reads them.</p>
         {/if}
       </aside>
     </div>

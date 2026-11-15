@@ -2440,7 +2440,9 @@ row each — its icon, its name, what it is ("Page · 2 versions",
 "Document", "Changed", "Shared", "Picture") — that opens it where it lives
 (`outputsOpen.js` `openOutput`, the summary's too: a page or a document
 beside the chat, a changed file in the file view, a picture in its tab, a
-shared file in the file view when it's in the workspace, else in its app);
+shared file in the file view when it's in the workspace, else in its app),
+and has a right-click menu (`outputMenuItems`, 15 Nov 2026: Open; a file's
+Show in folder and Copy path; a workspace file's Open in editor);
 nothing yet says what will show there. Opened by the title bar's **Outputs**
 button (the layers icon, beside a Code chat's Summary and the browser, while
 a chat is open: `stores/chatOutputs.svelte.js`, ChatView's `toggleOutputs`;
@@ -4365,23 +4367,68 @@ already takes (`chat/attachments.rs`, `views/chat/FileChip.svelte`,
   dropped on Chat (a picture among them still goes in as a screenshot,
   `snip/attach.rs`; everything else here). Rust reads each and keeps it
   (`chat_files_add`); the box shows a **chip** each: a small type badge
-  ("TXT", "PDF", "MD", "DOCX"), its name and its size, as the Claude app's
-  file chips; ✕ takes it out and deletes it (`chat_attachment_remove`), a
-  click opens it. The empty box asks "Ask about this file…"; Enter on it
-  empty asks "What's in this file?". At most 20 a question.
+  ("TXT", "PDF", "MD", "DOCX", "PPTX"), its name and its size, as the Claude
+  app's file chips (a scanned PDF's adds a small **OCR** tag, its tooltip
+  how many pages: "2 pages read with OCR"); ✕ takes it out and deletes it
+  (`chat_attachment_remove`), a click opens it. One still being read past
+  400 ms (a scan's OCR takes seconds) shows "Reading…" (chatState's
+  `readingFiles`, `chat-file-reading`). The empty box asks "Ask about this
+  file…"; Enter on it empty asks "What's in this file?". At most 20 a
+  question.
 - **What's read** (`attachments::read`): text and code by their bytes (UTF-8,
   UTF-16 with its mark; a NUL byte or many control characters early on is
   a binary file), Markdown, a **PDF's text read on this PC** (`pdf.rs`:
   `pdf-extract` on lopdf, page by page under `[Page n]` lines, in its own
   thread so a panic or a 60-second read is "couldn't read", never a crash
   or a hang; never uploaded to be read), a **Word document's** text
-  (`word.rs`: the `.docx` zip's `word/document.xml`, a paragraph a line).
-  **Anything else is said plainly** and not added, the toast naming each:
-  "Chat can't read budget.xlsx (a spreadsheet: save it as CSV to attach
-  it). It reads text, code, PDF and Word files, and pictures."; a PDF of
-  scanned pages "has no text Yap can read… Snip a page to Chat instead";
-  password-protected, empty, over 50 MB, or over 4 million characters
-  (about a million tokens) likewise.
+  (`word.rs`: the `.docx` zip's `word/document.xml`, a paragraph a line;
+  `.docm`/`.dotx` too), and since 16 Nov 2026:
+  - **A PDF's scanned pages, read with OCR** (`scan.rs`): a page with no
+    text is drawn by Windows' own PDF renderer (`Windows.Data.Pdf`, from an
+    in-memory stream: never written anywhere) as big as the OCR engine
+    takes (up to 2.5×, at most its `MaxImageDimension`) and read by the
+    screenshots' OCR (`snip/ocr.rs` `read_png`: the person's languages, a
+    test run's fake text, `e2e_snip_ocr`), under "[Page 2, read with OCR]".
+    **At most 20 pages a file within 90 seconds**, in its own thread (the
+    shared MTA of `shell/com.rs`, never COM set up or taken down there);
+    the pages left out are **named in a note at the end** of the text
+    ("[Pages 21–48 have no text layer (scans or pictures) and weren't
+    read: Yap reads at most 20 such pages of a file with OCR.]", or "…took
+    too long"). A PDF lopdf can't parse or decrypt that Windows opens (an
+    owner-password "copy protected" file) is read the same way, every page.
+    The attachment keeps `ocrPages` / `unreadPages`; its `<source>` says
+    "1 scanned page read with OCR, which can get words wrong". No OCR
+    language on the PC: its typed pages still go, the scans named; all
+    scans: "…Windows' text recognition isn't set up on this PC (add a
+    language in Settings → Time & language). Snip a page to Chat instead."
+  - **A PowerPoint presentation** (`.pptx`, `.pptm`, `.ppsx`, `.potx`;
+    `powerpoint.rs`): the zip's slides in the presentation's own order
+    (`ppt/presentation.xml`'s slide list through its relationships; else by
+    their numbers), each "Slide 3: <its title>" then its shapes' lines (a
+    table's row a line, cells by tabs; a SmartArt diagram's words), then
+    "Speaker notes: …" (the notes page's body only); a hidden slide "Slide
+    4 (hidden): …", an empty one "(no text)". Each part at most 64 MB, all
+    256 MB, 5,000 slides.
+  - **An older Word document** (`.doc`, Word 97–2003; `doc.rs`): the
+    Compound File (the `cfb` crate, MIT, already in the tree) and its text
+    by the public [MS-DOC] piece table — the FIB, the table stream's Clx,
+    each piece 8-bit (cp1252) or UTF-16 — the main text only, a paragraph
+    a line, a table's cells by tabs and its rows a line, a field's code
+    dropped and its result kept, in its own thread (30 s). Encrypted: "is
+    password-protected". Word 95 or a broken file: "…(it may be from Word
+    95 or older): save it as .docx in Word to attach it." A `.doc` that's
+    really a `.docx`, RTF or HTML is read as what it is.
+  - **An older PowerPoint file** (`.ppt`) isn't read: its text needs the
+    persist directory and the outline lists of [MS-PPT] to come out in
+    slide order, more than a small reader; said "(an older PowerPoint
+    presentation: save it as .pptx in PowerPoint to attach it)".
+
+  **Anything else is said plainly** and not added, the toast naming each,
+  worded for its kind: "Chat can't read budget.xlsx (a spreadsheet: save it
+  as CSV to attach it). It reads text, code, PDF, Word and PowerPoint files,
+  and pictures." (an OpenDocument or Keynote presentation, an `.odt` or
+  Pages document likewise); password-protected, empty, over 50 MB, or over 4
+  million characters (about a million tokens) likewise.
 - **Sized to the model**: each file's tokens (`budget::estimate`) count in
   the question's size, on the page (`inputTooLong`: the too-long line
   under the box, Send waits) and in Rust (`turn/history.rs`
@@ -4389,8 +4436,11 @@ already takes (`chat/attachments.rs`, `views/chat/FileChip.svelte`,
   sent, as a paste is. An earlier question's files count in the history
   (`budget::message_costs`), which drops older messages first.
 - **To the model** (`attachments::block`): a `<documents>` block before the
-  question, a `<document index>` each with its `<source>` (a PDF's says it's
-  its text, read on the person's PC) and `<document_content>`, as
+  question, a `<document index>` each with its `<source>` (`attachments::source`,
+  a project's files' too: a PDF's says it's its text, read on the person's
+  PC, its pages read with OCR and any not read; a Word document's, its
+  text; a presentation's, each slide's text, then its speaker notes) and
+  `<document_content>`, as
   Anthropic advises long documents go first. Joined where the turn's
   screenshots join its question (the task-local `attachments::with`, set in
   `chat_send`): the tool loop's opening messages, a plain answer
@@ -4400,7 +4450,8 @@ already takes (`chat/attachments.rs`, `views/chat/FileChip.svelte`,
   their question (`ChatMessage::sent_text`); a file past "Keep chat files"
   is a line, "(A file was attached here, notes.md; it was removed.)".
 - **On the question**: `ChatMessage.attachments` (id, name, kind, bytes,
-  tokens, a PDF's pages; never the text), its chips over its words
+  tokens, a PDF's pages, `ocrPages`, `unreadPages`; never the text), its
+  chips over its words
   (`chat-files-sent`), each opening its file (`chat_attachment_open`:
   Markdown in Yap's own window, anything else in its app, and one that
   could run a program or a web page, an `.html`, a script, its text as a
@@ -4415,20 +4466,31 @@ already takes (`chat/attachments.rs`, `views/chat/FileChip.svelte`,
   screenshots' daily sweep and when the setting changes). Download your
   data takes the copies (`chat-files/<id>/<name>`). An older Yap's save
   drops the field: every save writes `chat_attachments.json` too, put back
-  at the next start (as `chat_files.json` does for shared files).
+  at the next start (as `chat_files.json` does for shared files); a Yap
+  from before `ocrPages` / `unreadPages` drops those from a file it keeps,
+  and they're put back the same way (`restore_from`).
 - **Never queued** (a Code chat while Claude works): a message with files
   goes as one with a screenshot does.
 - **Privacy**: names, text and paths are never logged (kinds, counts,
   sizes, tokens); a file leaves the PC only inside the Chat request it's
   sent with and that chat's follow-ups.
 - **Not done**: a question asked out loud doesn't take the files waiting
-  in the box (typed questions only; screenshots it does take); a scanned
-  PDF isn't read with OCR; spreadsheets, presentations and old `.doc` files
-  aren't read.
+  in the box (typed questions only; screenshots it does take); an older
+  `.ppt`, an OpenDocument or Keynote presentation and an `.odt` aren't
+  read; a scan's pictures past 20 pages aren't read; a `.doc`'s headers,
+  footnotes and comments aren't read.
 - e2e: `chat-files.spec.js` (drop, chips, what the model gets now and in a
-  follow-up, Open, ✕, too long, deleted with its chat, Settings); unit tests
-  in `chat/attachments/` (`tests.rs`, `pdf.rs`, `word.rs`: a PDF and a
-  `.docx` made in the test).
+  follow-up, Open, ✕, too long, deleted with its chat, Settings; a PDF
+  with a typed and a scanned page — the OCR's text faked, the page drawn
+  by Windows for real —, a `.pptx` with notes made in the test,
+  `fixtures/allotment-rules.doc`, a broken `.pptx` and `.doc` and an older
+  `.ppt` said); unit tests in `chat/attachments/` (`tests.rs`, `pdf.rs`,
+  `scan.rs`, `word.rs`, `powerpoint.rs`, `doc.rs`: PDFs of typed and
+  scanned pages made in the test from `fixtures/scanned-note.png` — a
+  picture of fictional words, its rows put straight into the PDF —, read
+  by Windows' OCR where the PC has a language for it; a `.docx` and a
+  `.pptx` made in the test; a `.doc` made by the [MS-DOC] spec in the test
+  and one LibreOffice saved, `fixtures/allotment-rules.doc`).
 
 ## The message box is several lines (2026-11-15)
 
@@ -5830,9 +5892,13 @@ never an incognito chat.
   chat in <project>" before the first question — opens the project's page
   (`chat-project-line`).
 - **Its files** are read with a question's attachments' rules
-  (`chat/attachments.rs` `read`: text, code, Markdown, a PDF's or a Word
-  document's text, read on this PC; anything else said plainly and left
-  out), their copy and text kept in `projects/<project>/`; at most 50.
+  (`chat/attachments.rs` `read`: text, code, Markdown, a PDF's text — its
+  scanned pages read with OCR, the file's line on the page saying so
+  ("PDF, 2 pages read with OCR", `projectLines.js`) —, a Word document's,
+  `.docx` or `.doc`, a PowerPoint presentation's slides and notes, read on
+  this PC; anything else said plainly and left out), their copy and text
+  kept in `projects/<project>/`; at most 50. Their `<source>` lines are
+  the attachments' (`attachments::source`).
 - **In the prompt** (`prompt::chat_blocks`, before the chat's style, just
   before About you): "This chat is in the user's project "…". It's for: …",
   its instructions in `<project_instructions>`, and its files' text in a
