@@ -94,7 +94,9 @@ test('a question card: an option answers it, its preview shows, and the question
   await expect(card.getByTestId('chat-question-option').locator('.qdesc')).toHaveText(['Headings and lists.', 'No marks at all.']);
   // The preview beside the options: the first's, then the one pointed at.
   const preview = card.getByTestId('chat-question-preview');
-  await expect(preview.locator('h2')).toHaveText('Lakeside weekend');
+  // (Yap's answers draw a heading a level down: ## is an h3.)
+  await expect(preview.getByRole('heading', { name: 'Lakeside weekend' })).toBeVisible();
+  await expect(preview.locator('li')).toHaveText(['Friday: drive up', 'Saturday: walk']);
   await card.getByRole('button', { name: /Plain text/ }).hover();
   await expect(preview).toContainText('Lakeside weekend. Friday: drive up.');
   // The model was told when to ask, and offered the tool.
@@ -191,7 +193,8 @@ test('chapters and the next-step box: a divider and the contents, and a button t
   // The contents: the start, then the chapter; a click goes there.
   const contents = main.getByTestId('chat-chapters');
   await expect(contents).toBeVisible();
-  await contents.getByRole('button', { name: 'Chapters' }).click();
+  await expect(contents.getByRole('button', { name: /^Chapters/ })).toHaveAccessibleName('Chapters: Packing list');
+  await contents.getByRole('button', { name: /^Chapters/ }).click();
   await expect(contents.getByRole('menuitem')).toHaveText(['Start', 'Packing list']);
   await shot(main, '03-chapters-and-next-step');
   await contents.getByRole('menuitem', { name: 'Packing list' }).click();

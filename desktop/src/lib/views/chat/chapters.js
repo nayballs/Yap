@@ -33,12 +33,15 @@ export function chaptersOf(messages) {
 /**
  * The chapter the reader is in: the last one whose divider's top (`tops`, the
  * dividers' offsets from the thread's top, in order) is at or above `scrollTop`
- * plus a little (`slack`); -1 before the first (the chat's start). Pure.
+ * plus a little (`slack`) — or, scrolled to the end (`atEnd`), the last one in
+ * view (above `scrollTop + view`), as a contents does at a page's foot; -1
+ * before the first (the chat's start). Pure.
  */
-export function currentChapter(tops, scrollTop, slack = 48) {
+export function currentChapter(tops, scrollTop, slack = 48, view = 0, atEnd = false) {
+  const line = atEnd && view > 0 ? scrollTop + view - slack : scrollTop + slack;
   let at = -1;
   (tops || []).forEach((t, i) => {
-    if (t <= scrollTop + slack) at = i;
+    if (t <= line) at = i;
   });
   return at;
 }

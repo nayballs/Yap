@@ -1,10 +1,11 @@
 <script>
   // **A long chat's contents** (`mark_chapter`, chat/cards/chapters.rs, 15
-  // Nov 2026; the Claude app's floating table of contents): a small button at
-  // the thread's top right while the chat has chapters, saying the one you're
-  // reading; it opens the list — the chat's start, then each chapter's title —
-  // and a click scrolls the thread to its divider (ChatThread draws them).
-  // Esc or a click elsewhere closes it.
+  // Nov 2026; the Claude app's floating table of contents): while the chat has
+  // chapters, a slim rail at the thread's right edge — a tick for its start and
+  // one for each chapter, the one you're reading marked — that never covers a
+  // message. Pointing at it (or a click, or Enter) opens the list beside it:
+  // Start, then each chapter's title; a click scrolls the thread to its
+  // divider (ChatThread draws them). Esc, or a click elsewhere, closes it.
   import { onMount, untrack } from 'svelte';
   import { motionMs } from '../../core/appearance.js';
   import { currentChapter } from './chapters.js';
@@ -12,7 +13,10 @@
   /** `chapters`: `[{at, title, summary}]` (chapters.js); `thread`: the scrolling thread element. */
   let { chapters = [], thread = null } = $props();
 
+  // Opened by a click (stays), or pointed at (while the pointer's there).
   let open = $state(false);
+  let hover = $state(false);
+  const shown = $derived(open || hover);
   let now = $state(-1);
   let box = $state(null);
 
@@ -22,7 +26,8 @@
     if (!thread) return;
     const top = thread.getBoundingClientRect().top - thread.scrollTop;
     const tops = dividers().map((d) => d.getBoundingClientRect().top - top);
-    now = currentChapter(tops, thread.scrollTop);
+    const atEnd = thread.scrollTop + thread.clientHeight >= thread.scrollHeight - 4;
+    now = currentChapter(tops, thread.scrollTop, 48, thread.clientHeight, atEnd);
   }
   $effect(() => {
     const el = thread;
@@ -31,12 +36,19 @@
     untrack(measure);
     const on = () => measure();
     el.addEventListener('scroll', on, { passive: true });
-    return () => el.removeEventListener('scroll', on);
+    // (The thread grows as an answer comes: measured again then too.)
+    const grew = new ResizeObserver(on);
+    if (el.firstElementChild) grew.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener('scroll', on);
+      grew.disconnect();
+    };
   });
 
   /** Chapter `i` (-1: the chat's start) brought into view. */
   function go(i) {
     open = false;
+    hover = false;
     if (!thread) return;
     const behavior = motionMs(200) ? 'smooth' : 'auto';
     if (i < 0) {
@@ -51,9 +63,10 @@
       if (open && box && !box.contains(e.target)) open = false;
     };
     const key = (e) => {
-      if (open && e.key === 'Escape') {
+      if (shown && e.key === 'Escape') {
         e.stopPropagation();
         open = false;
+        hover = false;
       }
     };
     document.addEventListener('pointerdown', away, true);
@@ -68,12 +81,9 @@
 </script>
 
 {#if chapters.length}
-  <div class="chapters" bind:this={box} data-testid="chat-chapters">
-    <button type="button" class="ctoggle" aria-expanded={open} aria-haspopup="true" title="Chapters" onclick={() => (open = !open)}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" /></svg>
-      <span class="clabel">{label}</span>
-    </button>
-    {#if open}
+  <!-- svelte-ignore a11y_no_static_element_interactions (pointing only shows what the button opens) -->
+  <div class="chapters" class:shown bind:this={box} data-testid="chat-chapters" onmouseenter={() => (hover = true)} onmouseleave={() => (hover = false)}>
+    {#if shown}
       <div class="clist" role="menu" aria-label="Chapters">
         <button type="button" role="menuitem" class="citem" class:on={now < 0} onclick={() => go(-1)}>Start</button>
         {#each chapters as c, i (c.at)}
@@ -81,56 +91,66 @@
         {/each}
       </div>
     {/if}
+    <button type="button" class="crail" aria-expanded={shown} aria-haspopup="true" aria-label={`Chapters: ${label}`} title={`Chapters: ${label}`} onclick={() => (open = !open)}>
+      <span class="tick" class:on={now < 0}></span>
+      {#each chapters as c, i (c.at)}
+        <span class="tick" class:on={now === i}></span>
+      {/each}
+    </button>
   </div>
 {/if}
 
 <style>
+  /* At the thread's right edge, left of its scrollbar, in the column's margin. */
   .chapters {
     position: absolute;
-    top: 8px;
-    right: calc(14px + var(--thread-gutter, 0px));
+    top: 50%;
+    right: calc(3px + var(--thread-gutter, 0px));
     z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transform: translateY(-50%);
+  }
+  .crail {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    max-width: min(280px, 60%);
-  }
-  .ctoggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 100%;
-    height: 26px;
-    padding: 0 10px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: 999px;
-    background: var(--yap-s1);
-    color: var(--yap-muted);
-    font: inherit;
-    font-size: 12px;
+    gap: 7px;
+    max-height: 60vh;
+    padding: 8px 4px;
+    overflow: hidden;
+    border: none;
+    border-radius: 8px;
+    background: none;
     cursor: pointer;
-    box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
   }
-  .ctoggle:hover,
-  .ctoggle[aria-expanded='true'] {
-    color: var(--yap-fg);
+  .chapters.shown .crail,
+  .crail:hover {
     background: var(--yap-s2);
   }
-  .ctoggle:focus-visible,
+  .crail:focus-visible,
   .citem:focus-visible {
     outline: 2px solid var(--yap-focus-ring);
     outline-offset: 1px;
   }
-  .ctoggle svg {
+  .tick {
     flex: none;
-    width: 14px;
-    height: 14px;
+    display: block;
+    width: 10px;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--yap-border-subtle);
   }
-  .clabel {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .crail:hover .tick,
+  .chapters.shown .tick {
+    background: var(--yap-muted);
+  }
+  .tick.on,
+  .crail:hover .tick.on,
+  .chapters.shown .tick.on {
+    width: 14px;
+    background: var(--yap-primary);
   }
   .clist {
     display: flex;
@@ -138,8 +158,7 @@
     gap: 1px;
     width: max-content;
     max-width: 280px;
-    max-height: 320px;
-    margin-top: 4px;
+    max-height: 60vh;
     padding: 4px;
     overflow: auto;
     border: 1px solid var(--yap-border-subtle);
