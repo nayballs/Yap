@@ -309,6 +309,7 @@ pub fn run() {
             chat::pages::view::page_view_show,
             chat::pages::view::page_view_dialog,
             chat::pages::view::page_view_place,
+            chat::pages::view::page_view_still,
             chat::pages::view::page_view_width,
             chat::pages::view::page_view_close,
             chat::pages::view::page_view_close_all,
@@ -948,6 +949,10 @@ pub fn run() {
             chat::pages::view::e2e_page_views,
             #[cfg(debug_assertions)]
             chat::pages::view::e2e_page_view_ask,
+            #[cfg(debug_assertions)]
+            chat::pages::view::e2e_window_sizing,
+            #[cfg(debug_assertions)]
+            chat::pages::view::e2e_window_picture,
             #[cfg(debug_assertions)]
             chat::pages::pick::e2e_page_click,
             #[cfg(debug_assertions)]
