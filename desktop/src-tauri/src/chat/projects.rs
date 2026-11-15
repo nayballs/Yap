@@ -59,13 +59,19 @@ pub struct ProjectFile {
     /// `pf_` + 16 hex digits.
     pub id: String,
     pub name: String,
-    /// "text" | "code" | "markdown" | "pdf" | "word".
+    /// "text" | "code" | "markdown" | "pdf" | "word" | "powerpoint".
     pub kind: String,
     pub bytes: u64,
     /// Its text's tokens, estimated.
     pub tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pages: Option<u32>,
+    /// A PDF's pages read with OCR, and those with no text left unread
+    /// (as an attachment's: `attachments::Attachment`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ocr_pages: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread_pages: Option<u32>,
     pub added_ms: u64,
 }
 
@@ -236,11 +242,7 @@ pub fn block_of(p: &Project, texts: &[(ProjectFile, Option<String>)], budget: u6
     if !kept.is_empty() {
         out.push_str("\nThe project's files (its knowledge: use them when they help, and say which file you used):\n<documents>\n");
         for (i, (f, text)) in kept.iter().enumerate() {
-            let source = match f.kind.as_str() {
-                "pdf" => format!("{} (a PDF: its text)", f.name),
-                "word" => format!("{} (a Word document: its text)", f.name),
-                _ => f.name.clone(),
-            };
+            let source = crate::chat::attachments::source(&f.name, &f.kind, f.pages, f.ocr_pages, f.unread_pages);
             out.push_str(&format!("<document index=\"{}\">\n<source>{source}</source>\n<document_content>\n{}\n</document_content>\n</document>\n", i + 1, text.trim_end()));
         }
         out.push_str("</documents>");
@@ -482,6 +484,8 @@ pub fn add_bytes(project: &str, name: &str, bytes: Vec<u8>) -> Result<ProjectFil
         bytes: size,
         tokens: crate::chat::budget::estimate(&read.text),
         pages: read.pages,
+        ocr_pages: read.ocr_pages,
+        unread_pages: read.unread_pages,
         added_ms: now_ms(),
     };
     let folder = dir().join(project);
@@ -647,6 +651,20 @@ mod tests {
         assert_eq!(file_text(&p.id, &f.id).as_deref(), Some("# Sowing\nBeans in May."));
         // A file the attachments can't read is said, never added.
         assert!(add_bytes(&p.id, "seeds.xlsx", vec![0x50, 0x4b, 3, 4, 0, 0]).is_err());
+        assert!(add_bytes(&p.id, "old-year.ppt", vec![0xD0, 0xCF, 0x11, 0xE0, 0, 0]).unwrap_err().contains("an older PowerPoint presentation"));
+        // A presentation and an older Word document: the attachments' readers.
+        let deck = add_bytes(&p.id, "year.pptx", crate::chat::attachments::powerpoint::tests::pptx()).unwrap();
+        assert_eq!(deck.kind, "powerpoint");
+        assert!(file_text(&p.id, &deck.id).unwrap().contains("Slide 2: Spring planting"));
+        let rules = add_bytes(&p.id, "rules.doc", include_bytes!("attachments/fixtures/allotment-rules.doc").to_vec()).unwrap();
+        assert_eq!(rules.kind, "word");
+        // A PDF's scanned page that couldn't be read is said where it was.
+        let scan = ProjectFile { kind: "pdf".into(), pages: Some(3), ocr_pages: Some(1), unread_pages: Some(1), ..file("notice.pdf", 10) };
+        let b = block_of(&p, &[(scan, Some("[Page 1]\nSeeds".into())), (ProjectFile { kind: "powerpoint".into(), ..file("year.pptx", 10) }, Some("Slide 1: Year".into()))], 1_000);
+        assert!(b.contains("<source>notice.pdf (a PDF, 3 pages: its text, read on the person's PC; 1 scanned page read with OCR, which can get words wrong; 1 page not read, named at the end)</source>"), "{b}");
+        assert!(b.contains("<source>year.pptx (a PowerPoint presentation: each slide's text, then its speaker notes)</source>"), "{b}");
+        project_file_remove(p.id.clone(), deck.id.clone()).unwrap();
+        project_file_remove(p.id.clone(), rules.id.clone()).unwrap();
         // A chat joins it; its block has the file; deleting the chat takes it out.
         chat_project_set(5, Some(p.id.clone())).unwrap();
         let b = prompt_block(Some(5), 10_000).unwrap();
