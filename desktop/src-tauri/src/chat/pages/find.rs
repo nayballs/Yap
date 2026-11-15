@@ -60,6 +60,8 @@ pub struct Thing {
     /// The page marks it as a search box.
     pub search: bool,
     pub disabled: bool,
+    /// A link or button that's only a picture (a product's cover).
+    pub pic: bool,
     /// Where it is on the page (CSS pixels from the page's top left).
     pub x: f64,
     pub y: f64,
@@ -1091,7 +1093,7 @@ pub fn rank(w: &Wanted, scene: &Scene) -> Vec<Ranked> {
                             s += 6.0;
                             asked = true;
                             let item = c.words.first().map_or("item".to_string(), |w| w.clone());
-                            why.push(format!("in the {} of {of} {}s like it", Nth::At(n).word(), item));
+                            why.push(format!("in {item} {n} of {of}"));
                         } else if holders.iter().any(|h| h.group == *group) {
                             s -= 1.0;
                             parts_ok = false;
@@ -1214,12 +1216,13 @@ pub fn rank(w: &Wanted, scene: &Scene) -> Vec<Ranked> {
             Nth::At(n) => n.checked_sub(1).and_then(|k| set.get(k as usize)).copied(),
             Nth::Last => set.last().copied(),
         };
-        let what = w.kind.map_or("like it".to_string(), |_| "of its kind".to_string());
         for (r, _) in out.iter_mut() {
             if Some(r.i) == chosen {
                 r.score += 6.0;
                 let n = set.iter().position(|x| *x == r.i).map_or(0, |p| p as u32 + 1);
-                r.why.push(format!("the {} of {} {what}, top to bottom", Nth::At(n).word(), set.len()));
+                // (One way of saying a place throughout: "button 2 of 20", "book 3 of 20", "item 1 of 50".)
+                let what = if w.kind.is_some() { scene.things[r.i].role.clone() } else { "match".to_string() };
+                r.why.push(format!("{what} {n} of {} like it, top to bottom", set.len()));
             }
         }
     }
@@ -1268,7 +1271,8 @@ fn is_in_order(want: &[String], have: &[String]) -> bool {
 pub fn line(t: &Thing, why: &[String]) -> String {
     let name = [&t.name, &t.label, &t.placeholder].into_iter().find(|v| !v.trim().is_empty()).map_or(String::new(), |v| super::clip(v.trim(), 100));
     let role = if t.role.is_empty() { "element" } else { &t.role };
-    let mut line = format!("[{}] {role} \"{}\"", t.r, name.replace('"', "'"));
+    let pic = if t.pic { " (a picture)" } else { "" };
+    let mut line = format!("[{}] {role}{pic} \"{}\"", t.r, name.replace('"', "'"));
     if t.role == "link" && !t.href.is_empty() {
         line.push_str(&format!(" → {}", crate::web::short_url(&t.href)));
     }
@@ -1289,7 +1293,8 @@ pub fn best(query: &str, scene: &Scene) -> (Vec<String>, bool) {
     let w = parse(query);
     // (A block of text that only holds one already listed, with its words — the `<li>` of a "next" link —
     // is that one again: left out. Yap Lab, 15 Nov 2026.)
-    let holds_box = |a: &Thing, b: &Thing| a.x <= b.x + 1.0 && a.y <= b.y + 1.0 && a.x + a.w + 1.0 >= b.x + b.w && a.y + a.h + 1.0 >= b.y + b.h;
+    // (Overlapping, not holding: an inline `<li>`'s box is shorter than its padded link's — Yap Lab again.)
+    let holds_box = |a: &Thing, b: &Thing| a.x < b.x + b.w && b.x < a.x + a.w.max(1.0) && a.y < b.y + b.h && b.y < a.y + a.h.max(1.0);
     let mut kept: Vec<Ranked> = Vec::new();
     for r in rank(&w, scene) {
         if kept.len() == MAX {
@@ -1311,15 +1316,23 @@ pub fn best(query: &str, scene: &Scene) -> (Vec<String>, bool) {
             let t = &scene.things[r.i];
             let mut why = r.why.clone();
             let holders: Vec<&Holder> = t.within.iter().filter_map(|id| holder(scene, *id)).collect();
-            // Its place in a list of like things ("item 3 of 20"), when nothing said it.
+            // Its place in a list of like things, and that item's own name ("in item 3 of 20 (‘Salt and
+            // Smoke’)"), when nothing said it: what tells alike ones apart (three "Add to basket" buttons) —
+            // never the heading above it, which on a grid of cards is the card before's (Yap Lab, 15 Nov 2026).
+            let mut placed = false;
             if let Some(h) = holders.iter().find(|h| h.item > 0 && h.of >= 3) {
+                let name = quoted_short(&h.name);
+                let own = h.name.trim().is_empty() || super::see::fold(&h.name) == super::see::fold(&t.name) || why.iter().any(|x| x.contains(&name));
                 if !why.iter().any(|x| x.contains(" of ")) {
-                    why.push(format!("item {} of {}", h.item, h.of));
+                    why.push(format!("in item {} of {}{}", h.item, h.of, if own { String::new() } else { format!(" ({name})") }));
+                } else if !own {
+                    why.push(format!("in {name}"));
                 }
+                placed = true;
             }
-            // What it's in or under, to tell alike ones apart (three "Add to basket" buttons): a part its
-            // classes name (a pager, a sidebar), else the heading it's under.
-            let said = why.iter().any(|x| x.starts_with("under ") || x.contains(" under ") || x.starts_with("inside "));
+            // Else what it's in or under: a part its classes name (a pager, a sidebar), else the heading
+            // it's under.
+            let said = placed || why.iter().any(|x| x.starts_with("under ") || x.contains(" under ") || x.starts_with("inside "));
             if !said {
                 let named = holders.iter().find_map(|h| terms(&h.words).into_iter().find(|c| PART_CLASSES.contains(&c.as_str())));
                 match named {
@@ -1476,7 +1489,7 @@ mod tests {
         // The second result's link: the second product's own link.
         let (r, why) = top("the second product's link");
         assert_eq!(r, 9, "{why:?}");
-        assert!(why.iter().any(|w| w.starts_with("in the 2nd of 3")), "{why:?}");
+        assert!(why.iter().any(|w| w == "in product 2 of 3"), "{why:?}");
         assert_eq!(top("the second result's link").0, 9);
         assert_eq!(top("the last result").0, 12);
         // Inside a part.
@@ -1514,7 +1527,7 @@ mod tests {
             let id = 30 + i as u32;
             let y = 120.0 + 300.0 * (i / 2) as f64;
             let x = 400.0 + 300.0 * (i % 2) as f64;
-            holders.push(Holder { id, role: "listitem".into(), words: "col-xs-6 col-sm-4".into(), item: i as u32 + 1, of: 20, group: 8, ..Default::default() });
+            holders.push(Holder { id, role: "listitem".into(), name: title.to_string(), words: "col-xs-6 col-sm-4".into(), item: i as u32 + 1, of: 20, group: 8, ..Default::default() });
             let prev = if i == 0 { "All products".to_string() } else { titles[i - 1].to_string() };
             things.push(Thing { within: vec![id], heading: prev, x, ..thing(r, "link", title, y) });
             things.push(Thing { within: vec![id], heading: title.to_string(), x, kind: "heading".into(), level: 3, ..thing(r + 1, "heading", title, y + 160.0) });
@@ -1534,18 +1547,18 @@ mod tests {
         // "the third book's": the third of the grid's books — not the sidebar's "Books" by its word, nor its
         // 50 categories (one link each, in the sidebar) — its title link, the one in its heading.
         let l = first("the third book's title link");
-        assert!(l.contains("link \"Salt and Smoke\"") && l.contains("its heading's link (a title)") && l.contains("in the 3rd of 20"), "{l}");
+        assert!(l.contains("link \"Salt and Smoke\"") && l.contains("its heading's link (a title)") && l.ends_with("in book 3 of 20"), "{l}");
         assert!(first("the second book").contains("\"Tide Tables\""), "{}", first("the second book"));
         // A sidebar by its role though its classes don't say "categories": said.
         let l = first("the Travel link in the categories sidebar");
-        assert!(l.contains("link \"Travel\"") && l.contains("inside the sidebar"), "{l}");
+        assert!(l.contains("link \"Travel\"") && l.contains("inside the sidebar; in item 1 of 50"), "{l}");
         // The pager's link once, the item holding it left out; the part it's in named by its class.
         let (lines, _) = best("the next page link", &s);
         assert!(lines[0].contains("link \"next\"") && lines[0].contains("inside the ‘pager’"), "{lines:?}");
         assert!(!lines.iter().any(|l| l.contains("listitem \"next\"")), "{lines:?}");
         // The second button by the page's order, its place in the grid said.
         let l = first("the button that adds the second book to the basket");
-        assert!(l.contains("button \"Add to basket\"") && l.contains("under ‘Tide Tables’"), "{l}");
+        assert!(l.contains("button \"Add to basket\"") && l.contains("button 2 of 4 like it, top to bottom; in ‘Tide Tables’"), "{l}");
     }
 
     #[test]

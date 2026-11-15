@@ -1205,8 +1205,8 @@ async fn find_by_description_ranks_the_likeliest_first_with_why() {
     assert_eq!(r["data"]["described"], true, "{r}");
     assert!(r["displayText"].as_str().unwrap().ends_with("likely matches for ‘the button that adds it to the basket’ on shop.example.com"), "{r}");
     let lines: Vec<&str> = r["data"]["matches"].as_str().unwrap().lines().collect();
-    assert!(lines[0].contains("button \"Add to basket\" — ‘add’, ‘basket’ in its name; item 1 of 3; under ‘Ridge Runner’"), "{lines:?}");
-    assert!(lines[1].contains("under ‘Moss Walker’") && lines[2].contains("under ‘Scree Racer’"), "{lines:?}");
+    assert!(lines[0].contains("button \"Add to basket\" — ‘add’, ‘basket’ in its name; in item 1 of 3 (‘Ridge Runner’)"), "{lines:?}");
+    assert!(lines[1].contains("(‘Moss Walker’)") && lines[2].contains("(‘Scree Racer’)"), "{lines:?}");
     assert!(r["note"].as_str().unwrap().contains("The first two scored the same"), "{r}");
     assert!(r["note"].as_str().unwrap().contains("no model"), "{r}");
     // Its words with the product's: that card's.
@@ -1219,7 +1219,7 @@ async fn find_by_description_ranks_the_likeliest_first_with_why() {
     assert!(first_match(&r).contains("searchbox \"Search help\""), "{r}");
     // An ordinal of an item: the second product's own link.
     let r = call(&mut t, FIND, find("the second result's link"), &log).await.result;
-    assert!(first_match(&r).contains("link \"Moss Walker\" → shop.example.com/p/moss-walker") && first_match(&r).contains("in the 2nd of 3"), "{r}");
+    assert!(first_match(&r).contains("link \"Moss Walker\" → shop.example.com/p/moss-walker") && first_match(&r).contains("in result 2 of 3"), "{r}");
     let r = call(&mut t, FIND, find("the last product"), &log).await.result;
     assert!(first_match(&r).contains("\"Scree Racer\""), "{r}");
     // Inside a part (through the web component's open shadow root).
@@ -1233,7 +1233,7 @@ async fn find_by_description_ranks_the_likeliest_first_with_why() {
     let r = call(&mut t, FIND, find("the basket link on the right"), &log).await.result;
     assert!(first_match(&r).contains("link \"Basket, 2 items\"") && first_match(&r).contains("on the right"), "{r}");
     let r = call(&mut t, FIND, find("the third add to basket button"), &log).await.result;
-    assert!(first_match(&r).contains("under ‘Scree Racer’") && first_match(&r).contains("the 3rd of 3"), "{r}");
+    assert!(first_match(&r).contains("button 3 of 3 like it, top to bottom; in ‘Scree Racer’"), "{r}");
     let r = call(&mut t, FIND, find("the 'Sign up' button"), &log).await.result;
     assert!(first_match(&r).contains("button \"Sign up\" — says ‘sign up’"), "{r}");
     // Words on the page as they are: found as ever, every match.

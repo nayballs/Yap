@@ -890,23 +890,23 @@ test('browser_find by description: the likeliest first with why — words, a rol
   expect(alike).toMatchObject({ success: true, data: { described: true } });
   expect(alike.displayText).toMatch(/^Found \d likely matches for ‘the button that adds it to the basket’ on shop\.example\.com$/);
   const lines = alike.data.matches.split('\n');
-  expect(lines[0]).toMatch(/^\[\d+\] button "Add to basket" — ‘add’, ‘basket’ in its name; item 1 of 3; under ‘Ridge Runner’$/);
-  expect(lines[1]).toContain('under ‘Moss Walker’');
-  expect(lines[2]).toContain('under ‘Scree Racer’');
+  expect(lines[0]).toMatch(/^\[\d+\] button "Add to basket" — ‘add’, ‘basket’ in its name; in item 1 of 3 \(‘Ridge Runner’\)$/);
+  expect(lines[1]).toContain('(‘Moss Walker’)');
+  expect(lines[2]).toContain('(‘Scree Racer’)');
   expect(alike.note).toContain('no model');
   expect(alike.note).toContain('The first two scored the same');
   // A place: the header's search box, not the help's in the footer.
   expect(first(1)).toMatch(/^\[\d+\] searchbox "Search products" — .*at the top of the page/);
   expect(first(6)).toMatch(/^\[\d+\] searchbox "Search help"/);
   // An ordinal of an item: the second product's own link.
-  expect(first(2)).toMatch(/^\[\d+\] link "Moss Walker" → shop\.example\.com\/p\/moss-walker — in the 2nd of 3 results like it/);
+  expect(first(2)).toMatch(/^\[\d+\] link "Moss Walker" → shop\.example\.com\/p\/moss-walker — in result 2 of 3/);
   // Its words with the product's: that card's button.
   expect(first(3)).toMatch(/^\[\d+\] button "Add to basket" — ‘add’, ‘basket’ in its name; ‘scree’, ‘racer’ under ‘Scree Racer’/);
   // Inside a part, through the web component's open shadow root.
   expect(first(4)).toMatch(/^\[\d+\] textbox "Email" — ‘email’ in its name; inside the form ‘Newsletter’/);
   // On the right of the header.
   expect(first(5)).toMatch(/^\[\d+\] link "Basket, 2 items" → shop\.example\.com\/basket — .*on the right/);
-  expect(first(7)).toMatch(/^\[\d+\] button "Add to basket" — .*the 3rd of 3 of its kind, top to bottom; under ‘Scree Racer’$/);
+  expect(first(7)).toMatch(/^\[\d+\] button "Add to basket" — .*button 3 of 3 like it, top to bottom; in ‘Scree Racer’$/);
   // Words on the page as they are: found as ever.
   expect(found(8).data.described).toBeUndefined();
   expect(found(8).data.matches).toMatch(/\[\d+\] link "Moss Walker"/);

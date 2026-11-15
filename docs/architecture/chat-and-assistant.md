@@ -2885,10 +2885,14 @@ of sight. What they share is said once, in the line.
   of its kind and words top to bottom +6; an item word for any list,
   "result", "item", "card", fits the page's main list of like items, one
   for a kind of thing, "video", only a list that says it) and lists **the
-  best 5, each with why** ("‘add’, ‘basket’ in its name; under ‘Ridge
-  Runner’", "inside the form ‘Newsletter’", "in the 2nd of 3 results like
-  it", "at the top of the page"), what it's under added so alike ones tell
-  apart; its note says it's Yap's own ranking, the first the likeliest not
+  best 5, each with why** ("‘add’, ‘basket’ in its name; in item 1 of 3
+  (‘Ridge Runner’)", "inside the form ‘Newsletter’", "in result 2 of 3",
+  "at the top of the page", "inside the ‘pager’"), each line's place in a
+  list of like things and that item's name added — never the heading above
+  it, on a grid the card before's — else a part its classes name or the
+  heading it's under, so alike ones tell apart; a link that's only a
+  picture says so; a block of text that only holds a listed match is left
+  out; its note says it's Yap's own ranking, the first the likeliest not
   certain, and when the first two tie — the model judges, as between a
   read's lines. Words on the page as they are still list every match as
   before ("Moss Walker", "button Buy"); nothing ranked, "Found no match".

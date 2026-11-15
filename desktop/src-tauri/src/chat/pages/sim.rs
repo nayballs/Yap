@@ -1618,6 +1618,7 @@ impl<'a> Page<'a> {
                 t.href = e.href.clone();
                 t.search = e.search;
                 t.disabled = e.disabled;
+                t.pic = matches!(t.role.as_str(), "link" | "button") && Self::text_of(&node).is_empty() && !dom_query::Selection::from(node).select("img, svg, picture").nodes().is_empty();
                 t.kind = "control".into();
             } else if heading {
                 t.role = "heading".into();
