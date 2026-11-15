@@ -73,6 +73,8 @@
   import { colourCode } from '../../ui/colourCode.js';
   import { codeCopy } from '../../ui/codeCopy.js';
   import { markdownVisuals } from '../../ui/markdownVisuals.js';
+  import { getContext } from 'svelte';
+  import { fileLinks, CODE_FILES } from '../../ui/fileLinks.js';
   import { agentLogs, watchAgentLog, watchSaying } from '../../stores/agentLogs.svelte.js';
   import StepPictures from './StepPictures.svelte';
   import CrewAvatar from './CrewAvatar.svelte';
@@ -109,6 +111,8 @@
     cards = false,
     onpaged = null,
   } = $props();
+  // A Code chat's paths in what Claude said are links to the file (ChatView's context).
+  const codeFiles = getContext(CODE_FILES) ?? null;
 
   $effect(() => {
     if (events == null && agent?.id) watchAgentLog(agent.id);
@@ -187,7 +191,7 @@
     {/if}
     {#each items as it, i (i)}
       {#if it.kind === 'said'}
-        <div class="wsaid" data-testid="chat-agent-work-said" use:colourCode use:codeCopy use:markdownVisuals>{@html renderMarkdown(it.text)}</div>
+        <div class="wsaid" data-testid="chat-agent-work-said" use:colourCode use:codeCopy use:markdownVisuals use:fileLinks={codeFiles}>{@html renderMarkdown(it.text)}</div>
       {:else if it.kind === 'thought'}
         <!-- Its thinking (the Thinking and Verbose views): quieter than its words. -->
         <div class="wthought" data-testid="chat-agent-work-thought">

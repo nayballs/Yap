@@ -822,7 +822,7 @@ const stepsWord = (n) => (n === 1 ? '1 step' : n > 0 ? `${n} steps` : 'No steps'
  * **A turn's helpers** (12 Nov 2026): Claude Code's own subagents, one for
  * each part its session handed over — the Agent panel's entries under the
  * turn's row, as Claude Code's own app lists a session's subagents. Each
- * `{key, title, steps, status, line}`: its hand-over's words ("Check the
+ * `{key, title, steps, status, line, ts}` (`ts`: when it was handed over, unix seconds): its hand-over's words ("Check the
  * docs"), its own steps (`workOf`'s `helped`), `status` working (not back
  * yet, the turn still going: `live`), done or failed, and the line it's on
  * while it works, else how many steps it took. Pure.
@@ -837,7 +837,7 @@ export function helpersOf(events, live = false) {
       const status = st.back === 'failed' ? 'failed' : st.back || !live ? 'done' : 'working';
       const title = String(st.step || '').replace(/^Handing part of it to a helper(?: · )?/, '').trim() || 'A helper';
       const line = status === 'working' ? steps.at(-1)?.step || 'Starting' : status === 'failed' ? `Didn't finish · ${stepsWord(steps.length).toLowerCase()}` : stepsWord(steps.length);
-      out.push({ key: st.calls[0] || `helper-${out.length + 1}`, title, steps, status, line });
+      out.push({ key: st.calls[0] || `helper-${out.length + 1}`, title, steps, status, line, ts: Number(st.ts) || 0 });
     }
   }
   return out;

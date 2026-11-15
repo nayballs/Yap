@@ -169,8 +169,14 @@ test('web and mail addresses become links; nothing else does', () => {
   expect(renderMarkdown('[the plan](https://docs.example.com/plan?a=1&b=2 "Plan")')).toBe(
     `<p>${link('https://docs.example.com/plan?a=1&amp;b=2', 'the plan')}</p>`
   );
-  // javascript:, data:, file: and relative links stay text.
+  // A file's path as a link's address: `a.md-file` with its path, no address (a Code chat makes it a link to the file:
+  // ui/fileLinks.js); its words only anywhere else.
+  expect(renderMarkdown('[the notes](docs/lab.md:3)')).toBe('<p><a class="md-file" data-path="docs/lab.md:3">the notes</a></p>');
+  expect(renderMarkdown('[a](my%20file.md)')).toBe('<p><a class="md-file" data-path="my file.md">a</a></p>');
+  // javascript:, data:, file:, rooted (`/settings`), in-page and protocol-relative links stay text.
   for (const md of [
+    '[x](#top)',
+    '[x](//evil.example/x)',
     '[x](javascript:alert(1))',
     '[x](JavaScript:alert(1))',
     '<javascript:alert(1)>',
