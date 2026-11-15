@@ -54,9 +54,10 @@
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
   const codeFiles = getContext(CODE_FILES) ?? null;
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null, branch = null, retry = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null, keptPages = null, onkept = null, branch = null, retry = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false } = $props();
   // `visuals`: what the answer made to be seen, not read (chat/made.rs: "Made a visual", above its words;
-  // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends.
+  // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends. `keptPages`: the
+  // pages it saved (chat/made/pages.rs: `[{page, version}]`, a card each, PageCard); `onkept(page, n)` opens one.
   // **Retry, Edit and ‹ ›** (15 Nov 2026, the Claude app's; chat/chats/branches.rs): `branch` — `{ fork, why, onbranch }`,
   // this message's versions (‹ 2/3 ›; `why` it can't switch now) —; `retry` — `{ why, onretry }`, under an answer —;
   // `actions.onedit` (and `actions.edit`, why not now) under the person's message; `editing` — `{ text }` — it's open in
@@ -153,6 +154,14 @@
   {#await import('./VisualFrame.svelte') then { default: VisualFrame }}
     {#each visuals as v (v.id)}
       <VisualFrame {v} {conversation} onprompt={onvisualprompt} />
+    {/each}
+  {/await}
+{/if}
+{#if m.role === 'assistant' && keptPages?.length}
+  <!-- The pages it saved (save_page): a card each version, › opens it beside the chat. -->
+  {#await import('./PageCard.svelte') then { default: PageCard }}
+    {#each keptPages as p (`${p.page.id}:${p.version.n}`)}
+      <div class="keptcard"><PageCard page={p.page} version={p.version} onopen={onkept} /></div>
     {/each}
   {/await}
 {/if}

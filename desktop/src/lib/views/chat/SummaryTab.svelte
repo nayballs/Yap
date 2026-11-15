@@ -26,6 +26,8 @@
   import { percentOf } from '../../core/aiUsage.js';
   import { codeRuns, loadRuns, stopRun } from './codeRuns.svelte.js';
   import { outputItems } from './outputs.js';
+  import { openOutput as open } from './outputsOpen.js';
+  import { made } from './made.svelte.js';
   import { CODE_FILES } from '../../ui/fileLinks.js';
   import { toast } from '../../ui/toast.svelte.js';
   import OutputsList from './OutputsList.svelte';
@@ -101,31 +103,9 @@
     return null;
   });
 
-  const outputs = $derived(outputItems({ agents: chatAgents, messages }));
-
-  async function openOutput(it) {
-    if (it.kind === 'changed') {
-      doc.showFile({ rel: it.rel, line: null });
-      return;
-    }
-    if (it.kind === 'shared') {
-      if (it.picture) {
-        doc.showPicture({ id: it.item.id, w: it.item.w, h: it.item.h, caption: it.item.name });
-        return;
-      }
-      // A file in the workspace: the file view; any other as its card opens it.
-      try {
-        const [ref] = await invoke('code_files_check', { conversation: conversationId, paths: [it.item.path] });
-        if (ref) {
-          doc.showFile(ref);
-          return;
-        }
-        await invoke('chat_file_open', { conversation: conversationId, path: it.item.path });
-      } catch (e) {
-        toast({ title: "Couldn't open it", description: String(e?.message ?? e), variant: 'destructive' });
-      }
-    }
-  }
+  // (And the pages it keeps, the documents it wrote: chat/made/pages.rs, chat/documents.rs.)
+  const outputs = $derived(outputItems({ agents: chatAgents, messages, made: made.of(conversationId) }));
+  const openOutput = (it) => open(it, { doc, conversationId });
 
   function openRow(r) {
     const a = r.agent;
@@ -219,7 +199,7 @@
       {#if outputs.length}
         <OutputsList items={outputs} onopen={openOutput} />
       {:else}
-        <p class="snote">Nothing changed or shared yet.</p>
+        <p class="snote">Nothing made, changed or shared yet.</p>
       {/if}
     </section>
 

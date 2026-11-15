@@ -135,6 +135,8 @@
   import { workingDirectly } from '../../core/agents.js';
   import { initChatStatus, setShown, markSeen } from '../../stores/chatStatus.svelte.js';
   import { lastAnswerAt } from '../../core/chatStatus.js';
+  // A message a kept page's button sends (chat/made/pages.rs): into its own chat, as a visual's.
+  import { promptFromVisual } from './made.svelte.js';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…". `onopennote({id, line, ts, field})`: a
@@ -685,7 +687,7 @@
          reduced motion); the panel's ground while its chunk is on its way. -->
     <div id="chat-panel" class="docslot" class:cover class:ground={!DocPanel} style={cover ? undefined : `width: ${room.panelWidth}px`} data-testid="chat-panel-slot">
       {#if DocPanel}
-        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} messages={chat.messages} conversationId={chat.activeId} workspace={code.current?.path ?? null} />
+        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} messages={chat.messages} conversationId={chat.activeId} workspace={code.current?.path ?? null} onvisualprompt={(text, v) => promptFromVisual(chat, text, v, chat.activeId)} />
       {/if}
     </div>
   {/if}
