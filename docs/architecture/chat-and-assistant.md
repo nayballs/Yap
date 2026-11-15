@@ -1779,6 +1779,10 @@ one side.
   shows when asked out loud (`line`, `card`: "Use Notion: Create page?" and
   its first arguments), for `spoken_ok.rs`.
 
+- **`chat/export.rs`** — **Export a chat** (15 Nov 2026): a conversation's
+  ⋯ → Export… as a Markdown file and its pictures beside it, never uploaded
+  ([below](#export-a-chat-2026-11-15)).
+
 ## Questions about selected text (2026-10-31)
 
 Wispr Flow's Command Mode ("Wispr Lens": "select text and ask Flow") by
@@ -4950,3 +4954,38 @@ rules pure in `core/chatStatus.js`, kept live for the whole main window by
 - Tests: `chat-status.spec.js` (the pure rules, then each state in the app,
   light and dark), `cargo test chat::stream` (the list of conversations
   answering) and `chat::chats` (`answerAt` / `askedAt`).
+
+## Export a chat (2026-11-15)
+
+The Claude app's Share, made local (Yap keeps chats on this PC, so there's
+no link to share): a conversation's ⋯ (its row's, a right-click, or an
+archived one's) → **Export…** asks where (Save as, `chatExport.js`), and
+`chat_export(id, path)` (`chat/export.rs`) writes it there in the background.
+The toast says where, and how many pictures went in which folder.
+
+- **The file** (`export::render`, pure): `# Title`, "_Exported from Yap ·
+  15 November 2026 · 6 messages_", then each message under who wrote it and
+  when — "**You** · 15 Nov 2026, 10:42", "**Yap** · claude-opus-5-5 · …"
+  (the model's name when it has one, the on-device model's), "**Agent
+  report**" for an agent's report — and its words as written: an answer's
+  markdown as it was, the person's line breaks kept (`"  
+"`). A question's
+  quoted passage goes above it as a `>` quote; a stopped answer says so.
+  After the words: its pictures, its Sources as numbered links (a meeting's
+  passage has no address: its title alone), and the files it shared that
+  aren't pictures as `file:///` links to their paths. Never its thinking
+  or its steps' chips: what was said, not how. An empty message isn't one.
+- **Its pictures**: a question's screenshots, the pictures an answer
+  showed (never a step's shot for the model, `chip` set), the ones it
+  shared and its pages' pictures, copied into "<file name> pictures/"
+  beside the file as `1.png`, `2.png`… in the order they show, each copied
+  once (a fork's shared screenshot is one file) and linked by a relative,
+  percent-encoded path (`link_path`). One whose copy is gone (kept past
+  "Keep chat screenshots") is "_A picture that's no longer kept._". No
+  folder when there are none.
+- **Copy as Markdown** stays as it was (`core/itemMenus.js`: the words
+  only, to paste); Download your data's chats stay its own
+  (`privacy/export.rs` `chat_markdown`, with every screenshot in the zip).
+- The log says counts only. Tests: `cargo test chat::export`;
+  `chat-export.spec.js` (the menu, then the file and its folder);
+  `right-click.spec.js` (the row's menu).
