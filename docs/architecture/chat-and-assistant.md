@@ -4401,6 +4401,30 @@ already takes (`chat/attachments.rs`, `views/chat/FileChip.svelte`,
   in `chat/attachments/` (`tests.rs`, `pdf.rs`, `word.rs`: a PDF and a
   `.docx` made in the test).
 
+## The message box is several lines (2026-11-15)
+
+Chat's box was a one-line `<input>`, so a message couldn't have line breaks:
+typed with Shift+Enter or pasted (a stack trace in a Code chat, a list), the
+browser dropped them before anything was sent. The Claude app's box is
+several lines, and so is Yap's now (`Composer.svelte`):
+
+- **A textarea** (`rows="1"`, `.msginput`) one line high to start, growing
+  with its words (`fitBox`: its `scrollHeight`, read again whenever the words
+  change, typed, dictated, pasted, put back by Cancel and edit, and when the
+  box's width changes) up to 40% of the window (120 to 320 px), then
+  scrolling. An empty box is one line whatever its placeholder. The +, mic
+  and Send buttons sit at its foot.
+- **Keys**: Enter sends, Shift+Enter makes a new line, Ctrl+Enter queues
+  the message for later (below). The `@` picker and the `/` Skills menu
+  take their keys first (↑ ↓, Enter, Tab, Esc); an IME's composition keeps
+  its Enter (`isComposing`, `keyCode` 229).
+- Nothing else changed: paste (pictures included), the mic's dictation at
+  the caret, the in-page hotkey fallback and Esc work as on the old box; the
+  bubble draws the words as written (`.saidtext`, `white-space: pre-wrap`).
+- e2e: `chat-streaming.spec.js` (Shift+Enter, a two-line message arriving
+  with both lines in the thread and to the model, a long paste at its cap,
+  scrolling), and every spec that types into the box.
+
 ## Ctrl+Enter queues a message for after the answer (2026-11-15)
 
 The Claude app's box says "Enter to send, Ctrl+Enter to queue for later"
