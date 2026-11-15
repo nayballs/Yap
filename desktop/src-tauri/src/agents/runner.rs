@@ -968,9 +968,28 @@ fn shown_beside(agent: &Agent, n: u32, ev: crate::chat::stream::Event) {
 /// The page's event for what a Code chat's own Claude showed beside the chat.
 pub const SHOWN_EVENT: &str = "yap-agent-shown";
 
+/// **The next-step box and the chapter a turn's session put in its chat**
+/// (`chat/cards.rs`: `Event::NextStep`, `Event::Chapter` through its turn's
+/// stream), the latest of each: its answer keeps them (`TurnNote::beside`).
+#[derive(Debug, Default)]
+struct Carded {
+    next_step: Option<crate::chat::cards::next_step::NextStep>,
+    chapter: Option<crate::chat::cards::chapters::Chapter>,
+}
+
+impl Carded {
+    fn see(&mut self, ev: &crate::chat::stream::Event) {
+        match ev {
+            crate::chat::stream::Event::NextStep { next } => self.next_step = Some(next.clone()),
+            crate::chat::stream::Event::Chapter { chapter } => self.chapter = Some(chapter.clone()),
+            _ => {}
+        }
+    }
+}
+
 /// What turn `n` showed beside the chat, kept for its answer (`TurnNote::beside`).
-fn keep_beside(id: &str, n: u32, shown: claude_live::turn::Shown) {
-    let beside = store::Beside { pages: shown.pages, pictures: shown.pictures, files: shown.files };
+fn keep_beside(id: &str, n: u32, shown: claude_live::turn::Shown, carded: Carded) {
+    let beside = store::Beside { pages: shown.pages, pictures: shown.pictures, files: shown.files, next_step: carded.next_step, chapter: carded.chapter };
     if beside.is_empty() {
         return;
     }
@@ -1189,8 +1208,9 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         // a plan Code chat's session always could; an agent Chat sent out
         // doesn't (Chat's model reads for its brief).
         reads: direct,
-        // (Chat's cards in the thread are a Chat run's; Claude Code asks with its own AskUserQuestion.)
-        cards: Default::default(),
+        // The next-step box and chapters in its chat (chat/cards.rs, 15 Nov 2026), a Code chat's own
+        // session's; its questions are Claude Code's own AskUserQuestion (approve.rs).
+        cards: if direct && agent.conversation.is_some() { crate::chat::cards::Cards::for_code_session(phone.is_some()) } else { Default::default() },
     }) {
         Ok(r) => r,
         Err(e) => return failed_early(id, n, format!("Couldn't start the agent: {e}"), None),
@@ -1202,9 +1222,11 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     let eyes = if direct { direct_eyes(&cfg, &agent.model, phone.is_some()) } else { Default::default() };
     // Visuals in the chat's thread (chat/made.rs, 15 Nov 2026): a turn of the person's in Chat, never a phone's.
     let visuals = direct && phone.is_none() && agent.conversation.is_some();
-    let mut beside = (direct && (eyes.any() || visuals)).then(|| {
+    // The next-step box and chapters (chat/cards.rs): a turn of the person's in its chat; a phone's has no box.
+    let cards = if direct && agent.conversation.is_some() { crate::chat::cards::Cards::for_code_session(phone.is_some()) } else { Default::default() };
+    let mut beside = (direct && (eyes.any() || visuals || cards.any())).then(|| {
         // Bypass permissions: nobody is asked, a page action's card either (its instructions have Claude ask in the chat).
-        let ctx = beside_context(&agent, n, eyes, modes::unattended(mode), visuals);
+        let ctx = claude_live::turn::Context { cards, ..beside_context(&agent, n, eyes, modes::unattended(mode), visuals) };
         let web = beside_web(&cfg, &agent, &ctx);
         run.begin_turn(ctx, web)
     });
@@ -1330,6 +1352,8 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     follow.marks = beside.as_ref().map(|t| t.marks());
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     let mut shows = beside.is_some();
+    // The box and the chapter its session put in the chat this turn (`Carded`), for its answer.
+    let mut carded = Carded::default();
     loop {
         tokio::select! {
             ev = rx.recv() => match ev {
@@ -1337,7 +1361,10 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
                 Some(ev) => follow.on(ev, &session),
             },
             shown = next_shown(&mut beside), if shows => match shown {
-                Some(ev) => shown_beside(&agent, n, ev),
+                Some(ev) => {
+                    carded.see(&ev);
+                    shown_beside(&agent, n, ev);
+                }
                 None => shows = false,
             },
             _ = tick.tick() => follow.on_tick(&session),
@@ -1347,9 +1374,10 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     // (its turn over, a call still waiting stops).
     if let Some(mut t) = beside.take() {
         while let Ok(ev) = t.events.try_recv() {
+            carded.see(&ev);
             shown_beside(&agent, n, ev);
         }
-        keep_beside(&agent.id, n, t.shown());
+        keep_beside(&agent.id, n, t.shown(), carded);
         // Its turn over: the page's "Yap is using this page" goes, a card still asking lapses.
         if let Some(app) = APP.get() {
             let _ = app.emit(SHOWN_EVENT, serde_json::json!({ "id": agent.id, "turn": n, "conversation": agent.conversation, "ended": true }));

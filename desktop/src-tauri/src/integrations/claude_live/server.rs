@@ -123,7 +123,10 @@ impl Endpoint {
                 spec.eyes = super::eyes::Eyes::default();
             }
             spec.connectors = None;
-            spec.cards = crate::chat::cards::Cards::default();
+            // (A Code chat's own session keeps its box and chapters: `Cards::for_code_session`.)
+            if !(spec.reads && tools == super::Tools::Agent) {
+                spec.cards = crate::chat::cards::Cards::default();
+            }
         }
         let eyes = spec.eyes;
         let cards = spec.cards;

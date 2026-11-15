@@ -140,6 +140,10 @@ pub fn of_tool(name: &str, input: &Value, folder: &Path) -> Seen {
         // first needed): its own plumbing, never a step of the work — the
         // call that follows is ("Using github · create issue").
         "ToolSearch" => Seen { step: "Finding a tool".into(), ..Default::default() },
+        // The next-step box and a chapter in its chat (chat/cards.rs): what they show is the box and the
+        // divider, never a step of the work (`core/agents.js` PLUMBING), as Chat's own have no chip.
+        "mcp__yap__suggest_next_step" => Seen { step: "Wrapping up".into(), ..Default::default() },
+        "mcp__yap__mark_chapter" => Seen { step: "Marking a chapter".into(), ..Default::default() },
         // Yap's browser beside the chat (a Code chat's own session, 14 Nov 2026): its own words.
         other if other.strip_prefix("mcp__yap__").and_then(|t| browser_line(t, input)).is_some() => {
             Seen { step: other.strip_prefix("mcp__yap__").and_then(|t| browser_line(t, input)).unwrap_or_default(), ..Default::default() }
@@ -341,6 +345,8 @@ mod tests {
         assert_eq!(of_tool("mcp__yap__browser_key", &json!({ "keys": "Enter" }), &f).step, "Pressing keys on the page beside the chat");
         // Its other tools: as any server's.
         assert_eq!(of_tool("mcp__yap__list_tasks", &json!({}), &f).step, "Using yap · list tasks");
+        assert_eq!(of_tool("mcp__yap__suggest_next_step", &json!({ "recap": "Done." }), &f).step, "Wrapping up");
+        assert_eq!(of_tool("mcp__yap__mark_chapter", &json!({ "title": "Beds" }), &f).step, "Marking a chapter");
         assert_eq!(of_tool("Frobnicate", &json!({}), &f).step, "Using Frobnicate");
         // Claude Code's own plumbing has its own words (the thread never counts these as work).
         assert_eq!(of_tool("ToolSearch", &json!({ "query": "select:mcp__github__create_issue" }), &f).step, "Finding a tool");

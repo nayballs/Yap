@@ -333,7 +333,21 @@ async fn report(id: &str, n: u32, held: bool) {
     let appended = if beside.is_empty() {
         chats::append(conv, "assistant", &reply, &[], model, false)
     } else {
-        chats::append_whole(conv, ChatMessage { role: "assistant".into(), text: reply.clone(), model, pages: beside.pages, pictures: beside.pictures, files: beside.files, ..Default::default() })
+        chats::append_whole(
+            conv,
+            ChatMessage {
+                role: "assistant".into(),
+                text: reply.clone(),
+                model,
+                pages: beside.pages,
+                pictures: beside.pictures,
+                files: beside.files,
+                // Its next-step box and the chapter it started (chat/cards.rs, 15 Nov 2026).
+                next_step: beside.next_step,
+                chapter: beside.chapter,
+                ..Default::default()
+            },
+        )
     };
     let Ok(index) = appended else { return };
     drop(stop);

@@ -106,6 +106,14 @@ impl Cards {
         out
     }
 
+    /// **A Code chat's own session's** (`agents/direct.rs`, 15 Nov 2026):
+    /// the next-step box (with Chat in view: never a phone's turn) and
+    /// chapters — its questions are Claude Code's own `AskUserQuestion`
+    /// (`claude_live/approve.rs`). Pure.
+    pub fn for_code_session(phone: bool) -> Cards {
+        Cards { ask: false, next_step: !phone, chapters: true }
+    }
+
     /// The lines for the model's instructions (empty: none offered).
     pub fn instructions(self) -> String {
         let mut out: Vec<&str> = Vec::new();
@@ -174,6 +182,9 @@ mod tests {
         assert!(!Cards::for_turn(false, false, None, true, false).any());
         assert!(Cards::default().instructions().is_empty());
         assert!(quiet(next_step::NAME) && quiet(chapters::NAME) && !quiet(ask::NAME));
+        // A Code chat's own session: Claude Code asks with its own card; a phone's turn has no box.
+        assert_eq!(Cards::for_code_session(false), Cards { ask: false, next_step: true, chapters: true });
+        assert_eq!(Cards::for_code_session(true).names(), [chapters::NAME]);
     }
 
     #[tokio::test]
