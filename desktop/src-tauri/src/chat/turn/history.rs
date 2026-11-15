@@ -61,7 +61,7 @@ impl Sizing {
             + crate::chat::attachments::current_tokens();
         let rate_cap = crate::chat::budget::rate_cap(provider);
         let connectors = t.gates.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, provider, model, t.scope, context_size, conversation_id)).flatten();
-        let parts = super::fit::Parts { persona: &t.ep.persona, profile: &t.profile, now: t.now, code, connectors: connectors.as_ref(), conversation: conversation_id };
+        let parts = super::fit::Parts { persona: &t.ep.persona, profile: &t.profile, now: t.now, code, connectors: connectors.as_ref(), conversation: conversation_id, context: context_size };
         let room = super::fit::Room { context: context_size, known: context_known, kind, tools: t.gates.tools, cap: rate_cap };
         // (A model evaluation sending the last messages by count: no budget.)
         let fitted = if mode == crate::chat::budget::Mode::Messages {

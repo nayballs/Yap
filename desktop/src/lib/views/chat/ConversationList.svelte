@@ -184,12 +184,25 @@
         { label: 'Export…', icon: 'download', onselect: () => exportConversation(c) },
         // What it made (chat/made/pages.rs): its pages, documents and files, beside it.
         { label: 'Outputs', icon: 'folder', onselect: () => openOutputs(c) },
+        // Projects (chat/projects.rs): Chat's side only (a Code chat has its workspace).
+        ...(onCode ? [] : [{ label: 'Move to project', icon: 'folder', items: projectItems(c) }]),
         { label: 'Archive', icon: 'archive', onselect: () => lib.archive([c.id]) },
         { separator: true },
         { label: 'Delete…', icon: 'trash', danger: true, onselect: () => chat.askDelete(c) },
       ],
       { label: `Conversation ${c.title || 'Untitled'}`, row: chat.convEls[c.id] }
     );
+  }
+
+  /** "Move to project ▸": each project (the one it's in ticked), and out of it. */
+  function projectItems(c) {
+    const list = chat.projects;
+    if (!list.length) return [{ note: 'No projects yet' }, { label: 'Open Projects', onselect: () => chat.openProjects() }];
+    const inOne = list.find((p) => p.chatIds?.includes(c.id));
+    return [
+      ...list.map((p) => ({ label: p.name, checked: p.id === inOne?.id, onselect: () => chat.moveToProject(c.id, p.id) })),
+      ...(inOne ? [{ separator: true }, { label: 'Remove from project', onselect: () => chat.moveToProject(c.id, null) }] : []),
+    ];
   }
 
   /** **Outputs**: the chat open, its Outputs beside it (OutputsTab). */
@@ -301,6 +314,15 @@
         </button>
       {/if}
     </div>
+    {#if !onCode}
+      <!-- Projects (chat/projects.rs): their page in the thread's place. -->
+      <div class="tools">
+        <button class="tool" class:on={!!chat.page} aria-current={chat.page ? 'page' : undefined} onclick={() => chat.openProjects()}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v6.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z" /></svg>
+          Projects
+        </button>
+      </div>
+    {/if}
   {/if}
 
   <!-- (With Yap Code on, on the Code side only: the Chat side has nothing agent-like.) -->
@@ -627,6 +649,11 @@
     cursor: pointer;
   }
   .tool:hover {
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+  }
+  /* Projects open in the thread's place. */
+  .tool.on {
     background: var(--yap-s2);
     color: var(--yap-fg);
   }

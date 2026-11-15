@@ -307,6 +307,15 @@
   );
 </script>
 
+{#if !code?.onCode && (chat.projectHere || (chat.activeId == null && chat.newProject))}
+  <!-- The project this chat is in (chat/projects.rs): its page a click away. -->
+  {@const inProject = chat.projectHere || chat.newProject}
+  <p class="scopeline projline" data-testid="chat-project-line" style:--thread-gutter="{chat.threadGutter}px">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v6.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z" /></svg>
+    {chat.activeId == null ? 'New chat in' : 'In'}
+    <button type="button" class="projlink" onclick={() => chat.openProject(inProject.id)}>{inProject.name}</button>
+  </p>
+{/if}
 {#if chat.messages.length === 0 && (code?.current || code?.onCode)}
   <!-- An empty Code chat: the Code side's own greeting. -->
   <CodeEmpty {chat} {code} {onopensettings} />
@@ -756,6 +765,24 @@
   }
   .ghostline {
     color: var(--yap-fg-80);
+  }
+  .projlink {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-fg-80);
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .projlink:hover {
+    color: var(--yap-primary);
+    text-decoration: underline;
+  }
+  .projlink:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
   }
   .ghostline svg {
     color: var(--yap-fg);

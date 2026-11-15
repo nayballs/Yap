@@ -18,6 +18,7 @@ pub mod note_chats;
 pub mod note_text;
 pub mod pages;
 pub mod pictures;
+pub mod projects;
 pub mod see_screen;
 pub mod shares;
 pub mod skills;

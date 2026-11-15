@@ -877,6 +877,7 @@ fn forget_incognito(id: u64) {
     crate::agents::code_chat::chat_deleted(id);
     crate::integrations::connectors::chats::chat_deleted(id);
     crate::chat::styles::chats_deleted(&[id]);
+    crate::chat::projects::chats_deleted(&[id]);
 }
 
 #[cfg(test)]

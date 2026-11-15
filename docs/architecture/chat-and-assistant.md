@@ -1917,6 +1917,9 @@ one side.
 - **`chat/incognito.rs`** — **Incognito chats** (15 Nov 2026): a new chat's
   ghost; kept in memory only, never listed, searched, remembered or used by
   memory, gone when left ([below](#incognito-chats-2026-11-15)).
+- **`chat/projects.rs`** — **Projects** (15 Nov 2026): a named group of
+  chats sharing instructions and files every chat in it gets; its page in
+  the thread's place ([below](#projects-2026-11-15)).
 - **`chat/styles.rs`** — **Styles** (15 Nov 2026): how a chat's answers are
   written (Normal, Concise, Explanatory, Formal, your own), picked from the
   composer's Style chip, a block in the system prompt
@@ -5613,3 +5616,53 @@ Claude Code's own).
 - Tests: `cargo test chat::styles`; `chat-styles.spec.js` (the menu, the
   block in the request, kept per chat and for a new one; one written from a
   description, edited, used and deleted; light and dark).
+
+## Projects (2026-11-15)
+
+The Claude app's projects, from Anthropic's help pages: a named group of
+chats sharing **instructions** and **files** (the project's knowledge) that
+every chat in it gets. Chat's side only (a Code chat has its workspace);
+never an incognito chat.
+
+- **Where**: **Projects** under New chat in the conversation list
+  (`ConversationList.svelte`) opens the page in the thread's place
+  (`ProjectsView.svelte`, its own chunk; chatState's `page`: `'projects'`
+  or `{ project: id }`, closed by opening any chat): every project, last
+  changed first, as a card (what it's for, its chats and files, when it
+  changed), and **New project** (a name, what it's for). One project's page:
+  ‹ Projects, its name and line (⋯: Edit details, Delete project… — asked
+  first; its chats stay, out of it, and its files' copies go), **New chat
+  in <name>**, its chats, and beside them (below, when narrow) its
+  **Instructions** (saved a moment after the typing stops, and on leaving
+  the box) and its **Files** (Add files…, × to take one out).
+- **A chat joins one** by starting from its page (chatState's
+  `newProject`, `chat_send`'s `project` → `projects::with_new` →
+  `turn_conversation` → `adopt_new`), or from its ⋯ → **Move to project ▸**
+  (each project, the one it's in ticked; Remove from project;
+  `chat_project_set`). Its band over the thread — "In <project>", "New
+  chat in <project>" before the first question — opens the project's page
+  (`chat-project-line`).
+- **Its files** are read with a question's attachments' rules
+  (`chat/attachments.rs` `read`: text, code, Markdown, a PDF's or a Word
+  document's text, read on this PC; anything else said plainly and left
+  out), their copy and text kept in `projects/<project>/`; at most 50.
+- **In the prompt** (`prompt::chat_blocks`, before the chat's style, just
+  before About you): "This chat is in the user's project "…". It's for: …",
+  its instructions in `<project_instructions>`, and its files' text in a
+  `<documents>` block as attachments go — stable from turn to turn. **Sized
+  to the model** (`knowledge_budget`: half its context): files that don't
+  fit are named ("didn't fit in this model's memory: …"), never cut; a file
+  gone from the disk is a line. The fixed part a question must fit beside
+  counts it (`fit::Parts::texts`, with the model's context), so a chat in a
+  big project leaves out older messages as it must. On your Claude plan the
+  session's prompt has it; the small web pipeline's too. (A question asked
+  out loud into a new chat doesn't start it in a project.)
+- **Kept** in `projects.json` ([config-and-data.md](./config-and-data.md)),
+  never chats.json. A deleted chat leaves its project; Delete some of your
+  data → Chats takes every chat out; the projects stay, as Skills do.
+  Download your data has projects.json.
+- Tests: `cargo test chat::projects`; `chat-projects.spec.js` (a project
+  made, its instructions saved, a Markdown file read and a spreadsheet
+  refused, a new chat in it carrying its block, another chat moved in from
+  its ⋯, its page listing both, deleted with its chats kept; light and
+  dark).

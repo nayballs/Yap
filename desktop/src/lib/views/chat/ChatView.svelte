@@ -650,7 +650,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9 4v16" /></svg>
       </button>
     {/if}
-    {#if chat.activeId == null && !chat.messages.length && !code?.current && !code?.onCode}
+    {#if chat.activeId == null && !chat.messages.length && !code?.current && !code?.onCode && !chat.page && !chat.newProject}
       <!-- Incognito (chat/incognito.rs): a new chat's ghost, at the thread's
            top right as the Claude app has it. -->
       <button
@@ -666,8 +666,15 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11a7 7 0 0 1 14 0v9l-2.33-1.5L14.33 20 12 18.5 9.67 20l-2.34-1.5z" /><circle cx="9.5" cy="11" r="1" fill="currentColor" stroke="none" /><circle cx="14.5" cy="11" r="1" fill="currentColor" stroke="none" /></svg>
       </button>
     {/if}
-    <ChatThread {chat} {code} {onopensettings} />
-    <Composer {chat} {code} {onopensettings} {onopenusage} />
+    {#if chat.page && !code?.onCode}
+      <!-- Projects (chat/projects.rs): the list, or one project's page, in the thread's place. -->
+      {#await import('./ProjectsView.svelte') then { default: ProjectsView }}
+        <ProjectsView {chat} />
+      {/await}
+    {:else}
+      <ChatThread {chat} {code} {onopensettings} />
+      <Composer {chat} {code} {onopensettings} {onopenusage} />
+    {/if}
   </section>
 
   {#if doc.open}

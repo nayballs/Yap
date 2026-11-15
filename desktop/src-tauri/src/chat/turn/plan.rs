@@ -449,10 +449,11 @@ fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude
         s.push(' ');
         s.push_str(&cards_lines(cards));
     }
-    // How this chat's answers are written (chat/styles.rs), as Chat's own prompt has it.
-    if !built.style.is_empty() {
+    // This chat's own blocks: its project and its style (chat/projects.rs,
+    // chat/styles.rs), as Chat's own prompt has them.
+    if !built.chat_blocks.is_empty() {
         s.push_str("\n\n");
-        s.push_str(&built.style);
+        s.push_str(&built.chat_blocks);
     }
     s.push_str("\n\n");
     s.push_str(crate::chat::chats::CONTEXT_NOTE);
