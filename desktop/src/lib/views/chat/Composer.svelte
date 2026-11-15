@@ -80,6 +80,54 @@
     }
   }
 
+  // **The message box is several lines** (15 Nov 2026, the Claude app's box): a textarea that grows with its words
+  // up to a cap (`boxCap`), then scrolls. Enter sends, Shift+Enter makes a new line, Ctrl+Enter queues it for later;
+  // the "@" picker and the "/" Skills menu take their keys first, and an IME's composition is its own.
+  function keydown(e) {
+    if (chat.mentionKey(e) || chat.skillKey(e)) return;
+    // (Enter that confirms an IME's composition: the IME's.)
+    if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229 || e.shiftKey) return;
+    e.preventDefault();
+    chat.send(e.ctrlKey || e.metaKey ? { later: true } : undefined);
+  }
+  /** One line's height (its padding in): an empty box never measures its placeholder. */
+  const ONE_LINE = 32;
+  /** The tallest the box grows: 40% of the window, 120 to 320 px. */
+  const boxCap = () => Math.max(120, Math.min(320, Math.round(window.innerHeight * 0.4)));
+  /** The box's height fitted to its words (set by hand, or dictated, pasted, put back: every way they change). */
+  function fitBox() {
+    const el = chat.inputEl;
+    if (!el) return;
+    if (!chat.input) {
+      el.style.height = `${ONE_LINE}px`;
+      el.style.overflowY = 'hidden';
+      return;
+    }
+    el.style.height = 'auto';
+    const cap = boxCap();
+    const full = el.scrollHeight;
+    el.style.height = `${Math.max(ONE_LINE, Math.min(full, cap))}px`;
+    el.style.overflowY = full > cap ? 'auto' : 'hidden';
+  }
+  $effect(() => {
+    void chat.input;
+    void chat.inputEl;
+    fitBox();
+  });
+  // A wider or narrower box wraps its words again (the panel opening, the window resized).
+  $effect(() => {
+    const el = chat.inputEl;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fitBox();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+
   // The model chip (its picker opens for "Choose another model…").
   let chipRef = $state(null);
   let plusEl = $state(null);
@@ -493,8 +541,9 @@
     <SkillMenu picker={chat.skills} onpick={chat.pickSkill} />
     <!-- "@" in a Code chat: its workspace's files (agents/mention.rs). -->
     <MentionMenu picker={chat.mention} onpick={chat.pickMention} />
-    <input
+    <textarea
       class="msginput"
+      rows="1"
       bind:this={chat.inputEl}
       bind:value={chat.input}
       placeholder={chat.quote
@@ -517,8 +566,8 @@
       aria-autocomplete="list"
       aria-controls={chat.mention.open ? 'mention-list' : chat.skills.open ? 'skill-list' : undefined}
       aria-activedescendant={chat.mention.open && chat.mention.items.length ? `mention-opt-${chat.mention.active}` : chat.skills.open ? `skill-opt-${chat.skills.active}` : undefined}
-      onkeydown={(e) => chat.mentionKey(e) || chat.skillKey(e) || (e.key === 'Enter' && !e.isComposing && chat.send(e.ctrlKey || e.metaKey ? { later: true } : undefined))}
-      onkeyup={(e) => (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') && chat.mentionInput()}
+      onkeydown={keydown}
+      onkeyup={(e) => (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Home' || e.key === 'End') && chat.mentionInput()}
       onclick={() => chat.mentionInput()}
       onpaste={chat.pasteImage}
       oninput={() => {
@@ -533,7 +582,7 @@
         chat.reportFocus(false);
         chat.closeMention();
       }}
-    />
+    ></textarea>
     <!-- Not `disabled` while an answer comes: disabling the focused box
          throws the caret out of it, and you'd have to click back in to
          type the next message. `send()` ignores Enter until the answer is
@@ -626,7 +675,7 @@
   .inputbar {
     position: relative;
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 6px;
     min-height: 48px;
     padding: 6px 8px 6px 6px;
@@ -833,16 +882,30 @@
     width: 15px;
     height: 15px;
   }
+  /* Several lines (a textarea): one line high to start, growing with its words up to its cap (fitBox), then
+     scrolling; the buttons beside it at its foot. */
   .msginput {
     flex: 1 1 auto;
     min-width: 0;
     height: 32px;
-    padding: 0 4px;
+    min-height: 32px;
+    box-sizing: border-box;
+    padding: 6px 4px;
     border: none;
     background: transparent;
     color: var(--yap-fg);
     font: inherit;
     font-size: 13.5px;
+    line-height: 20px;
+    resize: none;
+    overflow-y: hidden;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    scrollbar-width: thin;
+  }
+  /* (The buttons, 30 px, a pixel up from the foot: centred on one line, as before.) */
+  .inputbar > :global(:not(.msginput):not(textarea)) {
+    margin-bottom: 1px;
   }
   .msginput:focus {
     outline: none;

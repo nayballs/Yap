@@ -523,3 +523,36 @@ test('Ctrl+Enter queues a message while an answer is written, and it goes once t
   await expect(answers.last()).toHaveText('Compost goes on in autumn.');
   await expect(queued).toHaveCount(0);
 });
+
+// The message box is several lines (15 Nov 2026, the Claude app's box): Shift+Enter makes a new line and a paste keeps its
+// line breaks (a one-line input dropped them before anything was sent); it grows with its words up to a cap, then
+// scrolls; Enter sends the message with every line, drawn as written.
+test('Shift+Enter makes a new line; a two-line message arrives with both lines; the box grows, then scrolls', async ({ main, fakeLlm }) => {
+  await freshChat(main);
+  const input = box(main);
+  const oneLine = await input.evaluate((el) => el.offsetHeight);
+  await input.fill('Water the beds');
+  await input.press('Shift+Enter');
+  await input.pressSequentially('then weed the path');
+  await expect(input).toHaveValue('Water the beds\nthen weed the path');
+  await expect.poll(() => input.evaluate((el) => el.offsetHeight)).toBeGreaterThan(oneLine);
+  fakeLlm.scriptChat([{ content: 'Done in that order.' }]);
+  await input.press('Enter');
+  await expect(thread(main).locator('.cbubble.assistant').last()).toHaveText('Done in that order.');
+  // Both lines: in the thread, drawn as written, and to the model.
+  const said = main.getByTestId('chat-question-text').last();
+  expect(await said.evaluate((el) => el.textContent)).toBe('Water the beds\nthen weed the path');
+  const asked = (fakeLlm.requests.filter((r) => r.kind === 'other').at(-1)?.messages || []).filter((m) => m.role === 'user').at(-1);
+  expect(String(typeof asked?.content === 'string' ? asked.content : JSON.stringify(asked?.content))).toMatch(/Water the beds\nthen weed the path\s*$/);
+  // Sent: one line high again.
+  await expect(input).toHaveValue('');
+  await expect.poll(() => input.evaluate((el) => el.offsetHeight)).toBe(oneLine);
+  // A long paste keeps its lines; the box stops growing at its cap and scrolls.
+  await input.fill(Array.from({ length: 40 }, (_, i) => `Line ${i + 1}`).join('\n'));
+  await expect(input).toHaveValue(/^Line 1\nLine 2\n[\s\S]*Line 40$/);
+  const [h, full, shown] = await input.evaluate((el) => [el.offsetHeight, el.scrollHeight, el.clientHeight]);
+  expect(h).toBeLessThanOrEqual(320);
+  expect(full).toBeGreaterThan(shown);
+  await input.fill('');
+});
+
