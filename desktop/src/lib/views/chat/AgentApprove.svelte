@@ -380,6 +380,10 @@
   }
   .aplan .md {
     overflow-wrap: anywhere;
+    /* (Yap turns text selection off everywhere: the plan's words are there to select and comment on.) */
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
   }
   .aplan .md :global(h1),
   .aplan .md :global(h2),

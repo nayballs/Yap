@@ -148,7 +148,7 @@ test('the outline shows before the writing: Go writes it as outlined, and the ca
   await expect(card(main).getByRole('button', { name: 'Go', exact: true })).toBeVisible();
   await expect(card(main).getByRole('button', { name: 'Edit' })).toBeVisible();
   await expect(panel(main)).toHaveCount(0);
-  expect((await yap.invoke('notes_list')).some((n) => n.title === OUTLINE.title)).toBe(false);
+  expect((yap.readJson('notes.json')?.notes ?? []).some((n) => n.title === OUTLINE.title)).toBe(false);
   await expect(main.getByTestId('chat-activity')).toContainText('Waiting for you: the outline');
   await shot(main, '01-outline-card-light');
   await theme(yap, main, 'dark');
@@ -164,7 +164,9 @@ test('the outline shows before the writing: Go writes it as outlined, and the ca
   await expect(card(main)).toContainText('Written as outlined');
   const res = made(fakeLlm.requests.filter((r) => r.tools.includes('write_section')).at(-1));
   expect(res.data.outline).toContain('The user read the outline and said go');
-  // Kept with the answer: back with the chat.
+  // Kept with the answer: back with the chat. (The list stepped aside for the document: brought back first.)
+  const showChats = main.getByRole('button', { name: 'Show your chats' });
+  if (await showChats.isVisible()) await showChats.click();
   await main.getByRole('button', { name: 'New chat' }).click();
   await main.locator('.conv').filter({ hasText: 'Build me a lone wolf' }).first().click();
   await expect(card(main)).toHaveAttribute('data-state', 'allowed');
@@ -251,9 +253,11 @@ test('asked out loud: the headings said, on the Yap bar, and “drop the second 
   await askAloud('Go ahead, but drop the second part');
   await said("It's in Chat.");
   await expect.poll(barCard).toBeNull();
-  const doc = (await yap.invoke('notes_list')).find((n) => n.title === OUTLINE.title);
-  expect(doc.content).toContain('Gear');
-  expect(doc.content).not.toContain('Skills');
+  // Written without the part dropped (notes.json as saved).
+  const docText = () => (yap.readJson('notes.json')?.notes ?? []).find((n) => n.title === OUTLINE.title)?.content ?? '';
+  await expect.poll(docText, { timeout: 10_000 }).toContain('Talents');
+  expect(docText()).toContain('Gear');
+  expect(docText()).not.toContain('Skills');
   const conv = (yap.readJson('chats.json')?.conversations ?? []).find((c) => c.messages.some((m) => m.text === 'Make me a lone wolf ranger guide to keep'));
   expect(conv.messages.some((m) => m.text === 'Go ahead, but drop the second part')).toBe(false);
   expect(conv.messages.at(-1).confirms?.[0]).toMatchObject({ act: 'outline', state: 'changed', outline: { said: 'Go ahead, but drop the second part', voice: true } });

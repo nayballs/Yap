@@ -88,6 +88,8 @@
   }
   .md {
     overflow-wrap: anywhere;
+    user-select: text;
+    -webkit-user-select: text;
   }
   .md :global(h1),
   .md :global(h2),
