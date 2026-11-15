@@ -146,7 +146,7 @@ impl Gates {
     /// that acts on the screen or apps with nobody there — no look at the
     /// screen, no clicks or typing on pages, no opening apps, no agents or
     /// connectors, and no cards (a question nobody answers, a next step
-    /// nobody takes). Pure.
+    /// nobody takes, a document's outline nobody reviews). Pure.
     pub(super) fn unattended(self) -> Gates {
         Gates {
             screen: Gate::Off,
@@ -154,7 +154,8 @@ impl Gates {
             apps: false,
             agents: false,
             connectors: false,
-            cards: crate::chat::cards::Cards { ask: false, next_step: false, chapters: false },
+            // (None: a question, a next step, an outline to wait on — nobody's there.)
+            cards: crate::chat::cards::Cards::default(),
             ..self
         }
     }
@@ -543,7 +544,7 @@ mod tests {
             let ep = keyed(provider, model, base);
             for (scope, meetings, in_view) in [(None, false, true), (None, true, true), (Some("meetings"), true, false)] {
                 let g = Gates::for_turn_on(&cfg, &ep, scope, meetings, in_view, &here).unattended();
-                assert_eq!((g.screen, g.act, g.apps, g.agents, g.connectors, g.cards.any()), (Gate::Off, false, false, false, false, false), "{provider} {model}");
+                assert_eq!((g.screen, g.act, g.apps, g.agents, g.connectors, g.cards.any(), g.cards.outline), (Gate::Off, false, false, false, false, false, false), "{provider} {model}");
                 let (prompt, offered) = sent(&g, &ep.persona, false);
                 for name in ["open_app", "list_apps", "look_at_screen", "start_agent", "ask_user", "suggest_next_step"] {
                     assert!(!offered.iter().any(|n| n == name), "{provider} {model}: {name} offered");
