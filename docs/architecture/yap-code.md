@@ -409,6 +409,16 @@ workspace, word for word, and no model of Chat's is asked.
     selection or a Skill it goes as before; from another app or a phone,
     as before. Another chat shown by the time it lands, or a send still
     going: it waits in its own chat's queue.
+  - **Ctrl+Enter queues it on purpose** (2026-11-15, the Claude app's box:
+    "Enter to send, Ctrl+Enter to queue for later", which Yap's empty box
+    says too while Claude works). Enter hands a message to Claude at its
+    next step; Ctrl+Enter keeps it Queued even with a call out (`later`:
+    never handed over at a step, its bubble's "Queued" says it goes once
+    this answer is in) and sends it as the next turn, its own answer.
+    With nothing going on, Ctrl+Enter sends as Enter does. A step after a
+    turn ended clears the 20-second release timed for it, so a message
+    queued for later never goes mid-turn. In any chat while an answer is
+    written, Ctrl+Enter queues too: [Chat's own](chat-and-assistant.md#ctrlenter-queues-a-message-for-after-the-answer-2026-11-15).
 - **Rewind and Fork from here** (2026-11-14, `agents/rewind.rs`), the
   rest of the Claude Code app's message actions: under the person's
   message in a Code chat (on hover, or its right-click menu) are Copy,
@@ -656,7 +666,8 @@ workspace, word for word, and no model of Chat's is asked.
   (fake monitors: the shots with the message and to Claude Code), ■ Stop
   and Esc, the switch off; the queue: a message while Claude writes waits
   as Queued and is its own turn with its own answer (asked out loud too:
-  the same queue, its answer read aloud), a message while a
+  the same queue, its answer read aloud; Ctrl+Enter with a call out: kept
+  for the next turn, the box saying how), a message while a
   call is out goes at once and ticks ✓✓, Cancel and edit, Send now (its
   answer only what came after it read it), a message queued in a chat
   left for another going once that chat is shown again, by a click or the
@@ -1905,7 +1916,12 @@ something that matches that?").
   "Created notes.md +12", "Read app.ts (424–503)", "Checked the edits
   parse" — with a hairline between. The step the agent is on now is the last
   row, as it is, with a spinner. A row with nothing more to show (a read,
-  another tool's call) doesn't open (`stepOpens`).
+  another tool's call) doesn't open (`stepOpens`). **Another tool's call
+  made again and again** with nothing to show (15 Nov 2026: a plugin of the
+  person's own Claude Code ticking its progress bar, "Used savvy-progress ·
+  progress" five rows) is one row where it was first made, "×5" after it
+  (`rowSteps`' `times`, `.rtimes`); the rows between keep their order, and a
+  call with a picture, or the one going now, keeps its own row.
 - **An edit's row** opens to the file's path and its diff, each line with its
   number in the file, removed lines red and added ones green (`diffRows`).
   A long line wraps under itself beside its number (2026-11-12, as Claude

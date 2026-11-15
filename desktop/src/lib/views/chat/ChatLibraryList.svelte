@@ -15,9 +15,10 @@
   //   lib:      the search and archive (chatLibrary.svelte.js)
   //   searchEl: the search box (↑ from the first result goes back to it)
   //   oncopy:   Copy as Markdown for a conversation id
+  //   onexport: Export… for a conversation `{ id, title }`
   import { openContextMenu, menuKey, devInspect } from '../../ui/contextMenu.svelte.js';
 
-  let { chat, lib, searchEl = null, oncopy = () => {} } = $props();
+  let { chat, lib, searchEl = null, oncopy = () => {}, onexport = () => {} } = $props();
 
   const titleOf = (id) => chat.conversations.find((c) => c.id === id)?.title || lib.archived.find((c) => c.id === id)?.title || '';
   const isArchived = (id) => lib.archived.some((c) => c.id === id);
@@ -45,7 +46,7 @@
     }
   }
 
-  // An archived conversation's menu: Restore, Copy as Markdown, Delete….
+  // An archived conversation's menu: Restore, Copy as Markdown, Export…, Delete….
   function archivedMenu(e, c) {
     if (e.type === 'contextmenu' && !devInspect(e) && !chat.sending && chat.activeId !== c.id) chat.selectConversation(c.id);
     openContextMenu(
@@ -53,6 +54,7 @@
       [
         { label: 'Restore', icon: 'restore', onselect: () => lib.restore([c.id]) },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => oncopy(c.id) },
+        { label: 'Export…', icon: 'download', onselect: () => onexport(c) },
         { separator: true },
         { label: 'Delete…', icon: 'trash', danger: true, onselect: () => lib.askDelete(c, archivedEls[c.id]) },
       ],
