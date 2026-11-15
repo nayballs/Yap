@@ -243,6 +243,9 @@ pub enum Purpose {
     /// Chat downloading a picture from the web to look at or show beside
     /// the chat (`chat/pictures.rs`).
     WebPicture,
+    /// A chart library a visual in Chat loads (`chat/made/serve.rs`: Chart.js
+    /// or D3 from the pinned allow-list), fetched once and kept.
+    VisualLibrary,
     /// A provider's (or a server's) list of models: its name in words.
     ModelList(String),
     Download(Download),
@@ -355,6 +358,7 @@ impl Purpose {
             Purpose::ProviderSearch(p) => ("web", format!("Web search · {p}"), f("Chat")),
             Purpose::WebPage => ("web", "Reading a web page".into(), f("Chat")),
             Purpose::WebPicture => ("web", "A picture from the web".into(), f("Chat")),
+            Purpose::VisualLibrary => ("download", "A chart library for a visual (Chart.js or D3)".into(), "Chat"),
             Purpose::ModelList(who) => ("models", format!("Model list · {who}"), "Settings"),
             Purpose::Download(d) => match d {
                 Download::SpeechModel => ("download", "Speech model download".into(), "Speech-to-Text"),

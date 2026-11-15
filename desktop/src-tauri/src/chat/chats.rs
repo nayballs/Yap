@@ -1134,6 +1134,8 @@ pub fn reset() -> usize {
     if gone > 0 {
         crate::search::removed();
     }
+    // What they made (chat/made.rs), the libraries kept for it too.
+    crate::chat::made::reset();
     gone
 }
 
@@ -1169,6 +1171,10 @@ pub fn delete_many(ids: &[u64]) -> usize {
     // …and the files their questions carried (chat/attachments.rs).
     if !files.is_empty() {
         crate::chat::attachments::delete(&files);
+    }
+    // What they made (their visuals: chat/made.rs) goes with them.
+    if gone > 0 {
+        crate::chat::made::delete_conversations(ids);
     }
     gone
 }

@@ -125,6 +125,7 @@
   import { MIN_WIDTH, tabKeyOf } from './chatDoc.svelte.js';
   import { LIST_MIN } from './chatRoom.js';
   import { createChatLayout } from './chatLayout.svelte.js';
+  import { layoutMotion } from './pageMotion.svelte.js';
   import { chatBrowser } from '../../stores/chatBrowser.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
   import { agents, initAgents, agentById } from '../../stores/agents.svelte.js';
@@ -242,6 +243,11 @@
     measure();
     return () => ro.disconnect();
   });
+  // The split or the list's edge held: a page beside the chat shows a still of itself meanwhile (PageTab.svelte).
+  $effect(() => {
+    layoutMotion.held = layout.dragging;
+  });
+  $effect(() => () => (layoutMotion.held = false));
 
   // The panel's own chunk (DocPanel: documents, pictures, pages, agents),
   // fetched once Chat is idle so a panel opens whole in its first frame —
@@ -569,6 +575,7 @@
       title="Drag to resize · Double-click to reset"
       tabindex="0"
       data-testid="chat-list-edge"
+      onpointerenter={() => layoutMotion.near++}
       onpointerdown={edgeDown}
       onpointermove={edgeMove}
       onpointerup={edgeUp}
@@ -627,6 +634,7 @@
         title="Drag to resize · Double-click to reset"
         tabindex="0"
         data-testid="chat-split"
+        onpointerenter={() => layoutMotion.near++}
         onpointerdown={splitDown}
         onpointermove={splitMove}
         onpointerup={splitUp}

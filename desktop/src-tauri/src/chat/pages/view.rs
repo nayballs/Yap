@@ -140,6 +140,95 @@ pub struct Bounds {
     pub h: i32,
 }
 
+/// **The newest place wins** (15 Nov 2026). While the stage moves (the
+/// split dragged, Yap's window resized) the view sends the page's place
+/// every frame, and each send is a task of its own on its way to the main
+/// thread: two can get there out of order, and the older one, last, left
+/// the page in the wrong place until the next move. Every send carries a
+/// number that only rises (the view's clock, across its tabs and reloads,
+/// `pagePlace.js` `nextSeq`): one no newer than the newest applied is
+/// dropped; one with none (a caller that doesn't number them) always goes.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Latest(u64);
+
+impl Latest {
+    /// Place `seq` has come: apply it? (Then it's the newest.)
+    pub fn take(&mut self, seq: Option<u64>) -> bool {
+        match seq {
+            None => true,
+            Some(s) if s > self.0 => {
+                self.0 = s;
+                true
+            }
+            Some(_) => false,
+        }
+    }
+}
+
+/// **Where a page's window goes**: over the stage, in sight (`Top`); laid
+/// out over it but under Yap's own page, drawn and never seen, while a still
+/// of it shows there (`Under`: the split dragged, Yap's window resized —
+/// the still moves with the page around it in every frame, which a window
+/// of its own can't); or nowhere (`None` bounds: out of sight).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Layer {
+    #[default]
+    Top,
+    Under,
+}
+
+/// What Windows says of Yap's window in its size-move loop (a drag of its
+/// edge or of its title bar).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SizeMsg {
+    /// `WM_ENTERSIZEMOVE`: pressed (its edge, or its title bar: a move).
+    Enter,
+    /// `WM_SIZING`: its size is changing (never for a move).
+    Sizing,
+    /// `WM_EXITSIZEMOVE`: let go.
+    Exit,
+}
+
+/// **Yap's window resized by its edge**, as its page hears it
+/// ([`SIZING_EVENT`]): `on` as the loop starts (a page beside the chat
+/// takes a still of itself, ready: it may only be a move), `sizing` once
+/// with the first change of size (the still shows in the page's place, the
+/// page under Yap's: PageTab.svelte), `off` when it's let go (the page in
+/// sight again). Nothing else, and nothing twice. Pure.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct SizeLoop {
+    pressed: bool,
+    sizing: bool,
+}
+
+impl SizeLoop {
+    pub const fn new() -> Self {
+        SizeLoop { pressed: false, sizing: false }
+    }
+
+    /// Message `m` has come: what to tell the page, if anything.
+    pub fn on(&mut self, m: SizeMsg) -> Option<&'static str> {
+        match m {
+            SizeMsg::Enter => {
+                *self = SizeLoop { pressed: true, sizing: false };
+                Some("on")
+            }
+            SizeMsg::Sizing if !self.sizing => {
+                // (A loop Yap saw only from its middle starts here too.)
+                *self = SizeLoop { pressed: true, sizing: true };
+                Some("sizing")
+            }
+            SizeMsg::Sizing => None,
+            SizeMsg::Exit if self.pressed => {
+                *self = SizeLoop::new();
+                Some("off")
+            }
+            SizeMsg::Exit => None,
+        }
+    }
+}
+
 /// What a page is doing, for its tab (`yap-page-view`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -523,12 +612,12 @@ fn checked_key(key: &str) -> Result<String, String> {
 /// **Show a page in the panel**, over `bounds` (`None`: kept out of sight
 /// for now): made and loaded the first time, else as it was.
 #[tauri::command]
-pub async fn page_view_show(app: AppHandle, key: String, url: String, section: Option<String>, bounds: Option<Bounds>) -> Result<(), String> {
+pub async fn page_view_show(app: AppHandle, key: String, url: String, section: Option<String>, bounds: Option<Bounds>, seq: Option<u64>) -> Result<(), String> {
     let key = checked_key(&key)?;
     let (standin, offline) = web_route();
     let load = load_url(&url, standin.as_deref(), offline)?;
     let section = section.map(|s| s.chars().take(crate::chat::pages::SECTION_MAX).collect::<String>()).unwrap_or_default();
-    imp::show(app, key, url, load, section, bounds, false).await.map(|_| ())
+    imp::show(app, key, url, load, section, bounds, false, seq).await.map(|_| ())
 }
 
 /// **A page's dialog answered** in its tab's strip (`alert`, `confirm`,
@@ -541,11 +630,29 @@ pub async fn page_view_dialog(app: AppHandle, key: String, accept: bool, text: O
 }
 
 /// **Move a page** over its stage, or keep it out of sight (`None`: its tab
-/// isn't showing, or something of Yap's covers it).
+/// isn't showing, or something of Yap's covers it); `layer` `under` while a
+/// still of it shows there ([`Layer`]); `seq` its number ([`Latest`]).
 #[tauri::command]
-pub async fn page_view_place(app: AppHandle, key: String, bounds: Option<Bounds>) -> Result<(), String> {
-    imp::place(app, checked_key(&key)?, bounds).await
+pub async fn page_view_place(app: AppHandle, key: String, bounds: Option<Bounds>, seq: Option<u64>, layer: Option<Layer>) -> Result<(), String> {
+    imp::place(app, checked_key(&key)?, bounds, seq, layer.unwrap_or_default()).await
 }
+
+/// **A still of page `key` as it's in view**, at the screen's own pixels, for
+/// its stage while the stage moves (the split dragged, Yap's window
+/// resized: [`Layer::Under`]): the PNG's bytes as they are (no base64, no
+/// JSON: it's wanted within a frame or two). On screen or under Yap's page,
+/// never a page out of sight (nothing is drawn for it).
+#[tauri::command]
+pub async fn page_view_still(app: AppHandle, key: String) -> Result<tauri::ipc::Response, String> {
+    let started = std::time::Instant::now();
+    let png = imp::still(app, checked_key(&key)?).await?;
+    tracing::debug!(bytes = png.len(), ms = started.elapsed().as_millis() as u64, "Chat: a still of a page for its stage");
+    Ok(tauri::ipc::Response::new(png))
+}
+
+/// The event Yap's window being resized by its edge goes out on (`on`: the
+/// edge pressed, `sizing`: it has started to change size, `off`: let go).
+pub const SIZING_EVENT: &str = "yap-window-sizing";
 
 /// **Close a page** (its tab closed).
 #[tauri::command]
@@ -581,12 +688,12 @@ pub async fn page_view_reload(app: AppHandle, key: String) -> Result<(), String>
 /// address, or a search on their engine: [`address`]) — the page made the
 /// first time (a new tab's), else taken there. The address it opened.
 #[tauri::command]
-pub async fn page_view_go(app: AppHandle, key: String, typed: String, bounds: Option<Bounds>) -> Result<String, String> {
+pub async fn page_view_go(app: AppHandle, key: String, typed: String, bounds: Option<Bounds>, seq: Option<u64>) -> Result<String, String> {
     let key = checked_key(&key)?;
     let url = address(&typed, &crate::config::load().web_search_browser)?;
     let (standin, offline) = web_route();
     let load = load_url(&url, standin.as_deref(), offline)?;
-    imp::go_to(app, key, url.clone(), load, bounds).await?;
+    imp::go_to(app, key, url.clone(), load, bounds, seq).await?;
     tracing::info!("Chat: the address bar took a page beside the chat somewhere");
     Ok(url)
 }
@@ -766,7 +873,7 @@ pub async fn open_hidden(url: &str, section: &str) -> Option<(usize, String)> {
     let (standin, offline) = web_route();
     let load = load_url(url, standin.as_deref(), offline).ok()?;
     let section: String = section.chars().take(crate::chat::pages::SECTION_MAX).collect();
-    match imp::show(app, key_of(url), url.to_string(), load, section, None, true).await {
+    match imp::show(app, key_of(url), url.to_string(), load, section, None, true, None).await {
         Ok(closed) => closed,
         Err(e) => {
             tracing::debug!("A page brought up wasn't made out of sight: {e}");
@@ -912,6 +1019,42 @@ pub async fn e2e_page_views(app: AppHandle) -> Result<serde_json::Value, String>
     imp::list(app).await
 }
 
+/// Test mode: Yap's window resized by its edge, as Windows tells it
+/// (`enter`, `sizing`, `exit`: [`SizeMsg`]) — a real one takes the mouse —
+/// `sizing` resizing the window to `width` × `height` (physical px) first.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn e2e_window_sizing(app: AppHandle, msg: String, width: Option<u32>, height: Option<u32>) -> Result<(), String> {
+    use tauri::Manager;
+    if !crate::shell::e2e::active() {
+        return Err("Only in e2e test mode".into());
+    }
+    let m = match msg.as_str() {
+        "enter" => SizeMsg::Enter,
+        "sizing" => SizeMsg::Sizing,
+        "exit" => SizeMsg::Exit,
+        _ => return Err("enter, sizing or exit".into()),
+    };
+    imp::e2e_size_msg(app.clone(), m).await?;
+    if let (Some(w), Some(h)) = (width, height) {
+        let window = app.get_webview_window("settings").ok_or("Yap's window isn't there.")?;
+        window.set_size(tauri::PhysicalSize::new(w, h)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Test mode: **Yap's page as it's on screen, its pages' own windows in it**
+/// (what CDP's shots of Yap's page leave out): Yap's window drawn whole by
+/// Windows (`PrintWindow`, full content), its webview's part, as a PNG.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn e2e_window_picture(app: AppHandle) -> Result<tauri::ipc::Response, String> {
+    if !crate::shell::e2e::active() {
+        return Err("Only in e2e test mode".into());
+    }
+    imp::window_picture(app).await.map(tauri::ipc::Response::new)
+}
+
 /// Test mode: "Ask Yap about this" on what's selected in the page (its menu
 /// never shows in a test run).
 #[cfg(debug_assertions)]
@@ -943,14 +1086,15 @@ mod imp {
         Reload,
     }
 
-    pub async fn show(_: AppHandle, _: String, _: String, _: String, _: String, _: Option<Bounds>, _: bool) -> Result<Option<(usize, String)>, String> {
+    #[allow(clippy::too_many_arguments)]
+    pub async fn show(_: AppHandle, _: String, _: String, _: String, _: String, _: Option<Bounds>, _: bool, _: Option<u64>) -> Result<Option<(usize, String)>, String> {
         Err(NO.into())
     }
     pub async fn answer_dialog(_: AppHandle, _: String, _: bool, _: Option<String>) -> Result<(), String> {
         Ok(())
     }
     pub async fn dismiss_dialog(_: AppHandle, _: String) {}
-    pub async fn go_to(_: AppHandle, _: String, _: String, _: String, _: Option<Bounds>) -> Result<(), String> {
+    pub async fn go_to(_: AppHandle, _: String, _: String, _: String, _: Option<Bounds>, _: Option<u64>) -> Result<(), String> {
         Err(NO.into())
     }
     pub async fn clear_data(_: AppHandle) -> Result<(), String> {
@@ -959,8 +1103,19 @@ mod imp {
     pub async fn user_data_folder(_: AppHandle) -> Option<std::path::PathBuf> {
         None
     }
-    pub async fn place(_: AppHandle, _: String, _: Option<Bounds>) -> Result<(), String> {
+    pub async fn place(_: AppHandle, _: String, _: Option<Bounds>, _: Option<u64>, _: super::Layer) -> Result<(), String> {
         Ok(())
+    }
+    pub async fn still(_: AppHandle, _: String) -> Result<Vec<u8>, String> {
+        Err(NO.into())
+    }
+    #[cfg(debug_assertions)]
+    pub async fn e2e_size_msg(_: AppHandle, _: super::SizeMsg) -> Result<(), String> {
+        Ok(())
+    }
+    #[cfg(debug_assertions)]
+    pub async fn window_picture(_: AppHandle) -> Result<Vec<u8>, String> {
+        Err(NO.into())
     }
     pub async fn close(_: AppHandle, _: Option<String>) -> Result<(), String> {
         Ok(())
@@ -1025,22 +1180,23 @@ mod win {
         HistoryChangedEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler, NewWindowRequestedEventHandler,
         PermissionRequestedEventHandler, ProcessFailedEventHandler, ScriptDialogOpeningEventHandler, WebResourceRequestedEventHandler, ZoomFactorChangedEventHandler,
     };
-    use windows::core::{w, Interface, BOOL, HSTRING, PWSTR};
+    use windows::core::{w, Interface, BOOL, HSTRING, PCWSTR, PWSTR};
     use windows::Win32::Foundation::{HGLOBAL, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows::Win32::Graphics::Gdi::{GetStockObject, HBRUSH, WHITE_BRUSH};
     use windows::Win32::System::Com::StructuredStorage::CreateStreamOnHGlobal;
     use windows::Win32::System::Com::{IStream, STREAM_SEEK_SET};
     use windows::Win32::System::Threading::GetCurrentProcessId;
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetKeyState, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT};
+    use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId, RegisterClassExW, SetWindowPos, ShowWindow, GWLP_HINSTANCE,
-        HWND_BOTTOM, HWND_TOP, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WINDOW_EX_STYLE, WNDCLASSEXW, WS_CHILD, WS_CLIPCHILDREN,
-        WS_CLIPSIBLINGS,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, FindWindowExW, GetForegroundWindow, GetParent, GetWindowLongPtrW, GetWindowThreadProcessId, RegisterClassExW, SetWindowPos, ShowWindow,
+        GWLP_HINSTANCE, HWND_BOTTOM, HWND_TOP, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WINDOW_EX_STYLE, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_SIZING, WNDCLASSEXW, WS_CHILD,
+        WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
     };
 
     use super::{
-        error_words, evict, may_navigate, menu_keep, next_tab, refused_request, section_script, shown_url, Bounds, ViewState, DIALOG_EVENT, DRAW, EVENT, PROFILE, QUOTE_EVENT, SETTLE,
-        SHOT_TIMEOUT, SNAP_H, SNAP_W,
+        error_words, evict, may_navigate, menu_keep, next_tab, refused_request, section_script, shown_url, Bounds, Latest, Layer, SizeLoop, SizeMsg, ViewState, DIALOG_EVENT, DRAW, EVENT,
+        PROFILE, QUOTE_EVENT, SETTLE, SHOT_TIMEOUT, SIZING_EVENT, SNAP_H, SNAP_W,
     };
 
     type Done<T> = tokio::sync::oneshot::Sender<Result<T, String>>;
@@ -1142,6 +1298,30 @@ mod win {
         /// person's own (Ctrl+wheel), and the width is theirs again.
         width: Option<u32>,
         zoom: f64,
+        /// The newest place applied ([`Latest`]), and its layer ([`Layer`]).
+        latest: Latest,
+        layer: Layer,
+    }
+
+    /// **Where [`put`] puts a host**: over the stage in sight, under Yap's
+    /// own page at the stage (a still of it shows there: [`Layer::Under`]),
+    /// or a shot's page under Yap's page at the window's top left (its size
+    /// never the stage's).
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum At {
+        Top,
+        Under,
+        Snap,
+    }
+
+    impl At {
+        fn of(snap: bool, layer: Layer) -> At {
+            match (snap, layer) {
+                (true, _) => At::Snap,
+                (false, Layer::Top) => At::Top,
+                (false, Layer::Under) => At::Under,
+            }
+        }
     }
 
     thread_local! {
@@ -1152,6 +1332,9 @@ mod win {
         /// Yap's WebView2 environment (the main window's) and its controller.
         static ENV: RefCell<Option<(ICoreWebView2Environment, ICoreWebView2Controller)>> = const { RefCell::new(None) };
         static CLASS: Cell<bool> = const { Cell::new(false) };
+        /// Yap's window watched for being resized by its edge ([`sizing_proc`]).
+        static WATCHED: Cell<bool> = const { Cell::new(false) };
+        static SIZE_LOOP: Cell<SizeLoop> = const { Cell::new(SizeLoop::new()) };
         static TICK: Cell<u64> = const { Cell::new(0) };
         /// The size pages last had on screen (physical pixels): a page out of
         /// sight is laid out at it (`put`).
@@ -1271,6 +1454,11 @@ mod win {
             let _ = unsafe { RegisterClassExW(&class) };
             CLASS.with(|c| c.set(true));
         }
+        if !WATCHED.with(Cell::get) {
+            WATCHED.with(|c| c.set(true));
+            // (Never taken off: it lives as long as Yap's window, and does nothing without a page.)
+            let _ = unsafe { SetWindowSubclass(parent, Some(sizing_proc), SIZING_SUBCLASS, 0) };
+        }
         unsafe {
             CreateWindowExW(
                 WINDOW_EX_STYLE(0),
@@ -1290,6 +1478,49 @@ mod win {
         .map_err(|e| format!("Yap couldn't make room for the page: {e}"))
     }
 
+    /// [`sizing_proc`]'s id among the subclasses of Yap's window.
+    const SIZING_SUBCLASS: usize = 0x59_6150;
+
+    /// **Yap's window resized by its edge** (Windows' size-move loop): told to
+    /// Yap's page as it goes ([`SizeLoop`], [`SIZING_EVENT`]), so a page
+    /// beside the chat shows a still of itself in its place until it's let
+    /// go (PageTab.svelte) — its own window can't keep up with the layout
+    /// around it.
+    unsafe extern "system" fn sizing_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _: usize, _: usize) -> LRESULT {
+        match msg {
+            WM_ENTERSIZEMOVE => size_msg(SizeMsg::Enter),
+            WM_SIZING => size_msg(SizeMsg::Sizing),
+            WM_EXITSIZEMOVE => size_msg(SizeMsg::Exit),
+            _ => {}
+        }
+        unsafe { DefSubclassProc(hwnd, msg, wp, lp) }
+    }
+
+    /// Message `m` of the size-move loop: told to Yap's page if it says something ([`SizeLoop`]).
+    fn size_msg(m: SizeMsg) {
+        let mut l = SIZE_LOOP.with(Cell::get);
+        let told = l.on(m);
+        SIZE_LOOP.with(|c| c.set(l));
+        if let (Some(phase), Some(app)) = (told, super::APP.get()) {
+            let _ = app.emit_to("settings", SIZING_EVENT, serde_json::json!({ "phase": phase }));
+        }
+    }
+
+    /// Test mode: the size-move loop's message `m`, as Windows would send it.
+    #[cfg(debug_assertions)]
+    pub async fn e2e_size_msg(app: AppHandle, m: SizeMsg) -> Result<(), String> {
+        main_thread(&app, move |_| size_msg(m)).await
+    }
+
+    /// Tauri's window over the edges of Yap's (an undecorated window's
+    /// resizing edges, `TAURI_DRAG_RESIZE_BORDERS`): a page in sight goes
+    /// just under it, so the window's edge still resizes it where the page
+    /// reaches it; at the top where there's none.
+    fn under_the_edges(host: HWND) -> HWND {
+        let Ok(parent) = (unsafe { GetParent(host) }) else { return HWND_TOP };
+        unsafe { FindWindowExW(Some(parent), None, w!("TAURI_DRAG_RESIZE_BORDERS"), PCWSTR::null()) }.unwrap_or(HWND_TOP)
+    }
+
     /// Where Yap's own page starts in its window (its webview's bounds: the
     /// page measures from there).
     fn page_origin() -> (i32, i32) {
@@ -1306,22 +1537,25 @@ mod win {
     /// ([`STAGE`]), so a page opened out of sight, or scrolled while it's
     /// there, is the page the person sees when its tab comes up (and the
     /// model's shot of it is that view).
-    fn put(host: HWND, controller: Option<&ICoreWebView2Controller>, bounds: Option<Bounds>, snap: bool) {
+    fn put(host: HWND, controller: Option<&ICoreWebView2Controller>, bounds: Option<Bounds>, at: At) {
         unsafe {
             match bounds {
                 Some(b) => {
                     let (w, h) = (b.w.max(1), b.h.max(1));
-                    if !snap {
+                    if at != At::Snap {
                         STAGE.with(|s| s.set((w, h)));
                     }
-                    // A shot's page sits under Yap's own page: drawn, never seen.
-                    let z = if snap { HWND_BOTTOM } else { HWND_TOP };
-                    let (ox, oy) = if snap { (0, 0) } else { page_origin() };
+                    // A shot's page, and one whose still shows in its place,
+                    // sit under Yap's own page: drawn, never seen.
+                    let z = if at == At::Top { under_the_edges(host) } else { HWND_BOTTOM };
+                    let (ox, oy) = if at == At::Snap { (0, 0) } else { page_origin() };
                     let _ = SetWindowPos(host, Some(z), b.x + ox, b.y + oy, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
                     if let Some(c) = controller {
                         let _ = c.SetBounds(RECT { left: 0, top: 0, right: w, bottom: h });
                         fit_width(host, c, w);
                         let _ = c.SetIsVisible(true);
+                        // Its popups (a list's options, a tooltip) open where it is now.
+                        let _ = c.NotifyParentWindowPositionChanged();
                     }
                 }
                 None => {
@@ -1449,7 +1683,8 @@ mod win {
 
     /// `rust`: a page Yap brought up itself (in front at once), else one the
     /// view shows.
-    pub async fn show(app: AppHandle, key: String, url: String, load: String, section: String, bounds: Option<Bounds>, rust: bool) -> Result<Option<(usize, String)>, String> {
+    #[allow(clippy::too_many_arguments)]
+    pub async fn show(app: AppHandle, key: String, url: String, load: String, section: String, bounds: Option<Bounds>, rust: bool, seq: Option<u64>) -> Result<Option<(usize, String)>, String> {
         let a = app.clone();
         main_thread(&app, move |root| {
             if rust {
@@ -1457,7 +1692,7 @@ mod win {
             } else {
                 shown_front(&key);
             }
-            make_or_place(&a, root, key, url, load, section, bounds, None)
+            make_or_place(&a, root, key, url, load, section, bounds, None, seq)
         })
         .await?
     }
@@ -1475,12 +1710,19 @@ mod win {
         section: String,
         bounds: Option<Bounds>,
         snap: Option<Done<Vec<u8>>>,
+        seq: Option<u64>,
     ) -> Result<Option<(usize, String)>, String> {
         if let Some((host, controller, core)) = handles(&key) {
+            let mut placed = false;
             let changed = VIEWS.with(|v| {
                 let mut v = v.borrow_mut();
                 let view = v.iter_mut().find(|x| x.key == key)?;
-                view.bounds = bounds;
+                // (A place the view sent after this one, already here, stays.)
+                if view.latest.take(seq) {
+                    view.bounds = bounds;
+                    view.layer = Layer::Top;
+                    placed = true;
+                }
                 view.used = tick();
                 // The same tab, another address (a new answer's page under the
                 // same key never happens; a section asked again does).
@@ -1491,7 +1733,9 @@ mod win {
                     view.scrolled = false;
                 })
             });
-            put(host, controller.as_ref(), bounds, false);
+            if placed {
+                put(host, controller.as_ref(), bounds, At::Top);
+            }
             match (changed, core) {
                 (Some(()), Some(core)) => unsafe {
                     let _ = core.Navigate(&HSTRING::from(load.as_str()));
@@ -1555,9 +1799,15 @@ mod win {
                 done: 0,
                 width: None,
                 zoom: 1.0,
+                latest: {
+                    let mut l = Latest::default();
+                    l.take(seq);
+                    l
+                },
+                layer: Layer::Top,
             })
         });
-        put(host, None, bounds, is_snap);
+        put(host, None, bounds, At::of(is_snap, Layer::Top));
         let made = || -> windows::core::Result<()> {
             let env10: ICoreWebView2Environment10 = env.cast()?;
             let opts = unsafe { env10.CreateCoreWebView2ControllerOptions()? };
@@ -1608,8 +1858,8 @@ mod win {
     /// Its controller made: set up (no IPC, its rules, its menu), placed and
     /// loaded.
     fn ready(app: &AppHandle, key: &str, env: &ICoreWebView2Environment, controller: ICoreWebView2Controller) {
-        let Some((host, bounds, load, snap)) =
-            VIEWS.with(|v| v.borrow().iter().find(|x| x.key == key).map(|x| (x.host, x.bounds, x.load.clone(), x.snap.is_some())))
+        let Some((host, bounds, load, snap, layer)) =
+            VIEWS.with(|v| v.borrow().iter().find(|x| x.key == key).map(|x| (x.host, x.bounds, x.load.clone(), x.snap.is_some(), x.layer)))
         else {
             // Closed meanwhile.
             unsafe {
@@ -1633,7 +1883,7 @@ mod win {
                 x.core = Some(core.clone());
             }
         });
-        put(host, Some(&controller), bounds, snap);
+        put(host, Some(&controller), bounds, At::of(snap, layer));
         unsafe {
             let _ = core.Navigate(&HSTRING::from(load.as_str()));
         }
@@ -2115,20 +2365,49 @@ mod win {
         Ok(out)
     }
 
-    pub async fn place(app: AppHandle, key: String, bounds: Option<Bounds>) -> Result<(), String> {
+    pub async fn place(app: AppHandle, key: String, bounds: Option<Bounds>, seq: Option<u64>, layer: Layer) -> Result<(), String> {
         main_thread(&app, move |_| {
             let Some((host, controller, _)) = handles(&key) else { return };
-            VIEWS.with(|v| {
-                if let Some(x) = v.borrow_mut().iter_mut().find(|x| x.key == key) {
-                    x.bounds = bounds;
-                    if bounds.is_some() {
-                        x.used = tick();
-                    }
+            let newest = VIEWS.with(|v| {
+                let mut v = v.borrow_mut();
+                let Some(x) = v.iter_mut().find(|x| x.key == key) else { return false };
+                // An older place than one already here: dropped (the newest wins).
+                if !x.latest.take(seq) {
+                    return false;
                 }
+                x.bounds = bounds;
+                x.layer = layer;
+                if bounds.is_some() {
+                    x.used = tick();
+                }
+                true
             });
-            put(host, controller.as_ref(), bounds, false);
+            if newest {
+                put(host, controller.as_ref(), bounds, At::of(false, layer));
+            }
         })
         .await
+    }
+
+    /// **A still of page `key` for its stage** (`page_view_still`): what's in
+    /// view, on screen or under Yap's page; never a page out of sight.
+    pub async fn still(app: AppHandle, key: String) -> Result<Vec<u8>, String> {
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<Vec<u8>, String>>();
+        main_thread(&app, move |_| {
+            let shown = VIEWS.with(|v| v.borrow().iter().find(|x| x.key == key).map(|x| (x.bounds.is_some(), x.core.clone())));
+            let Some((true, Some(core))) = shown else { return Err("That page isn't on screen.".to_string()) };
+            capture(
+                &core,
+                Box::new(move |res| {
+                    let _ = tx.send(res);
+                }),
+            )
+        })
+        .await??;
+        match tokio::time::timeout(SHOT_TIMEOUT, rx).await {
+            Ok(Ok(res)) => res,
+            _ => Err("The still didn't come out in time.".into()),
+        }
     }
 
     /// Close page `key`: its controller and its host.
@@ -2199,7 +2478,7 @@ mod win {
     /// **The address bar's page**: page `key` taken to `load` (its address
     /// `url` from now on: a tab shown again asks for it), or made there the
     /// first time (a new tab's).
-    pub async fn go_to(app: AppHandle, key: String, url: String, load: String, bounds: Option<Bounds>) -> Result<(), String> {
+    pub async fn go_to(app: AppHandle, key: String, url: String, load: String, bounds: Option<Bounds>, seq: Option<u64>) -> Result<(), String> {
         let a = app.clone();
         main_thread(&app, move |root| {
             // The tab the person typed in: in front.
@@ -2211,8 +2490,9 @@ mod win {
                 view.load = load.clone();
                 view.section.clear();
                 view.scrolled = true;
-                if bounds.is_some() {
+                if bounds.is_some() && view.latest.take(seq) {
                     view.bounds = bounds;
+                    view.layer = Layer::Top;
                     view.used = tick();
                 }
                 Some(view.core.clone())
@@ -2221,7 +2501,7 @@ mod win {
                 Some(Some(core)) => unsafe { core.Navigate(&HSTRING::from(load.as_str())) }.map_err(|e| e.message()),
                 // Still being made: it loads the new address when it's ready.
                 Some(None) => Ok(()),
-                None => make_or_place(&a, root, key, url, load, String::new(), bounds, None).map(|_| ()),
+                None => make_or_place(&a, root, key, url, load, String::new(), bounds, None, seq).map(|_| ()),
             }
         })
         .await?
@@ -2251,15 +2531,16 @@ mod win {
                 return Err("That page isn't open.".to_string());
             }
             pick_front(&key);
-            let on_screen = VIEWS.with(|v| v.borrow().iter().find(|x| x.bounds.is_some() && x.key != key && x.snap.is_none() && !x.key.starts_with("snap:")).map(|x| (x.key.clone(), x.host, x.controller.clone(), x.bounds)));
-            let moved = on_screen.as_ref().and_then(|(_, _, _, b)| *b);
-            if let Some((old, host, controller, _)) = on_screen {
+            let on_screen = VIEWS.with(|v| v.borrow().iter().find(|x| x.bounds.is_some() && x.key != key && x.snap.is_none() && !x.key.starts_with("snap:")).map(|x| (x.key.clone(), x.host, x.controller.clone(), x.bounds, x.layer)));
+            let moved = on_screen.as_ref().and_then(|(_, _, _, b, _)| *b);
+            let layer = on_screen.as_ref().map_or(Layer::Top, |o| o.4);
+            if let Some((old, host, controller, _, _)) = on_screen {
                 VIEWS.with(|v| {
                     if let Some(x) = v.borrow_mut().iter_mut().find(|x| x.key == old) {
                         x.bounds = None;
                     }
                 });
-                put(host, controller.as_ref(), None, false);
+                put(host, controller.as_ref(), None, At::Top);
             }
             let target = VIEWS.with(|v| {
                 let mut v = v.borrow_mut();
@@ -2267,11 +2548,12 @@ mod win {
                 x.used = tick();
                 if moved.is_some() {
                     x.bounds = moved;
+                    x.layer = layer;
                 }
                 Some((x.host, x.controller.clone(), x.bounds))
             });
             if let (Some((host, controller, bounds)), Some(_)) = (target, moved) {
-                put(host, controller.as_ref(), bounds, false);
+                put(host, controller.as_ref(), bounds, At::of(false, layer));
             }
             Ok(())
         })
@@ -2350,6 +2632,8 @@ mod win {
                     done: 0,
                     width: None,
                     zoom: 1.0,
+                    latest: Latest::default(),
+                    layer: Layer::Top,
                 })
             });
             let opts = unsafe { env10.CreateCoreWebView2ControllerOptions() }.map_err(|e| e.message())?;
@@ -2445,7 +2729,7 @@ mod win {
             let on_screen = VIEWS.with(|v| v.borrow().iter().find(|x| x.key == k).is_some_and(|x| x.bounds.is_some()));
             if !on_screen {
                 let (w, h) = STAGE.with(Cell::get);
-                put(host, Some(&controller), Some(Bounds { x: 0, y: 0, w, h }), true);
+                put(host, Some(&controller), Some(Bounds { x: 0, y: 0, w, h }), At::Snap);
             }
             Ok(!on_screen)
         })
@@ -2459,7 +2743,7 @@ mod win {
             let _ = main_thread(&app, move |_| {
                 let still_hidden = VIEWS.with(|v| v.borrow().iter().find(|x| x.key == key).map(|x| (x.bounds.is_none(), x.host, x.controller.clone())));
                 if let Some((true, host, controller)) = still_hidden {
-                    put(host, controller.as_ref(), None, false);
+                    put(host, controller.as_ref(), None, At::Top);
                 }
             })
             .await;
@@ -2492,7 +2776,7 @@ mod win {
             }
             let (w, h) = STAGE.with(Cell::get);
             let finer = |n: i32| (f64::from(n) * scale).round() as i32;
-            put(host, Some(&controller), Some(Bounds { x: 0, y: 0, w: finer(w), h: finer(h) }), true);
+            put(host, Some(&controller), Some(Bounds { x: 0, y: 0, w: finer(w), h: finer(h) }), At::Snap);
             Ok(Some(was))
         })
         .await??;
@@ -2508,8 +2792,8 @@ mod win {
             if let Some(c3) = controller.as_ref().and_then(|c| c.cast::<ICoreWebView2Controller3>().ok()) {
                 let _ = unsafe { c3.SetRasterizationScale(was) };
             }
-            let bounds = VIEWS.with(|v| v.borrow().iter().find(|x| x.key == key).and_then(|x| x.bounds));
-            put(host, controller.as_ref(), bounds, false);
+            let (bounds, layer) = VIEWS.with(|v| v.borrow().iter().find(|x| x.key == key).map_or((None, Layer::Top), |x| (x.bounds, x.layer)));
+            put(host, controller.as_ref(), bounds, At::of(false, layer));
         })
         .await;
         tracing::info!(scale, ok = shot.is_ok(), "Chat: a page out of sight drawn finer for a zoom");
@@ -2783,11 +3067,124 @@ mod win {
             serde_json::Value::Array(VIEWS.with(|v| {
                 v.borrow()
                     .iter()
-                    .map(|x| serde_json::json!({ "key": x.key, "tab": x.id, "url": x.url, "load": x.load, "onScreen": x.bounds.is_some(), "loaded": x.loaded, "made": x.controller.is_some(), "width": x.width, "zoom": x.zoom }))
+                    .map(|x| {
+                        let (rect, shown, over_yap, siblings) = where_it_is(x.host);
+                        serde_json::json!({
+                            "key": x.key, "tab": x.id, "url": x.url, "load": x.load, "onScreen": x.bounds.is_some(), "loaded": x.loaded,
+                            "made": x.controller.is_some(), "width": x.width, "zoom": x.zoom,
+                            // Where it was put, its layer, and where its window really is (as `Bounds` count), shown and over Yap's page.
+                            "bounds": x.bounds, "layer": x.layer, "rect": rect, "shown": shown, "overYap": over_yap, "siblings": siblings,
+                        })
+                    })
                     .collect()
             }))
         })
         .await
+    }
+
+    /// Test mode: Yap's window drawn whole by Windows (`PrintWindow`, full
+    /// content: its pages' own windows in it), its webview's part, as a PNG.
+    #[cfg(debug_assertions)]
+    pub async fn window_picture(app: AppHandle) -> Result<Vec<u8>, String> {
+        use windows::Win32::Graphics::Gdi::{
+            CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HDC,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+        #[link(name = "user32")]
+        unsafe extern "system" {
+            fn PrintWindow(hwnd: HWND, hdc: HDC, flags: u32) -> BOOL;
+        }
+        // PW_CLIENTONLY | PW_RENDERFULLCONTENT
+        const FLAGS: u32 = 0x1 | 0x2;
+        let parent = parent(&app)?.0 as isize;
+        let origin = main_thread(&app, |_| page_origin()).await?;
+        let (w, h, bgra) = tauri::async_runtime::spawn_blocking(move || unsafe {
+            let hwnd = HWND(parent as *mut _);
+            let mut r = RECT::default();
+            GetClientRect(hwnd, &mut r).map_err(|e| e.message())?;
+            let (w, h) = (r.right - r.left, r.bottom - r.top);
+            let screen = GetDC(None);
+            let dc = CreateCompatibleDC(Some(screen));
+            let bmp = CreateCompatibleBitmap(screen, w, h);
+            let old = SelectObject(dc, bmp.into());
+            let printed = PrintWindow(hwnd, dc, FLAGS).as_bool();
+            let mut info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: w,
+                    biHeight: -h,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut buf = vec![0u8; (w * h * 4) as usize];
+            let rows = GetDIBits(dc, bmp, 0, h as u32, Some(buf.as_mut_ptr().cast()), &mut info, DIB_RGB_COLORS);
+            SelectObject(dc, old);
+            let _ = DeleteObject(bmp.into());
+            let _ = DeleteDC(dc);
+            ReleaseDC(None, screen);
+            if !printed || rows == 0 {
+                return Err("Windows didn't draw Yap's window.".to_string());
+            }
+            Ok((w, h, buf))
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        // Its webview's part, as RGBA.
+        let (ox, oy) = (origin.0.clamp(0, w), origin.1.clamp(0, h));
+        let (cw, ch) = (w - ox, h - oy);
+        let mut rgba = Vec::with_capacity((cw * ch * 4) as usize);
+        for y in oy..h {
+            for x in ox..w {
+                let i = ((y * w + x) * 4) as usize;
+                rgba.extend_from_slice(&[bgra[i + 2], bgra[i + 1], bgra[i], 255]);
+            }
+        }
+        crate::snip::images::encode_png(&rgba, cw as u32, ch as u32, true)
+    }
+
+    /// Test mode: where host `host` really is (its window's rect in `Bounds`'
+    /// terms), whether it's shown, whether it's over Yap's own page (its
+    /// webview's window below it among the siblings), and the siblings'
+    /// classes top to bottom (`*` this host).
+    #[cfg(debug_assertions)]
+    fn where_it_is(host: HWND) -> (Option<Bounds>, bool, bool, Vec<String>) {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::Graphics::Gdi::ScreenToClient;
+        use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetWindow, GetWindowRect, IsWindowVisible, GW_CHILD, GW_HWNDNEXT};
+        unsafe {
+            let shown = IsWindowVisible(host).as_bool();
+            let Ok(parent) = GetParent(host) else { return (None, shown, false, Vec::new()) };
+            let mut r = RECT::default();
+            if GetWindowRect(host, &mut r).is_err() {
+                return (None, shown, false, Vec::new());
+            }
+            let mut tl = POINT { x: r.left, y: r.top };
+            let _ = ScreenToClient(parent, &mut tl);
+            let (ox, oy) = page_origin();
+            let rect = Bounds { x: tl.x - ox, y: tl.y - oy, w: r.right - r.left, h: r.bottom - r.top };
+            // The siblings top to bottom: is Yap's own page's window below this one?
+            let mut siblings = Vec::new();
+            let (mut mine, mut yaps) = (None, None);
+            let mut next = GetWindow(parent, GW_CHILD).ok();
+            while let Some(h) = next {
+                let mut buf = [0u16; 64];
+                let n = GetClassNameW(h, &mut buf);
+                let class = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+                if h == host {
+                    mine = Some(siblings.len());
+                } else if yaps.is_none() && !class.starts_with("YapPageHost") && !class.starts_with("TAURI_DRAG") && IsWindowVisible(h).as_bool() {
+                    yaps = Some(siblings.len());
+                }
+                siblings.push(if h == host { format!("*{class}") } else { class });
+                next = GetWindow(h, GW_HWNDNEXT).ok();
+            }
+            let over = matches!((mine, yaps), (Some(m), Some(y)) if m < y);
+            (Some(rect), shown, over, siblings)
+        }
     }
 
 }
@@ -2797,6 +3194,61 @@ mod tests {
     use super::*;
 
     const STANDIN: &str = "http://127.0.0.1:5555/standin";
+
+    #[test]
+    fn the_newest_place_wins_however_late_an_older_one_comes() {
+        let mut l = Latest::default();
+        // A drag's places, every frame: in order, each applied.
+        assert!(l.take(Some(100)));
+        assert!(l.take(Some(101)));
+        assert!(l.take(Some(105)));
+        // One sent before the newest, there after it: dropped.
+        assert!(!l.take(Some(103)));
+        // The same one twice: once.
+        assert!(!l.take(Some(105)));
+        // A tab shown again sends from where the view's clock is now: newer.
+        assert!(l.take(Some(2_000)));
+        // An old tab's "out of sight", there after its new tab's show: dropped.
+        assert!(!l.take(Some(1_999)));
+        // One with no number (a caller that doesn't number them) always goes, and changes nothing.
+        assert!(l.take(None));
+        assert!(!l.take(Some(1_500)));
+        assert!(l.take(Some(2_001)));
+        // A page just made took its first place's number.
+        let mut made = Latest::default();
+        assert!(made.take(Some(7)));
+        assert!(!made.take(Some(6)));
+    }
+
+    #[test]
+    fn a_page_is_told_when_yaps_window_is_resized_by_its_edge_never_for_a_move() {
+        let mut l = SizeLoop::new();
+        // Its edge pressed: a still made ready…
+        assert_eq!(l.on(SizeMsg::Enter), Some("on"));
+        // …the first change of size: the still in the page's place; nothing for the rest.
+        assert_eq!(l.on(SizeMsg::Sizing), Some("sizing"));
+        assert_eq!(l.on(SizeMsg::Sizing), None);
+        assert_eq!(l.on(SizeMsg::Sizing), None);
+        // Let go.
+        assert_eq!(l.on(SizeMsg::Exit), Some("off"));
+        assert_eq!(l, SizeLoop::new());
+        // A move (its title bar): pressed, never sized, let go.
+        assert_eq!(l.on(SizeMsg::Enter), Some("on"));
+        assert_eq!(l.on(SizeMsg::Exit), Some("off"));
+        // A stray end, or a size Yap saw only from its middle: told once, and ended.
+        assert_eq!(l.on(SizeMsg::Exit), None);
+        assert_eq!(l.on(SizeMsg::Sizing), Some("sizing"));
+        assert_eq!(l.on(SizeMsg::Sizing), None);
+        assert_eq!(l.on(SizeMsg::Exit), Some("off"));
+    }
+
+    #[test]
+    fn a_place_says_its_layer_and_an_older_view_says_none() {
+        // The view's `layer`: "top" (in sight) or "under" (a still in its place).
+        assert_eq!(serde_json::from_str::<Layer>("\"under\"").unwrap(), Layer::Under);
+        assert_eq!(serde_json::from_str::<Layer>("\"top\"").unwrap(), Layer::Top);
+        assert_eq!(Layer::default(), Layer::Top);
+    }
 
     #[test]
     fn a_shortcut_on_a_key_that_types_is_watched_for_while_a_page_has_the_focus() {

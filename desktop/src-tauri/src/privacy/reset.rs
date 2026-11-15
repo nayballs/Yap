@@ -177,7 +177,7 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: "Chats",
         says: "Every chat, archived ones too, with its screenshots and the files attached to it. Documents Chat wrote stay in Notes",
-        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "chat-images/", "chat-files/", "claude_sessions.json", "connector_chats.json", "(memory.json)", "(search-index/)"],
+        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "chat-images/", "chat-files/", "chat-made/", "claude_sessions.json", "connector_chats.json", "(memory.json)", "(search-index/)"],
         stores: &["chats", "claudeSessions", "memory"],
     },
     About {
@@ -554,6 +554,8 @@ const STORES: &[(&str, Rule)] = &[
     ("chat-images/", Choice::chat_images),
     // (Files attached to Chat's questions: Chat's alone, as its screenshots are.)
     ("chat-files/", Choice::chat_images),
+    // What chats made (chat/made.rs): every visual is a chat's (Ask threads make none).
+    ("chat-made/", Choice::chat_images),
     ("claude_sessions.json", Choice::claude_sessions),
     ("connector_chats.json", Choice::connector_chats),
     ("memory.json", Choice::memory),

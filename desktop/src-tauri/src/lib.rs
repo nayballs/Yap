@@ -264,6 +264,12 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("yapsnip", |_ctx, request, responder| {
             tauri::async_runtime::spawn_blocking(move || responder.respond(snip::serve(&request)));
         })
+        // What Chat made (chat/made.rs): a visual's own document in a sandboxed
+        // frame, its policy in the response (chat/made/serve.rs), and the
+        // chart libraries of its allow-list. Never any of Yap's commands.
+        .register_asynchronous_uri_scheme_protocol(chat::made::serve::SCHEME, |_ctx, request, responder| {
+            tauri::async_runtime::spawn(async move { responder.respond(chat::made::serve::serve(&request).await) });
+        })
         .invoke_handler(tauri::generate_handler![
             dictation::commands::toggle_recording,
             dictation::commands::dictation_key,
@@ -309,6 +315,7 @@ pub fn run() {
             chat::pages::view::page_view_show,
             chat::pages::view::page_view_dialog,
             chat::pages::view::page_view_place,
+            chat::pages::view::page_view_still,
             chat::pages::view::page_view_width,
             chat::pages::view::page_view_close,
             chat::pages::view::page_view_close_all,
@@ -491,6 +498,8 @@ pub fn run() {
             chat::shares::chat_file_open,
             chat::shares::chat_file_reveal,
             chat::shares::chat_file_preview,
+            // What a chat made: its visuals (chat/made.rs).
+            chat::made::chat_made_list,
             chat::documents::chat_document_save,
             chat::documents::chat_quote_set,
             chat::think::chat_think_info,
@@ -955,6 +964,10 @@ pub fn run() {
             chat::pages::view::e2e_page_views,
             #[cfg(debug_assertions)]
             chat::pages::view::e2e_page_view_ask,
+            #[cfg(debug_assertions)]
+            chat::pages::view::e2e_window_sizing,
+            #[cfg(debug_assertions)]
+            chat::pages::view::e2e_window_picture,
             #[cfg(debug_assertions)]
             chat::pages::pick::e2e_page_click,
             #[cfg(debug_assertions)]

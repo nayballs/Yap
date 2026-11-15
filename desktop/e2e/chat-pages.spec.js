@@ -988,3 +988,284 @@ test('a desktop width: the tab laid out 1280 px wide, read and seen as the deskt
   const closePanel = main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' });
   if (await closePanel.count()) await closePanel.click();
 });
+
+// ---- Resizing smoothly (15 Nov 2026) ----------------------------------------------------------
+// A fast drag of the split left the page trailing the layout: over the thread one way, a gap beside the
+// split the other, until it caught up. The page's own window followed its stage on a 150 ms check; now it
+// follows it in the frame the stage changes (the newest place wins: view.rs `Latest`), and while the stage
+// moves (the split or the list's edge held, Yap's window resized by its edge) a still of the page stands in
+// for it in the stage (drawn by Yap's own page, it moves with everything else) and the live page is laid out
+// under Yap's page; let go, it's in sight again exactly over its stage (pagePlace.js, PageTab.svelte).
+
+test('pagePlace.js: places numbered ever higher; a still ready only while recent and the page’s size; the page’s background read off its edge', async () => {
+  const { nextSeq, stillFits, edgeColour, pixelShift, STILL_FRESH_MS } = await import('../src/lib/views/chat/pagePlace.js');
+  const a = nextSeq(1_000);
+  const b = nextSeq(1_000);
+  const c = nextSeq(500);
+  expect(b).toBeGreaterThan(a);
+  expect(c).toBeGreaterThan(b);
+  expect(nextSeq(5_000)).toBe(5_000_000);
+  const still = { w: 800, h: 600, at: 10_000 };
+  expect(stillFits(still, { x: 3, y: 4, w: 800, h: 600 }, 10_000 + STILL_FRESH_MS)).toBe(true);
+  expect(stillFits(still, { x: 3, y: 4, w: 800, h: 600 }, 10_001 + STILL_FRESH_MS)).toBe(false);
+  expect(stillFits(still, { x: 3, y: 4, w: 801, h: 600 }, 10_000)).toBe(false);
+  expect(stillFits(still, null, 10_000)).toBe(false);
+  expect(stillFits(null, { x: 0, y: 0, w: 800, h: 600 }, 10_000)).toBe(false);
+  const col = (...px) => new Uint8ClampedArray(px.flatMap((p) => [...p, 255]));
+  expect(edgeColour(col([250, 250, 250], [250, 250, 250], [10, 20, 30], [250, 250, 250]))).toBe('rgb(250, 250, 250)');
+  // No colour on a third of the column: no telling.
+  expect(edgeColour(col([1, 1, 1], [2, 2, 2], [3, 3, 3], [4, 4, 4]), 'none')).toBe('none');
+  expect(pixelShift({ left: 10, top: 20 }, 1)).toEqual({ x: 0, y: 0 });
+  // 10.4 CSS px at 150 %: 15.6 device px, the window at 16: the still moved 0.4 device px with it.
+  expect(pixelShift({ left: 10.4, top: 20 }, 1.5).x * 1.5).toBeCloseTo(0.4, 6);
+});
+
+/** The stage's place in physical px, as the view measures it (PageTab.svelte `measure`). */
+const stageBounds = (main) =>
+  main.getByTestId('chat-page-stage').evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const d = window.devicePixelRatio || 1;
+    return { x: Math.round(r.left * d), y: Math.round(r.top * d), w: Math.round(r.width * d), h: Math.round(r.height * d) };
+  });
+
+/** Where the page's window really is now (`e2e_page_views`: its rect, layer, in sight over Yap's page). */
+const pageNow = async (yap, key = KEY) => (await views(yap)).find((v) => v.key === key);
+
+/**
+ * **What's on screen**: Yap's page with the page's own window in it, as Windows draws Yap's window
+ * (`e2e_window_picture`), and Yap's page alone (CDP's shot: the page's window is never in it), both at the
+ * device's pixels; kept under `name`.
+ */
+async function onScreen(main, name) {
+  const b64 = await main.evaluate(async () => {
+    const b = new Uint8Array(await window.__TAURI_INTERNALS__.invoke('e2e_window_picture'));
+    let s = '';
+    for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+    return btoa(s);
+  });
+  const screen = Buffer.from(b64, 'base64');
+  const yaps = await main.screenshot();
+  keepPng(`${name}-on-screen`, screen);
+  keepPng(`${name}-yaps-page`, yaps);
+  return { screen: readPng(screen), yaps: readPng(yaps) };
+}
+
+/**
+ * The share of the pixels of `rect` (device px; `outside`: of everything but it) where pictures `a` and `b`
+ * differ by more than `tol` on a channel.
+ */
+function differs(a, b, rect, { outside = false, tol = 24 } = {}) {
+  let n = 0;
+  let off = 0;
+  const w = Math.min(a.width, b.width);
+  const h = Math.min(a.height, b.height);
+  for (let y = 0; y < h; y += 2) {
+    for (let x = 0; x < w; x += 2) {
+      const inside = x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h;
+      if (inside === outside) continue;
+      n++;
+      const i = (y * a.width + x) * 4;
+      const j = (y * b.width + x) * 4;
+      if (Math.abs(a.data[i] - b.data[j]) > tol || Math.abs(a.data[i + 1] - b.data[j + 1]) > tol || Math.abs(a.data[i + 2] - b.data[j + 2]) > tol) off++;
+    }
+  }
+  return n ? off / n : 0;
+}
+
+/** The page's own pixels as it's in view (`page_view_still`), as a picture. */
+async function pageStill(main) {
+  const b64 = await main.evaluate(async (key) => {
+    const b = new Uint8Array(await window.__TAURI_INTERNALS__.invoke('page_view_still', { key }));
+    let s = '';
+    for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+    return btoa(s);
+  }, KEY);
+  return readPng(Buffer.from(b64, 'base64'));
+}
+
+/** Picture `p` laid over a blank one of `size` at `at` (device px): where it would be on screen. */
+function placedAt(p, at, size) {
+  const out = { width: size.width, height: size.height, data: new Uint8Array(size.width * size.height * 4) };
+  for (let y = 0; y < p.height; y++) {
+    for (let x = 0; x < p.width; x++) {
+      const X = at.x + x;
+      const Y = at.y + y;
+      if (X < 0 || Y < 0 || X >= size.width || Y >= size.height) continue;
+      const i = (y * p.width + x) * 4;
+      const j = (Y * size.width + X) * 4;
+      out.data.set(p.data.subarray(i, i + 4), j);
+    }
+  }
+  return out;
+}
+
+/** The page in sight over Yap's page, exactly over its stage, no still standing in. */
+async function expectAtRest(yap, main) {
+  await expect(main.getByTestId('chat-page-standin')).toHaveCount(0, { timeout: 5_000 });
+  await expect
+    .poll(async () => {
+      const v = await pageNow(yap);
+      return { layer: v.layer, shown: v.shown, overYap: v.overYap, rect: v.rect };
+    })
+    .toEqual({ layer: 'top', shown: true, overYap: true, rect: await stageBounds(main) });
+}
+
+test('a fast drag of the split: a still stands in for the page, the live page under Yap’s; let go, it’s exactly over its stage', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  fakeLlm.scriptChat([{ tools: [{ name: 'browser_navigate', args: { url: FORT_JOY_URL } }] }, { content: 'It’s open beside the chat.' }]);
+  await ask(main, `Bring up the treasure map page ${FORT_JOY_URL}`);
+  await expect.poll(async () => pageNow(yap), { timeout: 20_000 }).toMatchObject({ made: true, loaded: true, onScreen: true });
+  await expect(main.getByTestId('chat-page-title')).toHaveText('Fort Joy - Example Wiki', { timeout: 20_000 });
+  await expectAtRest(yap, main);
+  // On screen, at rest: Yap's page everywhere but the stage, the page's own pixels all over the stage.
+  {
+    const stage = await stageBounds(main);
+    const { screen, yaps } = await onScreen(main, 'resize-1-at-rest');
+    expect(screen.width).toBe(yaps.width);
+    expect(differs(screen, yaps, stage, { outside: true })).toBeLessThan(0.002);
+    expect(differs(screen, placedAt(await pageStill(main), stage, screen), stage)).toBeLessThan(0.01);
+  }
+
+  // How long a still takes (Rust's, at the screen's pixels, through the IPC as bytes): said in the report.
+  const took = await main.evaluate(async (key) => {
+    const out = [];
+    for (let i = 0; i < 5; i++) {
+      const t = performance.now();
+      const buf = await window.__TAURI_INTERNALS__.invoke('page_view_still', { key });
+      out.push([Math.round(performance.now() - t), buf.byteLength]);
+    }
+    return out;
+  }, KEY);
+  test.info().annotations.push({ type: 'still', description: JSON.stringify(took) });
+  expect(took.every(([, bytes]) => bytes > 1000)).toBe(true);
+
+  const standin = main.getByTestId('chat-page-standin');
+  const split = main.getByTestId('chat-split');
+  const h = await split.boundingBox();
+  const cx = h.x + h.width / 2;
+  const cy = h.y + h.height / 2;
+  // The pointer over the handle takes a still ready; pressed, it stands in for the page at once…
+  await main.mouse.move(cx, cy);
+  await main.waitForTimeout(500);
+  const t0 = Date.now();
+  await main.mouse.down();
+  await expect(standin).toBeVisible({ timeout: 2_000 });
+  test.info().annotations.push({ type: 'still shown after the press', description: `${Date.now() - t0} ms` });
+  // …and the live page goes under Yap's, laid out where the stage is.
+  await expect.poll(async () => (await pageNow(yap)).overYap).toBe(false);
+  expect((await pageNow(yap)).layer).toBe('under');
+
+  // Fast moves both ways, a frame or two apart: the live page never in sight anywhere but exactly its stage,
+  // the still at the stage's top left at the screen's own pixels, clipped to the stage.
+  const seen = [];
+  for (let i = 1; i <= 30; i++) {
+    const dx = (i % 2 ? -1 : 1) * (30 + i * 9);
+    await main.mouse.move(cx + dx, cy);
+    const [v, b, img] = await Promise.all([
+      pageNow(yap),
+      stageBounds(main),
+      standin.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const i = el.querySelector('img').getBoundingClientRect();
+        const s = el.parentElement.getBoundingClientRect();
+        return { inStage: Math.abs(r.left - s.left) < 0.5 && Math.abs(r.width - s.width) < 0.5, imgLeft: i.left - s.left, imgTop: i.top - s.top };
+      }),
+    ]);
+    seen.push({ under: !v.overYap, exact: JSON.stringify(v.rect) === JSON.stringify(b) });
+    expect(!v.overYap || JSON.stringify(v.rect) === JSON.stringify(b), `move ${i}: the page in sight away from its stage`).toBe(true);
+    expect(img.inStage).toBe(true);
+    expect(Math.abs(img.imgLeft)).toBeLessThan(1);
+    expect(Math.abs(img.imgTop)).toBeLessThan(1);
+  }
+  expect(seen.every((s) => s.under)).toBe(true);
+  // Under, it's laid out at the stage's place too (ready at its new size when it comes up).
+  await expect.poll(async () => (await pageNow(yap)).rect).toEqual(await stageBounds(main));
+  // On screen mid-drag: Yap's page alone, everywhere (the still in the stage, nothing of the page's window).
+  {
+    const stage = await stageBounds(main);
+    const { screen, yaps } = await onScreen(main, 'resize-2-mid-drag');
+    expect(differs(screen, yaps, stage, { outside: true })).toBeLessThan(0.002);
+    expect(differs(screen, yaps, stage)).toBeLessThan(0.002);
+  }
+  await main.mouse.up();
+  // Let go: in sight again, exactly over its stage, the still gone; laid out at its width.
+  await expectAtRest(yap, main);
+  const stage = await stageBounds(main);
+  {
+    // (The pointer off the handle first: its line fades in under the pointer.)
+    await main.mouse.move(cx - 300, cy);
+    await main.waitForTimeout(400);
+    const { screen, yaps } = await onScreen(main, 'resize-3-let-go');
+    expect(differs(screen, yaps, stage, { outside: true })).toBeLessThan(0.002);
+    expect(differs(screen, placedAt(await pageStill(main), stage, screen), stage)).toBeLessThan(0.01);
+  }
+  const inner = await inPage(yap, '[Math.round(innerWidth * devicePixelRatio), Math.round(innerHeight * devicePixelRatio)]');
+  expect(Math.abs(inner[0] - stage.w)).toBeLessThanOrEqual(1);
+  expect(Math.abs(inner[1] - stage.h)).toBeLessThanOrEqual(1);
+
+  // Pressed and let go at once (no still ready, none in time): the page simply follows, and ends exactly over its stage.
+  const h2 = await split.boundingBox();
+  await main.mouse.move(h2.x + h2.width / 2, cy);
+  await main.mouse.down();
+  await main.mouse.move(h2.x + h2.width / 2 - 140, cy);
+  await main.mouse.up();
+  await expectAtRest(yap, main);
+
+  // The list's edge held: likewise (the panel may not move, but nothing of the page shows out of place).
+  const listEdge = main.getByTestId('chat-list-edge');
+  if (await listEdge.isVisible()) {
+    const e = await listEdge.boundingBox();
+    await main.mouse.move(e.x + e.width / 2, cy);
+    await main.mouse.down();
+    for (let i = 1; i <= 6; i++) await main.mouse.move(e.x + e.width / 2 + i * 15, cy);
+    await main.mouse.up();
+    await expectAtRest(yap, main);
+  }
+  test.info().annotations.push({ type: 'moves', description: JSON.stringify(seen) });
+});
+
+test('Yap’s window resized by its edge: a still stands in for the page while it lasts; let go, it’s exactly over its stage', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  fakeLlm.scriptChat([{ tools: [{ name: 'browser_navigate', args: { url: FORT_JOY_URL } }] }, { content: 'It’s open beside the chat.' }]);
+  await ask(main, `Bring up the treasure map page ${FORT_JOY_URL}`);
+  await expect.poll(async () => pageNow(yap), { timeout: 20_000 }).toMatchObject({ made: true, loaded: true, onScreen: true });
+  await expectAtRest(yap, main);
+  const standin = main.getByTestId('chat-page-standin');
+  const size = await main.evaluate(() => [Math.round(innerWidth * devicePixelRatio), Math.round(innerHeight * devicePixelRatio)]);
+  const sizing = (msg, w, h) => yap.invoke('e2e_window_sizing', { msg, width: w ?? null, height: h ?? null });
+
+  // A move (its title bar: pressed, never sized): the page never leaves its place.
+  await sizing('enter');
+  await main.waitForTimeout(300);
+  await expect(standin).toHaveCount(0);
+  await sizing('exit');
+  await expectAtRest(yap, main);
+
+  // Its edge pressed (a still taken ready), then the window narrower and shorter, step by step, and back.
+  await sizing('enter');
+  await main.waitForTimeout(400);
+  try {
+    for (const [i, d] of [40, 90, 150, 220, 160, 60].entries()) {
+      await sizing('sizing', size[0] - d, size[1] - Math.round(d / 2));
+      if (i === 0) {
+        await expect(standin).toBeVisible({ timeout: 2_000 });
+        await expect.poll(async () => (await pageNow(yap)).overYap).toBe(false);
+      }
+      await main.waitForTimeout(30);
+      const v = await pageNow(yap);
+      expect(!v.overYap || JSON.stringify(v.rect) === JSON.stringify(await stageBounds(main)), `step ${i}: the page in sight away from its stage`).toBe(true);
+    }
+    // Under, laid out where the stage is.
+    await expect.poll(async () => (await pageNow(yap)).rect).toEqual(await stageBounds(main));
+  } finally {
+    await sizing('sizing', size[0], size[1]);
+    await sizing('exit');
+  }
+  // Let go: in sight again, exactly over its stage.
+  await expectAtRest(yap, main);
+  // Resized in one go (maximised, restored: no size-move loop): it follows, exactly.
+  await sizing('exit', size[0] - 120, size[1]);
+  await expectAtRest(yap, main);
+  await sizing('exit', size[0], size[1]);
+  await expectAtRest(yap, main);
+});
