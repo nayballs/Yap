@@ -65,11 +65,11 @@ const cached = (conv, path) => {
   return k.ref;
 };
 
-/** Text nodes worth looking at: not in code, a link, a button or something already a file link. */
+/** Text nodes worth looking at: not in code, a link, a button, maths or a diagram, nor already a file link. */
 function textNodes(node) {
   const out = [];
   const walk = node.ownerDocument.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
-    acceptNode: (t) => (t.parentElement?.closest('a, code, pre, button, .md-filelink') ? NodeFilter.FILTER_REJECT : /[.]/.test(t.data) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+    acceptNode: (t) => (t.parentElement?.closest('a, code, pre, button, svg, .md-filelink, .md-math, .md-math-display, .md-diagram') ? NodeFilter.FILTER_REJECT : /[.]/.test(t.data) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
   });
   while (walk.nextNode()) out.push(walk.currentNode);
   return out;

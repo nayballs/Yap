@@ -979,8 +979,9 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   `data:`, `file:` and `ftp:` stay text; a relative one, a file's path, is
   `a.md-file` with its path in `data-path` and no address: its words only,
   until a Code chat makes it a link to the file, ui/fileLinks.js and
-  [yap-code.md](./yap-code.md#file-links-and-the-file-view), 15 Nov 2026), images aren't rendered
-  (a model's `![x](url)` would make Yap fetch it), and DOMPurify then keeps
+  [yap-code.md](./yap-code.md#file-links-and-the-file-view), 15 Nov 2026), images never become an
+  `<img>` (a model's `![x](url)` would make Yap fetch it: it's a link the view
+  makes a "Show image" box of, below), and DOMPurify then keeps
   only the tags, attributes and classes the renderer makes (`PURIFY`,
   `CLASSES`; an `href` only on `a` and only web/mail, `start` only on `ol`,
   the one `input` a disabled checkbox; no `style`, no handlers, no `data-`
@@ -1033,8 +1034,10 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   isn't shown, a mark with no note stays as written; no links or ids,
   several answers share a page; before the web rule, so a note in a web
   answer keeps only its sources' links); **a markdown image** is a link to
-  the picture with no stray "!" (images stay off: "![alt](url)" reads as a
-  "!" and a link, and the "!" goes; not before a bare link). In `app.css`,
+  the picture with no stray "!": a web address's is read as a picture and
+  drawn as `a.md-link.md-image`, which the view makes a "Show image" box
+  (below); any other "![alt](url)" reads as a "!" and a link, and the "!"
+  goes (not before a bare link). In `app.css`,
   `li.task` has no bullet beside its checkbox, and a table's cells wrap
   between words only (`overflow-wrap: break-word`: under an answer's
   `anywhere`, short headers broke mid-word, "Siz e");
@@ -1072,3 +1075,105 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   (`16-chat-rich-web-answer`), notepad (`46-summary-rich-markdown`,
   `47-notes-enhanced-rich-markdown`) and meeting-summary specs. Bundle cost:
   ~134 kB minified / ~54 kB gzipped on the main chunk.
+
+  **Maths, diagrams, diffs and pictures** (15 Nov 2026, after the Claude
+  app's answers). `markdown.js` only marks them, their text as the model
+  wrote it, so a view that doesn't draw them (a toast, the bar's card, an
+  email copy) shows that text; **`ui/markdownVisuals.js`**, a Svelte action
+  on the rendered element (`use:markdownVisuals`), draws them — in Chat's
+  answers and a Code chat's (the thread, the Agent tab, its work), a
+  meeting's Ask thread, a note's summary (Notes and the notepad), the
+  notepad's Ask sheet and a document's page while Chat writes it (its
+  editor, the Preview at rest, draws maths and diagrams its own way: below).
+  - **Maths**: `$…$` / `\(…\)` → `span.md-math`, `$$…$$` / `\[…\]` →
+    `.md-math.md-math-display` (a `div` on lines of their own, breaking into
+    a paragraph as models write it; no blank line inside; unclosed stays
+    text). `$…$` only as Pandoc reads it, plus one rule (`mathAt`): no `$`
+    after a letter or digit, a non-space after the opening `$` and before
+    the closing one, no digit, letter or `$` after it, and it ends at the
+    next `$` or isn't maths — so "$5 and $10", "$5–$10", "US$5",
+    "$HOME/$USER" and "Pay $5 now; then $x^2$" (a price, then maths) read
+    right. `\$` never opens or closes. Drawn by **KaTeX** 0.18.11 (MIT,
+    pinned; the version mermaid's own range takes, so one copy) in a chunk
+    of its own (`ui/maths.js` with its CSS and fonts), loaded the first
+    time maths shows: no trust (`\href`, `\url`, `\includegraphics` off),
+    `maxSize` / `maxExpand` limits, at most `MATH_MAX` (4,000) characters,
+    HTML and MathML (for a screen reader), then sanitised again
+    (`core/visualSafety.js` `cleanMaths`: no links, pictures, scripts, or a
+    `style` with an address); drawn in the same step as the text (a
+    MutationObserver, before the page is drawn), so a formula never
+    flickers while an answer streams; one KaTeX can't read stays as
+    written. A copy of drawn maths gives its TeX back (KaTeX's copy-tex).
+  - **Diagrams**: a ```mermaid fence → `div.md-diagram` round its code
+    (`pre.md-code > code.lang-mermaid`). Drawn by **mermaid** 12.2.0 (MIT,
+    pinned) in chunks of its own (`ui/diagrams.js`: its core ~640 kB, each
+    kind of diagram and layout its own, loaded only when used; vite.config.js
+    exempts the drawing libraries' chunks from the 450 kB budget, which
+    still holds Yap's own): strict security level, labels' markup cut to
+    text tags (`dompurifyConfig`), a diagram's `%%{init}%%` never changing
+    the theme, its CSS or the security keys (`secure`). Never drawn — its
+    code shows, the reason as its `title` — when its source could reach an
+    address (`diagramRefused`: a CSS `url(` or `@import`, a CSS escape in a
+    style line, `<img>`/`<a>`/`<iframe>`… markup, an `img:`/`icon:` shape)
+    or mermaid can't read it; the SVG made is sanitised again
+    (`cleanDiagram`: SVG, MathML and the label HTML only; no `a`, `image`,
+    `use`, scripts or forms; `href` and `url(…)` only to the drawing's own
+    parts, an arrow's marker; a sheet with any other address refuses the
+    whole drawing) and put in a **shadow root**, so its sheet styles
+    nothing else. Yap's colours: mermaid's base theme from the `--yap-*`
+    tokens, as app.css's rules set them for each theme; each diagram is
+    drawn in the theme shown and then in the other one too, so a change of
+    `data-yap-theme` swaps it before the page is next drawn (no flash of
+    code, and Yap Lab's dark shots catch it); each drawing kept by theme and
+    source (an answer rendered again draws it once), one at a time, and one
+    whose code is still
+    changing (an answer streaming) waits until it has stood still 400 ms.
+    `</>` at its top right switches to the code and back (remembered while
+    the view lasts), as the Claude app's does. A wide one shrinks to the
+    column but never below 65% of its size (past that it scrolls sideways),
+    with mermaid's flowchart spacing tightened for a narrow column.
+  - **Diffs**: a ```diff / ```patch fence → `pre.md-code.md-diff`, a
+    `span.md-dl` per line (`md-add`, `md-del`, `md-hunk`, `md-meta`, by
+    `diffLineKind`) with its line break inside, so its text is the diff as
+    written; red and green lines across the block's widest line (app.css,
+    a Code chat's diff colours), no code colours on top (no `lang-` class).
+  - **Pictures**: `![alt](https://…)` (a render only) → `a.md-link.md-image`
+    named by its alt text; not http(s): its alt text; in a web answer only
+    from a source's own address, else its alt text (as links are). The view
+    makes it a **"Show image" box** naming its site; nothing is fetched
+    until it's clicked, then Rust's `markdown_picture`
+    (`chat/pictures/markdown.rs`) downloads it the way Chat's pictures are
+    (`web::fetch_picture`: through `privacy/net.rs` as "A picture from the
+    web", public http(s) only, an image type, ≤ 10 MB), hands over only
+    PNG, JPEG, GIF, WebP, AVIF or BMP by their first bytes (never SVG), and
+    the page shows it from memory (a `blob:` address, freed with the view);
+    it's never kept on disk.
+  - **Headings in Chat's answers**: `#`–`####` (h2–h5 here) at four sizes,
+    18 / 15.5 / 13.5 / 12.5 px times the reading scale (ChatMessage.svelte).
+  - **The editor's tokens never change**: maths and pictures are parsed only
+    for a render (`env.render`, set by `renderMarkdown`, as the footnotes are); `markdownTokens`
+    and `taskLines` read `$…$` and `![…](…)` as text exactly as before, and a
+    fence is a fence either way, so the document editor writes the markdown
+    back character for character (doc-markdown.spec.js).
+  - **The editor's page draws them too** (`components/richtext/richVisuals.js`,
+    in the editing extensions: a document's Preview at rest, notes' My
+    thoughts, the notepad and the quick note), with decorations only, so the
+    document never changes: maths in a line of text (read by `mathAt`, never
+    in inline code) drawn by KaTeX with its text hidden, and a ```mermaid
+    code block's diagram above it with the code hidden. With the caret on or
+    beside a formula, or in the diagram's code (a click on the diagram or its
+    `</>` puts it there), the text shows to edit; the diagram stays up,
+    drawn again once the code has stood still. Until KaTeX and mermaid have
+    loaded, or when one can't be drawn, the text shows as it is. Pictures
+    stay links there (Ctrl+click opens the browser, as any link). So a
+    document Chat wrote keeps its diagrams once Chat stops writing.
+  - A document's page (`docPieces.js` `drawParts`) remembers each block's
+    HTML as it was made, so a block whose maths was drawn isn't taken for a
+    changed one when a change lands.
+
+  Tests: `desktop/e2e/markdown.spec.js` (marking, prices, the editor's
+  tokens, `diagramRefused`, `cleanDiagram` / `cleanMaths` against hostile
+  input, in jsdom), `doc-markdown.spec.js` (round trips), and
+  `markdown-visuals.spec.js` in the app (an answer's maths, diagram, `</>`,
+  diff, headings and a picture fetched only on its click; dark; a note's
+  summary).

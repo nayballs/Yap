@@ -56,6 +56,7 @@
   import { screenPixels } from './chatShots.svelte.js';
   import RichToolbar from '../../components/richtext/RichToolbar.svelte';
   import { renderMarkdown } from '../../core/markdown.js';
+  import { markdownVisuals } from '../../ui/markdownVisuals.js';
   import { highlightMarkdown } from '../../core/markdownSource.js';
   import { motionReduced } from '../../core/appearance.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
@@ -883,7 +884,7 @@
             {/key}
           {:else}
             <!-- Drawn by `drawParts` (renderMarkdown's sanitised HTML, a piece at a time). -->
-            <div class="docmd" bind:this={mdEl}></div>
+            <div class="docmd" bind:this={mdEl} use:markdownVisuals></div>
           {/if}
         </article>
       </div>
