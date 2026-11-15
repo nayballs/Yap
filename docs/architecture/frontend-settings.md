@@ -969,7 +969,11 @@ on an element that also has a `settings.css` class (`set-note`,
   (Download with its size — the engine's too when it isn't here — and its
   progress; then name · size · where it runs, the licence link) and Search
   index (passages · notes · size, or what it's doing; Rebuild, Delete… asked
-  first), from `search_status` and `yap-search-status`. **Chat screenshots** (`#settings-chat-images`): "Keep chat
+  first), from `search_status` and `yap-search-status`. **Chats**
+  (`#settings-chats`, 2026-11-15): "Archive chats you haven't used in"
+  (`chatArchiveDays`: Never (default) / 7 / 30 / 90 days, `chat-archive`;
+  auto-archive, [chat-and-assistant.md](./chat-and-assistant.md#auto-archive-2026-11-15)).
+  **Chat screenshots** (`#settings-chat-images`): "Keep chat
   screenshots" (`chatImageDays`: 7 / 30 / 90 days / Forever, `chat-images`;
   "4 screenshots · 1.2 MB" from `chat_images_usage`; Snip to Chat, [snip.md](./snip.md)).
   **Local API** (`#settings-local-api`): `bridgeEnabled` (the
