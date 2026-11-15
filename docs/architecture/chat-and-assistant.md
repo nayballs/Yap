@@ -2759,11 +2759,42 @@ of sight. What they share is said once, in the line.
   it in place too — Google's sponsored results — opened it twice; a mail
   link to their mail app), **downloads off**, **every permission denied**, DevTools only in a
   debug build. It's a child window of the main window ("the host") laid over
-  the tab's stage: the page measures the stage every 150 ms (and on resize)
-  and sends its place in physical pixels (`page_view_place`), or `null` when
+  the tab's stage: the page measures the stage in the frame it changes size
+  (a `ResizeObserver`), on the window's resize, every frame of a move, and
+  every 150 ms besides, and sends its place in physical pixels
+  (`page_view_place`), or `null` when
   something of Yap's covers it (a 3 × 3 grid of `elementFromPoint`: a menu,
   a dialog, Settings, a toast) or it's out of sight — the native window would
-  cover Yap's own UI otherwise. So the page **keeps its place** (scroll, a
+  cover Yap's own UI otherwise. **Resizing smoothly** (15 Nov 2026: a fast
+  drag of the split left the page trailing the layout, over the thread one
+  way, a gap beside the split the other, until the 150 ms check caught up):
+  every place carries a number that only rises (`pagePlace.js` `nextSeq`, the
+  view's clock) and Rust applies only the newest (`view::Latest`: two sends
+  can reach the main thread out of order, and an older one last left the page
+  out of place). A native window placed over IPC is always a frame or two
+  behind the web layout around it, so **while the stage moves** — the split or
+  the list's edge held (`pageMotion.svelte.js`, set by ChatView), Yap's
+  window resized by its edge (its size-move loop, watched by a subclass:
+  `view::SizeLoop`, `yap-window-sizing` `on` / `sizing` / `off`) — **a still
+  of the page stands in for it** in the stage: Yap's own page draws it, so it
+  moves with everything else in every frame. The still is `page_view_still`
+  (the page's `CapturePreview` PNG as bytes, ~25–30 ms), taken ready when the
+  pointer comes over a handle or the window's edge is pressed, else at the
+  press (the live page follows every frame meanwhile); it sits at the stage's
+  top left at the screen's own pixels, clipped to the stage, the page's own
+  background (`edgeColour`, read off its right edge) past it. Meanwhile the
+  live page is laid out over the stage every frame but **under Yap's page**
+  (`Layer::Under`, `HWND_BOTTOM`: drawn, never seen), and a newer still of it
+  replaces the old at most every 50 ms, so what's in the still reflows as it
+  goes. Let go, it's laid out at its last place, comes up in sight (just
+  under Tauri's resizing edges, `TAURI_DRAG_RESIZE_BORDERS`, so the window's
+  edge still resizes it where the page reaches it), and the still goes two
+  frames later. A resize in one go (maximise, restore) just follows. Each place
+  also tells WebView2 its window moved (`NotifyParentWindowPositionChanged`:
+  a list's options open where the page is). The suite (`chat-pages.spec.js`) checks it from the
+  screen's own pixels: `e2e_window_picture` (Yap's window drawn whole by
+  Windows, the page's window in it) against CDP's shot of Yap's page.
+  So the page **keeps its place** (scroll, a
   map's zoom) while another tab shows, and **closes with its tab**
   (`page_view_close`); another conversation or leaving Chat closes them all;
   at most four stay alive (the least recently shown goes; when a new tab
