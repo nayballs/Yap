@@ -2430,7 +2430,9 @@ row each — its icon, its name, what it is ("Page · 2 versions",
 "Document", "Changed", "Shared", "Picture") — that opens it where it lives
 (`outputsOpen.js` `openOutput`, the summary's too: a page or a document
 beside the chat, a changed file in the file view, a picture in its tab, a
-shared file in the file view when it's in the workspace, else in its app);
+shared file in the file view when it's in the workspace, else in its app),
+and has a right-click menu (`outputMenuItems`, 15 Nov 2026: Open; a file's
+Show in folder and Copy path; a workspace file's Open in editor);
 nothing yet says what will show there. Opened by the title bar's **Outputs**
 button (the layers icon, beside a Code chat's Summary and the browser, while
 a chat is open: `stores/chatOutputs.svelte.js`, ChatView's `toggleOutputs`;
