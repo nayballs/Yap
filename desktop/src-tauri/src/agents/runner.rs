@@ -25,7 +25,7 @@
 //!   Claude Code's problems (signed out, at the plan's limit, paying
 //!   another way: that one is stopped at once) and the result — each sent
 //!   as the app event **`yap-agent`** (`{id, status, folder, conversation?,
-//!   step?, file?, command?, about?, said?, todos?, now?, diff?, text?,
+//!   step?, file?, command?, about?, said?, thought?, todos?, now?, diff?, text?,
 //!   cost?, problem?, ts}`) and kept in the agent's `log.jsonl` for its tab.
 //! - **Asking**: a permission card waiting for the person (the endpoint's
 //!   `pending()`): the agent is `asking` until it's answered.
@@ -98,6 +98,9 @@ pub const EVENT: &str = "yap-agent";
 pub const SAYING_EVENT: &str = "yap-agent-saying";
 /// At most this often ([`SAYING_EVENT`]).
 const SAYING_EVERY: Duration = Duration::from_millis(70);
+/// A thought's most characters in its log ([`AgentEvent::thought`]): past
+/// them, cut at a character's edge with "…".
+const THOUGHT_CHARS: usize = 12_000;
 /// The most agents at once.
 pub const MAX: usize = 3;
 /// What every brief ends with: the report is ready to say.
@@ -154,6 +157,13 @@ pub struct AgentEvent {
     /// tab's steps each).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub said: Option<String>,
+    /// **Its thinking** (15 Nov 2026): a thinking block of its own message,
+    /// as Claude Code's stream hands it over (a helper's never), at most
+    /// [`THOUGHT_CHARS`]. Shown only in a Code chat's Thinking and Verbose
+    /// views, as Claude Code's app shows it in its transcript; never to a
+    /// phone, never in Yap's log.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought: Option<String>,
     /// Its to-do list, as its latest `TodoWrite` left it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub todos: Option<Vec<steps::Todo>>,
@@ -1858,6 +1868,12 @@ impl Follow {
                 for block in &a.blocks {
                     match block {
                         Block::ToolUse { id, name, input } => self.on_tool(id, name, input),
+                        // Its thinking (a helper's isn't its own): a line the thread's Thinking view shows.
+                        Block::Thinking(t) if a.parent_tool_use_id.is_none() && !t.trim().is_empty() => {
+                            if let Some(agent) = store::get(&self.id) {
+                                emit(&AgentEvent { thought: Some(thought_of(t)), ..self.event(&agent) });
+                            }
+                        }
                         // What it says between its calls: a line of its own
                         // (a helper's words, under a Task, aren't).
                         Block::Text(t) if !t.trim().is_empty() => {
@@ -2225,6 +2241,16 @@ fn turn_words(said: &[String], split_at: Option<usize>) -> String {
     match split_at {
         Some(k) if k < said.len() => said[k..].join("\n\n"),
         _ => said.join("\n\n"),
+    }
+}
+
+/// **A thought as its log keeps it**: trimmed, at most [`THOUGHT_CHARS`]
+/// characters (cut at a character's edge, with "…"). Pure.
+fn thought_of(text: &str) -> String {
+    let t = text.trim();
+    match t.char_indices().nth(THOUGHT_CHARS) {
+        Some((cut, _)) => format!("{}…", t[..cut].trim_end()),
+        None => t.to_string(),
     }
 }
 
@@ -3039,6 +3065,20 @@ mod tests {
         assert!(!fits([r"d:\a"], 3, r"d:\a"), "one per folder");
         assert!(!fits([r"d:\a"], 1, r"d:\b"), "agents_max 1");
         assert_eq!(workspaces::norm("D:/Projects/Garden/"), workspaces::norm(r"d:\projects\garden"));
+    }
+
+    #[test]
+    fn a_thought_is_kept_trimmed_and_capped_at_a_characters_edge() {
+        assert_eq!(thought_of("  They want a greeting.\n"), "They want a greeting.");
+        let long = "é".repeat(THOUGHT_CHARS + 5);
+        let kept = thought_of(&long);
+        assert!(kept.ends_with('…'));
+        assert_eq!(kept.chars().count(), THOUGHT_CHARS + 1);
+        // Its event says it alone, never as words said.
+        let ev = AgentEvent { id: "ab12".into(), thought: Some("Check the notes first.".into()), ..Default::default() };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["thought"], "Check the notes first.");
+        assert!(v.get("said").is_none() && v.get("step").is_none() && v.get("text").is_none());
     }
 
     #[test]

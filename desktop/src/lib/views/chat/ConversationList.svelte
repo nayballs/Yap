@@ -13,6 +13,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { toast } from '../../ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, devInspect } from '../../ui/contextMenu.svelte.js';
+  import { THREAD_VIEWS, threadViewOf, setThreadView } from './threadView.svelte.js';
   import { overflowTip } from '../../ui/overflowTip.js';
   import { showSaveError } from '../../notices/saveErrors.js';
   import { copyText, conversationMarkdown } from '../../core/itemMenus.js';
@@ -156,10 +157,26 @@
     chat.clearPicked();
     // A right-click opens it too, as a click does (not while an answer comes).
     if (e.type === 'contextmenu' && !devInspect(e) && !chat.sending && chat.activeId !== c.id) chat.selectConversation(c.id);
+    // A Code chat: how its thread shows Claude's work (threadView.svelte.js, as Claude Code's app's transcript view).
+    const views = code?.of(c.id)
+      ? [
+          { separator: true },
+          {
+            label: 'Transcript view',
+            icon: 'lines',
+            items: [
+              ...THREAD_VIEWS.map((v) => ({ label: v.label, checked: threadViewOf(c.id) === v.id, onselect: () => setThreadView(c.id, v.id) })),
+              { separator: true },
+              { note: 'Thinking adds Claude’s thinking; Verbose opens every step too.' },
+            ],
+          },
+        ]
+      : [];
     openContextMenu(
       e,
       [
         { label: 'Rename', icon: 'pencil', onselect: () => startRename(c) },
+        ...views,
         { separator: true },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyConversation(c.id) },
         { label: 'Archive', icon: 'archive', onselect: () => lib.archive([c.id]) },

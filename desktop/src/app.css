@@ -118,6 +118,8 @@ body {
   --yap-shot-ring-hover: rgba(35, 33, 27, 0.3);
   --yap-shot-drop: 0 1px 2px rgba(60, 50, 30, 0.08);
   --yap-shot-scrim: rgba(28, 23, 14, 0.62);
+  /* words on the scrim: the viewer's step name and ‹ 2 of 4 › */
+  --yap-shot-on-scrim: #f7f3ea;
 
   /* Code chats (views/chat/codeChat.css): a calm teal, never the warning
      amber Bypass permissions wears — the accent and its text, the box's
@@ -566,6 +568,7 @@ body {
   --yap-shot-ring-hover: rgba(255, 255, 255, 0.34);
   --yap-shot-drop: 0 1px 2px rgba(0, 0, 0, 0.28);
   --yap-shot-scrim: rgba(4, 3, 2, 0.74);
+  --yap-shot-on-scrim: #f2eee6;
   /* Code chats: the same teal, brighter on the dark surfaces */
   --yap-syn-keyword: #e39b6c;
   --yap-syn-string: #9dcf8f;
