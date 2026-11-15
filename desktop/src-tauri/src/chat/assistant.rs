@@ -1681,7 +1681,9 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let turn = WINDOW_LOOK.scope(window_look, turn);
     // A new code chat's: the conversation it makes is a Code chat in its workspace.
     let turn = crate::agents::code_chat::with_new(code_folder, turn);
-    let turn = crate::chat::incognito::with_new(ghost, turn);
+    // (Boxed: the turn's future grows with each layer, and its thread's
+    // stack is small — unboxed, this one overflowed it.)
+    let turn = Box::pin(crate::chat::incognito::with_new(ghost, turn));
     // Its AI calls and searches are the Voice Assistant's in the network
     // receipts (net.rs), though they run Chat's code — and say so when the
     // window in front or a selection went with them, or the question came
