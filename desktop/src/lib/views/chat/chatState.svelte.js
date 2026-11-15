@@ -253,6 +253,64 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (rec.ghost) markGhost(conv);
   }
 
+  // ---- Projects (chat/projects.rs, 15 Nov 2026; the Claude app's projects) ----
+  // `page`: the Projects page in the thread's place ('projects'), or one
+  // project's (`{ project: id }`); null: the chat. `newProject`: the project a
+  // new chat starts in (`{id, name}`, its page's New chat). `projectHere`: the
+  // shown chat's project (`{id, name}`), its band over the thread. `projects`:
+  // the list, for a chat's ⋯ → Move to project.
+  let page = $state(null);
+  let newProject = $state(null);
+  let projectHere = $state(null);
+  let projects = $state([]);
+  async function loadProjects() {
+    try {
+      projects = (await invoke('projects_list')) || [];
+    } catch {
+      projects = [];
+    }
+  }
+  loadProjects();
+  function openProjects() {
+    page = 'projects';
+  }
+  function openProject(id) {
+    page = { project: id };
+  }
+  function closePage() {
+    page = null;
+  }
+  /** Something changed a project (made, renamed, deleted, a chat moved): read again. */
+  function projectsChanged() {
+    loadProjects();
+    loadProjectHere(activeId);
+  }
+  async function loadProjectHere(id) {
+    if (id == null) {
+      projectHere = null;
+      return;
+    }
+    try {
+      const p = await invoke('chat_project_of', { conversation: id });
+      if (id === activeId) projectHere = p ?? null;
+    } catch {
+      if (id === activeId) projectHere = null;
+    }
+  }
+  $effect(() => {
+    const id = activeId;
+    untrack(() => loadProjectHere(id));
+  });
+  /** Chat `id` into project `project` (null: out of its project). */
+  async function moveToProject(id, project) {
+    try {
+      await invoke('chat_project_set', { conversation: id, project });
+      projectsChanged();
+    } catch (e) {
+      toast({ title: "Couldn't move the chat", description: String(e), variant: 'destructive' });
+    }
+  }
+
   // ---- Incognito (chat/incognito.rs, 15 Nov 2026; the Claude app's ghost) ----
   // A new chat's ghost (`ghostNew`) makes its first question start an
   // incognito chat: kept in memory only, never listed or remembered. The
@@ -922,6 +980,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   }
 
   async function selectConversation(id) {
+    // (A chat opened from a project's page, or its own row: the page closes.)
+    page = null;
     if (id === activeId) return;
     try {
       const answering = !!turns[String(id)];
@@ -1090,6 +1150,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     choseNew = true;
     // A new chat starts kept, its ghost off (the Claude app's).
     ghostNew = false;
+    // In a project when its page started it (`opts.project`: `{id, name}`); the page closes.
+    newProject = opts?.project?.id ? { id: opts.project.id, name: opts.project.name || '' } : null;
+    page = null;
     // A new chat has every connector on.
     connectors.resetNew();
     reportView();
@@ -2039,7 +2102,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const rec = new Answer({ conv: activeId, turn, view: viewSeq, question });
     if (retry != null) rec.askedId = question.id ?? null;
     // A new chat's ghost on (never a Code chat's): its conversation is incognito.
-    rec.ghost = activeId == null && ghostNew && !(newChatFolder?.() ?? null);
+    rec.ghost = activeId == null && ghostNew && !newProject && !(newChatFolder?.() ?? null);
+    // A new chat started from a project's page (chat/projects.rs).
+    const inProject = activeId == null && !rec.ghost ? (newProject?.id ?? null) : null;
     setTurn(rec);
     // (Read again as it ends when it didn't answer: Rust put the chat back as it was.)
     let reloadAfter = false;
@@ -2111,6 +2176,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         ...(edit != null ? { edit, editFiles: opts.editFiles === true, elements: opts.elements?.length ? opts.elements : null } : {}),
         // A new chat asked incognito (chat/incognito.rs).
         incognito: rec.ghost || null,
+        // …or in a project (chat/projects.rs).
+        project: inProject,
       },
       onEvent
     );
@@ -2463,6 +2530,15 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     /** The chat shown is incognito (a new one: its ghost is on). */
     get incognito() { return incognito; },
     setGhost,
+    get page() { return page; },
+    get newProject() { return newProject; },
+    get projectHere() { return projectHere; },
+    get projects() { return projects; },
+    openProjects,
+    openProject,
+    closePage,
+    projectsChanged,
+    moveToProject,
     get messages() { return messages; },
     get input() { return input; },
     set input(v) { input = v; },

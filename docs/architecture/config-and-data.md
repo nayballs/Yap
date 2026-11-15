@@ -1072,6 +1072,21 @@
   Delete some of your data → Chats, Reset app: every pick; the styles stay,
   as settings do); a deleted style's chats go back to Normal. Download your
   data has it (`chats/chat_styles.json`). Never logged (counts only).
+- Projects: `%APPDATA%/yap/projects.json` (2026-11-15, `chat/projects.rs`,
+  Chat's Projects) — `{projects: [{id, name, description, instructions,
+  files: [{id, name, kind, bytes, tokens, pages?, addedMs}], createdMs,
+  updatedMs}], chats: {"<conversation id>": "<project id>"}}`: the person's
+  projects (at most 100; a name at most 60 characters, what it's for 300,
+  instructions 8,000; at most 50 files each) and which chat is in which.
+  Each file's copy and its text (as read: `chat/attachments.rs` `read`) are
+  in `%APPDATA%/yap/projects/<project id>/` (`<file id>/<name>`,
+  `<file id>.txt`), deleted with the file or the project. A file of its own,
+  never chats.json, so an older Yap never reads or writes it; fields a newer
+  Yap adds are kept. A deleted chat leaves its project (and Delete some of
+  your data → Chats, Reset app: every chat leaves; the projects and their
+  files stay, as settings do). Download your data has projects.json
+  (`chats/projects.json`; the files stay in `projects/`). Never logged
+  (counts, sizes and tokens only).
 - Language nudges: `%APPDATA%/yap/language_nudges.json` — when Yap last
   offered to add a language to My languages, and per language your "Not now"
   count and "Don't ask about it" (`dictation/languages/nudge.rs`). Codes only.

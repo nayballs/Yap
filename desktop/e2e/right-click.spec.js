@@ -127,7 +127,7 @@ test('Chat: a conversation is renamed in place, copied and deleted; messages cop
   // A right-click: its menu, and it opens, as a click does.
   await conv('Trip plans').click({ button: 'right' });
   await expect(menu(main)).toHaveAccessibleName('Conversation Trip plans');
-  await expect(allItems(main)).toHaveText(['Rename', 'Copy as Markdown', 'Export…', 'Outputs', 'Archive', 'Delete…']);
+  await expect(allItems(main)).toHaveText(['Rename', 'Copy as Markdown', 'Export…', 'Outputs', 'Move to project', 'Archive', 'Delete…']);
   await expect(allItems(main).last()).toHaveClass(/danger/);
   await expect(main.locator('.msgs')).toContainText('Where should we stay in Lisbon?');
   await expect(conv('Trip plans')).toHaveClass(/active/);

@@ -342,14 +342,16 @@ fn tidy(s: &str, max: usize) -> String {
 
 // ---- the commands -------------------------------------------------------------------------------
 
-/// A project as the list shows it: no instructions or file names.
-fn summary_of(p: &Project, chats: usize) -> Value {
+/// A project as the list shows it (and a chat's ⋯, which ticks the one it's
+/// in): no instructions or file names.
+fn summary_of(p: &Project, chat_ids: Vec<u64>) -> Value {
     json!({
         "id": p.id,
         "name": p.name,
         "description": p.description,
         "files": p.files.len(),
-        "chats": chats,
+        "chats": chat_ids.len(),
+        "chatIds": chat_ids,
         "updatedMs": p.updated_ms,
         "createdMs": p.created_ms,
     })
@@ -361,7 +363,7 @@ pub fn projects_list() -> Value {
     with_store(|s| {
         let mut ps: Vec<&Project> = s.projects.iter().collect();
         ps.sort_by_key(|p| std::cmp::Reverse(p.updated_ms));
-        let rows: Vec<Value> = ps.iter().map(|p| summary_of(p, s.chats.values().filter(|v| **v == p.id).count())).collect();
+        let rows: Vec<Value> = ps.iter().map(|p| summary_of(p, s.chats.iter().filter(|(_, v)| **v == p.id).filter_map(|(k, _)| k.parse().ok()).collect())).collect();
         json!(rows)
     })
 }
