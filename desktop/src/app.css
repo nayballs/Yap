@@ -902,15 +902,14 @@ code.md-filelink {
   outline-offset: 1px;
   border-radius: 3px;
 }
-/* ▶ Run on a one-line shell block of a Code chat's answer (ui/codeRun.js), at the block's right. */
-pre.md-code[data-run] {
-  position: relative;
+/* ▶ Run on a one-line shell block of a Code chat's answer (ui/codeRun.js): left of its Copy, as the Claude app has it. */
+pre.md-code[data-run=''] {
   padding-right: 64px;
 }
 .md-coderun {
   position: absolute;
-  top: 50%;
-  right: 34px;
+  top: 5px;
+  right: 33px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -922,7 +921,6 @@ pre.md-code[data-run] {
   background: transparent;
   color: var(--yap-muted);
   cursor: pointer;
-  transform: translateY(-50%);
 }
 .md-coderun:hover,
 .md-coderun:focus-visible {
