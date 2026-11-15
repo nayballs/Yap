@@ -5172,8 +5172,8 @@ Claude Code's own).
   cache. The small web pipeline's prompt ends with it too (`small.rs`), and
   so does your Claude plan's session prompt (`plan.rs` `system_prompt`: a
   new style restarts the warm session). A question asked out loud into the
-  chat has it (the same build). Normal adds nothing. (Not in
-  `stable_prompt`'s measure: a few dozen tokens.)
+  chat has it (the same build). Normal adds nothing. The fixed part a
+  question must fit beside counts it (`fit::Parts::texts`).
 - **Your own** (`StylesDialog.svelte`, its own chunk): "Create a style",
   then "Describe it" (a sentence or two) or "From your writing" (a pasted
   sample, at most 6,000 characters read); "Write the style" asks Chat's own

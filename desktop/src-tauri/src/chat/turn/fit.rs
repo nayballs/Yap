@@ -332,7 +332,15 @@ impl Parts<'_> {
     /// The stable prompt and the tools offered for `g`, as the turn writes
     /// and offers them (`Gates::stable_prompt`, `Gates::offered`).
     fn texts(&self, g: &Gates) -> (String, Value) {
-        (g.stable_prompt(self.persona, self.profile, self.now, self.code), g.offered(self.connectors, self.conversation, self.code))
+        let mut stable = g.stable_prompt(self.persona, self.profile, self.now, self.code);
+        // This chat's style (chat/styles.rs), as `prompt::build` adds it: measured too.
+        if !self.code {
+            if let Some(style) = crate::chat::styles::prompt_block(self.conversation) {
+                stable.push_str("\n\n");
+                stable.push_str(&style);
+            }
+        }
+        (stable, g.offered(self.connectors, self.conversation, self.code))
     }
 
     /// `g`'s fixed part, estimated (the costs).
