@@ -45,6 +45,9 @@
   import PictureTab from './PictureTab.svelte';
   import PageTab from './PageTab.svelte';
   import AgentTab from './AgentTab.svelte';
+  import FileTab from './FileTab.svelte';
+  import RunsTab from './RunsTab.svelte';
+  import SummaryTab from './SummaryTab.svelte';
   import { agentTabName } from '../../core/agents.js';
   import { agentById } from '../../stores/agents.svelte.js';
   import { panelTabs, neighbour } from './panelTabs.js';
@@ -112,7 +115,13 @@
         ? doc.pageNow[t.key]?.title || t.page?.title || t.page?.site || (t.page?.url || doc.pageNow[t.key]?.went ? 'Page' : 'New tab')
         : t.kind === 'agent'
           ? agentTabName(t, tabs, agentById)
-          : t.title || 'Untitled document';
+          : t.kind === 'file'
+            ? String(t.file?.rel || '').split('/').pop() || 'File'
+            : t.kind === 'runs'
+              ? 'Runs'
+              : t.kind === 'summary'
+                ? 'Summary'
+                : t.title || 'Untitled document';
 
   // The pages this conversation's answers read or showed, newest first: a
   // new page tab offers them (PageTab's new tab, as Claude Code's offers
@@ -630,7 +639,13 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="docpanel" class:cover aria-label={doc.showing === 'page' ? 'Page' : doc.showing === 'agent' ? 'Agent' : away ? 'Picture' : 'Document'} data-testid="chat-doc" onkeydown={panelKey}>
+<aside
+  class="docpanel"
+  class:cover
+  aria-label={doc.showing === 'page' ? 'Page' : doc.showing === 'agent' ? 'Agent' : doc.showing === 'file' ? 'File' : doc.showing === 'runs' ? 'Runs' : doc.showing === 'summary' ? 'Summary' : away ? 'Picture' : 'Document'}
+  data-testid="chat-doc"
+  onkeydown={panelKey}
+>
   {#if tabs.length > 1 || doc.showing === 'page'}
     <!-- This conversation's documents, pictures and pages, newest last; + a new page tab. -->
     <div class="tabrow">
@@ -660,6 +675,12 @@
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
             {:else if t.kind === 'agent'}
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+            {:else if t.kind === 'file'}
+              <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="m10 13-2 2 2 2M14 13l2 2-2 2" /></svg>
+            {:else if t.kind === 'runs'}
+              <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M12 15h5" /></svg>
+            {:else if t.kind === 'summary'}
+              <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" /></svg>
             {:else}
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
             {/if}
@@ -679,6 +700,21 @@
       <!-- The page's own buttons (PageTab.svelte's `actions`), at the row's right, as Claude Code's app has them. -->
       <div class="rowactions" data-testid="chat-page-actions">{@render rowActions()}</div>
     {/if}
+    {#if workspace}
+      <!-- A Code chat's summary (SummaryTab.svelte), as the Claude app's right column (with one tab, no row: the title bar's button). -->
+      <button
+        type="button"
+        class="tabnew tabsummary"
+        class:on={doc.showing === 'summary'}
+        onclick={() => doc.toggleSummary()}
+        aria-label="Summary"
+        aria-pressed={doc.showing === 'summary'}
+        title="Summary: environment, context, outputs, background tasks"
+        data-testid="chat-panel-summary"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" /></svg>
+      </button>
+    {/if}
     </div>
   {/if}
   {#if doc.showing === 'picture' && doc.picture}
@@ -691,6 +727,15 @@
   {:else if doc.showing === 'agent' && doc.agent}
     <!-- An agent Chat started: what it's doing, live (closing it never stops it). -->
     <AgentTab {doc} {narrow} />
+  {:else if doc.showing === 'file' && doc.file}
+    <!-- A Code chat's file, read only, at the line a link named. -->
+    <FileTab {doc} {narrow} {conversationId} />
+  {:else if doc.showing === 'runs'}
+    <!-- What ▶ Run ran in this Code chat. -->
+    <RunsTab {doc} {narrow} {conversationId} {workspace} />
+  {:else if doc.showing === 'summary'}
+    <!-- A Code chat's summary. -->
+    <SummaryTab {doc} {conversationId} {workspace} {messages} />
   {/if}
   {#if doc.id != null}
   <!-- The document (behind a picture: still here, out of sight). -->
@@ -944,6 +989,14 @@
   .tabnew svg {
     width: 14px;
     height: 14px;
+  }
+  /* The summary's button: at the row's right end. */
+  .tabsummary {
+    margin-left: auto;
+  }
+  .tabsummary.on {
+    background: var(--yap-paper-s2);
+    color: var(--yap-code);
   }
   .doctabs:focus {
     outline: none;

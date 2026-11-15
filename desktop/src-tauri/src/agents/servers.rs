@@ -737,7 +737,7 @@ pub fn stop_all(workspace: Option<&Path>) -> usize {
 }
 
 #[cfg(windows)]
-fn kill_tree(pid: u32, since: u64) {
+pub(super) fn kill_tree(pid: u32, since: u64) {
     // Children first, so none is left to be adopted.
     let mut family = crate::shell::procs::family(pid, since);
     family.reverse();
@@ -747,14 +747,14 @@ fn kill_tree(pid: u32, since: u64) {
 }
 
 #[cfg(not(windows))]
-fn kill_tree(pid: u32, _since: u64) {
+pub(super) fn kill_tree(pid: u32, _since: u64) {
     let _ = std::process::Command::new("kill").arg("-TERM").arg(format!("-{pid}")).status();
     let _ = std::process::Command::new("kill").arg("-TERM").arg(pid.to_string()).status();
 }
 
 /// **A command as Windows finds it**: a path as it is; a bare name in the
 /// folder or on PATH, with each of PATHEXT's endings (`npm` is `npm.cmd`).
-fn resolve(command: &str, dir: &Path) -> Option<PathBuf> {
+pub(super) fn resolve(command: &str, dir: &Path) -> Option<PathBuf> {
     let given = Path::new(command);
     if given.components().count() > 1 || given.is_absolute() {
         let p = if given.is_absolute() { given.to_path_buf() } else { dir.join(given) };
