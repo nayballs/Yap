@@ -517,7 +517,7 @@ async function dropFiles(files) {
   await chips.nth(before + paths.length - 1).waitFor({ state: 'visible', timeout: 60_000 });
 }
 
-async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false }) {
+async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null }) {
   if (!text?.trim()) throw new Error('Nothing to ask');
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
   readRecord();
@@ -528,6 +528,8 @@ async function startTurn({ text, spoken = false, chat = 'new', autoCards = null,
   const t = new Turn({ question: text, spoken, since, askedAt, autoCards, report, shots, themes });
   turn = t;
   try {
+    // A new chat started from a project's page (chat/projects.rs), the project made first if need be.
+    if (project) await newChatInProject(project);
     // The chat's style from Style under the box (chat/styles.rs), as the person picks it.
     if (style) await pickStyle(style);
     // A new chat made incognito with its ghost (chat/incognito.rs).
@@ -572,6 +574,21 @@ async function branchTurn(how, text) {
   await col.getByTestId('chat-edit-message').last().click({ timeout: 10_000 });
   await col.getByTestId('chat-edit-input').fill(text, { timeout: 10_000 });
   await col.getByTestId('chat-edit-save').click({ timeout: 10_000 });
+}
+
+/**
+ * **A new chat in a project** (`--project`, chat/projects.rs): the project named `project.name` made if there's none
+ * (its instructions set when given), then its page opened and its New chat pressed, as the person does.
+ */
+async function newChatInProject(project) {
+  const name = String(project.name).trim();
+  let p = ((await invoke('projects_list')) || []).find((x) => x.name === name);
+  if (!p) p = await invoke('project_create', { name, description: null });
+  if (project.instructions) await invoke('project_update', { id: p.id, instructions: String(project.instructions) });
+  const m = main();
+  await m.getByRole('button', { name: 'Projects', exact: true }).click({ timeout: 10_000 });
+  await m.getByTestId('chat-projects').getByRole('button', { name }).first().click({ timeout: 10_000 });
+  await m.getByRole('button', { name: `New chat in ${name}` }).click({ timeout: 10_000 });
 }
 
 /** Style under the message box (chat/styles.rs): the one named `name` (any case), as the person picks it. */
@@ -1078,7 +1095,7 @@ const COMMANDS = {
     const attach = Array.isArray(a.attach) ? a.attach : a.attach ? String(a.attach).split(',').filter(Boolean) : null;
     const how = a.retry ? 'retry' : a.edit ? 'edit' : 'ask';
     const text = how === 'retry' ? String(a.text ?? '').trim() || 'Retry' : a.text;
-    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, ...shotsFor(a) });
+    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null } : null, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
   wait: async (a) => {
