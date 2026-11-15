@@ -692,6 +692,19 @@ pub fn mark_read(conversation: u64, upto: usize) {
     });
 }
 
+/// **Another branch shown from message `at` on** (Retry, Edit, ‹ ›:
+/// `chat/chats/branches.rs`): what a pass read of conversation
+/// `conversation` from there is read again by the next one — it says
+/// something else now.
+pub fn read_again_from(conversation: u64, at: usize) {
+    with_store(|s| {
+        if s.read.get(&conversation).is_some_and(|n| *n > at) {
+            s.read.insert(conversation, at);
+            save_to_disk(s);
+        }
+    });
+}
+
 /// Conversations waiting for a pass, as kept across a quit.
 pub fn pending() -> Vec<u64> {
     with_store(|s| s.pending.clone())

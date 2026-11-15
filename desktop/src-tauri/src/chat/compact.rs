@@ -336,6 +336,8 @@ async fn summarise_claimed(app: Option<&AppHandle>, conversation: u64, range: Ra
     let max_chars = (reading as usize / 3) * 36 / 10;
     let named = models_switched(&conv.messages);
     let lines: Vec<String> = conv.messages[range.clone()].iter().map(|m| line(m, max_chars.max(400), named)).collect();
+    // What it read: kept only over the same messages (another branch shown meanwhile: Retry, Edit, ‹ ›).
+    let read = crate::chat::chats::print_of(&conv.messages[..range.end]);
     let mut notes: Option<String> = conv.usable_summary().map(|s| s.text.clone());
     let turns = TURNS.load(Ordering::SeqCst);
     let _sidecar = crate::ai::local_llm::hold(&ep.base_url);
@@ -374,6 +376,7 @@ async fn summarise_claimed(app: Option<&AppHandle>, conversation: u64, range: Ra
             model: ep.by.clone(),
             ts: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
         },
+        read,
     );
     if !kept {
         return Ok(false);
@@ -517,15 +520,18 @@ mod tests {
             crate::chat::chats::append(c.id, if i % 2 == 0 { "user" } else { "assistant" }, &format!("message {i}"), &[], None, false).unwrap();
         }
         let s = |upto: usize, text: &str| ChatSummary { text: text.into(), upto, after: 8, model: None, ts: 1 };
+        let read = |upto: usize| crate::chat::chats::get(c.id).map(|c| crate::chat::chats::print_of(&c.messages[..upto.min(c.messages.len())])).unwrap();
         // The first: covers the first four.
-        assert!(crate::chat::chats::set_summary(c.id, 0, s(4, "- first")));
+        assert!(crate::chat::chats::set_summary(c.id, 0, s(4, "- first"), read(4)));
         // Another pass that started from nothing: not over it.
-        assert!(!crate::chat::chats::set_summary(c.id, 0, s(6, "- stale")));
+        assert!(!crate::chat::chats::set_summary(c.id, 0, s(6, "- stale"), read(6)));
+        // Over messages that changed since it read them (another branch shown): not kept.
+        assert!(!crate::chat::chats::set_summary(c.id, 4, s(6, "- other branch"), read(6) ^ 1));
         // Extending the first: kept.
-        assert!(crate::chat::chats::set_summary(c.id, 4, s(6, "- second")));
+        assert!(crate::chat::chats::set_summary(c.id, 4, s(6, "- second"), read(6)));
         // More messages than there are, or not further: not kept.
-        assert!(!crate::chat::chats::set_summary(c.id, 6, s(20, "- x")));
-        assert!(!crate::chat::chats::set_summary(c.id, 6, s(6, "- x")));
+        assert!(!crate::chat::chats::set_summary(c.id, 6, s(20, "- x"), read(20)));
+        assert!(!crate::chat::chats::set_summary(c.id, 6, s(6, "- x"), read(6)));
         let got = crate::chat::chats::get(c.id).unwrap();
         assert_eq!(got.usable_summary().map(|x| (x.upto, x.text.as_str())), Some((6, "- second")));
         // Stored camelCase; an older Yap without it reads the rest.

@@ -172,6 +172,18 @@ pub(crate) fn rewound_from(turns: &[TurnNote], n: u32) -> Vec<u32> {
 /// **Rewind** conversation `conversation` to before its message `index`
 /// (the module's doc); `files`: the files the turns changed go back too.
 pub fn rewind(conversation: u64, index: usize, files: bool) -> Result<Rewound, String> {
+    rewind_as(conversation, index, files, false).map(|(r, _)| r)
+}
+
+/// **Edit in a Code chat** (15 Nov 2026, `chat_send`'s `edit`): [`rewind`] to
+/// before message `index`, its screenshots kept to go again with the new
+/// words, then sent as any message is. The message as it was.
+pub fn rewind_for_edit(conversation: u64, index: usize, files: bool) -> Result<crate::chat::chats::ChatMessage, String> {
+    rewind_as(conversation, index, files, true).map(|(_, m)| m)
+}
+
+/// [`rewind`]; `keep_shots`: the message's own screenshots stay. What it did, and the message.
+fn rewind_as(conversation: u64, index: usize, files: bool, keep_shots: bool) -> Result<(Rewound, crate::chat::chats::ChatMessage), String> {
     let (agent, turn) = turn_at(conversation, index)?;
     if agent.status.live() || runner::queue_state(conversation) != "idle" {
         return Err("Claude is working: rewind once it's done, or stop it first.".into());
@@ -208,8 +220,8 @@ pub fn rewind(conversation: u64, index: usize, files: bool) -> Result<Rewound, S
             }
         }
     }
-    let message = crate::chat::chats::rewind(conversation, index)?;
-    out.text = message.text;
+    let message = crate::chat::chats::rewind(conversation, index, keep_shots)?;
+    out.text = message.text.clone();
     let Some(agent) = store::update(&agent.id, |j| {
         for t in j.turn_list.iter_mut() {
             if gone.contains(&t.n) {
@@ -230,7 +242,7 @@ pub fn rewind(conversation: u64, index: usize, files: bool) -> Result<Rewound, S
     store::saved().map_err(|e| e.to_string())?;
     tracing::info!(id = %agent.id, conversation, turn = turn.n, turns = out.turns, files, restored = out.restored, deleted = out.deleted, fresh = branch.at.is_none(), seeded = branch.seed.is_some(), "Code chat: rewound");
     runner::told_changed(&agent, "rewound");
-    Ok(out)
+    Ok((out, message))
 }
 
 /// **Fork from here**: a new Code chat holding conversation

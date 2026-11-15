@@ -54,7 +54,7 @@
     const id = chat.activeId;
     if (id != null) untrack(() => made.load(id));
   });
-  const placed = $derived(placeVisuals(chat.messages, made.of(chat.activeId)));
+  const placed = $derived(placeVisuals(chat.messages, made.of(chat.activeId), chat.forks));
   /**
    * **A visual's button sent a message** (`sendPrompt`, visualBridge.js: the person's click, text only):
    * into this chat as if typed — or, made after outside content (a page, the screen, a connector) or while
@@ -211,10 +211,13 @@
   function messageMenu(e, m) {
     const reading = !!m.id && chat.speakingId === m.id;
     const items = messageItems(m, { read: m.role === 'assistant' && m.id ? () => chat.readAloud(m) : null, reading });
-    // A Code chat's own message: Rewind and Fork from here too (as under it).
+    // The person's message: Edit, and in a Code chat Rewind and Fork from here too (as under it); an answer: Retry.
     const a = actionsFor(m);
-    if (a) {
-      items.push({ separator: true });
+    const r = m.role === 'assistant' ? retryOf(m, chat.messages.indexOf(m)) : null;
+    if (a?.onedit || a?.onrewind || r) items.push({ separator: true });
+    if (a?.onedit) items.push({ label: a.edit ? `Edit (${a.edit.toLowerCase()})` : 'Edit', icon: 'pencil', disabled: !!a.edit, onselect: a.onedit });
+    if (r) items.push({ label: r.why ? `Retry (${r.why.toLowerCase()})` : 'Retry', icon: 'sync', disabled: !!r.why, onselect: r.onretry });
+    if (a?.onrewind) {
       items.push({ label: a.rewind ? `Rewind (${a.rewind.toLowerCase()})` : 'Rewind', icon: 'undo', disabled: !!a.rewind, onselect: a.onrewind });
       items.push({ label: a.fork ? `Fork from here (${a.fork.toLowerCase()})` : 'Fork from here', icon: 'split', disabled: !!a.fork, onselect: a.onfork });
     }
@@ -226,28 +229,87 @@
   // asked first, the files Claude changed since put back as they were unless unticked) and Fork from here (a new chat
   // with the conversation up to its answer).
   function actionsFor(m) {
-    if (!code?.current || m?.role !== 'user' || !m.id) return null;
+    if (m?.role !== 'user' || !m.id || m.kind || chat.activeId == null) return null;
+    // Chat: Copy and Edit (a new version from there, ‹ 1/2 › on it).
+    if (!code?.current) return { edit: busyWhy, onedit: () => chat.startEdit(m) };
     const t = messageTurn(agents.list, chat.activeId, m.id);
     if (!t) return null;
-    return { rewind: t.rewind, fork: t.fork, onrewind: () => askRewind(m, t.files), onfork: () => chat.forkAt(m) };
+    // A Code chat's Edit is a Rewind with new words (agents/rewind.rs): when it can rewind.
+    return { rewind: t.rewind, fork: t.fork, onrewind: () => askRewind(m, t.files), onfork: () => chat.forkAt(m), edit: t.rewind || busyWhy, onedit: () => chat.startEdit(m) };
   }
+
+  // **Retry, Edit and ‹ ›** (15 Nov 2026, the Claude app's message actions; chat/chats/branches.rs): ↻ under an
+  // answer asks its question again, the pencil under the person's message opens it in place to change; either keeps
+  // what was there as a version, ‹ 1/2 › to switch. Not while an answer is being written. In a Code chat both are
+  // Claude Code's own Rewind (asked first, as Rewind is), then the message sent again: no versions kept there.
+  const busyWhy = $derived(chat.sending || chat.answeringHere ? 'Unavailable while an answer is being written' : '');
+  /** ↻ under answer `m` (index `i`), or null where there's none. */
+  function retryOf(m, i) {
+    if (m?.role !== 'assistant' || !m.id || m.kind || m.streaming || i < 1) return null;
+    if (code?.current) {
+      const qi = chat.messages.findLastIndex((x, k) => k < i && x.role === 'user' && !x.kind);
+      const q = chat.messages[qi];
+      const t = q?.id ? messageTurn(agents.list, chat.activeId, q.id) : null;
+      if (!t) return null;
+      return { why: t.rewind || busyWhy, onretry: () => askCodeSend(q, null, t.files) };
+    }
+    const q = chat.messages[i - 1];
+    if (q?.role !== 'user' || q.kind || !q.id) return null;
+    return { why: busyWhy, onretry: () => chat.retryAt(m) };
+  }
+  /** The ‹ k/n › of the message at `i`, or null. */
+  function branchOf(i) {
+    const fork = chat.forkOf(i);
+    return fork ? { fork, why: busyWhy, onbranch: (place) => chat.switchBranch(i, place) } : null;
+  }
+  /** Save and send an edited message: in a Code chat, asked first as a Rewind is. */
+  function saveEdited(m, words) {
+    if (!code?.current) {
+      chat.saveEdit(m, words);
+      return;
+    }
+    const t = messageTurn(agents.list, chat.activeId, m.id);
+    if (!t || t.rewind) return;
+    askCodeSend(m, words, t.files);
+  }
+
   let rewindOpen = $state(false);
   let rewindAsk = $state(null);
   let rewindFiles = $state(true);
   let rewindBusy = $state(false);
   function askRewind(m, files) {
-    rewindAsk = { m, files };
+    rewindAsk = { m, files, mode: 'rewind' };
+    rewindFiles = true;
+    rewindOpen = true;
+  }
+  /** A Code chat's Retry (`words` null: the message as it was) or Edit: back to before `m`, then sent — asked first. */
+  function askCodeSend(m, words, files) {
+    rewindAsk = { m, files, mode: words == null ? 'retry' : 'edit', words };
     rewindFiles = true;
     rewindOpen = true;
   }
   async function doRewind() {
     if (!rewindAsk) return;
+    const { m, files, mode, words } = rewindAsk;
+    if (mode !== 'rewind') {
+      rewindOpen = false;
+      chat.saveEdit(m, words ?? chat.wordsOf(m), { files: files > 0 && rewindFiles, code: true });
+      return;
+    }
     rewindBusy = true;
-    const ok = await chat.rewindAt(rewindAsk.m, rewindAsk.files > 0 && rewindFiles);
+    const ok = await chat.rewindAt(m, files > 0 && rewindFiles);
     rewindBusy = false;
     rewindOpen = false;
     if (ok) chat.inputEl?.focus({ preventScroll: true });
   }
+  // (Its words: what the dialog says for each.)
+  const rewindText = $derived(
+    rewindAsk?.mode === 'retry'
+      ? { title: 'Retry from this message?', body: "Everything after it goes, as with Rewind, and Claude won't see it again. Then the message is sent again.", confirm: 'Retry', busy: 'Retrying…' }
+      : rewindAsk?.mode === 'edit'
+        ? { title: 'Send the edited message?', body: "This message and everything after it go, as with Rewind, and Claude won't see them again. Your new words are sent in its place.", confirm: 'Send', busy: 'Sending…' }
+        : { title: 'Rewind to before this message?', body: "This message and everything after it go, and Claude won't see them again. Its words go back in the message box.", confirm: 'Rewind', busy: 'Rewinding…' }
+  );
 </script>
 
 {#if chat.messages.length === 0 && (code?.current || code?.onCode)}
@@ -356,6 +418,11 @@
               busy={chat.sending}
               visuals={placed.get(i)?.inAnswer ? placed.get(i).visuals : null}
               onvisualprompt={(text, v) => sendFromVisual(text, v, chat.activeId)}
+              branch={m.id && !m.streaming ? branchOf(i) : null}
+              retry={m.role === 'assistant' ? retryOf(m, i) : null}
+              editing={m.role === 'user' && chat.editing?.id === m.id ? chat.editing : null}
+              onedited={(words) => saveEdited(m, words)}
+              oneditcancel={() => chat.cancelEdit()}
             />
           {/if}
           {#if directPills.get(i)?.length}
@@ -491,10 +558,10 @@
 
 <ConfirmDialog
   bind:open={rewindOpen}
-  title="Rewind to before this message?"
-  body="This message and everything after it go, and Claude won't see them again. Its words go back in the message box."
-  confirmLabel="Rewind"
-  busyLabel="Rewinding…"
+  title={rewindText.title}
+  body={rewindText.body}
+  confirmLabel={rewindText.confirm}
+  busyLabel={rewindText.busy}
   busy={rewindBusy}
   onconfirm={doRewind}
 >

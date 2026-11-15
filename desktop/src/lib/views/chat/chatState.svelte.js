@@ -21,7 +21,7 @@ import { openExternalLink } from '../../core/externalLinks.js';
 import { signInClaudePlan } from '../../stores/claudePlan.svelte.js';
 import { streamCall, liveAnswer, applyEvent, streamingHeight, STOPPED, SUPERSEDED } from '../../core/streaming.js';
 import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from '../../stores/speech.svelte.js';
-import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused, pastedImage, keepPasted } from './chatImages.js';
+import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused, pastedImage, keepPasted, splitScreenText } from './chatImages.js';
 // (`pickedElements`, not `picked`: that's the conversations picked in the list, below.)
 import { picked as pickedElements, takePicked } from '../../stores/pickedElements.svelte.js';
 import { waitingShots, followWaitingShots, removeWaiting, clearWaiting, followPixelRatio } from './chatShots.svelte.js';
@@ -405,6 +405,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // The open conversation's summary of its older messages ({ text, upto,
   // model }): a divider over the messages after it, "Show summary".
   let summary = $state(null);
+  // Its versions (Retry, Edit: chat/chats/branches.rs): `{at, shown, count}` each message that has some (chat_get's `forks`).
+  let forks = $state([]);
+  // The person's message open to edit in place: `{id, text}` (MessageEdit), or null.
+  let editing = $state(null);
   // The summary shown read-only (Show summary).
   let showingSummary = $state(false);
   // The last send's "too long" (Rust's plain sentence), until the next send.
@@ -764,6 +768,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       activeId = id;
       scope = conv.scope || null;
       summary = conv.summary ?? null;
+      forks = conv.forks || [];
+      editing = null;
       showingSummary = false;
       tooLong = '';
       // (Answering still: its question and the answer so far, where they were.)
@@ -825,6 +831,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (activeId === id) {
         messages = withLive(id, conv.messages);
         summary = conv.summary ?? null;
+        forks = conv.forks || [];
       }
     } catch {
       /* it stays as it was */
@@ -903,6 +910,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     viewSeq += 1;
     messages = [];
     summary = null;
+    forks = [];
+    editing = null;
     showingSummary = false;
     tooLong = '';
     if (opts?.keepInput !== true) input = '';
@@ -1205,6 +1214,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         scope = conv.scope || null;
       }
       summary = conv.summary ?? null;
+      forks = conv.forks || [];
       // Its answer is saved already: a quick one's "answered" came while this
       // view was still opening for the question (ControlPanel brought Chat up
       // on "asked", before this view listened), and it'd say "Thinking" for
@@ -1505,6 +1515,69 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     else waitingOpen.add(conv);
   }
 
+  // ---- Retry, Edit and ‹ › (15 Nov 2026, chat/chats/branches.rs; the Claude app's message actions) ----
+
+  /** The ‹ k/n › of the message at index `i`, or null. */
+  const forkOf = (i) => forks.find((f) => f.at === i) ?? null;
+
+  /**
+   * **Retry** the answer `m` (Chat's: the Claude app's ↻): its question answered again, the old answer and what
+   * followed kept as a version, ‹ 2/2 › on the new one. (A Code chat's is an edit with the same words: `saveEdit`.)
+   */
+  function retryAt(m) {
+    const index = indexOf(m?.id);
+    if (activeId == null || sending || !Number.isInteger(index)) return false;
+    const q = messages[index - 1];
+    if (q?.role !== 'user' || q.kind) return false;
+    editing = null;
+    send({ text: q.text?.trim() || DEFAULT_PROMPT, retry: index, voice: !!q.voice });
+    return true;
+  }
+
+  /** The person's message `m`'s own words (no screenshot text, no picked elements' blocks). */
+  const wordsOf = (m) => splitScreenText(splitElements(m?.text || '').text).question ?? '';
+  /** **Edit** the person's message `m`: open in place with its own words. */
+  function startEdit(m) {
+    if (!m?.id || m.role !== 'user') return;
+    editing = { id: m.id, text: wordsOf(m) };
+  }
+  function cancelEdit() {
+    editing = null;
+  }
+
+  /**
+   * **Save and send** the edited message `m` as `text`: a new version of the conversation from there (‹ 1/2 › on the
+   * message), its screenshots and the passage it was about going again. `code`: a Code chat's — a Rewind to before it
+   * first (`files`: the files Claude changed since go back too). False when it didn't go.
+   */
+  function saveEdit(m, text, { files = false, code = false } = {}) {
+    const index = indexOf(m?.id);
+    const words = String(text ?? '').trim();
+    if (activeId == null || sending || !Number.isInteger(index) || !words) return false;
+    editing = null;
+    send({ text: words, edit: index, from: m, elements: splitElements(m.text || '').elements, editFiles: !!files, code: !!code });
+    return true;
+  }
+
+  /** **‹ ›**: the message at `at` shows its version `place`, what was shown from there kept as a version. */
+  async function switchBranch(at, place) {
+    const id = activeId;
+    if (id == null || sending) return;
+    try {
+      const conv = await invoke('chat_branch', { id, at, place });
+      if (activeId !== id) return;
+      stopReading();
+      editing = null;
+      messages = withLive(id, conv.messages);
+      summary = conv.summary ?? null;
+      forks = conv.forks || [];
+      contextStamp += 1;
+      refreshList();
+    } catch (e) {
+      toast({ title: "Couldn't show that version", description: String(e?.message ?? e), variant: 'destructive' });
+    }
+  }
+
   // ---- Rewind and Fork from here (14 Nov 2026, agents/rewind.rs; the Claude Code app's message actions) ----
 
   /** A message's index in the chat shown ("chat:<conversation>:<index>"). */
@@ -1667,6 +1740,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   const earlyReads = new Set();
 
   async function send(opts) {
+    // **Retry** (`retry`: the answer's index, its question answered again) or **Edit** (`edit`: the person's message's
+    // index, `from` that message; the new words in its place): a new version of the conversation from there
+    // (chat/chats/branches.rs). Never from the box, nor queued.
+    const retry = Number.isInteger(opts?.retry) ? opts.retry : null;
+    const edit = Number.isInteger(opts?.edit) ? opts.edit : null;
+    const branching = retry != null || edit != null;
     const asText = opts?.asText === true;
     // With a screenshot waiting, an empty box asks "What's this?".
     const fromBox = opts?.text == null;
@@ -1688,7 +1767,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // waits for nothing then). With nothing going on it's sent as Enter sends it.
     const later = fromBox && opts?.later === true;
     // (Asked out loud, `spokenWhileWorking`: its words alone, never the box's screenshots, elements or passage.)
-    const queueable = fromBox ? !shots.length && !elements.length && !quote : opts?.spoken === true;
+    // (A retry or an edit is never queued.)
+    const queueable = branching ? false : fromBox ? !shots.length && !elements.length && !quote : opts?.spoken === true;
     const gated = queueGate();
     if (queueable && text && activeId != null && (!sending || later) && (gated || later) && !skills.parse(text)?.skill) {
       // Rust says (agents/runner.rs `queue_state`): writing its answer — it waits; a tool call out — it goes now,
@@ -1750,8 +1830,26 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const turn = ++sendSeq;
     // (Words from a page beside the chat: quoted as a selection, its site named.)
     const sentQuote = about ? (about.page ? { noteId: 0, text: about.text, app: about.page.site || about.page.title || '' } : { noteId: about.noteId, text: about.text }) : null;
-    const question = { role: 'user', text, voice, id: null, turn, images: shots, quote: sentQuote, elements: sentElements };
-    messages = [...messages, question];
+    let question;
+    if (retry != null) {
+      // Its question stays as saved, the turn's now; the answer and what followed set aside.
+      question = { ...messages[retry - 1], turn };
+      messages = [...messages.slice(0, retry - 1), question];
+    } else {
+      // (An edit: its screenshots, its passage and its picked elements go again, as the message had them.)
+      const from = edit != null ? opts.from : null;
+      question = {
+        role: 'user',
+        text,
+        voice,
+        id: null,
+        turn,
+        images: from ? (from.images || []).filter((i) => !i.gone) : shots,
+        quote: from ? (from.quote ?? null) : sentQuote,
+        elements: from ? opts.elements || [] : sentElements,
+      };
+      messages = edit != null ? [...messages.slice(0, edit), question] : [...messages, question];
+    }
     // **The answer, in its own conversation** (`Answer`): a new chat's is
     // that new chat's until its question makes the conversation. Another
     // conversation opened while it's written (a click in the list, New
@@ -1759,7 +1857,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // written — shown again, where it is, when its conversation opens; it
     // lands there.
     const rec = new Answer({ conv: activeId, turn, view: viewSeq, question });
+    if (retry != null) rec.askedId = question.id ?? null;
     setTurn(rec);
+    // (Read again as it ends when it didn't answer: Rust put the chat back as it was.)
+    let reloadAfter = false;
     scrollThread();
     // The conversation it went to, for the status dots: an ask-first card
     // waiting there is "needs you", even once Chat is left.
@@ -1800,7 +1901,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       rec.took(ev);
       paint(rec);
     };
-    const call = streamCall(
+    const call = retry != null
+      ? streamCall('chat_retry', { conversationId: activeId, index: retry }, onEvent)
+      : streamCall(
       'chat_send',
       {
         conversationId: activeId,
@@ -1820,6 +1923,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         codeFolder: activeId == null ? (newChatFolder?.() ?? null) : null,
         // A new chat's connectors switched off in its + menu (connectors/chats.rs).
         connectorsOff: activeId == null ? connectors.newChatOff() : null,
+        // An edit (chat/commands.rs `edit`): the message it replaces, its picked elements again.
+        ...(edit != null ? { edit, editFiles: opts.editFiles === true, elements: opts.elements?.length ? opts.elements : null } : {}),
       },
       onEvent
     );
@@ -1913,6 +2018,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // The question as saved: with its screenshots' text when it went as text.
       const saved = asText && res.question ? { text: res.question, images: shots.map((s) => ({ ...s, asText: true })) } : {};
       messages = [...messages.slice(0, qi), { ...asked, ...saved, id: res.userMessageId ?? null }, answer];
+      // Its versions now (a retry's or an edit's ‹ ›).
+      if (Array.isArray(res.forks)) forks = res.forks;
       refreshList();
       followThread();
       contextStamp += 1;
@@ -1924,6 +2031,24 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (!alive) return;
       // Its conversation shown now (another one: its messages and its box stay as they are).
       const shown = isShown(rec);
+      // A retry or an edit that never answered: Rust put the chat back as it was (read again as it ends). A Code
+      // chat's edit has rewound: its words go back in the box, as any send's.
+      if (branching && !(edit != null && opts.code)) {
+        if (shown) reloadAfter = true;
+        if (!String(e).includes(SUPERSEDED) && !String(e).includes(STOPPED)) {
+          // (An edit's words: back in its box, open in place.)
+          if (shown && edit != null) editing = { id: chatId(activeId, edit), text };
+          const why = aiError(e);
+          toast({
+            title: retry != null ? "Couldn't try again" : "Couldn't send",
+            description: why.text,
+            ...(why.known ? { variant: 'default', kind: 'error', chip: 'Error', icon: 'alert' } : { variant: 'destructive' }),
+          });
+        }
+        refreshList();
+        contextStamp += 1;
+        return;
+      }
       if (String(e).includes(SUPERSEDED)) {
         // A newer question in this conversation replaced it (asked out
         // loud, or dictated here and sent): no answer was saved, its bubble
@@ -2007,6 +2132,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // (No card of its waits any more.)
       turnOver(cardsIn);
       dropTurn(rec);
+      if (alive && reloadAfter && isShown(rec)) reloadActive();
       if (alive && sendWhenFree === rec) {
         sendWhenFree = null;
         send();
@@ -2130,6 +2256,15 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     sendQueuedNow,
     rewindAt,
     forkAt,
+    forkOf,
+    retryAt,
+    wordsOf,
+    startEdit,
+    cancelEdit,
+    saveEdit,
+    switchBranch,
+    get editing() { return editing; },
+    get forks() { return forks; },
     agentEvent,
     agentReported,
     spokenWhileWorking,

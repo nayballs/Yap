@@ -791,6 +791,12 @@ pub fn chat_answering() -> Value {
     json!({ "conversations": ids, "seq": seq })
 }
 
+/// **Is a turn answering conversation `conversation` now?** (Retry, Edit and
+/// ‹ › wait for it: `chat/commands.rs`.)
+pub fn is_answering(conversation: u64) -> bool {
+    ANSWERING.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|m| m.contains_key(&conversation))
+}
+
 /// A turn's answer that can be **stopped** (the page's ■, registered under
 /// the page's id) and **superseded** (a newer question to its conversation,
 /// once [`Stoppable::answers`] says which) until dropped.
