@@ -58,7 +58,7 @@ export async function agentTimeline(main, n = null) {
     key = await panel.locator(`[data-testid="chat-agent-row"][data-turn="${n}"]`).getAttribute('data-key');
   }
   const row = panel.locator(`[data-testid="chat-agent-row"][data-key="${key}"]`);
-  if ((await row.getAttribute('data-open')) !== 'true') await row.locator('.rhead').click();
+  if ((await row.getAttribute('data-open')) !== 'true') await row.getByTestId('chat-agent-row-fold').click();
   await row.getByTestId('chat-agent-row-open').click();
   await expect(main.getByTestId('chat-agent-back')).toBeVisible();
 }
