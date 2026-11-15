@@ -7,7 +7,8 @@
   // Today / Yesterday / Previous 7 Days / Older. A conversation — also from
   // its hover ⋯ and the ContextMenu key / Shift+F10 — has Rename (in place:
   // Enter or leaving it saves, Esc cancels; chat/chats.rs `rename`), Copy as
-  // Markdown and Delete… (asked first); a right-click opens it too.
+  // Markdown, Export… (a .md file and its pictures: chatExport.js), Archive
+  // and Delete… (asked first); a right-click opens it too.
   // Shift+click and Ctrl+click pick several (the "N selected" bar deletes
   // them); Delete, Esc and Ctrl+A from the keyboard.
   import { invoke } from '@tauri-apps/api/core';
@@ -17,6 +18,7 @@
   import { overflowTip } from '../../ui/overflowTip.js';
   import { showSaveError } from '../../notices/saveErrors.js';
   import { copyText, conversationMarkdown } from '../../core/itemMenus.js';
+  import { exportConversation } from './chatExport.js';
   import { createChatLibrary } from './chatLibrary.svelte.js';
   // The agents running now, above the list (Yap Code).
   import RunningAgents from './RunningAgents.svelte';
@@ -179,6 +181,7 @@
         ...views,
         { separator: true },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyConversation(c.id) },
+        { label: 'Export…', icon: 'download', onselect: () => exportConversation(c) },
         { label: 'Archive', icon: 'archive', onselect: () => lib.archive([c.id]) },
         { separator: true },
         { label: 'Delete…', icon: 'trash', danger: true, onselect: () => chat.askDelete(c) },
@@ -313,7 +316,7 @@
 
   {#if lib.query.trim() || lib.showArchived}
     {#await import('./ChatLibraryList.svelte') then { default: ChatLibraryList }}
-      <ChatLibraryList bind:this={libView} {chat} {lib} {searchEl} oncopy={copyConversation} />
+      <ChatLibraryList bind:this={libView} {chat} {lib} {searchEl} oncopy={copyConversation} onexport={exportConversation} />
     {/await}
   {:else if chat.groups.length === 0}
     {#if onCode}

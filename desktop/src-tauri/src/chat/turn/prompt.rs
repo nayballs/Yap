@@ -628,6 +628,11 @@ fn instructions(g: &Gates, profile: &crate::ai::about_you::Profile, memory: bool
             s.push(' ');
             s.push_str(&crate::chat::tools::calendar::CALENDAR_TOOL_INSTRUCTIONS.join(" "));
         }
+        // Visuals in the answer itself (chat/made.rs): when to draw one.
+        if g.visuals {
+            s.push(' ');
+            s.push_str(crate::chat::made::INSTRUCTIONS);
+        }
         // Yap Code (chat/tools/agents.rs): agents on and Claude Code on this PC,
         // as the turn offers them (never across the meetings).
         if g.agents {
@@ -813,6 +818,7 @@ mod tests {
             picture_tools: true,
             files: Gate::Off,
             share_tools: true,
+            visuals: false,
         }
     }
 
@@ -941,6 +947,7 @@ mod tests {
             picture_tools: true,
             files: Gate::Off,
             share_tools: true,
+            visuals: false,
         };
         let asks = "What's the latest version of Python?";
         assert!(crate::web::needs_web(asks), "the test's question needs the web");

@@ -915,7 +915,7 @@ fn direct_eyes(cfg: &crate::config::YapConfig, model: &str, phone: bool) -> clau
 
 /// **Its browser turn's context**: the person's message this turn, their
 /// earlier ones in the chat (an address they gave opens), the chat itself.
-fn beside_context(agent: &Agent, n: u32, eyes: claude_live::eyes::Eyes, unattended: bool) -> claude_live::turn::Context {
+fn beside_context(agent: &Agent, n: u32, eyes: claude_live::eyes::Eyes, unattended: bool, visuals: bool) -> claude_live::turn::Context {
     let question = agent.turn_list.iter().find(|t| t.n == n).map(|t| t.request.clone()).filter(|q| !q.trim().is_empty()).unwrap_or_else(|| agent.brief.clone());
     let said = agent
         .conversation
@@ -926,7 +926,7 @@ fn beside_context(agent: &Agent, n: u32, eyes: claude_live::eyes::Eyes, unattend
     let workspace = (!agent.path.trim().is_empty()).then(|| agent.path.clone());
     // An element picked on a page beside the chat: web content from the turn's start (`chat/pages/pick.rs`).
     let web = crate::chat::pages::pick::has_element(&question);
-    claude_live::turn::Context { question, conversation: agent.conversation, eyes, said, watched: true, unattended, workspace, web, ..Default::default() }
+    claude_live::turn::Context { question, conversation: agent.conversation, eyes, said, watched: true, unattended, workspace, web, visuals, ..Default::default() }
 }
 
 /// **Its browser turn's web side**, as a plan chat's (`plan.rs` `web_side`):
@@ -1198,9 +1198,11 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     // earlier ones (the pages it may open), the chat — and what they show
     // goes to the chat's panel (`yap-agent-shown`), its answer keeping it.
     let eyes = if direct { direct_eyes(&cfg, &agent.model, phone.is_some()) } else { Default::default() };
-    let mut beside = (direct && eyes.any()).then(|| {
+    // Visuals in the chat's thread (chat/made.rs, 15 Nov 2026): a turn of the person's in Chat, never a phone's.
+    let visuals = direct && phone.is_none() && agent.conversation.is_some();
+    let mut beside = (direct && (eyes.any() || visuals)).then(|| {
         // Bypass permissions: nobody is asked, a page action's card either (its instructions have Claude ask in the chat).
-        let ctx = beside_context(&agent, n, eyes, modes::unattended(mode));
+        let ctx = beside_context(&agent, n, eyes, modes::unattended(mode), visuals);
         let web = beside_web(&cfg, &agent, &ctx);
         run.begin_turn(ctx, web)
     });

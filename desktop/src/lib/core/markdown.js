@@ -37,6 +37,25 @@
 // - footnotes ("…[^1]" and "[^1]: …") are a raised number and the notes under
 //   the text, and a markdown image is a link to the picture with no stray
 //   "!" — both only as drawn (`renderMarkdown`), never in `markdownTokens`.
+//
+// **What a view draws afterwards** (15 Nov 2026, after the Claude app's
+// answers; ui/markdownVisuals.js, a Svelte action on the rendered element):
+// the HTML made here only marks them, its text as the model wrote it, so a
+// view without the action (a toast, the bar, an email) shows that text:
+// - maths, `span.md-math` (`$…$`, `\(…\)`) and `.md-math.md-math-display`
+//   (`$$…$$`, `\[…\]`; a `div` on lines of its own), drawn by KaTeX. `$`
+//   before a digit, a price ("$5 and $10"), a shell variable ("$HOME/$USER")
+//   stay text (`mathAt`);
+// - a ```mermaid fence, `div.md-diagram` round its code, drawn by mermaid
+//   with a `</>` switch back to the code;
+// - a markdown picture, `a.md-link.md-image` (its address, the alt text as
+//   its words): a "Show image" box, fetched only when clicked;
+// - a ```diff fence, `pre.md-code.md-diff`: a line each, `md-add` / `md-del`
+//   / `md-hunk` / `md-meta`, as red and green lines (app.css).
+// Maths and pictures are parsed only for a render (`env.render`, as the
+// footnotes are): `markdownTokens` (the document editor) reads `$…$` and
+// `![…](…)` as text, exactly as before, so the markdown it writes back is
+// unchanged.
 import MarkdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
 
@@ -52,8 +71,13 @@ const md = new MarkdownIt('default', {
   typographer: false,
 });
 md.validateLink = (url) => SAFE_URL.test(url.trim());
-// No images: a model's ![x](https://…) would make Yap fetch the address.
+// No <img>: a model's ![x](https://…) would make Yap fetch the address. A
+// render reads it as a picture (`yap_image` below), drawn as a link the view
+// makes a "Show image" box of; anything else reads it as text.
+const imageRule = md.inline.ruler.__rules__.find((r) => r.name === 'image').fn;
 md.disable('image');
+/** A picture's address Yap may fetch when asked: the web's only. */
+const PICTURE_URL = /^https?:\/\//i;
 // Bare links: http(s) and mail addresses only (linkify-it's defaults also
 // take ftp: and //; "example.com" alone isn't linked).
 md.linkify.add('ftp:', null).add('//', null);
@@ -112,6 +136,125 @@ export function isPlaceholder(line, key = null) {
   const m = PENDING.exec(String(line || '').trim());
   return !!m && !!m[1].trim() && (key == null || m[1].trim().toLowerCase() === String(key).trim().toLowerCase());
 }
+
+// --- Maths and pictures (a render's only: `env.render`) -------------------
+
+/** The longest formula drawn (a longer one stays text). */
+export const MATH_MAX = 4000;
+
+const isSpace = (c) => c === undefined || /\s/.test(c);
+const isWordChar = (c) => c !== undefined && /[\p{L}\p{N}_]/u.test(c);
+
+/**
+ * The maths starting at `src[pos]`, or `null`: `{ end, tex, display, open,
+ * close }` (`end` just past it). `$…$` only as Pandoc reads it — a `$` right
+ * after a letter or digit isn't one, the opening `$` has a non-space after
+ * it, the closing one a non-space before it and no digit, letter or `$`
+ * after it — so a price ("$5 and $10", "$5–$10"), a currency ("US$5") or
+ * shell variables ("$HOME/$USER") stay text. `$$…$$` and `\[…\]` are
+ * display maths, `\(…\)` inline. Nothing empty, nothing over `MATH_MAX`, a
+ * `\` escaping the next character. Pure.
+ */
+export function mathAt(src, pos, max = src.length) {
+  let open;
+  let close;
+  let display;
+  if (src.startsWith('$$', pos)) [open, close, display] = ['$$', '$$', true];
+  else if (src[pos] === '$') [open, close, display] = ['$', '$', false];
+  else if (src.startsWith('\\(', pos)) [open, close, display] = ['\\(', '\\)', false];
+  else if (src.startsWith('\\[', pos)) [open, close, display] = ['\\[', '\\]', true];
+  else return null;
+  if (open === '$' && (isWordChar(src[pos - 1]) || src[pos - 1] === '\\' || isSpace(src[pos + 1]))) return null;
+  const from = pos + open.length;
+  for (let i = from; i < max; i++) {
+    if (src.startsWith(close, i)) {
+      // `$…$` ends at the next `$`, or isn't maths: "$5 now; then $x^2$" is
+      // a price, then maths — never one formula from the 5 to the 2.
+      if (open === '$' && (src[i + 1] === '$' || isSpace(src[i - 1]) || isWordChar(src[i + 1]))) return null;
+      const tex = src.slice(from, i);
+      if (!tex.trim() || tex.length > MATH_MAX) return null;
+      return { end: i + close.length, tex, display, open, close };
+    }
+    // `\$` (and any other escaped character) never closes it.
+    if (src[i] === '\\') i++;
+  }
+  return null;
+}
+
+/** Maths as text (`span.md-math`'s, as written) → `{ tex, display }` for KaTeX, or `null`. Pure. */
+export function mathOf(text) {
+  const s = String(text ?? '').trim();
+  const m = mathAt(s, 0);
+  return m && m.end === s.length ? { tex: m.tex, display: m.display } : null;
+}
+
+md.inline.ruler.before('escape', 'yap_math', (state, silent) => {
+  if (!state.env?.render) return false;
+  const c = state.src[state.pos];
+  if (c !== '$' && c !== '\\') return false;
+  const m = mathAt(state.src, state.pos, state.posMax);
+  if (!m) return false;
+  if (!silent) {
+    const t = state.push('yap_math', '', 0);
+    t.content = state.src.slice(state.pos, m.end);
+    t.meta = { display: m.display };
+  }
+  state.pos = m.end;
+  return true;
+});
+
+// Display maths on lines of its own: `$$` (or `\[`) to a line ending `$$`
+// (`\]`), no blank line between; on one line, `$$ x $$` alone. It may break
+// into a paragraph (models write "…the equation:\n$$"). Unclosed, it's text.
+md.block.ruler.before(
+  'fence',
+  'yap_math_block',
+  (state, line, end, silent) => {
+    if (!state.env?.render || state.sCount[line] - state.blkIndent >= 4) return false;
+    const at = (l) => state.src.slice(state.bMarks[l] + state.tShift[l], state.eMarks[l]);
+    const first = at(line);
+    const [open, close] = first.startsWith('$$') ? ['$$', '$$'] : first.startsWith('\\[') ? ['\\[', '\\]'] : [];
+    if (!open) return false;
+    let last = -1;
+    const whole = first.trimEnd();
+    if (whole.length > open.length + close.length && whole.endsWith(close)) {
+      const inner = whole.slice(open.length, -close.length);
+      if (inner.trim() && !inner.includes(close)) last = line;
+    }
+    if (last < 0) {
+      if (first.slice(open.length).includes(close)) return false;
+      for (let l = line + 1; l < end; l++) {
+        const text = at(l);
+        if (!text.trim() || state.sCount[l] < state.blkIndent) return false;
+        if (text.trimEnd().endsWith(close)) {
+          last = l;
+          break;
+        }
+        if (text.includes(close)) return false;
+      }
+    }
+    if (last < 0) return false;
+    if (silent) return true;
+    const lines = [];
+    for (let l = line; l <= last; l++) lines.push(at(l));
+    const content = lines.join('\n').trim();
+    const inner = content.slice(open.length, -close.length);
+    if (!inner.trim() || inner.length > MATH_MAX) return false;
+    const t = state.push('yap_math_block', 'div', 0);
+    t.block = true;
+    t.content = content;
+    t.map = [line, last + 1];
+    state.line = last + 1;
+    return true;
+  },
+  { alt: ['paragraph'] }
+);
+
+// A picture (`![alt](https://…)`), in a render only: drawn as a link
+// (`rules.image`), which a view with ui/markdownVisuals.js makes a "Show
+// image" box of. Not a web address: its alt text, as the "!" and link
+// would have been.
+md.inline.ruler.before('link', 'yap_image', (state, silent) => (state.env?.render ? imageRule(state, silent) : false));
 
 // Block markup: headings a level down, classes for quotes and rules.
 md.core.ruler.push('yap_blocks', (state) => {
@@ -309,6 +452,11 @@ md.core.ruler.push('yap_web', (state) => {
         if (open.pop()) out.push(t);
         continue;
       }
+      // A picture only from a source's own address; any other, its alt text.
+      if (t.type === 'image') {
+        out.push(web.allows(t.attrGet('src')) ? t : textToken(state, t.content));
+        continue;
+      }
       // Citations, outside links only.
       if (t.type !== 'text' || open.some(Boolean)) {
         out.push(t);
@@ -407,8 +555,53 @@ function fenceClass(token) {
   const name = `lang-${String(token.info || '').trim().split(/\s+/)[0].toLowerCase()}`;
   return LANG_CLASS.test(name) ? ` class="${name}"` : '';
 }
-rules.fence = rules.code_block = (tokens, idx) =>
+const codeBlock = (tokens, idx) =>
   `<pre class="md-code"${lineAttr(tokens[idx])}><code${fenceClass(tokens[idx])}>${escapeHtml(tokens[idx].content.replace(/\n$/, ''))}</code></pre>\n`;
+/** A fence's language, its first word lower-cased ("" for none). */
+const fenceLang = (token) => (token.type === 'fence' ? String(token.info || '').trim().split(/\s+/)[0].toLowerCase() : '');
+
+/** A diff's line's kind: added, removed, a hunk's header, a file's header, or context (""). Pure. */
+export function diffLineKind(line) {
+  if (/^(\+\+\+|---)(\s|$)/.test(line) || /^(diff|index) /.test(line)) return 'md-meta';
+  if (line.startsWith('@@')) return 'md-hunk';
+  if (line.startsWith('+')) return 'md-add';
+  if (line.startsWith('-')) return 'md-del';
+  return '';
+}
+
+rules.code_block = codeBlock;
+rules.fence = (tokens, idx, options, env) => {
+  const t = tokens[idx];
+  const lang = fenceLang(t);
+  // A diagram: its code, in a box the view draws it in (its `</>` shows the code again).
+  if (lang === 'mermaid') {
+    const code = codeBlock(tokens, idx).replace(/ data-line="[^"]*"/, '');
+    return `<div class="md-diagram"${lineAttr(t)}>${code.trimEnd()}</div>\n`;
+  }
+  // A diff: a line each, as added, removed or context (no code colours on top).
+  if (lang === 'diff' || lang === 'patch') {
+    const lines = t.content.replace(/\n$/, '').split('\n');
+    const body = lines.map((l) => `<span class="md-dl${diffLineKind(l) ? ` ${diffLineKind(l)}` : ''}">${escapeHtml(l)}\n</span>`).join('');
+    return `<pre class="md-code md-diff"${lineAttr(t)}><code>${body}</code></pre>\n`;
+  }
+  return codeBlock(tokens, idx, options, env);
+};
+
+// Maths: its text as written, for the view to draw (KaTeX).
+rules.yap_math = (tokens, idx) =>
+  `<span class="md-math${tokens[idx].meta?.display ? ' md-math-display' : ''}">${escapeHtml(tokens[idx].content)}</span>`;
+rules.yap_math_block = (tokens, idx) => `<div class="md-math md-math-display"${lineAttr(tokens[idx])}>${escapeHtml(tokens[idx].content)}</div>\n`;
+
+// A picture: a link to it named by its alt text, which the view makes a
+// "Show image" box of (never an <img>: nothing is fetched by itself).
+rules.image = (tokens, idx, options, env, self) => {
+  const t = tokens[idx];
+  const src = String(t.attrGet('src') || '').trim();
+  const alt = self.renderInlineAsText(t.children || [], options, env).trim();
+  if (!PICTURE_URL.test(src)) return escapeHtml(alt);
+  const href = escapeHtml(src);
+  return `<a class="md-link md-image" href="${href}" title="${href}">${escapeHtml(alt || 'Picture')}</a>`;
+};
 
 // Tables: in a sideways-scrolling wrapper, alignment as classes, compact.
 const ALIGN = { center: ' class="c"', right: ' class="r"' };
@@ -441,7 +634,10 @@ const PURIFY = {
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
 };
-const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-passage', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'md-pending', 'md-pending-key', 'md-pending-intent', 'md-fnref', 'md-footnotes', 'task', 'c', 'r']);
+const CLASSES = new Set([
+  'md-link', 'md-cite', 'md-cites', 'md-passage', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'md-pending', 'md-pending-key', 'md-pending-intent', 'md-fnref', 'md-footnotes', 'task', 'c', 'r',
+  'md-math', 'md-math-display', 'md-diagram', 'md-image', 'md-diff', 'md-dl', 'md-add', 'md-del', 'md-hunk', 'md-meta',
+]);
 // The one in-page address: a passage pill's (rendered by yap_cite only).
 const PASSAGE_HREF = /^#passage-\d{1,2}$/;
 // Which elements may carry which of the narrower attributes.
