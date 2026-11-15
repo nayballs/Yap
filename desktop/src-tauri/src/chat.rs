@@ -23,6 +23,7 @@ pub mod projects;
 pub mod see_screen;
 pub mod side;
 pub mod shares;
+pub mod sheets;
 pub mod skills;
 pub mod styles;
 pub mod stream;

@@ -110,6 +110,8 @@ export const picKey = (id) => `pic:${id}`;
 export const agentKey = (id) => `agent:${id}`;
 /** A Code chat's file, its Runs and its summary (FileTab, RunsTab, SummaryTab: 15 Nov 2026). */
 export const fileKey = (rel) => `file:${rel}`;
+/** A spreadsheet beside the chat (SheetTab, chat/sheets/view.rs): a Code chat's file's, or an attached one's. */
+export const sheetKey = (src) => (src?.from === 'attachment' ? `sheet:att:${src.id}` : `sheet:ws:${src?.rel}`);
 export const RUNS_KEY = 'runs';
 export const SUMMARY_KEY = 'summary';
 /** A page Yap keeps (chat/made/pages.rs): its tab's key. The chat's Outputs: its tab's. */
@@ -145,6 +147,9 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
   // A Code chat's file beside the chat (agents/files.rs: `{rel, line, seq}`; its File tab).
   let file = $state(null);
   let fileSeq = 0;
+  // A spreadsheet beside the chat (chat/sheets/view.rs: `{src, name, seq}`; its Sheet tab).
+  let sheet = $state(null);
+  let sheetSeq = 0;
   // A page Yap keeps beside the chat (chat/made/pages.rs: `{id, conversation, title, n?, seq}`; KeptPageTab):
   // `n` the version asked for (none: its newest), `seq` counts each time it's asked for.
   let kept = $state(null);
@@ -219,6 +224,10 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
           : showing === 'file'
             ? file
               ? fileKey(file.rel)
+              : null
+          : showing === 'sheet'
+            ? sheet
+              ? sheetKey(sheet.src)
               : null
           : showing === 'runs'
             ? RUNS_KEY
@@ -483,6 +492,24 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     open = true;
   }
 
+  /**
+   * **A spreadsheet** (`{src, name}`: `src` a Code chat's file `{from: 'workspace', conversation, rel}` or an
+   * attached one `{from: 'attachment', id}`, chat/sheets/view.rs): its Sheet tab, drawn as Excel draws it and
+   * live while it changes on disk. One tab a file; `seq` tells the tab it was asked again.
+   */
+  function showSheet(s) {
+    if (!s?.src) return;
+    if (showing === 'doc') flushSave();
+    sheetSeq += 1;
+    const v = { src: s.src, name: s.name || '', seq: sheetSeq };
+    const key = sheetKey(v.src);
+    inRow({ key, kind: 'sheet', sheet: v });
+    extra = extra.map((t) => (t.key === key ? { ...t, sheet: v } : t));
+    sheet = v;
+    showing = 'sheet';
+    open = true;
+  }
+
   /** **The Runs tab**: what ▶ Run ran in this Code chat (RunsTab.svelte). */
   function showRuns() {
     if (showing === 'doc') flushSave();
@@ -571,6 +598,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     // so going back and forth with a row's own view lands where the person left it.)
     else if (t?.kind === 'agent') showAgent({ ...t.agent, turn: null, view: null, auto: true });
     else if (t?.kind === 'file') showFile(t.file);
+    else if (t?.kind === 'sheet') showSheet(t.sheet);
     else if (t?.kind === 'runs') showRuns();
     else if (t?.kind === 'summary') {
       inRow(t);
@@ -690,6 +718,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     picture = null;
     agent = null;
     file = null;
+    sheet = null;
     kept = null;
     task = null;
     if (page || Object.keys(pageNow).length) closePages();
@@ -827,6 +856,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     get page() { return page; },
     get agent() { return agent; },
     get file() { return file; },
+    get sheet() { return sheet; },
     get kept() { return kept; },
     get task() { return task; },
     get pageNow() { return pageNow; },
@@ -859,6 +889,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     showAgent,
     showFile,
     showRuns,
+    showSheet,
     toggleSummary,
     showKept,
     showOutputs,
