@@ -746,7 +746,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
 
 ### The summary
 
-`SummaryTab.svelte`, a `summary` tab opened from the list button at the right of the panel's tab row (a Code chat always has the row) or the title bar's (`stores/chatSummary.svelte.js`, a Code chat's only; it closes the panel while the summary shows, as the browser button does). After the Claude app's right column:
+`SummaryTab.svelte`, a `summary` tab opened from the list button at the right of the panel's row of tabs (the row shows with two tabs or more, as before) or the title bar's (`stores/chatSummary.svelte.js`, a Code chat's only; it closes the panel while the summary shows, as the browser button does). After the Claude app's right column:
 
 - **Environment** (`code_chat_environment`): the workspace's name and path, its git branch (a detached HEAD's commit), **Worktree** for a linked worktree, "Runs on this PC". Read from `.git` itself: a `.git` file whose `gitdir:` points into `<repo>/.git/worktrees/` is a worktree; no git is run.
 - **Context**: how full the chat's context is, from what Yap knows already: its own Claude's latest turn (a Code chat that works directly: `agents/usage.rs`), else the plan's count for the chat, else the context ring's (`chat_context`).

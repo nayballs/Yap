@@ -13,7 +13,7 @@
 //   the line in the workspace, its output in the Runs tab beside the chat
 //   (Stop, Run again, Add to message); under Bypass permissions nothing asks.
 //   A block of two lines has no ▶; neither has a Chat (non-Code) chat.
-// - **The summary** (the panel row's list button, or the title bar's):
+// - **The summary** (the title bar's button, or the list button in the panel's row of tabs):
 //   Environment (the workspace, its branch, a worktree), Context, the chat's
 //   connectors, Outputs (the files its work changed) and Background tasks (a
 //   run's clock and Stop, "N finished").
@@ -237,7 +237,7 @@ test('▶ Run on a one-line shell block: asked first under Auto, run in the work
   // A long one: its clock and Stop, here and in the summary's Background tasks.
   const long = await yap.invoke('code_run_start', { conversation, command: 'Start-Sleep -Seconds 60', lang: 'powershell', asked: true });
   await expect(runs.locator(`[data-id="${long.id}"]`)).toHaveAttribute('data-state', 'running');
-  await panel(main).getByTestId('chat-panel-summary').click();
+  await main.getByTestId('chat-summary-button').click();
   const tasks = main.getByTestId('chat-summary-tasks');
   await expect(tasks.locator('[data-testid="chat-summary-task"][data-kind="run"]')).toContainText('Start-Sleep -Seconds 60');
   await expect(tasks.getByTestId('chat-summary-finished')).toHaveText(/2 finished/);
@@ -273,7 +273,8 @@ test('the summary: the workspace, its branch and worktree, context, connectors, 
   await shot(main, '06-the-summary');
   await outputs.first().click();
   await expect(main.getByTestId('chat-file')).toHaveAttribute('data-rel', 'src/convert.js');
-  // The row's list button shows it again; the title bar's closes the panel while it shows.
+  // With two tabs, the row: its list button shows it again; the title bar's closes the panel while it shows.
+  await expect(panel(main).getByTestId('chat-panel-tab')).toHaveText(['Summary', 'convert.js']);
   await panel(main).getByTestId('chat-panel-summary').click();
   await expect(summary).toBeVisible();
   await button.click();

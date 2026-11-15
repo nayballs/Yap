@@ -645,8 +645,7 @@
   data-testid="chat-doc"
   onkeydown={panelKey}
 >
-  <!-- (A Code chat always has the row: its Summary button is there.) -->
-  {#if tabs.length > 1 || doc.showing === 'page' || !!workspace}
+  {#if tabs.length > 1 || doc.showing === 'page'}
     <!-- This conversation's documents, pictures and pages, newest last; + a new page tab. -->
     <div class="tabrow">
     <div class="doctabs" role="tablist" aria-label="In the panel" tabindex="-1" data-testid="chat-panel-tabs" bind:this={tabsEl} onkeydown={tabsKey} onwheel={tabsWheel}>
@@ -701,7 +700,7 @@
       <div class="rowactions" data-testid="chat-page-actions">{@render rowActions()}</div>
     {/if}
     {#if workspace}
-      <!-- A Code chat's summary (SummaryTab.svelte), as the Claude app's right column. -->
+      <!-- A Code chat's summary (SummaryTab.svelte), as the Claude app's right column (with one tab, no row: the title bar's button). -->
       <button
         type="button"
         class="tabnew tabsummary"
