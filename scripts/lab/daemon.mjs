@@ -568,12 +568,29 @@ async function branchTurn(how, text) {
   if (how === 'retry') {
     await col.locator('.cbubble.assistant').last().hover({ timeout: 10_000 });
     await col.getByTestId('chat-retry').last().click({ timeout: 10_000 });
+    await confirmIfAsked();
     return;
   }
   await col.locator('.cbubble.user').last().hover({ timeout: 10_000 });
   await col.getByTestId('chat-edit-message').last().click({ timeout: 10_000 });
   await col.getByTestId('chat-edit-input').fill(text, { timeout: 10_000 });
   await col.getByTestId('chat-edit-save').click({ timeout: 10_000 });
+  await confirmIfAsked();
+}
+
+/**
+ * A Code chat asks first: its Retry and Edit go through Rewind ("Retry from this message?", "Send the edited
+ * message?", ChatThread.svelte). Its confirm pressed, as the person would (Lab, 15 Nov 2026: `--retry` waited on the
+ * question for good). A plain chat asks nothing: back at once.
+ */
+async function confirmIfAsked() {
+  const confirm = main().locator('[role="alertdialog"] .btns button:not([data-cancel])').first();
+  try {
+    await confirm.waitFor({ state: 'visible', timeout: 2_500 });
+  } catch {
+    return;
+  }
+  await confirm.click({ timeout: 5_000 });
 }
 
 /**

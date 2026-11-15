@@ -116,6 +116,37 @@ fn an_answer_that_took_a_model_turn_or_cost_anything_isnt_local() {
     assert!(!parse_output(&serde_json::json!({"type": "result", "result": MARKDOWN}).to_string()).local, "no turns or cost said: not known to be free");
 }
 
+/// Lab, 15 Nov 2026: `/context` on a real chat's session answered locally
+/// (`<synthetic>`, no turn), but the result's `total_cost_usd` was the
+/// session's spend so far ($0.61), so the breakdown never showed.
+#[test]
+fn a_resumed_sessions_earlier_spend_doesnt_make_its_answer_a_models() {
+    let synthetic = serde_json::json!({"type": "assistant", "message": {"model": "<synthetic>", "role": "assistant", "content": [{"type": "text", "text": MARKDOWN}]}});
+    let resumed = serde_json::json!({"type": "result", "subtype": "success", "num_turns": 0, "total_cost_usd": 0.610611, "is_error": false, "result": MARKDOWN});
+    let a = parse_output(&format!("{synthetic}\n{resumed}\n"));
+    assert!(a.local, "Claude Code's own answer, no model turn");
+    assert!(a.breakdown.is_some());
+    // The same with the object instead of the marker.
+    let with_usage: String = STREAM
+        .lines()
+        .map(|l| match serde_json::from_str::<Value>(l) {
+            Ok(mut v) if v.get("type").and_then(Value::as_str) == Some("result") => {
+                v["total_cost_usd"] = serde_json::json!(1.25);
+                v.to_string()
+            }
+            _ => l.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(parse_output(&with_usage).local);
+    // Neither marker and a cost: not known to be free.
+    assert!(!parse_output(&resumed.to_string()).local);
+    // A model's answer is never local, whatever its cost says.
+    let model = serde_json::json!({"type": "assistant", "message": {"model": "claude-haiku-5-5", "content": [{"type": "text", "text": "I can't run that."}]}});
+    let one_turn = serde_json::json!({"type": "result", "num_turns": 1, "total_cost_usd": 0, "result": "I can't run that."});
+    assert!(!parse_output(&format!("{model}\n{one_turn}\n")).local);
+}
+
 #[test]
 fn token_counts_as_written() {
     for (raw, want) in [("628", 628), ("4,324", 4324), ("15k", 15_000), ("32.2k", 32_200), ("934.8k", 934_800), ("1m", 1_000_000), ("1M", 1_000_000), ("~240", 240), ("< 20", 20), (" 3.5K ", 3500)] {

@@ -167,6 +167,50 @@ fn a_scripts_workbook_is_calculated_and_formatted() {
     assert!(book.sheets[2].hidden);
 }
 
+/// Lab, 15 Nov 2026: a workbook whose `styles.xml` leaves out parts the
+/// format lets it (here `<cellStyles>`, then all but `<cellXfs>`) made
+/// IronCalc panic, and the file was left out of Chat. It's calculated and
+/// keeps its looks now.
+#[test]
+fn a_workbook_missing_optional_style_parts_is_still_calculated() {
+    let without = STYLES.split("<cellStyles").next().unwrap();
+    let rows = format!("<sheetData><row r=\"1\">{}{}</row><row r=\"2\">{}{}</row><row r=\"3\">{}</row></sheetData>", s("A1", "Item", 1), s("B1", "Price", 1), s("A2", "Seeds", 0), n("B2", 2.5, 4), f("B3", "B2*4", 4));
+    let book = read_now(Format::Xlsx, &xlsx_of(&[("Costs", "", rows)], without)).unwrap();
+    assert!(book.calculated, "IronCalc read it (calamine can't calculate)");
+    let c = &book.sheets[0];
+    assert_eq!(cell(c, 3, 2).text, "£10.00");
+    assert!(book.styles[cell(c, 1, 1).style as usize].bold, "the header's bold kept");
+
+    // Only cellXfs: fonts, fills, borders, cellStyleXfs and cellStyles all filled in.
+    let only_xfs = r#"<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>"#;
+    let rows = format!("<sheetData><row r=\"1\">{}{}{}</row></sheetData>", n("A1", 2.0, 0), n("B1", 3.0, 0), f("C1", "A1*B1", 0));
+    let book = read_now(Format::Xlsx, &xlsx_of(&[("S", "", rows)], only_xfs)).unwrap();
+    assert!(book.calculated);
+    assert_eq!(cell(&book.sheets[0], 1, 3).text, "6");
+}
+
+#[test]
+fn missing_style_parts_are_added_in_the_roots_own_prefix() {
+    let plain = r#"<?xml version="1.0"?><styleSheet xmlns="m"><fonts count="1"><font/></fonts><cellXfs count="1"><xf/></cellXfs></styleSheet>"#;
+    let full = xlsx::full_styles(plain).unwrap();
+    for part in ["<fills", "<borders", "<cellStyleXfs", "<cellStyles "] {
+        assert!(full.contains(part), "{part} added");
+    }
+    assert_eq!(full.matches("<fonts").count(), 1, "one it had isn't added again");
+    assert!(full.ends_with("</styleSheet>"));
+    // `<cellStyleXfs>` isn't `<cellStyles>`: a prefix of a tag's name never counts as the tag.
+    assert!(xlsx::full_styles(r#"<styleSheet><cellStyleXfs/></styleSheet>"#).unwrap().contains("<cellStyles count"));
+
+    let prefixed = r#"<x:styleSheet xmlns:x="m"><x:fonts count="1"><x:font/></x:fonts></x:styleSheet>"#;
+    let full = xlsx::full_styles(prefixed).unwrap();
+    assert!(full.contains(r#"<x:fills count="2"><x:fill><x:patternFill patternType="none"/></x:fill>"#), "{full}");
+    assert!(full.contains("</x:cellStyles></x:styleSheet>"), "{full}");
+
+    let complete = format!("<styleSheet>{STYLES}</styleSheet>");
+    assert_eq!(xlsx::full_styles(&complete), None, "nothing to add: nothing to read again");
+    assert_eq!(xlsx::full_styles("<styleSheet>"), None, "no end tag to add them before");
+}
+
 #[test]
 fn a_workbooks_looks_are_kept() {
     let book = read_now(Format::Xlsx, &seed_order()).unwrap();

@@ -18,6 +18,10 @@
 //!   in the network receipts) and kept only when its SHA-256 is the one
 //!   pinned here. A visual's `<script src>` naming one of their addresses is
 //!   pointed here ([`point_libraries`]); any other is refused when it's made.
+//!   Since 15 Nov 2026 the frame never asks for it: its document carries the
+//!   library's code itself ([`inline_libraries`]), because WebView2 runs a
+//!   sandboxed frame in a process of its own whose requests never reach this
+//!   handler (Lab: a kept page's chart stayed blank).
 //! - **Anything else**: 404.
 
 use sha2::{Digest, Sha256};
@@ -231,10 +235,10 @@ pub async fn serve(request: &tauri::http::Request<Vec<u8>>) -> Response {
     match parts.as_slice() {
         ["v", conv, id] => {
             let Ok(conv) = conv.parse::<u64>() else { return not_found() };
-            visual(conv, id, &origin_of(uri))
+            visual(conv, id, &origin_of(uri)).await
         }
         ["p", conv, id, n] => match (conv.parse::<u64>(), n.parse::<u32>()) {
-            (Ok(conv), Ok(n)) => page(conv, id, n, &origin_of(uri)),
+            (Ok(conv), Ok(n)) => page(conv, id, n, &origin_of(uri)).await,
             _ => not_found(),
         },
         ["lib", file] => library(file).await,
@@ -243,9 +247,9 @@ pub async fn serve(request: &tauri::http::Request<Vec<u8>>) -> Response {
 }
 
 /// `/v/<chat>/<id>`: a visual's document, with its policy.
-pub fn visual(conv: u64, id: &str, origin: &str) -> Response {
+pub async fn visual(conv: u64, id: &str, origin: &str) -> Response {
     let Some((made, code)) = crate::chat::made::code_of(conv, id) else { return not_found() };
-    let body = document(&code, &made.format).into_bytes();
+    let body = with_libraries(document(&code, &made.format)).await.into_bytes();
     respond(200, "text/html; charset=utf-8")
         .header("Content-Security-Policy", csp(origin))
         .header("Cache-Control", "no-store")
@@ -254,12 +258,12 @@ pub fn visual(conv: u64, id: &str, origin: &str) -> Response {
 }
 
 /// `/p/<chat>/<id>/<n>`: a page's version `n` (0: its newest), with its policy.
-pub fn page(conv: u64, id: &str, n: u32, origin: &str) -> Response {
+pub async fn page(conv: u64, id: &str, n: u32, origin: &str) -> Response {
     let Some((_, _, html)) = crate::chat::made::page_of(conv, id, n) else { return not_found() };
     respond(200, "text/html; charset=utf-8")
         .header("Content-Security-Policy", csp(origin))
         .header("Cache-Control", "no-store")
-        .body(page_document(&html).into_bytes())
+        .body(with_libraries(page_document(&html)).await.into_bytes())
         .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
 }
 
@@ -278,12 +282,12 @@ pub fn verified(lib: &Lib, bytes: &[u8]) -> bool {
 /// One fetch at a time (two visuals asking for Chart.js at once fetch it once).
 static FETCHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// `/lib/<file>`: a library of the allow-list, from its copy here or fetched once.
-async fn library(file: &str) -> Response {
-    let Some(lib) = LIBS.iter().find(|l| l.file == file) else { return not_found() };
+/// **A library's pinned bytes**: its copy here, or fetched once ([`fetch`])
+/// and kept; `None` when it can't be had.
+async fn lib_bytes(lib: &Lib) -> Option<Vec<u8>> {
     let kept = lib_dir().join(lib.file);
     let _one = FETCHING.lock().await;
-    let bytes = match std::fs::read(&kept) {
+    match std::fs::read(&kept) {
         Ok(b) if verified(lib, &b) => Some(b),
         _ => fetch(lib).await.inspect(|b| {
             let _ = std::fs::create_dir_all(lib_dir());
@@ -291,8 +295,67 @@ async fn library(file: &str) -> Response {
                 tracing::warn!(kind = ?e.kind(), "Chat: a visual's library couldn't be kept; fetched again next time");
             }
         }),
-    };
-    match bytes {
+    }
+}
+
+/// **`doc` with its pinned libraries inside it** ([`inline_libraries`], each
+/// had through [`lib_bytes`]): what a visual's and a page's frame gets.
+async fn with_libraries(doc: String) -> String {
+    let mut have: Vec<(&'static Lib, Vec<u8>)> = Vec::new();
+    for src in crate::chat::made::script_sources(&doc) {
+        let Some(lib) = lib_for(&src) else { continue };
+        if have.iter().any(|(h, _)| h.file == lib.file) {
+            continue;
+        }
+        match lib_bytes(lib).await {
+            Some(bytes) => have.push((lib, bytes)),
+            None => tracing::warn!("Chat: a visual's library couldn't be had; its chart won't draw"),
+        }
+    }
+    if have.is_empty() {
+        return doc;
+    }
+    inline_libraries(&doc, &have)
+}
+
+/// **A document's pinned libraries, inline** (Lab, 15 Nov 2026: a kept
+/// page's Chart.js chart stayed blank). A visual's and a page's frame is
+/// sandboxed, which WebView2 runs in a process of its own, and a request
+/// from there never reaches this scheme's handler: its `/lib/` script failed
+/// at once (status 0, nothing in the log). So each `<script src>` naming
+/// one of [`LIBS`] that's in `have` becomes that library's own code in a
+/// `<script>` (the policy's `'unsafe-inline'`), its bytes the pinned ones;
+/// any other stays as it was. Pure.
+pub fn inline_libraries(doc: &str, have: &[(&'static Lib, Vec<u8>)]) -> String {
+    let lower = doc.to_ascii_lowercase();
+    let mut out = String::with_capacity(doc.len() + have.iter().map(|(_, b)| b.len() + 64).sum::<usize>());
+    let (mut from, mut copied) = (0, 0);
+    while let Some(i) = lower[from..].find("<script") {
+        let start = from + i;
+        let Some(len) = lower[start..].find('>') else { break };
+        let open_end = start + len + 1;
+        let src = crate::chat::made::script_sources(&doc[start..open_end]).into_iter().next();
+        let lib = src.as_deref().and_then(lib_for).and_then(|l| have.iter().find(|(h, _)| h.file == l.file));
+        let close = lower[open_end..].find("</script").map(|j| open_end + j);
+        if let (Some((lib, bytes)), Some(close)) = (lib, close) {
+            let close_end = lower[close..].find('>').map(|j| close + j + 1).unwrap_or(lower.len());
+            let code = String::from_utf8_lossy(bytes).replace("</script", "<\\/script").replace("</SCRIPT", "<\\/SCRIPT");
+            out.push_str(&doc[copied..start]);
+            out.push_str(&format!("<script>/* {} */\n{code}\n</script>", lib.name));
+            copied = close_end;
+            from = close_end;
+        } else {
+            from = open_end;
+        }
+    }
+    out.push_str(&doc[copied..]);
+    out
+}
+
+/// `/lib/<file>`: a library of the allow-list, from its copy here or fetched once.
+async fn library(file: &str) -> Response {
+    let Some(lib) = LIBS.iter().find(|l| l.file == file) else { return not_found() };
+    match lib_bytes(lib).await {
         Some(b) => respond(200, "text/javascript; charset=utf-8")
             .header("Cache-Control", "max-age=31536000, immutable")
             .body(b)
