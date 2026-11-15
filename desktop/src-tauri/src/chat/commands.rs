@@ -146,6 +146,10 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// Ignored for an existing conversation (its own switches are saved as
 /// they're flipped, `connector_chat_set`).
 ///
+/// `files`: the files attached in Chat's box (`chat/attachments.rs`: ids
+/// from `chat_files_add`), their text sent before the question and kept
+/// with it; one gone since is said, nothing sent.
+///
 /// `edit`: **Edit** (15 Nov 2026, the Claude app's) — the person's message
 /// at that index replaced by `text`: in Chat, it and everything after it
 /// set aside as a branch (‹ 1/2 › on the message, `chats/branches.rs`), back
@@ -176,10 +180,13 @@ pub async fn chat_send(
     elements: Option<Vec<crate::chat::pages::pick::Picked>>,
     code_folder: Option<String>,
     connectors_off: Option<Vec<String>>,
+    files: Option<Vec<String>>,
     edit: Option<usize>,
     edit_files: Option<bool>,
     incognito: Option<bool>,
 ) -> Result<serde_json::Value, String> {
+    // The files attached in the box (chat/attachments.rs): each still there.
+    let files = crate::chat::attachments::taken(&files.unwrap_or_default())?;
     // A Skill (`/decisions`, a one-tap prompt): asked across the meetings,
     // its own passages and instructions (chat/skills.rs).
     let skill_turn = match skill.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
@@ -192,6 +199,11 @@ pub async fn chat_send(
         (Some(at), Some(id)) => Some(begin_edit(id, at, edit_files.unwrap_or(false)).await?),
         (Some(_), None) => return Err("That chat isn't there any more.".to_string()),
         (None, _) => None,
+    };
+    // (An edit's files: as its message had them, unless new ones came with it.)
+    let files = match &editing {
+        Some(e) if files.is_empty() => e.question.attachments.clone(),
+        _ => files,
     };
     let (images, as_text, selection, page_quote) = match &editing {
         Some(e) => {
@@ -221,6 +233,7 @@ pub async fn chat_send(
         None => taken.iter().map(|i| (i.id.clone(), i.source.clone())).collect(),
     };
     let turn = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, sources, as_text);
+    let turn = crate::chat::attachments::with(files, turn);
     let send = crate::chat::skills::with(skill_turn, crate::chat::documents::with_selection(selection, turn));
     // Text selected on a page beside the chat: what the question is about.
     // (Boxed: the command's future is made on the main thread, whose stack
@@ -375,7 +388,9 @@ pub async fn chat_retry(
     let (image_ids, as_text) = images_again(question);
     // (A screenshot that went as its text: that text is in its words already.)
     let image_ids = if as_text { Vec::new() } else { image_ids };
-    let turn = send_turn(&app, Some(conversation_id), question.sent_text(), None, Some(question.voice), on_stream, turn_id, image_ids, Vec::new(), None);
+    // (Its words, and its attached files through the turn's own: chat/attachments.rs.)
+    let turn = send_turn(&app, Some(conversation_id), question.sent_words(), None, Some(question.voice), on_stream, turn_id, image_ids, Vec::new(), None);
+    let turn = crate::chat::attachments::with(question.attachments.clone(), turn);
     let send = crate::chat::skills::with(skill_again(&question.text), turn);
     let send = Box::pin(crate::chat::turn::again(conversation_id, begun.question_at, send));
     let (out, thought) = crate::chat::think::scoped(false, send).await;

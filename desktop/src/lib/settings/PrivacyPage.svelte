@@ -127,6 +127,15 @@
       shots = null;
     }
   }
+  // Files attached to Chat's questions (chat/attachments.rs): { count, bytes, folder }.
+  let chatFiles = $state(null);
+  async function loadChatFiles() {
+    try {
+      chatFiles = await invoke('chat_attachments_usage');
+    } catch {
+      chatFiles = null;
+    }
+  }
   // "Delete meeting transcripts after" (config meetingTranscriptDays, notes/retention.rs;
   // 0 = keep them). The meetings' notes, summaries and tasks stay; their
   // audio goes with the transcript (or sooner: Settings → Meetings).
@@ -157,6 +166,13 @@
     const mb = bytes / (1024 * 1024);
     return mb >= 1 ? `${mb.toFixed(mb >= 10 ? 0 : 1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
   };
+  const chatFilesDesc = $derived(
+    !chatFiles
+      ? 'Files you attach in Chat are kept with their chat, on this PC'
+      : chatFiles.count
+        ? `${chatFiles.count} ${chatFiles.count === 1 ? 'file' : 'files'} · ${sizeText(chatFiles.bytes)}`
+        : 'None kept right now'
+  );
   const shotsDesc = $derived(
     !shots
       ? 'Snip to Chat keeps each screenshot with its chat, on this PC'
@@ -173,6 +189,7 @@
       .catch(() => {});
     loadCount();
     loadShots();
+    loadChatFiles();
     loadNet();
     const unNet = listen('yap-connections', loadNet);
     // A dictation saved, an entry deleted from Home, all cleared (dictation/history.rs).
@@ -400,6 +417,26 @@
     });
   }
 
+  function deleteChatFiles(e) {
+    const btn = e?.currentTarget;
+    askConfirm({
+      title: 'Delete all chat files?',
+      body: 'Every file you attached in Chat goes from this PC. Your chats stay; their files show as removed.',
+      confirmLabel: 'Delete files',
+      busyLabel: 'Deleting…',
+      returnFocus: btn,
+      run: async () => {
+        try {
+          await invoke('chat_attachments_delete_all');
+          await loadChatFiles();
+        } catch (err) {
+          toast({ title: "Couldn't delete the files", description: String(err), variant: 'destructive' });
+          return false;
+        }
+      },
+    });
+  }
+
   function clearAudio(e) {
     const btn = e?.currentTarget;
     askConfirm({
@@ -549,6 +586,23 @@
   </Row>
   <Row label="Delete all screenshots" desc={shotsDesc} setting="chat-images-delete">
     <Button variant="secondary" size="sm" disabled={!shots?.count} onclick={deleteShots}>Delete all…</Button>
+  </Row>
+</Group>
+
+<Group title="Chat files" id="settings-chat-files">
+  <Row
+    label="Keep chat files"
+    desc={chatFilesDesc}
+    hint="A file you attach in Chat (+ → Attach files, or dropped on it) is copied here with its text, read on this PC, and kept with its chat. Deleting the chat deletes its files; after this long they're removed, and the chat says so. A file you never sent goes after a day."
+    setting="chat-files"
+  >
+    <Select bind:value={cfg.chatFileDays} options={KEEP_SHOTS} ariaLabel="Keep chat files" onchange={() => setTimeout(loadChatFiles, 1500)} />
+  </Row>
+  <Row label="Where they're kept" desc={chatFiles?.folder || "In Yap's own folder on this PC"} setting="chat-files-folder">
+    <Button variant="secondary" size="sm" onclick={() => invoke('chat_attachments_open_folder').catch(() => {})}>Open folder</Button>
+  </Row>
+  <Row label="Delete all chat files" desc={chatFilesDesc} setting="chat-files-delete">
+    <Button variant="secondary" size="sm" disabled={!chatFiles?.count} onclick={deleteChatFiles}>Delete all…</Button>
   </Row>
 </Group>
 

@@ -778,7 +778,7 @@ test('a picture pasted into the box or image files dropped on Chat go in as scre
   await expect(attachments(main)).toContainText('64 × 48');
   await expect(box(main)).toHaveValue('');
 
-  // Dropped on Chat: a PNG, a JPEG (Windows' own decoder) and a text file.
+  // Dropped on Chat: a PNG, a JPEG (Windows' own decoder) and a text file (an attached file, not a picture).
   const dir = path.join(yap.dataDir, 'to-drop');
   fs.mkdirSync(dir, { recursive: true });
   const pngFile = path.join(dir, 'chart.png');
@@ -800,7 +800,8 @@ test('a picture pasted into the box or image files dropped on Chat go in as scre
   await expect(attachments(main).locator('.shotchip')).toHaveCount(3);
   await expect(attachments(main)).toContainText('90 × 30');
   await expect(attachments(main)).toContainText('40 × 40');
-  await expect(main.getByRole('status').filter({ hasText: "1 of the files weren't added" })).toBeVisible();
+  // (The text file isn't a picture: since 15 Nov 2026 it goes in as an attached file, chat-files.spec.js.)
+  await expect(main.getByTestId('chat-files').getByTestId('chat-file-chip')).toContainText('notes.txt');
   await shot(main, '09-pasted-and-dropped');
 
   // They go like a snip's: three image parts (Groq takes three).

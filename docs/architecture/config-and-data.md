@@ -64,7 +64,7 @@
   gets its next one moved up); the hook gives every first shortcut and
   earlier one precedence, `input_hook::assign_more`), triple_tap_meeting
   (`tripleTapMeeting`, off: push-to-talk's triple-tap starts meeting notes,
-  `dictation/gesture.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + snip_listen ("Then listen for my question", on, 2026-10-25: after a spoken "snip" lands in Chat a Voice Assistant question starts by itself; `snip::listens_after`) + snip_copy ("Copy every snip to the clipboard", on, 2026-10-25: Settings → Shortcuts; a snip to Chat is copied too, out of Win+V history). Both new fields: an older Yap sharing the folder drops them on its next save and they come back on (their default) — harmless + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md) + snip_save_dir (the folder a snip's or a chat screenshot's Save opened in last, "" = Pictures; `snip/copy_save.rs`), rewrite_last_dictation (`rewriteLastDictation`,
+  `dictation/gesture.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + snip_listen ("Then listen for my question", on, 2026-10-25: after a spoken "snip" lands in Chat a Voice Assistant question starts by itself; `snip::listens_after`) + snip_copy ("Copy every snip to the clipboard", on, 2026-10-25: Settings → Shortcuts; a snip to Chat is copied too, out of Win+V history). Both new fields: an older Yap sharing the folder drops them on its next save and they come back on (their default) — harmless + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md) + chat_file_days ("Keep chat files", 2026-11-15: the same choices for the files attached to Chat's questions; `chat/attachments.rs`) + snip_save_dir (the folder a snip's or a chat screenshot's Save opened in last, "" = Pictures; `snip/copy_save.rs`), rewrite_last_dictation (`rewriteLastDictation`,
   serde default on: the rewrite shortcut with nothing selected rewrites the
   last dictation — within a minute, in the same field, still ending at the
   cursor —; off, it writes new text as before 2026-10-23; Settings →
@@ -706,6 +706,19 @@
   for, its last day). Made once; made again when the QR's address isn't one it
   names, or a month before its two years end (the phone then warns once more).
   Kept by Reset app.
+- Chat's attached files (2026-11-15, `chat/attachments.rs`):
+  `%APPDATA%/yap/chat-files/` — `file_<16 hex>/<name>`, the file's copy, and
+  `file_<16 hex>.txt`, its text as sent (a PDF's and a Word document's read
+  on this PC); `chats.json` keeps the question's `attachments` (id, name,
+  kind, bytes, tokens, a PDF's pages), never the text. Deleted with its
+  conversation, after "Keep chat files" (`chat_file_days`: 7 / 30 (default) /
+  90 / 0 = forever; another value counts as 30), and a day after a file
+  that was never sent. **New field**: an older Yap's save drops
+  `attachments`, so every save also writes
+  `%APPDATA%/yap/chat_attachments.json` (`{version, messages:
+  [{conversation, index, ts, files}]}`, removed when there are none), put
+  back at the next start (`attachments::restore_from_disk`). Never logged;
+  leaves the PC only inside the Chat request it's sent with.
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after
@@ -823,7 +836,9 @@
   created, items: [{id, kind, title, format, after: {index, ts}, at,
   outside?, bytes}]}`: `created` the conversation's `createdTs`, so a
   reused id's folder is another chat's; fields a later Yap adds are kept
-  as they are) and each visual's code (`v_<16 hex>.svg` / `.html`); never
+  as they are; a page's `versions: [{n, at, bytes, after, title}]`) and
+  each visual's code (`v_<16 hex>.svg` / `.html`) and each kept page's
+  versions (`pg_<16 hex>.v<n>.html`, `chat/made/pages.rs`); never
   in chats.json, so an older Yap's save can't drop it. `chat-made/lib/`
   keeps the chart libraries a visual loaded (Chart.js, D3: checked against
   their pinned SHA-256). Deleted with its chat, and whole with the chats

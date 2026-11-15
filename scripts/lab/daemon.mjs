@@ -503,7 +503,21 @@ async function dropPictures(pictures) {
   await main().locator('[data-testid="chat-attachments"] .shotchip').nth(paths.length - 1).waitFor({ state: 'visible', timeout: 15_000 });
 }
 
-async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, how = 'ask', style = null, incognito = false }) {
+/**
+ * Files dropped on Chat (`--attach`, 15 Nov 2026: chat/attachments.rs), as a person drops them: each read by Yap and
+ * waiting in the message box as a chip, going with the next message. Paths on this PC (the lab's own, or the scratch
+ * workspace's made-up files).
+ */
+async function dropFiles(files) {
+  const paths = files.map((f) => path.resolve(String(f)));
+  for (const p of paths) if (!fs.existsSync(p)) throw new Error(`No file at ${p}`);
+  const chips = main().locator('[data-testid="chat-files"] [data-testid="chat-file-chip"]');
+  const before = await chips.count();
+  await invoke('e2e_drag_drop', { paths });
+  await chips.nth(before + paths.length - 1).waitFor({ state: 'visible', timeout: 60_000 });
+}
+
+async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false }) {
   if (!text?.trim()) throw new Error('Nothing to ask');
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
   readRecord();
@@ -527,6 +541,7 @@ async function startTurn({ text, spoken = false, chat = 'new', autoCards = null,
       await invoke('e2e_assistant_ask', { text, listenMs: 300 });
     } else {
       if (pictures?.length) await dropPictures(pictures);
+      if (attach?.length) await dropFiles(attach);
       const box = main().getByRole('textbox', { name: 'Message' });
       await box.fill(text, { timeout: 10_000 });
       // (Exactly "Send": with an agent's tab beside the chat, other buttons' names have the word.)
@@ -1060,9 +1075,10 @@ const COMMANDS = {
       if (card) return COMMANDS.answer({ ...a, _: [card.id, 'said', String(a.text ?? '')] });
     }
     // (Retry the last answer, or Edit the last message to these words: in the chat shown.)
+    const attach = Array.isArray(a.attach) ? a.attach : a.attach ? String(a.attach).split(',').filter(Boolean) : null;
     const how = a.retry ? 'retry' : a.edit ? 'edit' : 'ask';
     const text = how === 'retry' ? String(a.text ?? '').trim() || 'Retry' : a.text;
-    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, ...shotsFor(a) });
+    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
   wait: async (a) => {

@@ -27,6 +27,8 @@
   import { splitElements } from '../../core/selectedElements.js';
   import { copyText, messageItems } from '../../core/itemMenus.js';
   import ElementChip from './ElementChip.svelte';
+  import FileChip from './FileChip.svelte';
+  import { mentionParts } from './chatMentions.js';
   import { screenPixels } from './chatShots.svelte.js';
   import { thoughtLabel } from './chatThink.svelte.js';
   import { appLabel } from '../../core/appNames.js';
@@ -52,9 +54,10 @@
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
   const codeFiles = getContext(CODE_FILES) ?? null;
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null, branch = null, retry = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null, keptPages = null, onkept = null, branch = null, retry = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false } = $props();
   // `visuals`: what the answer made to be seen, not read (chat/made.rs: "Made a visual", above its words;
-  // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends.
+  // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends. `keptPages`: the
+  // pages it saved (chat/made/pages.rs: `[{page, version}]`, a card each, PageCard); `onkept(page, n)` opens one.
   // **Retry, Edit and ‹ ›** (15 Nov 2026, the Claude app's; chat/chats/branches.rs): `branch` — `{ fork, why, onbranch }`,
   // this message's versions (‹ 2/3 ›; `why` it can't switch now) —; `retry` — `{ why, onretry }`, under an answer —;
   // `actions.onedit` (and `actions.edit`, why not now) under the person's message; `editing` — `{ text }` — it's open in
@@ -154,6 +157,14 @@
     {/each}
   {/await}
 {/if}
+{#if m.role === 'assistant' && keptPages?.length}
+  <!-- The pages it saved (save_page): a card each version, › opens it beside the chat. -->
+  {#await import('./PageCard.svelte') then { default: PageCard }}
+    {#each keptPages as p (`${p.page.id}:${p.version.n}`)}
+      <div class="keptcard"><PageCard page={p.page} version={p.version} onopen={onkept} /></div>
+    {/each}
+  {/await}
+{/if}
 {#if m.role === 'user' && editing}
   <!-- Edit: open in place with its words (its own small chunk). -->
   {#await import('./MessageEdit.svelte') then { default: MessageEdit }}
@@ -243,6 +254,14 @@
         {/each}
       </div>
     {/if}
+    {#if m.attachments?.length}
+      <!-- The files it carried (chat/attachments.rs): a chip each, as the Claude app's; a click opens it. -->
+      <div class="elchips" data-testid="chat-files-sent">
+        {#each m.attachments as f (f.id)}
+          <FileChip file={f} />
+        {/each}
+      </div>
+    {/if}
     {#if hasText}
       <div class="utext">
         {#if m.quote?.text}
@@ -257,7 +276,7 @@
             <span class="viavoice" title="Asked by voice" aria-label="Asked by voice">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
             </span>
-          {/if}<span class="saidtext" data-testid="chat-question-text">{said.question}</span>
+          {/if}<span class="saidtext" data-testid="chat-question-text">{#each mentionParts(said.question) as part, pi (pi)}{#if part.path}<span class="mention" title={part.path} data-testid="chat-mention">@{part.path}</span>{:else}{part.text}{/if}{/each}</span>
         </p>
         {#if said.screenText}
           <!-- What Windows read from the screenshot, sent in its place. -->
@@ -464,6 +483,15 @@
 {/if}
 
 <style>
+  /* A workspace file the message mentions (@path, a Code chat's: agents/mention.rs). */
+  .mention {
+    padding: 0 2px;
+    border-radius: 5px;
+    background: var(--yap-primary-wash);
+    color: var(--yap-fg);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
   .elchips {
     display: flex;
     flex-wrap: wrap;

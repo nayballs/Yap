@@ -1271,6 +1271,44 @@ one side.
   weight, a question asking for one, refusals, the scripts and the
   libraries, the policy, the document, the scheme's 404s); `gates.rs`,
   `fit.rs` (offered as the gates say); e2e `chat-visuals.spec.js` (below).
+- **`chat/made/pages.rs`** — **pages Yap keeps** (15 Nov 2026, after the
+  Claude app's artifacts: its look and words, nothing of its code; local
+  only, never published). Asked for "a tip calculator I can keep", Chat
+  could only paste code. **`save_page {title, html, id?}`** (`SAVE_PAGE`,
+  `DESCRIPTION`, `parameters`; offered with `show_visual`, where it is:
+  `made::definitions`, `made::NAMES`, `made::execute` the one door for both,
+  the tool loop's `Source::Made` and the run endpoint's `made_call`): a whole
+  HTML page (a fragment works too), its scripts as a visual's (inline, or
+  the allow-list; any other refused). No `id`: a new page, `pg_` + 16 hex;
+  one of this chat's pages' ids: its **next version**, the earlier ones
+  kept (`MAX_VERSIONS` 40, then "save it as a new page"); an id that isn't
+  this chat's page is refused ("no such page here"). **The line**
+  (`made::INSTRUCTIONS`, `plan.rs` `VISUALS`, `rpc.rs` `VISUALS_INSTRUCTIONS`):
+  something to keep and come back to — a small app or tool — is
+  `save_page`; a quick picture in the answer is `show_visual`; writing to
+  keep stays a document. Both tools' schemas and the line weigh ~580
+  tokens (`the_tool_is_offered_where_a_thread_shows_it`). **Kept** in the
+  chat's `made.json` as a `Made` of kind "page" (its `title` the newest,
+  `after` its first question, `at` and `bytes` the newest's) with
+  **`versions`** (`PageVersion {n, at, bytes, after, title}`: each
+  version's question, so its card shows in the answer that saved it), each
+  version's HTML as `<id>.v<n>.html`; written through `made::with_index`
+  (one writer, the file first, then the index; never over one that can't
+  be read). The result: `{success, data: {saved: "Saved the page “Tip
+  calculator”" | "Saved version 2 of “…”", id, version, next}, displayText:
+  "Saved a page" | "Saved version 2 of a page"}`; `next` asks for a line
+  on what it does and gives the id for a later change. The page hears it
+  (`yap-chat-made`, the page whole, replacing the one it had) and opens it
+  beside the chat. **Shown** at `/p/<chat>/<id>/<n>` (`serve.rs` `page`,
+  `made::page_of`: 0 its newest): the same policy, sandbox and bridge as a
+  visual, its own style (`PAGE_STYLE`: it scrolls in its frame; a fragment
+  in `<main id="yap-page">` with room round it), where a visual's never
+  scrolls (`VISUAL_STYLE`). Step lines: "Saving a page…", "Saved a page"
+  (`chatSteps.js` `kept`), a Code chat's row "Saved a page: …". Logs: ids,
+  versions and sizes. Tests: unit (`made/tests.rs`: ids and files, a page's
+  versions read back by number and its newest, refusals, the one door, the
+  page's document, the scheme's versions and 404s; the claude_live lists);
+  e2e `chat-kept-pages.spec.js` (below).
 - **`chat/activity.rs`** — **what Chat is doing now** (2026-10-31): while
   a turn runs, the thread shows one line — a small moving mark, the step
   under way and the turn's time — as the Claude Code app does:
@@ -2366,6 +2404,40 @@ click does nothing (no link opened, no message); its button, clicked,
 sends "Make the tip 20%" into the chat and the model answers it; its link
 opens in the person's browser; a visual made after outside content (seeded)
 fills the box instead.
+
+**Pages Yap keeps** (15 Nov 2026, `PageCard.svelte`, `KeptPageTab.svelte`,
+`OutputsTab.svelte`, `outputs.js` + `outputsOpen.js`; `chat/made/pages.rs`). **A card a
+version** in the answer that saved it (`placeMade`: each `PageVersion` by
+its question, above the answer's words, after its visuals): the page icon,
+its title, "Saved" (version 1) or "Version 2", and › — as the Claude app's
+"Published ›" card, Yap's kept on this PC. **Beside the chat** (the panel's
+`kept` tab, `chatDoc` `showKept`, `keptKey`): opened at once when a turn
+saves it (`onMade`, a page of the chat in view), and by its card at that
+card's version. Its header: the icon, the title, "Saved", **‹ Version 2 of 3
+›** (two or more; a turn saving another while the newest shows moves to
+it) and ↻ to start it again; under it the page in the sandboxed frame
+(`pageSrc`, the colours, `sendPrompt` as a visual's, a page navigating
+away put back), filling the panel and scrolling in itself. **The chat's
+Outputs** (the Claude app's Outputs list; `chatDoc` `showOutputs`, tab
+`outputs`): **the one list** a Code chat's summary shows too (outputs.js
+`outputItems`, drawn by `OutputsList.svelte`: each kind adds its rows there)
+— every page it kept, then every document it wrote (both added here), then
+the files its work changed and the files it shared, newest first in each, a
+row each — its icon, its name, what it is ("Page · 2 versions",
+"Document", "Changed", "Shared", "Picture") — that opens it where it lives
+(`outputsOpen.js` `openOutput`, the summary's too: a page or a document
+beside the chat, a changed file in the file view, a picture in its tab, a
+shared file in the file view when it's in the workspace, else in its app);
+nothing yet says what will show there. Opened by the panel's row (the layers
+button beside +, whatever shows) and the conversation's ⋯ → **Outputs**
+(the chat opened first). e2e `chat-kept-pages.spec.js`: "a tip calculator I
+can keep" saved, beside the chat at once in the sandboxed frame (an opaque
+origin; its slider works), a card "Saved"; a change makes version 2 — its
+own card, the panel on the newest, ‹ › between them, the first card on
+version 1; light and dark; kept in `chat-made/` with both versions' files;
+Outputs (the panel's button) lists it as "Page · 2 versions" and opens it;
+shown again when the chat opens again; a seeded chat's ⋯ → Outputs lists its
+page, its document and its shared file; an id not this chat's is refused.
 
 **Chat looks at the screen** (2026-11-01, `chat/see_screen.rs`): asked
 "here are the speakers, can you have a look?" with the page open in another
@@ -4260,6 +4332,82 @@ and its Undo, Preview / Source, find, copy, light and dark).
   screenshot" (`snip_start {origin: "chat"}`).
   Search by meaning — local embeddings, Ask across meetings with cited
   passages — is [search.md](./search.md) (2026-10-25; ROADMAP step 3).
+
+## Files attached to a question (2026-11-15)
+
+The Claude app's + attaches any file and its box takes them dropped (gap
+E1, and H's file uploads). Yap's Chat does too, beside the pictures it
+already takes (`chat/attachments.rs`, `views/chat/FileChip.svelte`,
+`chatFiles.js`):
+
+- **How**: + → **Attach files** (Windows' picker, several at once), or files
+  dropped on Chat (a picture among them still goes in as a screenshot,
+  `snip/attach.rs`; everything else here). Rust reads each and keeps it
+  (`chat_files_add`); the box shows a **chip** each: a small type badge
+  ("TXT", "PDF", "MD", "DOCX"), its name and its size, as the Claude app's
+  file chips; ✕ takes it out and deletes it (`chat_attachment_remove`), a
+  click opens it. The empty box asks "Ask about this file…"; Enter on it
+  empty asks "What's in this file?". At most 20 a question.
+- **What's read** (`attachments::read`): text and code by their bytes (UTF-8,
+  UTF-16 with its mark; a NUL byte or many control characters early on is
+  a binary file), Markdown, a **PDF's text read on this PC** (`pdf.rs`:
+  `pdf-extract` on lopdf, page by page under `[Page n]` lines, in its own
+  thread so a panic or a 60-second read is "couldn't read", never a crash
+  or a hang; never uploaded to be read), a **Word document's** text
+  (`word.rs`: the `.docx` zip's `word/document.xml`, a paragraph a line).
+  **Anything else is said plainly** and not added, the toast naming each:
+  "Chat can't read budget.xlsx (a spreadsheet: save it as CSV to attach
+  it). It reads text, code, PDF and Word files, and pictures."; a PDF of
+  scanned pages "has no text Yap can read… Snip a page to Chat instead";
+  password-protected, empty, over 50 MB, or over 4 million characters
+  (about a million tokens) likewise.
+- **Sized to the model**: each file's tokens (`budget::estimate`) count in
+  the question's size, on the page (`inputTooLong`: the too-long line
+  under the box, Send waits) and in Rust (`turn/history.rs`
+  `question_tokens`), so a file too big for the model is said before it's
+  sent, as a paste is. An earlier question's files count in the history
+  (`budget::message_costs`), which drops older messages first.
+- **To the model** (`attachments::block`): a `<documents>` block before the
+  question, a `<document index>` each with its `<source>` (a PDF's says it's
+  its text, read on the person's PC) and `<document_content>`, as
+  Anthropic advises long documents go first. Joined where the turn's
+  screenshots join its question (the task-local `attachments::with`, set in
+  `chat_send`): the tool loop's opening messages, a plain answer
+  (`llm::note_chat`), your Claude plan's question (`turn/plan.rs`), and a
+  Code chat's own session (after its words there: `after_text`, so its
+  turn's title stays the person's). **The history** sends them again with
+  their question (`ChatMessage::sent_text`); a file past "Keep chat files"
+  is a line, "(A file was attached here, notes.md; it was removed.)".
+- **On the question**: `ChatMessage.attachments` (id, name, kind, bytes,
+  tokens, a PDF's pages; never the text), its chips over its words
+  (`chat-files-sent`), each opening its file (`chat_attachment_open`:
+  Markdown in Yap's own window, anything else in its app, and one that
+  could run a program or a web page, an `.html`, a script, its text as a
+  `.txt`). Removed past its days: greyed, "removed".
+- **Kept** in `<data>/chat-files/`: `<id>/<name>` the file's copy and
+  `<id>.txt` its text as sent (`file_<16 hex>`, checked everywhere).
+  Deleted with its chat (`chats::delete_many`, a Rewind; not while a fork
+  still carries it), by **Settings → Privacy & data → Chat files** ("Keep
+  chat files": 7 / 30 (default) / 90 days / forever, `chat_file_days`;
+  Open folder; Delete all…), by Delete some of your data → Chats and Reset
+  app, and a file never sent after a day (`attachments::sweep`, with the
+  screenshots' daily sweep and when the setting changes). Download your
+  data takes the copies (`chat-files/<id>/<name>`). An older Yap's save
+  drops the field: every save writes `chat_attachments.json` too, put back
+  at the next start (as `chat_files.json` does for shared files).
+- **Never queued** (a Code chat while Claude works): a message with files
+  goes as one with a screenshot does.
+- **Privacy**: names, text and paths are never logged (kinds, counts,
+  sizes, tokens); a file leaves the PC only inside the Chat request it's
+  sent with and that chat's follow-ups.
+- **Not done**: a question asked out loud doesn't take the files waiting
+  in the box (typed questions only; screenshots it does take); a scanned
+  PDF isn't read with OCR; spreadsheets, presentations and old `.doc` files
+  aren't read.
+- e2e: `chat-files.spec.js` (drop, chips, what the model gets now and in a
+  follow-up, Open, ✕, too long, deleted with its chat, Settings); unit tests
+  in `chat/attachments/` (`tests.rs`, `pdf.rs`, `word.rs`: a PDF and a
+  `.docx` made in the test).
 
 ## Ctrl+Enter queues a message for after the answer (2026-11-15)
 

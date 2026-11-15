@@ -51,13 +51,14 @@ import path from 'node:path';
 import { test as base, expect, openView, setConfig } from './support/fixtures.js';
 import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
-import { newCodeChat } from './support/code-chats.js';
+import { newCodeChat, toSide } from './support/code-chats.js';
 import { writePng } from './support/png.js';
 import { startFakeWeb, FORT_JOY_URL, LEVELING_URL } from './support/fake-web.js';
 import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine, turnParts, notesAfter, workOf, turnPictures, todosIn } from '../src/lib/core/agents.js';
 import { panelRows, panelGroups, panelTotals } from '../src/lib/core/agentPanel.js';
 import { workingLine } from '../src/lib/core/working.js';
 import { sayingOver, questionAnswers, questionsAnswered } from '../src/lib/core/agentNow.js';
+import { mentionAt, withMention, mentionParts, mentionedPaths, written } from '../src/lib/views/chat/chatMentions.js';
 
 const HERE = path.join(RUNS, 'agents-direct-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -618,6 +619,84 @@ test.beforeEach(async ({ yap, main }) => {
   await yap.invoke('e2e_claude_approve_auto', { allow: true });
   await setConfig(yap, main, { agentsEnabled: true, agentsDirect: true, agentsAsk: 'new-or-web', agentsSpeak: 'never', agentsMode: 'auto', webSearch: false, speakReplies: false, assistantScreen: false });
   if (!(await yap.invoke('workspaces_list')).some((f) => f.name === 'garden-planner')) await yap.invoke('workspaces_add', { path: GARDEN });
+});
+
+// ---- @-mention a file (agents/mention.rs, 15 Nov 2026, as Claude Code's own @)
+
+test("the mention being typed, the mention written, and a sent message's mentions found again", () => {
+  expect(mentionAt('Tidy @no', 8)).toEqual({ start: 5, query: 'no' });
+  expect(mentionAt('@', 1)).toEqual({ start: 0, query: '' });
+  expect(mentionAt('Mail sam@example.com', 20)).toBeNull();
+  expect(mentionAt('Tidy @notes.md then', 19)).toBeNull();
+  expect(mentionAt('Open @"bed pl', 13)).toEqual({ start: 5, query: 'bed pl' });
+  expect(written('beds/bed plan.md')).toBe('@"beds/bed plan.md"');
+  expect(withMention('Tidy @no please', { start: 5, query: 'no' }, 'notes.md', 8)).toEqual({ text: 'Tidy @notes.md please', caret: 15 });
+  expect(withMention('Tidy @no', { start: 5, query: 'no' }, 'notes.md', 8)).toEqual({ text: 'Tidy @notes.md ', caret: 15 });
+  expect(mentionParts('Compare @beds/north.md with @"beds/bed plan.md", not sam@example.com or @Sam.')).toEqual([
+    { text: 'Compare ' },
+    { path: 'beds/north.md' },
+    { text: ' with ' },
+    { path: 'beds/bed plan.md' },
+    { text: ', not sam@example.com or @Sam.' },
+  ]);
+  expect(mentionedPaths('@a.md and @a.md and @src/')).toEqual(['a.md', 'src/']);
+  // A sentence's full stop isn't the file's.
+  expect(mentionedPaths('Compare @beds/north.md and @beds/south.md.')).toEqual(['beds/north.md', 'beds/south.md']);
+  expect(mentionedPaths('See @beds/. Then')).toEqual(['beds/']);
+});
+
+test('@ in a Code chat opens a picker of its workspace files; Enter puts one in, and it goes with the message as Claude Code reads it', async ({ yap, main, shot }) => {
+  await script(yap, ECHOES, 'echoes');
+  fs.mkdirSync(path.join(GARDEN, 'beds'), { recursive: true });
+  fs.writeFileSync(path.join(GARDEN, 'beds', 'north.md'), '# North bed\n');
+  fs.writeFileSync(path.join(GARDEN, 'beds', 'south.md'), '# South bed\n');
+  fs.writeFileSync(path.join(GARDEN, 'schedule.js'), 'export const days = 2;\n');
+  fs.mkdirSync(path.join(GARDEN, 'node_modules', 'dep'), { recursive: true });
+  fs.writeFileSync(path.join(GARDEN, 'node_modules', 'dep', 'north.js'), '');
+  await codeChat(main);
+  const box = main.getByRole('textbox', { name: 'Message' });
+  await box.click();
+  await box.pressSequentially('Compare @nor');
+  const menu = main.getByTestId('mention-menu');
+  await expect(menu).toBeVisible();
+  // Best first, never a build folder's.
+  await expect(menu.getByRole('option').first()).toContainText('north.md');
+  await expect(menu.getByRole('option').first()).toContainText('beds');
+  await expect(menu).not.toContainText('node_modules');
+  await shot(main, '94-the-mention-picker');
+  await box.press('Enter');
+  await expect(menu).toHaveCount(0);
+  await expect(box).toHaveValue('Compare @beds/north.md ');
+  // Its chip over the box, as the message carries it.
+  await expect(main.getByTestId('chat-mentions').getByText('north.md')).toBeVisible();
+  // Keyboard first: ↓ moves, Tab puts it in too; Esc closes without one.
+  await box.pressSequentially('and @bed');
+  await expect(menu.getByRole('option')).toHaveCount(2);
+  await box.press('ArrowDown');
+  await expect(menu.getByRole('option').nth(1)).toHaveAttribute('aria-selected', 'true');
+  await box.press('Tab');
+  await expect(box).toHaveValue('Compare @beds/north.md and @beds/south.md ');
+  await box.pressSequentially('or @sch');
+  await expect(menu).toBeVisible();
+  await box.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await box.fill('Compare @beds/north.md and @beds/south.md.');
+  await main.getByRole('button', { name: 'Send', exact: true }).click();
+  // Claude Code gets the mentions as written; the sent message shows each as a pill.
+  await expect.poll(() => (fs.existsSync(ARGS) ? lastUserText() : ''), { timeout: 20_000 }).toBe('Compare @beds/north.md and @beds/south.md.');
+  const pills = thread(main).locator('.cbubble.user').last().getByTestId('chat-mention');
+  await expect(pills).toHaveText(['@beds/north.md', '@beds/south.md']);
+  await shot(main, '95-a-message-with-mentions');
+});
+
+test('@ in a plain chat is just an @: no picker', async ({ main }) => {
+  await openView(main, 'Chat');
+  await toSide(main, 'Chat');
+  await main.getByRole('button', { name: 'New chat' }).click();
+  const box = main.getByRole('textbox', { name: 'Message' });
+  await box.click();
+  await box.pressSequentially('Ask @not');
+  await expect(main.getByTestId('mention-menu')).toHaveCount(0);
 });
 
 test('a message typed in a Code chat on the plan goes straight to its session, and its own words are the answer', async ({ yap, main, shot }) => {

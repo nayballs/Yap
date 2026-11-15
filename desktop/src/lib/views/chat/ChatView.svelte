@@ -135,6 +135,8 @@
   import { workingDirectly } from '../../core/agents.js';
   import { initChatStatus, setShown, markSeen } from '../../stores/chatStatus.svelte.js';
   import { lastAnswerAt } from '../../core/chatStatus.js';
+  // A message a kept page's button sends (chat/made/pages.rs): into its own chat, as a visual's.
+  import { promptFromVisual } from './made.svelte.js';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…". `onopennote({id, line, ts, field})`: a
@@ -166,6 +168,8 @@
   // A message sent while a Code chat's own session works waits in the queue (chatState's `queued`).
   // (A Code chat: Rust says whether its own session works — the page's list of agents lags a moment behind.)
   chat.setQueueGate(() => code.current != null);
+  // **@ in a Code chat** (agents/mention.rs): its workspace's files; a plain chat's @ is just an @.
+  chat.setMentionGate(() => (code.current ? { folder: code.current.path || code.current.name || null } : null));
 
   // **Yap Code** (stores/agents.svelte.js): the bar card's or a notification's
   // Open (`yap-agent-open`) shows the agent's chat and its tab (a Code chat at
@@ -700,7 +704,7 @@
          reduced motion); the panel's ground while its chunk is on its way. -->
     <div id="chat-panel" class="docslot" class:cover class:ground={!DocPanel} style={cover ? undefined : `width: ${room.panelWidth}px`} data-testid="chat-panel-slot">
       {#if DocPanel}
-        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} messages={chat.messages} conversationId={chat.activeId} workspace={code.current?.path ?? null} />
+        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} messages={chat.messages} conversationId={chat.activeId} workspace={code.current?.path ?? null} onvisualprompt={(text, v) => promptFromVisual(chat, text, v, chat.activeId)} />
       {/if}
     </div>
   {/if}

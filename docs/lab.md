@@ -102,7 +102,7 @@ old or **not signed in, it says so and stops** — the lab never signs in.
 `start` on the plan, then `stop`: is Claude Code on this PC and signed in, as Yap sees
 it? Asks the model nothing.
 
-### `ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>] [--retry] [--edit] [--style <name>] [--incognito] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
+### `ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry] [--edit] [--style <name>] [--incognito] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
 
 Puts a question to Chat and waits until the turn ends (answered, stopped or failed),
 **or a card waits for the person**, or `--timeout` seconds pass.
@@ -115,6 +115,10 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   is when Chat still shows it: a follow-up in a Code chat too); `<id>` that
   conversation (Chat opens on it); `code:<workspace>` a new Code chat there
   (`--yap-code on`).
+- `--attach`: files dropped on Chat first (15 Nov 2026, `chat/attachments.rs`), as a
+  person drops them: each read by the test Yap and waiting as a chip in the box, sent
+  with the question. Paths on this PC: made-up files of your own, or the scratch
+  workspace's.
 - `--style <name>` (15 Nov 2026): the chat's style picked from Style under the message
   box first, by its name in the menu (`Concise`, one of the person's own…; `chat/styles.rs`);
   `--incognito`: the new chat's ghost turned on first (`chat/incognito.rs`). A feature

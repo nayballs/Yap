@@ -685,6 +685,47 @@ workspace, word for word, and no model of Chat's is asked.
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 
+## @-mention a file (2026-11-15)
+
+As Claude Code's own `@`: in a Code chat's box (on either side of a
+Code chat's first message), typing `@` opens a picker of its workspace's
+files (`agents/mention.rs`, `views/chat/MentionMenu.svelte`,
+`chatMentions.js`), keyboard first: ↑ ↓ move, Enter or Tab puts the file
+in, Esc closes; a click works too. A plain chat's `@` is just an `@`.
+
+- **Which files** (`mention::list`): `git ls-files --cached --others
+  --exclude-standard` when the workspace is a Git repository (what the repo
+  counts as its files, `.gitignore` kept; Git run with no window), else a
+  walk that leaves out hidden folders and build output (`node_modules`,
+  `target`, `dist`, `.venv`…), 12 folders deep at most. At most 30,000
+  files, read again after 20 seconds.
+- **The match** (`mention::score`, pure): the letters typed, in order, in the
+  file's name first — its start, a run of them, a word's start scored up —
+  then anywhere in its path; shorter paths first among equals; the best 50.
+  Nothing typed yet: the workspace's top first.
+- **In the message**: `@path/to/file`, relative to the workspace (quoted,
+  `@"bed plan.md"`, with a space in it), as Claude Code itself writes a
+  mention, so the chat's Claude reads it from the folder it works in.
+  Yap sends the words as they are; it doesn't read the file for it: Claude
+  Code attaches a mentioned file's contents to the message itself (Yap Lab on
+  Opus, 15 Nov 2026: "Your @TODO.md mention attached its contents to your
+  message", no Read step). A chip
+  for each file mentioned sits over the box (✕ takes the mention out of the
+  words), and the sent message shows each as a pill (`mentionParts`: a
+  path-like `@name.ext` or `@folder/…` after a space, never an email or
+  `@Sam`).
+- **On Chat's model** (a Code chat on an API key): the same words go to
+  Chat's model, which hands them to an agent working in the workspace.
+- e2e: `agents-direct.spec.js` (the picker, Enter, ↓ and Tab, Esc, the
+  stand-in seeing the mentions, the pills; a plain chat's `@`); unit tests
+  in `agents/mention.rs`.
+
+**Files attached in a Code chat** (2026-11-15, + or dropped:
+[chat-and-assistant.md](chat-and-assistant.md#files-attached-to-a-question-2026-11-15)):
+a message that works directly carries their text after its words, so the
+turn's title and brief start with the person's words (`after_text`); such a
+message is never queued.
+
 ## Dev servers
 
 A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 Nov 2026; the maintainer, on the Claude Code app's Dev servers menu in its browser pane: "Can we add this to Yap, please? And an ability to do this"). Built from Anthropic's public docs for the app ("Configure preview servers") and the preview tools as Claude Code's own session is given them, never from the app's files (Anthropic's terms forbid taking it apart).
@@ -765,7 +806,7 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
 - **Environment** (`code_chat_environment`): the workspace's name and path, its git branch (a detached HEAD's commit), **Worktree** for a linked worktree, "Runs on this PC". Read from `.git` itself: a `.git` file whose `gitdir:` points into `<repo>/.git/worktrees/` is a worktree; no git is run.
 - **Context**: how full the chat's context is, from what Yap knows already: its own Claude's latest turn (a Code chat that works directly: `agents/usage.rs`), else the plan's count for the chat, else the context ring's (`chat_context`).
 - **Connectors**: the chat's own (`connector_chat_list`), on or off here, and Manage connectors….
-- **Outputs** (`outputs.js` `outputItems`, drawn by `OutputsList.svelte`: **one list** that any kind adds its rows to): the files its work changed (its agents' turns' `files`, newest first; they open in the file view) and the files it shared (a picture in the picture tab, a file in the workspace in the file view, any other as its card opens it).
+- **Outputs** (`outputs.js` `outputItems`, drawn by `OutputsList.svelte`, opened by `outputsOpen.js` `openOutput`: **one list** that any kind adds its rows to, the same as any chat's Outputs tab, [chat-and-assistant.md](./chat-and-assistant.md)): the pages it keeps and the documents it wrote first (both open beside the chat), then the files its work changed (its agents' turns' `files`, newest first; they open in the file view) and the files it shared (a picture in the picture tab, a file in the workspace in the file view, any other as its card opens it).
 - **Background tasks**: its helpers and the agents Chat sent that are at work now (the Agent panel's own rows, `panelRows`), each with its clock (a helper's since it was handed its part: `helpersOf`'s `ts`) and Stop (a helper's stops the turn that sent it); its running ▶ Runs with theirs; then "N finished" (it opens the Agent panel, or the Runs tab).
 - **Not yet**: Remote Control's switch in the Environment (the "Code · garden-planner" card has it), and a right-click menu on an output.
 

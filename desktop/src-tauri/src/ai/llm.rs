@@ -766,8 +766,10 @@ pub async fn note_chat(
         messages.push(json!({ "role": role, "content": text }));
     }
     messages.push(json!({ "role": "user", "content": question }));
-    // A Chat turn's screenshots go with its question (Snip to Chat).
+    // A Chat turn's screenshots go with its question (Snip to Chat), and
+    // its attached files' text before it (chat/attachments.rs).
     crate::snip::turn::attach(&mut messages);
+    crate::chat::attachments::attach(&mut messages);
     // A model on this PC may take a while on a processor (`chat_timeout`).
     let req = ChatRequest::chat(base_url, api_key, model, provider, 0.5, Value::Array(messages), None, None);
     let message = match live {

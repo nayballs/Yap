@@ -582,6 +582,24 @@ pub fn disk_files(data: &Path, notes: &[(u64, String)], when: &dyn Fn(u64) -> St
         let file = p.file_name().and_then(|n| n.to_str()).unwrap_or("screenshot.png").to_string();
         out.push(DiskFile { name: format!("screenshots/{file}"), path: p, bytes });
     }
+    // The files attached to Chat's questions (chat/attachments.rs): each
+    // file's copy, under its id (its text, read here, is the chats' to give).
+    let mut attached: Vec<PathBuf> = std::fs::read_dir(data.join(crate::chat::attachments::FOLDER)).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    attached.sort();
+    for d in attached {
+        let id = d.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+        if !crate::chat::attachments::is_id(&id) {
+            continue;
+        }
+        for entry in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let Ok(meta) = entry.metadata() else { continue };
+            if !meta.is_file() {
+                continue;
+            }
+            let file = entry.file_name().to_string_lossy().into_owned();
+            out.push(DiskFile { name: format!("chat-files/{id}/{file}"), path: entry.path(), bytes: meta.len() });
+        }
+    }
     // What Chat made (chat/made.rs): each chat's visuals, as their own files.
     let mut made: Vec<PathBuf> = std::fs::read_dir(data.join(crate::chat::made::FOLDER)).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
     made.sort();

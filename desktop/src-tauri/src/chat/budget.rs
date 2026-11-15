@@ -450,7 +450,10 @@ pub async fn message_costs(counter: &Counter, messages: &[ChatMessage], replay: 
         } else {
             vec![serde_json::json!({ "role": messages[i].role, "content": messages[i].text })]
         };
-        costs.push(counter.count_messages(&sent).await);
+        // (A question's attached files: their text, sent again with it; counted
+        // by their tokens where the text alone was.)
+        let files = if replay { 0 } else { crate::chat::attachments::tokens_of(&messages[i].attachments) };
+        costs.push(counter.count_messages(&sent).await + files);
     }
     // Screenshots: the newest few sent again whole.
     let mut whole = if counter.here { 0 } else { IMAGES_AGAIN };

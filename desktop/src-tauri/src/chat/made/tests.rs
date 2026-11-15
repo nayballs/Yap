@@ -1,4 +1,4 @@
-use super::serve::{self, csp, document, lib_for, point_libraries, verified, LIBS};
+use super::serve::{self, csp, document, lib_for, page_document, point_libraries, verified, LIBS};
 use super::*;
 
 fn made(id: &str, after: Anchor) -> Made {
@@ -58,14 +58,16 @@ fn what_a_later_yap_keeps_is_never_dropped() {
     // A later Yap's index: a field of its own on the index and on an item (a page's versions).
     let later = json!({
         "version": 2, "created": 5, "pins": ["pg_1"],
-        "items": [{ "id": "pg_00000000000000f6", "kind": "page", "title": "Tips", "format": "html", "after": { "index": 0, "ts": 1 }, "at": 2, "bytes": 3, "versions": [{ "n": 1 }, { "n": 2 }] }]
+        "items": [{ "id": "pg_00000000000000f6", "kind": "page", "title": "Tips", "format": "html", "after": { "index": 0, "ts": 1 }, "at": 2, "bytes": 3, "pinned": true, "versions": [{ "n": 1, "shared": "no" }, { "n": 2 }] }]
     });
     std::fs::create_dir_all(dir().join("46")).unwrap();
     std::fs::write(dir().join("46").join("made.json"), later.to_string()).unwrap();
     add(46, 5, &made("v_00000000000000f7", Anchor::default()), SVG).unwrap();
     let kept: Value = serde_json::from_str(&std::fs::read_to_string(dir().join("46").join("made.json")).unwrap()).unwrap();
     assert_eq!(kept["pins"], json!(["pg_1"]));
-    assert_eq!(kept["items"][0]["versions"], json!([{ "n": 1 }, { "n": 2 }]));
+    assert_eq!(kept["items"][0]["pinned"], json!(true));
+    assert_eq!(kept["items"][0]["versions"][0]["shared"], json!("no"));
+    assert_eq!(kept["items"][0]["versions"][1]["n"], json!(2));
     assert_eq!(kept["items"][1]["id"], json!("v_00000000000000f7"));
 }
 
@@ -98,11 +100,14 @@ fn the_tool_is_offered_where_a_thread_shows_it() {
     let d = definitions(true);
     assert_eq!(d[0]["function"]["name"], SHOW_VISUAL);
     assert_eq!(d[0]["function"]["parameters"]["required"], json!(["title", "code"]));
-    // Light: every step sends it.
+    assert_eq!(d[1]["function"]["name"], pages::SAVE_PAGE);
+    assert_eq!(d[1]["function"]["parameters"]["required"], json!(["title", "html"]));
+    assert_eq!(NAMES, [SHOW_VISUAL, pages::SAVE_PAGE]);
+    // Light: every step sends them (show_visual alone was 291 tokens with its line).
     let est = crate::meetings::summary::estimate_tokens;
     let (schema, line) = (est(&d.to_string()), est(INSTRUCTIONS));
-    println!("show_visual adds: schema {schema} + line {line} tokens");
-    assert!(schema + line <= 340, "{} tokens", schema + line);
+    println!("show_visual and save_page add: schemas {schema} + line {line} tokens");
+    assert!(schema + line <= 620, "{} tokens", schema + line);
 }
 
 #[test]
@@ -210,6 +215,98 @@ fn the_scheme_serves_a_visual_with_its_policy_and_nothing_else() {
     assert!(String::from_utf8_lossy(ok.body()).contains("<svg"));
     assert_eq!(get("v/44/v_00000000000000e5").status(), 200);
     for bad in ["v/45/v_00000000000000e5", "v/44/v_00000000000000e6", "v/44/..%2F..%2Fchats.json", "v/x/v_00000000000000e5", "made.json", "44/made.json", "lib/evil.js", ""] {
+        assert_eq!(get(bad).status(), 404, "{bad}");
+    }
+}
+
+
+// ---- pages Yap keeps (pages.rs) -------------------------------------------------------------
+
+const TIPS: &str = "<!doctype html><html><head><title>Tips</title></head><body><h1>Tip calculator</h1><input id=bill value=48></body></html>";
+
+/// A page as save_page keeps one: in the chat's index, its versions' files beside it. (The tool itself
+/// needs the chat in chats.json; this is what it writes.)
+fn keep_page(conv: u64, created: u64, id: &str, versions: &[(u32, &str, Anchor)]) {
+    with_index(conv, created, |index, folder| {
+        let mut m = Made { id: id.into(), kind: "page".into(), title: "Tip calculator".into(), format: "html".into(), after: versions[0].2, ..Default::default() };
+        for (n, html, after) in versions {
+            std::fs::write(folder.join(pages::file_of(id, *n)), html).unwrap();
+            m.versions.push(PageVersion { n: *n, at: 1, bytes: html.len() as u64, after: *after, title: "Tip calculator".into(), ..Default::default() });
+        }
+        index.items.push(m);
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn a_pages_ids_and_files() {
+    assert!(pages::is_id("pg_0123456789abcdef"));
+    assert!(!pages::is_id("v_0123456789abcdef") && !pages::is_id("pg_0123") && !pages::is_id("pg_../made.json"));
+    assert!(!is_id("pg_0123456789abcdef"), "a page's id is never a visual's");
+    assert_eq!(pages::file_of("pg_0123456789abcdef", 3), "pg_0123456789abcdef.v3.html");
+}
+
+#[test]
+fn a_page_and_its_versions_read_back() {
+    let (q1, q2) = (Anchor { index: 0, ts: 10 }, Anchor { index: 2, ts: 12 });
+    keep_page(51, 3, "pg_00000000000000a1", &[(1, TIPS, q1), (2, "<p>Version two</p>", q2)]);
+    let (m, n, html) = page_of(51, "pg_00000000000000a1", 0).unwrap();
+    assert_eq!((n, html.as_str()), (2, "<p>Version two</p>"), "0: its newest");
+    assert_eq!(m.versions.iter().map(|v| (v.n, v.after)).collect::<Vec<_>>(), [(1, q1), (2, q2)]);
+    assert_eq!(page_of(51, "pg_00000000000000a1", 1).map(|(_, n, h)| (n, h)), Some((1, TIPS.to_string())));
+    assert!(page_of(51, "pg_00000000000000a1", 3).is_none());
+    assert!(page_of(52, "pg_00000000000000a1", 0).is_none(), "another chat's");
+    assert!(page_of(51, "v_00000000000000a1", 0).is_none());
+    // Its versions round-trip through the index, as the page reads them.
+    let listed = list(51, 3);
+    assert_eq!(listed[0].versions.len(), 2);
+    let v: Value = serde_json::to_value(&listed[0]).unwrap();
+    assert_eq!(v["versions"][1]["n"], json!(2));
+    assert_eq!(v["kind"], json!("page"));
+    // A visual has none (none written).
+    assert!(serde_json::to_value(made("v_00000000000000a2", q1)).unwrap().get("versions").is_none());
+}
+
+#[test]
+fn save_page_refuses_without_a_page_too_big_or_a_script_from_the_web() {
+    let r = pages::save_page(Some(1), &json!({ "title": "Tips" }), false);
+    assert_eq!(r["displayText"], json!("Didn't save a page: no HTML"));
+    let big = "x".repeat(pages::MAX_PAGE + 1);
+    assert_eq!(pages::save_page(Some(1), &json!({ "title": "Big", "html": big }), false)["displayText"], json!("Didn't save a page: too big"));
+    let web = r#"<script src="https://evil.example/app.js"></script>"#;
+    assert_eq!(pages::save_page(Some(1), &json!({ "title": "App", "html": web }), false)["displayText"], json!("Didn't save a page: a script from the web"));
+    assert_eq!(pages::save_page(None, &json!({ "title": "App", "html": TIPS }), false)["displayText"], json!("Didn't save a page: no chat here"));
+    // The run's one door: show_visual or save_page by name.
+    assert_eq!(execute(pages::SAVE_PAGE, None, &json!({ "title": "App", "html": TIPS }), false)["displayText"], json!("Didn't save a page: no chat here"));
+    assert_eq!(execute(SHOW_VISUAL, None, &json!({ "title": "D", "code": SVG }), false)["displayText"], json!("Didn't make a visual: no chat here"));
+}
+
+#[test]
+fn a_pages_document_scrolls_and_keeps_the_bridge() {
+    let doc = page_document("<h1>Tips</h1>");
+    assert!(doc.contains("<main id=\"yap-page\"><h1>Tips</h1></main>"));
+    assert!(doc.contains(serve::PAGE_STYLE) && !doc.contains(serve::VISUAL_STYLE));
+    assert!(doc.find("sendPrompt").unwrap() < doc.find("<h1>").unwrap());
+    let whole = page_document(TIPS);
+    assert!(whole.starts_with("<!doctype html><html><head><meta charset"), "{whole}");
+    // A visual's never scrolls.
+    assert!(document(SVG, "svg").contains(serve::VISUAL_STYLE));
+}
+
+#[test]
+fn the_scheme_serves_a_pages_versions_with_its_policy() {
+    keep_page(53, 4, "pg_00000000000000b1", &[(1, TIPS, Anchor::default()), (2, "<p>Two</p>", Anchor::default())]);
+    let get = |path: &str| {
+        let req = tauri::http::Request::builder().uri(format!("http://yapmade.localhost/{path}")).body(Vec::new()).unwrap();
+        tauri::async_runtime::block_on(serve::serve(&req))
+    };
+    let newest = get("p%2F53%2Fpg_00000000000000b1%2F0");
+    assert_eq!(newest.status(), 200);
+    assert_eq!(newest.headers()["Content-Security-Policy"].to_str().unwrap(), csp("http://yapmade.localhost"));
+    assert!(String::from_utf8_lossy(newest.body()).contains("<p>Two</p>"));
+    assert!(String::from_utf8_lossy(get("p/53/pg_00000000000000b1/1").body()).contains("Tip calculator"));
+    for bad in ["p/53/pg_00000000000000b1/3", "p/54/pg_00000000000000b1/1", "p/53/pg_00000000000000b1", "p/53/pg_00000000000000b1/x", "v/53/pg_00000000000000b1", "p/53/v_00000000000000b1/1"] {
         assert_eq!(get(bad).status(), 404, "{bad}");
     }
 }
