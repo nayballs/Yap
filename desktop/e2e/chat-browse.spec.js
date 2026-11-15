@@ -26,6 +26,8 @@
 //   fields listed, its password and code fields refused as anywhere, a click
 //   at a point on its search button opening its dialog (said so), the box
 //   found, typed in and sent by Enter through the submit check.
+// - browser_find by description (chat/pages/find.rs) on a made-up shop: the likeliest first, each
+//   with why — its words, role, place, an ordinal, a part (an open shadow root's form too).
 // A model that isn't strong ("fake-chat") gets none of it (chat-pages.spec.js).
 //
 // Nothing leaves the PC: the model is the scripted fake AI
@@ -35,7 +37,7 @@
 // `e2e_page_view_eval` / `e2e_page_views`. Fictional sites only.
 import { test as base, expect, expectStore, setConfig, openView } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL, BOARD_URL, SMOOTH_URL, PREFS_URL, DOCS_URL, WIDE_URL, WIDE_BOX, TASKS_URL, FRAMES_URL } from './support/fake-web.js';
+import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL, BOARD_URL, SMOOTH_URL, PREFS_URL, DOCS_URL, WIDE_URL, WIDE_BOX, TASKS_URL, FRAMES_URL, TRAIL_URL } from './support/fake-web.js';
 
 const test = base.extend({
   fakeLlm: [
@@ -858,6 +860,59 @@ test('typing into a page’s search box and pressing Enter needs no card', async
   expect(lastResult(calls[5])).toMatchObject({ success: false, displayText: "Couldn't press keys: none Yap presses" });
   // The message box sent nothing.
   expect(await inPage(yap, CHAT_URL, "document.querySelectorAll('#sent li').length")).toBe(0);
+});
+
+test('browser_find by description: the likeliest first with why — words, a role, a place, an ordinal, a part, inside an open shadow root', async ({ yap, main, fakeLlm }) => {
+  // (15 Nov 2026, chat/pages/find.rs: the last of what set Claude Code's own browser's find apart.)
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  const SAID = 'They are the Add to basket buttons.';
+  const queries = [
+    'the button that adds it to the basket',
+    'the search box at the top',
+    "the second result's link",
+    'the add to basket button for the Scree Racer',
+    'the email field in the newsletter form',
+    'the basket link on the right',
+    'the search box at the bottom',
+    'the third add to basket button',
+    'Moss Walker',
+  ];
+  fakeLlm.scriptChat([{ tools: [{ name: 'browser_navigate', args: { url: TRAIL_URL } }] }, ...queries.map((query) => ({ tools: [{ name: 'browser_find', args: { query } }] })), { content: SAID }]);
+  await ask(main, `On ${TRAIL_URL}, which buttons add a shoe to the basket?`);
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 60_000 });
+  const calls = chatCalls(fakeLlm, from);
+  // Query i's result comes back with the request after its call.
+  const found = (i) => lastResult(calls[i + 2]);
+  const first = (i) => String(found(i).data.matches).split('\n')[0];
+  // Three alike buttons: the first on the page first, each saying what it's under; the note says they tie.
+  const alike = found(0);
+  expect(alike).toMatchObject({ success: true, data: { described: true } });
+  expect(alike.displayText).toMatch(/^Found \d likely matches for ‘the button that adds it to the basket’ on shop\.example\.com$/);
+  const lines = alike.data.matches.split('\n');
+  expect(lines[0]).toMatch(/^\[\d+\] button "Add to basket" — ‘add’, ‘basket’ in its name; under ‘Ridge Runner’$/);
+  expect(lines[1]).toContain('under ‘Moss Walker’');
+  expect(lines[2]).toContain('under ‘Scree Racer’');
+  expect(alike.note).toContain('no model');
+  expect(alike.note).toContain('The first two match equally');
+  // A place: the header's search box, not the help's in the footer.
+  expect(first(1)).toMatch(/^\[\d+\] searchbox "Search products" — .*at the top of the page/);
+  expect(first(6)).toMatch(/^\[\d+\] searchbox "Search help"/);
+  // An ordinal of an item: the second product's own link.
+  expect(first(2)).toMatch(/^\[\d+\] link "Moss Walker" → shop\.example\.com\/p\/moss-walker — in the 2nd of 3 results like it/);
+  // Its words with the product's: that card's button.
+  expect(first(3)).toMatch(/^\[\d+\] button "Add to basket" — ‘add’, ‘basket’ in its name; ‘scree’, ‘racer’ under ‘Scree Racer’/);
+  // Inside a part, through the web component's open shadow root.
+  expect(first(4)).toMatch(/^\[\d+\] textbox "Email" — ‘email’ in its name; inside the form ‘Newsletter’/);
+  // On the right of the header.
+  expect(first(5)).toMatch(/^\[\d+\] link "Basket, 2 items" → shop\.example\.com\/basket — .*on the right/);
+  expect(first(7)).toMatch(/^\[\d+\] button "Add to basket" — .*the 3rd of 3 of its kind, top to bottom; under ‘Scree Racer’$/);
+  // Words on the page as they are: found as ever.
+  expect(found(8).data.described).toBeUndefined();
+  expect(found(8).data.matches).toMatch(/\[\d+\] link "Moss Walker"/);
+  // Its refs act: the first line's is the Ridge Runner's button on the page.
+  const ref = Number(/^\[(\d+)\]/.exec(lines[0])[1]);
+  expect(await inPage(yap, TRAIL_URL, `(() => { const b = window.__yapRefs.els[${ref}]; return b ? b.closest('li').querySelector('h2').textContent : null; })()`)).toBe('Ridge Runner');
 });
 
 test('the tabs beside the chat: listed, and one closed', async ({ yap, main, fakeLlm }) => {

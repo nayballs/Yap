@@ -613,10 +613,14 @@ workspace, word for word, and no model of Chat's is asked.
     one part), `browser_find` by role as well as words (20 matches, a
     table or a figure too), scrolling left and right (saying where its edges
     are, and when nothing moved), and `browser_key`'s `repeat` — tried by
-    Opus in Yap Lab on Wikipedia and fixed where it fell short. What stays apart: `find` by a description
-    (Claude Code's app runs a model for it; its built-in browser's own
-    `find` matches role, name and text, as Yap's does), and a script asked
-    first outside Bypass, on purpose.
+    Opus in Yap Lab on Wikipedia and fixed where it fell short. Then, 15 Nov
+    2026, `find` by a description ("the search box at the top", "the
+    second result's link": the best 5, each with why, ranked by Yap's own
+    deterministic scorer, `chat/pages/find.rs` — no model; the session
+    judges) and, on Select an element, a React page's component, owners,
+    props and source (`pick::ReactPart`) in the chip's card and the
+    `<selected-element>` block. What stays apart: a script asked first
+    outside Bypass, on purpose.
     A heading's words never ask (`rules::click_needs_ok`: "Build Order"
     opens, it doesn't order). Its lines say "Clicking on the page beside the
     chat" and the like, never what it types; a stretch of them is said

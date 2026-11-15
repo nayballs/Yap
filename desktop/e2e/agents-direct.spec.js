@@ -53,7 +53,7 @@ import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat, toSide } from './support/code-chats.js';
 import { writePng } from './support/png.js';
-import { startFakeWeb, FORT_JOY_URL, LEVELING_URL } from './support/fake-web.js';
+import { startFakeWeb, FORT_JOY_URL, LEVELING_URL, BASKET_URL, BASKET_APP } from './support/fake-web.js';
 import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine, turnParts, notesAfter, workOf, turnPictures, todosIn } from '../src/lib/core/agents.js';
 import { panelRows, panelGroups, panelTotals } from '../src/lib/core/agentPanel.js';
 import { workingLine } from '../src/lib/core/working.js';
@@ -1939,18 +1939,21 @@ test('its session has the workspace’s dev servers, as the Claude Code app’s 
 });
 
 /** The fake guide open beside a Code chat by its address bar (no Claude): its page's key. */
-async function guideBeside(yap, main) {
+const guideBeside = (yap, main) => pageBeside(yap, main, LEVELING_URL, 'guide/leveling');
+
+/** Page `url` open beside a Code chat by its address bar (no Claude), once one with `part` in its address has loaded: its key. */
+async function pageBeside(yap, main, url, part) {
   await main.getByRole('button', { name: 'Browser', exact: true }).click();
   const address = main.getByTestId('chat-page-address');
-  await address.fill(LEVELING_URL);
+  await address.fill(url);
   await address.press('Enter');
   let key = null;
   await expect
     .poll(async () => {
-      const v = (await yap.invoke('e2e_page_views')).find((x) => String(x.url || '').includes('guide/leveling') && x.loaded);
+      const v = (await yap.invoke('e2e_page_views')).find((x) => String(x.url || '').includes(part) && x.loaded);
       key = v?.key ?? null;
       return !!key;
-    }, { timeout: 20_000, message: 'the guide to load beside the chat' })
+    }, { timeout: 20_000, message: `${part} to load beside the chat` })
     .toBe(true);
   return key;
 }
@@ -2000,6 +2003,8 @@ test('Select an element on a page beside the chat: DevTools’ own inspect mode,
   const seen = fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).at(-1);
   expect(seen.user_text).toMatch(/^Make this line bold\.\n\n<selected-element page="[^"]*guide\/leveling" tag="p" id="build" picture="attached">/);
   expect(seen.user_text).toContain('<text>Build: Healing</text>');
+  // (No React on the guide: no React part, nothing about it on its card.)
+  expect(seen.user_text).not.toContain('<react');
   expect(seen.user_text).toContain('<path>');
   expect(seen.user_pictures).toHaveLength(1);
   // The question shows the words and a chip, never the block; the box is empty again.
@@ -2014,6 +2019,57 @@ test('Select an element on a page beside the chat: DevTools’ own inspect mode,
   await expect(thread(main).locator('.shots')).toHaveCount(0);
   await sent.getByRole('button', { name: /Element/ }).focus();
   await expect(sent.getByTestId('chat-element-card').locator('img.elpic')).toBeVisible();
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
+});
+
+test('Select an element on a React page: its component, owners, props and source on its card and in its block; a page without React unchanged', async ({ yap, main, shot }) => {
+  // (15 Nov 2026, chat/pages/pick.rs ReactPart: React 19's own development build, read from its fiber on the node.)
+  test.setTimeout(120_000);
+  await setConfig(yap, main, { webSearch: true });
+  await script(yap, SEES, 'react-element-seen');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  const key = await pageBeside(yap, main, BASKET_URL, 'shop.example.com/basket');
+  // The app has drawn its rows.
+  await expect.poll(async () => JSON.parse(await yap.invoke('e2e_page_view_eval', { key, script: "!!document.getElementById('remove-2')" })), { timeout: 20_000 }).toBe(true);
+  await main.getByTestId('chat-page-select').click();
+  await expect(main.getByTestId('chat-page-tool-select')).toHaveClass(/\bon\b/);
+  // A person's click on the Moss Walker's Remove button.
+  const at = JSON.parse(
+    await yap.invoke('e2e_page_view_eval', { key, script: "(() => { const r = document.getElementById('remove-2').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()" }),
+  );
+  await yap.invoke('e2e_page_click', { key, x: at.x, y: at.y });
+  const chip = main.getByTestId('chat-elements').getByTestId('chat-element-chip');
+  await expect(chip).toHaveCount(1, { timeout: 20_000 });
+  await expect(chip).toContainText('<button id="remove-2">');
+  // Its card: the component and where its JSX was written, first; its owners and props with the details.
+  const line = BASKET_APP.split('\n').findIndex((l) => l.includes("jsx('button'")) + 1;
+  await chip.getByRole('button', { name: /Element/ }).focus();
+  const card = chip.getByTestId('chat-element-card');
+  await expect(card.getByTestId('chat-element-component')).toHaveText('<BasketRow />');
+  await expect(card.getByTestId('chat-element-source')).toHaveText(new RegExp(`^src/Basket\\.js:${line}:\\d+ \\(as the page serves it\\)$`));
+  await card.getByTestId('chat-element-more').click();
+  await expect(card).toContainText('Owners');
+  await expect(card).toContainText('BasketPage ‹ App');
+  await expect(card).toContainText('onRemove: ƒ handleRemove');
+  await expect(card).toContainText('item: {id, name, price}');
+  await shot(main, '87-a-react-element-in-the-message-box');
+  // Sent: the block carries its React part.
+  await send(main, 'Make this button red.');
+  const agent = await newAgent(yap, before);
+  await ended(yap, agent.id, 60_000);
+  const seen = fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).at(-1);
+  expect(seen.user_text).toMatch(/^Make this button red\.\n\n<selected-element page="[^"]*shop\.example\.com\/basket" tag="button" id="remove-2"/);
+  expect(seen.user_text).toMatch(new RegExp(`<react component="BasketRow" source="src/Basket\\.js:${line}:\\d+ \\(as the page serves it\\)" build="development">\\n<owners>BasketPage ‹ App</owners>\\n<props>`));
+  expect(seen.user_text).toContain('onRemove: ƒ handleRemove');
+  expect(seen.user_text).toContain('currency: "GBP"');
+  // The sent question's chip shows the same from its block.
+  const sent = thread(main).getByTestId('chat-elements-sent');
+  await sent.getByRole('button', { name: /Element/ }).focus();
+  await expect(sent.getByTestId('chat-element-component')).toHaveText('<BasketRow />');
+  await expect(sent.getByTestId('chat-element-source')).toContainText(`src/Basket.js:${line}:`);
+  // The page itself unchanged: still its two rows, nothing added to its nodes but React's own.
+  expect(JSON.parse(await yap.invoke('e2e_page_view_eval', { key, script: "document.querySelectorAll('.basket-row').length" }))).toBe(2);
   await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 

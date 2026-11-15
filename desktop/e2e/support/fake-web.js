@@ -26,6 +26,9 @@
 //   responsive one (a search button under 900 px, a box at and over it);
 //   board.example.com, a task board (double-click, right-click, drags);
 //   forms.example.com, a form in a same-origin frame and a sandboxed frame.
+// - Finding by description and React (chat/pages/find.rs, pick.rs): shop.example.com/trail, a made-up
+//   shop's product list; shop.example.com/basket, a small React 19 app in a development build (React's
+//   own files from node_modules, a dev dependency).
 // - `/probe/…` (outside the stand-in): an address on this PC that a page
 //   beside the chat must never reach, its own or its workers' (recorded as
 //   service "probe"); `wiki.example.com/probe-sw.js`, a service worker that
@@ -33,7 +36,10 @@
 //
 // `requests` keeps every request: `{ service, method, host, path, query,
 // headers, body }`.
+import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
+import { createRequire } from 'node:module';
 import { writePng } from './png.js';
 
 export const GALE_URL = 'https://bg3.wiki/wiki/Gale';
@@ -444,6 +450,106 @@ PAGES['wiki.example.com/wiki/Mount_Ember'] = `<!doctype html><html><head><title>
   <h2>Weather</h2><figure><img src="/images/ember_weather.png" width="640" height="480" alt="The weather station on Mount Ember"><figcaption>The summit weather station on Mount Ember</figcaption></figure>
 </main></body></html>`;
 
+// A shop to find things on by description (chat/pages/find.rs; chat-browse.spec.js), made up: a header with
+// a search box, the main menu and a basket link at its right; three products, each a card with its own link,
+// size, "Add to basket" and a wishlist heart; the pages' links; a newsletter form inside a web component (an
+// open shadow root) and the help's own search at the foot of the page.
+export const TRAIL_URL = 'https://shop.example.com/trail';
+const CARD = (slug, name, price) => `<li class="product-card"><h2><a href="p/${slug}">${name}</a></h2><p class="price">£${price}</p>
+  <label>Size <select name="size-${slug}"><option>7</option><option>8</option></select></label>
+  <button type="button" class="add-to-basket">Add to basket</button><button type="button" class="wish" aria-label="Save ${name} to your wishlist">♡</button></li>`;
+PAGES['shop.example.com/trail'] = `<!doctype html><html><head><title>Trail shoes - Fellside Outdoor</title><meta name="viewport" content="width=device-width"><style>
+html,body{margin:0;font:15px sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid #ccc}
+header nav ul{display:flex;gap:10px;list-style:none;margin:0;padding:0}
+.basket-link{margin-left:auto;white-space:nowrap}
+main{padding:12px}
+.products{list-style:none;padding:0;margin:0}
+.product-card{border:1px solid #ddd;padding:12px;margin:0 0 16px;min-height:150px}
+.pager{display:flex;gap:8px;margin:24px 0}
+footer{margin-top:900px;padding:12px;border-top:1px solid #ccc}
+</style></head><body>
+<header class="site-header">
+  <a href="./" class="logo" aria-label="Fellside Outdoor home">Fellside</a>
+  <form role="search" action="search" class="site-search"><input type="search" name="q" placeholder="Search products" aria-label="Search products"><button>Search</button></form>
+  <nav aria-label="Main"><ul><li><a href="men">Men</a></li><li><a href="women">Women</a></li><li><a href="kids">Kids</a></li><li><a href="sale">Sale</a></li></ul></nav>
+  <a href="basket" class="basket-link" aria-label="Basket, 2 items">2</a>
+</header>
+<main>
+  <h1>Trail shoes</h1>
+  <label>Sort by <select name="sort"><option>Popular</option><option>Price: low to high</option></select></label>
+  <ul class="products">${CARD('ridge-runner', 'Ridge Runner', 95)}${CARD('moss-walker', 'Moss Walker', 80)}${CARD('scree-racer', 'Scree Racer', 120)}</ul>
+  <nav aria-label="Pages" class="pager"><a href="?page=1">1</a> <a href="?page=2">2</a> <a href="?page=2" rel="next">Next</a></nav>
+</main>
+<footer>
+  <trail-news><template shadowrootmode="open"><form class="newsletter" aria-label="Newsletter"><h2>Get trail news</h2><label for="nl-email">Email</label> <input id="nl-email" type="email" name="email"> <button>Sign up</button></form></template></trail-news>
+  <form class="help-search" action="help"><input type="search" name="hq" placeholder="Search help"> <button>Go</button></form>
+  <a href="#top">Back to top</a>
+</footer>
+</body></html>`;
+
+// A small React app, a development build (chat/pages/pick.rs: an element picked on it carries its component,
+// owners, props and source; agents-direct.spec.js): React 19's own development builds from node_modules (a
+// dev dependency, never shipped), each CommonJS module defined in the page and `require`d by name; the app's
+// code written as a JSX build turns it into (`jsxDEV` calls), so React keeps each element's `_debugStack` —
+// the line of `src/Basket.js` it was written on — and each component's owner.
+export const BASKET_URL = 'https://shop.example.com/basket';
+export const BASKET_APP = `// Your basket (made up), as a development build of its JSX.
+var jsx = require('react/jsx-dev-runtime').jsxDEV;
+var createRoot = require('react-dom/client').createRoot;
+var useState = require('react').useState;
+
+function BasketRow(props) {
+  var item = props.item;
+  return jsx('li', { className: 'basket-row', children: [
+    jsx('span', { className: 'item-name', children: item.name }, undefined, false, undefined, this),
+    jsx('span', { className: 'item-price', children: props.currency + ' ' + item.price }, undefined, false, undefined, this),
+    jsx('button', { type: 'button', id: 'remove-' + item.id, onClick: function remove() { props.onRemove(item.id); }, children: 'Remove' }, undefined, false, undefined, this)
+  ] }, undefined, true, undefined, this);
+}
+
+function BasketPage(props) {
+  return jsx('section', { 'aria-label': 'Your basket', children: [
+    jsx('h1', { children: 'Your basket' }, undefined, false, undefined, this),
+    jsx('ul', { className: 'basket', children: props.items.map(function (item) {
+      return jsx(BasketRow, { item: item, currency: props.currency, onRemove: props.onRemove }, item.id, false, undefined, this);
+    }) }, undefined, false, undefined, this)
+  ] }, undefined, true, undefined, this);
+}
+
+function App() {
+  var basket = useState([{ id: 1, name: 'Ridge Runner', price: 95 }, { id: 2, name: 'Moss Walker', price: 80 }]);
+  return jsx(BasketPage, { items: basket[0], currency: 'GBP', onRemove: function handleRemove(id) { basket[1](basket[0].filter(function (i) { return i.id !== id; })); } }, undefined, false, undefined, this);
+}
+
+createRoot(document.getElementById('root')).render(jsx(App, {}, undefined, false, undefined, this));
+`;
+PAGES['shop.example.com/basket'] = `<!doctype html><html><head><title>Your basket - Fellside Outdoor</title><meta name="viewport" content="width=device-width">
+<style>html,body{margin:0;font:16px sans-serif}#root{padding:16px}.basket{list-style:none;padding:0}.basket-row{display:flex;gap:12px;align-items:center;padding:8px 0}button{font:inherit;padding:6px 14px}</style>
+<script>var __defs={},__mods={};function define(n,f){__defs[n]=f;}function require(n){if(__mods[n])return __mods[n].exports;var m={exports:{}};__mods[n]=m;__defs[n].call(m.exports,m,m.exports,require,{env:{NODE_ENV:'development'}});return m.exports;}</script>
+<script src="vendor/react.development.js"></script>
+</head><body><div id="root"></div><script src="src/Basket.js"></script></body></html>`;
+
+let reactVendor = null;
+/** React's development builds as one script: each module `define`d by its name (read once, when first asked for). */
+function reactBundle() {
+  if (reactVendor) return reactVendor;
+  const req = createRequire(import.meta.url);
+  const dir = (pkg, from = req) => path.dirname(from.resolve(`${pkg}/package.json`));
+  const react = dir('react');
+  const dom = dir('react-dom');
+  const scheduler = dir('scheduler', createRequire(path.join(dom, 'package.json')));
+  const mods = [
+    ['react', path.join(react, 'cjs/react.development.js')],
+    ['react/jsx-dev-runtime', path.join(react, 'cjs/react-jsx-dev-runtime.development.js')],
+    ['scheduler', path.join(scheduler, 'cjs/scheduler.development.js')],
+    ['react-dom', path.join(dom, 'cjs/react-dom.development.js')],
+    ['react-dom/client', path.join(dom, 'cjs/react-dom-client.development.js')],
+  ];
+  reactVendor = Buffer.from(mods.map(([name, file]) => `define(${JSON.stringify(name)}, function (module, exports, require, process) {\n${fs.readFileSync(file, 'utf8')}\n});`).join('\n'));
+  return reactVendor;
+}
+
 /** The rail site's results for the stations asked for (`from`, `to`). */
 function railResults(q) {
   const right = /^kellbrook$/i.test((q.get('from') || '').trim()) && /^port ellis$/i.test((q.get('to') || '').trim());
@@ -473,6 +579,9 @@ const FILES = {
   'wiki.example.com/images/ember_weather.png': ['image/png', writePng(640, 480, [80, 90, 150])],
   'wiki.example.com/probe-sw.js': ['application/javascript', Buffer.from(PROBE_SW)],
 };
+// The React basket's scripts: the app, and React itself, read when first asked for.
+FILES['shop.example.com/src/Basket.js'] = ['application/javascript', Buffer.from(BASKET_APP)];
+Object.defineProperty(FILES, 'shop.example.com/vendor/react.development.js', { enumerable: true, get: () => ['application/javascript', reactBundle()] });
 
 // RPGs coming out in 2026 (made up: no model knows them).
 export const RPG_URL = 'https://rpgsite.example/anticipated-2026';

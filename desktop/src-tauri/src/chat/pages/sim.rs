@@ -596,6 +596,21 @@ impl Browser {
         Ok(blocks)
     }
 
+    /// **What tab `key` holds for a description** (`browser_find`, as the
+    /// element script's `scene`): every visible thing with a ref, its words,
+    /// where it is, the heading it's under and the parts it's inside;
+    /// numbered from now on.
+    pub fn scene(&mut self, key: &str) -> Result<super::find::Scene, String> {
+        let scene = {
+            let tab = self.tab(key)?;
+            let doc = dom_query::Document::from(tab.html.as_str());
+            let page = Page::read(&doc, tab);
+            page.scene()
+        };
+        self.tab_mut(key)?.seen = true;
+        Ok(scene)
+    }
+
     /// **The element at (`x`, `y`)** of tab `key`'s view: the last element
     /// whose `data-sim-rect="x,y,w,h"` (page pixels) holds that point, as
     /// its nearest link, button or field, else itself; numbered from now on.
@@ -1557,6 +1572,198 @@ impl<'a> Page<'a> {
                 (!text.is_empty()).then(|| self.ref_of(&n).map(|r| super::see::Block { r, tag, role, text })).flatten()
             })
             .collect()
+    }
+
+    /// **[`Browser::scene`]**: the things with refs in the page's order, as
+    /// the element script's `scene` reads them (an element's place: its line,
+    /// `data-sim-rect` where it has one).
+    fn scene(&self) -> super::find::Scene {
+        use super::find::{Holder, Scene, Thing};
+        let layout = self.layout();
+        let mut holders: Vec<Holder> = Vec::new();
+        let mut known: HashMap<dom_query::NodeId, Option<u32>> = HashMap::new();
+        let mut groups: Vec<(dom_query::NodeId, String, u32)> = Vec::new();
+        let mut things = Vec::new();
+        let mut last = String::new();
+        let rect = |n: &dom_query::NodeRef| -> Option<[f64; 4]> {
+            let r: Vec<f64> = n.attr("data-sim-rect")?.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+            (r.len() == 4).then(|| [r[0], r[1], r[2], r[3]])
+        };
+        let s = self.in_view().scroll;
+        for node in self.doc.root().descendants_it().filter(|n| n.is_element()) {
+            let Some(r) = self.ref_of(&node) else { continue };
+            if !self.visible(&node) {
+                continue;
+            }
+            let Some(y) = layout.iter().find(|(x, _)| *x == r).map(|(_, y)| *y) else { continue };
+            let tag = node.node_name().map(|n| n.to_ascii_lowercase()).unwrap_or_default();
+            let heading = node.is("h1, h2, h3, h4, h5, h6, [role=heading]");
+            let control = self.candidates.iter().any(|c| c.id == node.id);
+            let under = last.clone();
+            if heading {
+                let t: String = Self::text_of(&node).chars().take(100).collect();
+                if !t.is_empty() {
+                    last = t;
+                }
+            }
+            let [x, ry, w, h] = rect(&node).unwrap_or([0.0, y as f64, VIEW_W as f64, LINE as f64]);
+            let mut t = Thing { r, tag: tag.clone(), hints: Self::hints(&node), x, y: ry, w, h, seen: (s.y..s.y + VIEW_H).contains(&(ry as i64)), heading: under, ..Default::default() };
+            if control {
+                let e = self.describe(&node, r);
+                t.role = e.role.clone();
+                t.name = e.name.clone();
+                t.label = e.label.clone();
+                t.placeholder = e.placeholder.clone();
+                t.value = if e.masked { String::new() } else { e.value.chars().take(80).collect() };
+                t.href = e.href.clone();
+                t.search = e.search;
+                t.disabled = e.disabled;
+                t.kind = "control".into();
+            } else if heading {
+                t.role = "heading".into();
+                t.name = Self::text_of(&node).chars().take(160).collect();
+                t.level = tag.strip_prefix('h').and_then(|l| l.parse::<u8>().ok()).unwrap_or(2);
+                t.kind = "heading".into();
+            } else {
+                let role = Self::landmark(&node);
+                t.role = if role.is_empty() { "text".into() } else { role };
+                t.name = Self::text_of(&node).chars().take(300).collect();
+                t.kind = "text".into();
+            }
+            if t.name.is_empty() && t.kind != "control" {
+                continue;
+            }
+            t.desc = node.attr("title").map(|v| v.to_string()).unwrap_or_default();
+            t.within = self.within_of(&node, &mut holders, &mut known, &mut groups);
+            things.push(t);
+        }
+        let height = layout.iter().map(|(_, y)| y + LINE).max().unwrap_or(0);
+        Scene { things, holders, h: height as f64, w: if self.tab.laid > 0 { self.tab.laid as f64 } else { VIEW_W as f64 }, vh: VIEW_H as f64 }
+    }
+
+    /// A node's id, class, `name` and test id words.
+    fn hints(n: &dom_query::NodeRef) -> String {
+        ["id", "class", "name", "data-testid"].iter().filter_map(|k| n.attr(k).map(|v| v.to_string())).collect::<Vec<_>>().join(" ")
+    }
+
+    /// The role a part of the page has (its `role`, else its tag's: nav →
+    /// navigation, a page's own header → banner…; empty: none).
+    fn landmark(n: &dom_query::NodeRef) -> String {
+        if let Some(r) = n.attr("role").map(|r| r.trim().to_ascii_lowercase()).filter(|r| !r.is_empty() && r != "presentation" && r != "none") {
+            return r.split(' ').next().unwrap_or("").to_string();
+        }
+        let tag = n.node_name().map(|t| t.to_ascii_lowercase()).unwrap_or_default();
+        let in_section = || n.ancestors_it(None).any(|a| a.node_name().is_some_and(|t| matches!(t.to_ascii_lowercase().as_str(), "article" | "aside" | "nav" | "main" | "section")));
+        match tag.as_str() {
+            "nav" => "navigation",
+            "header" if !in_section() => "banner",
+            "footer" if !in_section() => "contentinfo",
+            "aside" => "complementary",
+            "main" => "main",
+            "form" => "form",
+            "dialog" => "dialog",
+            "section" => "region",
+            "article" => "article",
+            "search" => "search",
+            "table" => "table",
+            "tr" => "row",
+            "ul" | "ol" => "list",
+            "li" => "listitem",
+            "fieldset" | "details" => "group",
+            "menu" => "menu",
+            "p" => "paragraph",
+            "td" => "cell",
+            "th" => "columnheader",
+            "label" | "legend" => "label",
+            _ => "",
+        }
+        .to_string()
+    }
+
+    /// **The parts `node` is inside** ([`super::find::Holder`]s, the nearest
+    /// first, at most 8), as the element script's `withinOf`: a landmark, a
+    /// form, a row, a list's item, one of several like it in its parent (the
+    /// same tag, class and role), or anything with an `aria-label`.
+    fn within_of(&self, node: &dom_query::NodeRef, holders: &mut Vec<super::find::Holder>, known: &mut HashMap<dom_query::NodeId, Option<u32>>, groups: &mut Vec<(dom_query::NodeId, String, u32)>) -> Vec<u32> {
+        const LAND: &[&str] = &[
+            "navigation", "banner", "contentinfo", "complementary", "main", "form", "search", "dialog", "alertdialog", "region", "article", "table", "grid", "row", "list",
+            "listitem", "group", "menu", "menubar", "tablist", "tabpanel", "listbox",
+        ];
+        let mut ids = Vec::new();
+        for p in node.ancestors_it(None).filter(|a| a.is_element()) {
+            let tag = p.node_name().map(|t| t.to_ascii_lowercase()).unwrap_or_default();
+            if matches!(tag.as_str(), "body" | "html") || tag.eq_ignore_ascii_case(SHADOW_ROOT) || tag.eq_ignore_ascii_case(FRAME_ROOT) {
+                continue;
+            }
+            if ids.len() >= 8 {
+                break;
+            }
+            let id = match known.get(&p.id) {
+                Some(h) => *h,
+                None => {
+                    let role = Self::landmark(&p);
+                    let (class, role_attr) = (p.attr("class").map(|v| v.to_string()).unwrap_or_default(), p.attr("role").map(|v| v.to_string()).unwrap_or_default());
+                    let (mut item, mut of, mut group) = (0u32, 0u32, 0u32);
+                    if let Some(parent) = p.parent().filter(|_| !class.is_empty() || !role_attr.is_empty() || matches!(tag.as_str(), "li" | "article" | "tr" | "section" | "dt" | "dd")) {
+                        let like: Vec<dom_query::NodeRef> = parent
+                            .children_it(false)
+                            .filter(|k| k.is_element() && k.node_name().is_some_and(|t| t.eq_ignore_ascii_case(&tag)) && k.attr("class").map(|v| v.to_string()).unwrap_or_default() == class && k.attr("role").map(|v| v.to_string()).unwrap_or_default() == role_attr)
+                            .collect();
+                        if like.len() >= 2 {
+                            let sig = format!("{tag}|{class}|{role_attr}");
+                            group = match groups.iter().find(|(n, g, _)| *n == parent.id && *g == sig) {
+                                Some((_, _, g)) => *g,
+                                None => {
+                                    let g = groups.len() as u32 + 1;
+                                    groups.push((parent.id, sig, g));
+                                    g
+                                }
+                            };
+                            item = like.iter().position(|k| k.id == p.id).map_or(0, |i| i as u32 + 1);
+                            of = like.len() as u32;
+                        }
+                    }
+                    let labelled = p.attr("aria-label").is_some_and(|v| !v.trim().is_empty());
+                    let h = (LAND.contains(&role.as_str()) || item > 0 || labelled).then(|| {
+                        let id = holders.len() as u32 + 1;
+                        holders.push(super::find::Holder { id, role: role.clone(), name: self.holder_name(&p, &role).chars().take(100).collect(), words: Self::hints(&p), item, of, group, y: 0.0 });
+                        id
+                    });
+                    known.insert(p.id, h);
+                    h
+                }
+            };
+            if let Some(id) = id {
+                ids.push(id);
+            }
+        }
+        ids
+    }
+
+    /// A part's name: its `aria-label`, `aria-labelledby`, a fieldset's
+    /// legend, a table's caption, its first heading, a form's button, an
+    /// item's first link.
+    fn holder_name(&self, p: &dom_query::NodeRef, role: &str) -> String {
+        let label = p.attr("aria-label").map(|v| v.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
+        if !label.is_empty() {
+            return label;
+        }
+        let by = self.labelled_by(p);
+        if !by.is_empty() {
+            return by;
+        }
+        let first = |sel: &str| dom_query::Selection::from(*p).select(sel).nodes().first().map(Self::text_of).filter(|t| !t.is_empty());
+        let tag = p.node_name().map(|t| t.to_ascii_lowercase()).unwrap_or_default();
+        let own = match tag.as_str() {
+            "fieldset" => first("legend"),
+            "table" => first("caption"),
+            "figure" => first("figcaption"),
+            _ => None,
+        };
+        own.or_else(|| first("h1, h2, h3, h4, h5, h6, [role=heading]"))
+            .or_else(|| if matches!(role, "form" | "search") { dom_query::Selection::from(*p).select("button, input[type=submit]").nodes().first().map(|b| self.name_of(b)) } else { None })
+            .or_else(|| if matches!(role, "listitem" | "row" | "article") { first("a[href]") } else { None })
+            .unwrap_or_default()
     }
 
     /// The ref at point (`x`, `y`) of the page (pixels from its top): the

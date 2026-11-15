@@ -10,8 +10,9 @@
 //!   in front, or a new one when none is open: a Page tab, `stream::Event::
 //!   Page`, kept with the answer), `browser_read {mode?, tab?}` (its text
 //!   and links, its links, buttons and fields by ref, or its structure as
-//!   an accessibility tree: `read::tree`), `browser_find {query}` (words or
-//!   a role), `browser_scroll {direction, amount?}` (sideways too),
+//!   an accessibility tree: `read::tree`), `browser_find {query}` (words, a
+//!   role, or a description — "the search box at the top", "the second
+//!   result's link" — ranked by [`find`]), `browser_scroll {direction, amount?}` (sideways too),
 //!   `browser_scroll_to
 //!   {ref | text}`, `browser_wait {seconds?, text?}`, `browser_tabs {action:
 //!   list | new | switch | close | width}` ([`see`] has the viewing ones;
@@ -130,6 +131,7 @@ function foreignFrames(r,max){var out=[],fs=qa('iframe,frame',r);for(var i=0;i<f
 pub mod act;
 pub mod backend;
 pub mod dev;
+pub mod find;
 pub mod pick;
 pub mod preview;
 pub mod read;
@@ -392,7 +394,8 @@ pub fn definitions(gate: Gate, act: bool) -> Value {
         tool(NAVIGATE, "Open a page in the tab in front (a new tab if none): an address or search words (results for the user: web search finds pages); or \"back\"/\"forward\".", json!({ "url": s(), "search": s(), "tab": tab() }), &[]),
         // (ref: one part — 14 Nov 2026, so a model needn't page through a long page to find one section.)
         tool(READ, "Read the page: text and links; mode \"elements\": links, buttons and fields by ref; \"tree\": its structure; ref: one part (a heading: its section).", json!({ "mode": mode, "ref": r(), "offset": { "type": "integer" }, "depth": { "type": "integer" }, "filter": { "type": "string", "enum": ["all", "interactive"] }, "tab": tab() }), &[]),
-        tool(FIND, "Find words or roles on the page: matches by ref.", json!({ "query": s(), "tab": tab() }), &["query"]),
+        // (A description too — 15 Nov 2026, as Claude Code's own find takes one: `find.rs`.)
+        tool(FIND, "Find words, roles or a description (\"the 2nd result's link\"): matches by ref, with why.", json!({ "query": s(), "tab": tab() }), &["query"]),
     ];
     if look {
         out.push(tool(SCROLL, "Scroll the page, or the part at x, y of the latest shot; amount in screens.", json!({ "direction": { "type": "string", "enum": ["down", "up", "top", "bottom", "left", "right"] }, "amount": { "type": "number" }, "x": { "type": "number" }, "y": { "type": "number" }, "tab": tab() }), &["direction"]));
