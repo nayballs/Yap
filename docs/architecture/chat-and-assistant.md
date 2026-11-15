@@ -1930,6 +1930,10 @@ one side.
   app's): chats not used in 7, 30 or 90 days moved to Archived by
   themselves, at start and once a day, never one at work; off by default
   ([below](#auto-archive-2026-11-15)).
+- **`chat/side.rs`** — **Side questions** (15 Nov 2026, Ctrl+;): a quick
+  question about the chat open, answered by Chat's model in a box over the
+  thread with no tools, never saved; Keep it adds it to the thread
+  ([below](#side-questions-ctrl-2026-11-15)).
 
 ## Questions about selected text (2026-10-31)
 
@@ -6096,3 +6100,88 @@ a chat whose last message is that many days old or more moves to
   meeting's Ask kept, the setting on its page, Undo; a run's notice with
   Undo, a Code chat with a ▶ Run running kept until it's stopped, then
   archived).
+
+## Side questions (Ctrl+;, 2026-11-15)
+
+The Claude app's side chat: a quick question about the chat on screen,
+answered in a box over the thread and not added to it.
+
+- **Opening it**: Ctrl+; in Chat (`stores/sideQuestionKey.js`). The key goes
+  through the in-page hotkey fallback (`settings/hotkeyFallback.svelte.js`),
+  after every shortcut of the person's own, because the global hook never
+  fires while a Yap window has the focus. A page beside the chat sends its
+  Ctrl combos there too (`yap-page-key`: a keyCode only, VK_OEM_1). ChatView
+  takes it while it's on screen, never from Settings, a dialog or a menu
+  over it. Pressed again, it closes the box. With no chat open, a toast says
+  there's nothing to ask about yet. It's on the shortcut sheet's "In Yap's
+  window" list (`ShortcutSheet.svelte`, the page's own list: `shell/help.rs`
+  has only the hook's).
+- **The box** (`SideQuestion.svelte`, its state `sideQuestion.svelte.js`,
+  `chat-sideq*`): just above the message box (a ResizeObserver follows it),
+  560 px at most, the question, the answer streamed (`chat_side_ask` through
+  `core/streaming.js`), and its own line ("Ask another side question"). A new
+  question replaces the one before. Esc or ✕ stops the answer if it's still
+  coming and throws it away; the focus goes back to the message box. Another
+  chat opened closes it. A Code chat's box says the session never sees it.
+- **What it reads** (`side::build`): the chat's messages, sized to Chat's
+  model as a turn's history is (`budget.rs`: `budget(…, tools: false)`, the
+  usable summary, `plan`): every message, else the summary and those after
+  it, else the latest that fit. A question too long for the model is refused
+  with `budget::too_long`, never sent. With no tools offered, `turn/fit.rs`
+  has no family to shed. The prompt: the persona with the line naming the
+  model, `side::INSTRUCTIONS` (a side question, shown apart, no tools: say
+  so when the question needs one), a Code chat's line (its workspace: it
+  sees the messages, not the files), the summary, the web and other-models
+  notes, then the usual end: the project's and style's blocks and memory's
+  "You" in a plain chat, About you. As a turn has them: a Code chat's About
+  you has no note and no memory, and an incognito chat has no memory and no
+  project. The person's last message, still being answered (a turn being
+  written, a Code chat's Claude at work), goes in the prompt as context,
+  never as a question. The history's roles are made to alternate
+  (`side::alternating`: Gemma's template refuses anything else).
+- **One call, no tools** (`side::answer`): `llm::note_chat` with no tools,
+  under `net::Feature::Chat`. Its tokens are counted as any Chat call's
+  (`usage::tallied`, `ai_usage.json`, the network receipts). On your Claude
+  plan, that's a one-shot Claude Code run (`claude_plan/oneshot.rs`:
+  `--tools ""`, no MCP server, `--no-session-persistence`, so no transcript
+  is kept). The answer gets the checks every answer gets
+  (`chats::checked_answer`, the dollar note).
+- **Never the conversation's turn**: it never calls
+  `stream::Stoppable::answers`. A turn being written in the chat goes on, a
+  Code chat's Claude keeps working, and the status dots don't move. Its stop
+  is the box's own id (`stream_stop`).
+- **A Code chat**: the question never enters the chat's Claude Code session.
+  Chat's model answers from the thread's text. A throwaway fork (`--resume
+  <session> --fork-session --no-session-persistence --tools ""`, all in
+  `claude --help` on 2.1.296) would also leave no file. It wasn't chosen:
+  mid-turn the session's transcript ends in a tool call still running, and a
+  fork reads all its tool output again, which costs many more tokens for a
+  quick question.
+- **Nothing saved**: no message, nothing for search by meaning or memory's
+  learning pass to read, nothing listed. The page holds the answer, and Rust
+  keeps nothing once the call ends. The log has lengths and counts only.
+- **Keep it** (`chat_side_keep`): the question (the person's) and the
+  answer (Chat's model's, with its tokens) are appended as an ordinary
+  exchange, then `memory::learn::after_turn` runs as for any answered turn
+  (which skips incognito chats and Code chats as ever). Keep it is refused
+  while the thread is answering (`side::busy`: `stream::is_answering`, or a
+  Code chat's own Claude at work). The box stays open with "Keep it once the
+  answer in the chat is done." until then. In a plain plan chat, the
+  session hears of the exchange as of any message it hasn't seen
+  (`<earlier_in_this_chat>`). In a Code chat that works directly, the
+  session hears of it with its next message: the exchange goes after the
+  person's words as an `<earlier_in_this_chat>` block (`side::with_kept`,
+  from `turn::sent_directly`), once, and only while it's still in the thread
+  where it was (a Rewind may have cut it). That's held in memory only: if
+  Yap quits before the next message, the thread still has it.
+- Not done: a spoken side question (the mic).
+- Tests: `cargo test chat::side` (the prompt names no tool, the history
+  alternates and is sized, a long question refused, the request through a
+  stand-in server has no tools and nothing is saved, Keep it waits and adds
+  an ordinary exchange, a Code chat's session told once);
+  `chat-side.spec.js` (Ctrl+;, the request's shape, nothing in chats.json or
+  memory's pass, Esc, ✕ and the toggle; asked while the chat's answer is
+  held back, Keep it waiting, then kept and in the next question's history;
+  a Code chat on the plan with its Claude mid-turn: a one-shot run with no
+  tools and no transcript, Keep it after Claude is done, the next message
+  carrying it; light and dark).

@@ -23,6 +23,7 @@
 //   probe --window <w> [--css <selector>] [--text <words>]
 //   click --window main|thread|panel --css <selector>   (one of Yap's own buttons, as the person would)
 //   pick "<words on the page>" | pick --css <selector>   select an element beside the chat
+//   side "<question>" [--keep] [--close] [--timeout 180]   a side question (Ctrl+;) about the chat shown
 //   set '<json>' | set [--web on|off] [--yap-code on|off] [--connectors on|off]
 //   report <prompt> [--timeout 540] [--cards deny|allow] [--no-wait]
 //   sheet [--turns 1-3] [--out <png>]      a contact sheet of the run's shots
@@ -235,6 +236,8 @@ async function main() {
       return run(args);
     case 'pick':
       return send('pick', { css: args.css, text: args._.join(' ') || undefined });
+    case 'side':
+      return send('side', { ...args, text: args._.join(' ') });
     case 'wait':
     case 'answer':
     case 'cancel':
@@ -247,7 +250,7 @@ async function main() {
     case 'report':
       return send(command, args);
     default:
-      return { ok: false, error: `Commands: build, start, check, ask, wait, answer, cancel, shot, probe, click, pick, set, state, agents, logs, report, sheet, run, fake, stop (docs/lab.md)` };
+      return { ok: false, error: `Commands: build, start, check, ask, side, wait, answer, cancel, shot, probe, click, pick, set, state, agents, logs, report, sheet, run, fake, stop (docs/lab.md)` };
   }
 }
 
