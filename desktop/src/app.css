@@ -902,17 +902,34 @@ code.md-filelink {
   outline-offset: 1px;
   border-radius: 3px;
 }
-/* ▶ Run on a one-line shell block of a Code chat's answer (ui/codeRun.js): left of its Copy, as the Claude app has it. */
+/* ▶ Run on a one-line shell block of a Code chat's answer (ui/codeRun.js): the line, then ▶
+   and its Copy at the line's end, as the Claude app has them; a long line scrolls by itself. */
 pre.md-code[data-run=''] {
-  padding-right: 64px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 5px;
+  overflow-x: hidden;
+}
+pre.md-code[data-run=''] > code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+}
+pre.md-code[data-run=''] > .md-coderun,
+pre.md-code[data-run=''] > .md-codecopy {
+  position: static;
+  flex: 0 0 auto;
+}
+pre.md-code[data-run=''] > .md-coderun {
+  order: 1;
+}
+pre.md-code[data-run=''] > .md-codecopy {
+  order: 2;
 }
 .md-coderun {
-  position: absolute;
-  top: 5px;
-  right: 33px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   width: 24px;
   height: 24px;
   padding: 0;
@@ -924,15 +941,15 @@ pre.md-code[data-run=''] {
 }
 .md-coderun:hover,
 .md-coderun:focus-visible {
-  background: var(--yap-s2);
+  background: var(--yap-border-subtle);
   color: var(--yap-fg);
+}
+.md-coderun:focus-visible {
+  outline: 1.5px solid var(--yap-primary-line);
 }
 .md-coderun svg {
   width: 13px;
   height: 13px;
-}
-.md-coderun[data-running] {
-  color: var(--yap-code);
 }
 
 /* The words a search found, marked where its result opens (core/findWords.js:
