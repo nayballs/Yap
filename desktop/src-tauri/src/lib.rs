@@ -373,6 +373,8 @@ pub fn run() {
             ai::usage::ai_usage_summary,
             ai::usage::context::chat_context,
             chat::turn::chat_limits,
+            chat::side::chat_side_ask,
+            chat::side::chat_side_keep,
             dictation::commands::get_history,
             dictation::commands::clear_history,
             dictation::commands::delete_history_entry,

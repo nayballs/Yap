@@ -4,7 +4,9 @@
 //! a binding added there shows up here by itself — then the saved
 //! transforms' and the language shortcuts' keys. The page names each
 //! action (`lib/views/help/ShortcutSheet.svelte`); one it doesn't know yet
-//! goes by the hook's own name for it.
+//! goes by the hook's own name for it. The keys inside Yap's window (Ctrl+;
+//! for a side question in Chat, `chat/side.rs`, among them) are the page's
+//! own list: none of them is the hook's.
 
 use serde::Serialize;
 
