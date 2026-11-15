@@ -74,6 +74,11 @@ pub fn thinking() -> Activity {
     Activity::new("think", "Thinking")
 }
 
+/// A new document's outline waits for the person (`cards/outline.rs`).
+pub fn outline_waits() -> Activity {
+    Activity::new("doc", "Waiting for you: the outline")
+}
+
 /// The answer's words are showing.
 pub fn answering() -> Activity {
     Activity::new("answer", "Writing the answer")

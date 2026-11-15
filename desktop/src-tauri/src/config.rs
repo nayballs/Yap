@@ -989,6 +989,13 @@ pub struct YapConfig {
     /// words as said. On by default; an older Yap drops it (on again).
     #[serde(default = "default_true")]
     pub chat_clean_speech: bool,
+    /// "Show the outline before writing" (Settings → Language Models →
+    /// Chat & Voice Assistant, 15 Nov 2026): a new document's outline goes
+    /// to the person as a card first — Go, or Edit its headings and add a
+    /// note — and the writing follows it (`chat/cards/outline.rs`). On by
+    /// default; an older Yap drops it (on again).
+    #[serde(default = "default_true")]
+    pub chat_outline_review: bool,
     /// "Let Yap open apps when you ask" (Settings → Voice Assistant → Opening
     /// apps; `apps.rs`): "open Spotify" in Chat or to the Voice Assistant
     /// opens an app from the Start menu's list of apps installed on this PC
@@ -1724,6 +1731,7 @@ impl Default for YapConfig {
             assistant_screen_asked: false,
             spoken_length: default_spoken_length(),
             chat_clean_speech: true,
+            chat_outline_review: true,
             open_apps: true,
             apps_blocked: Vec::new(),
             app_nicknames: Vec::new(),

@@ -32,6 +32,15 @@
 //! plan out once its turn ends (`agents::runner::plan_allowed`); Not yet, it
 //! stays a plan and Claude is told to change nothing.
 //!
+//! **Comments on a plan** (15 Nov 2026, the Claude app's plan review): the
+//! person selects words of the plan, comments on them (or on the whole
+//! plan), and **Revise the plan** sends the comments back
+//! (`claude_approve_revise`, [`Book::revise`]): ExitPlanMode is refused with
+//! them ([`revise_message`], [`Outcome::Revised`]), so Claude Code stays in
+//! Plan mode and answers with a new plan — another card, this turn still.
+//! The plan and its comments are kept on the turn
+//! (`agents::runner::plan_revised`), folded in the thread above the new one.
+//!
 //! **A question** (12 Nov 2026): Claude Code's `AskUserQuestion` ([`ASK`])
 //! comes the same way — its input `{questions: [{question, header, options:
 //! [{label, description}], multiSelect}]}`, one to four questions of two to
@@ -93,6 +102,49 @@ pub use crate::chat::cards::ask::Choice;
 pub fn answers_for(questions: &[Question], given: &Value) -> Option<Value> {
     crate::chat::cards::ask::answers_for(questions, given).map(|a| serde_json::to_value(a).unwrap_or(Value::Null))
 }
+/// How a plan sent back with comments begins, as Claude Code is told it
+/// (the runner knows such a refusal by it: never a denial of the agent's).
+pub const REVISE_LEAD: &str = "The user reviewed your plan in Yap and left comments on it.";
+/// The most comments a plan sends back, and their lengths.
+const COMMENTS_MAX: usize = 20;
+const QUOTE_MAX: usize = 400;
+const COMMENT_MAX: usize = 2_000;
+
+/// A plan's comments as kept and told (`agents::store::PlanComment`).
+pub use crate::agents::store::PlanComment;
+
+/// **The comments of a "Revise the plan"** (`[{quote, text}]`): each with
+/// its words (the quote on one line, at most [`QUOTE_MAX`]; the comment at
+/// most [`COMMENT_MAX`]), at most [`COMMENTS_MAX`]. Pure.
+pub fn comments_of(given: &Value) -> Vec<PlanComment> {
+    given
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| {
+            let text: String = c.get("text").and_then(Value::as_str).unwrap_or("").trim().chars().take(COMMENT_MAX).collect();
+            let quote = one_line(c.get("quote").and_then(Value::as_str).unwrap_or(""), QUOTE_MAX);
+            (!text.is_empty()).then_some(PlanComment { quote, text })
+        })
+        .take(COMMENTS_MAX)
+        .collect()
+}
+
+/// **What Claude Code is told when its plan comes back with comments**:
+/// stay in Plan mode, change nothing, revise the plan for each comment, and
+/// show it again with ExitPlanMode. Pure.
+pub fn revise_message(comments: &[PlanComment]) -> String {
+    let list: Vec<String> = comments
+        .iter()
+        .enumerate()
+        .map(|(i, c)| if c.quote.is_empty() { format!("{}. On the whole plan: {}", i + 1, c.text) } else { format!("{}. On “{}”: {}", i + 1, c.quote, c.text) })
+        .collect();
+    format!(
+        "{REVISE_LEAD} Stay in plan mode and change nothing yet. Revise the plan so it answers every comment (where you keep a part as it was, say why in the plan), then call ExitPlanMode again with the whole revised plan.\n\nTheir comments:\n{}",
+        list.join("\n")
+    )
+}
+
 /// What Claude Code is told when it asks during a Bypass permissions run.
 pub const UNATTENDED: &str = "This agent runs in Bypass permissions in Yap, so nobody is asked while it works, and this step needed asking (one of Claude Code's own safety checks, or one of the user's rules), so it wasn't done. Don't try it another way: carry on without it, and say in your final summary what you couldn't do.";
 
@@ -131,6 +183,8 @@ pub enum Outcome {
     Ended,
     /// Claude Code cancelled the call (`notifications/cancelled`).
     Cancelled,
+    /// A plan sent back with comments (its card's Revise the plan).
+    Revised,
 }
 
 impl Outcome {
@@ -141,6 +195,7 @@ impl Outcome {
             Outcome::TimedOut => "timedOut",
             Outcome::Ended => "ended",
             Outcome::Cancelled => "cancelled",
+            Outcome::Revised => "revised",
         }
     }
 }
@@ -208,6 +263,19 @@ impl Book {
         let Some(answers) = map.get(&id).and_then(|w| answers_for(&w.card.questions, given)) else { return false };
         let Some(w) = map.remove(&id) else { return false };
         w.tx.send((Outcome::Allowed, Some(by), Some(answers))).is_ok()
+    }
+
+    /// **A plan sent back with comments** (its card's Revise the plan:
+    /// `comments`, `[{quote, text}]`): `true` if that plan was still waiting
+    /// and a comment came with it. Nothing to say leaves it waiting.
+    pub fn revise(&self, id: u64, comments: &Value, by: By) -> bool {
+        let comments = comments_of(comments);
+        let mut map = self.lock();
+        if comments.is_empty() || map.get(&id).is_none_or(|w| w.card.tool != EXIT_PLAN) {
+            return false;
+        }
+        let Some(w) = map.remove(&id) else { return false };
+        w.tx.send((Outcome::Revised, Some(by), Some(serde_json::to_value(&comments).unwrap_or(Value::Null)))).is_ok()
     }
 
     /// Prompt `id`, if it's still waiting.
@@ -308,7 +376,7 @@ fn decision(tool: &str, outcome: Outcome, input: &Value, answers: Option<&Value>
         return match (outcome, answers) {
             // Answered: the questions as asked, and what the person picked.
             (Outcome::Allowed, Some(answers)) => json!({ "behavior": "allow", "updatedInput": { "questions": input.get("questions").cloned().unwrap_or_else(|| json!([])), "answers": answers } }).to_string(),
-            (Outcome::Allowed | Outcome::Denied, _) => deny(format!("The user left this one to you in Yap. {CHOOSE}")),
+            (Outcome::Allowed | Outcome::Denied | Outcome::Revised, _) => deny(format!("The user left this one to you in Yap. {CHOOSE}")),
             (Outcome::TimedOut, _) => deny(format!("Nobody answered this question in Yap within {}. {CHOOSE}", span(wait))),
             (Outcome::Ended, _) => deny("The agent was stopped in Yap before the user answered.".into()),
             (Outcome::Cancelled, _) => deny("This question was cancelled.".into()),
@@ -316,6 +384,8 @@ fn decision(tool: &str, outcome: Outcome, input: &Value, answers: Option<&Value>
     }
     match outcome {
         Outcome::Allowed => json!({ "behavior": "allow", "updatedInput": input }).to_string(),
+        // A plan sent back with comments: still a plan, revised for them.
+        Outcome::Revised => deny(revise_message(&answers.map(comments_of).unwrap_or_default())),
         // A plan's Not yet: still a plan, nothing changed.
         Outcome::Denied if tool == EXIT_PLAN => deny("Not yet: the user hasn't approved the plan. Stay in plan mode and change nothing: end your turn with the plan as it is, and they'll say when to go ahead.".into()),
         Outcome::Denied => deny("The user said no to this in Yap. Don't try to do the same thing another way: carry on without it, and say in your final summary what you couldn't do.".into()),
@@ -413,6 +483,11 @@ pub fn ask(ep: &Endpoint, run: &Run, args: &serde_json::Map<String, Value>, rpc:
     // A plan allowed: the agent carries it out once this turn ends.
     if tool == EXIT_PLAN && outcome == Outcome::Allowed {
         crate::agents::runner::plan_allowed(&card.run);
+    }
+    // A plan sent back with comments: kept with them, folded above the next.
+    if tool == EXIT_PLAN && outcome == Outcome::Revised {
+        let plan = input.get("plan").and_then(Value::as_str).unwrap_or("");
+        crate::agents::runner::plan_revised(&card.run, plan, &answers.as_ref().map(comments_of).unwrap_or_default());
     }
     (ep.emit)(EVENT_DONE, done_payload(id, &card.run, outcome, by.as_ref()));
     tracing::info!(id, outcome = outcome.word(), by = by.as_ref().map(By::word), "Claude Code: a permission prompt answered");
@@ -614,5 +689,53 @@ mod tests {
         let not_yet: Value = serde_json::from_str(&decision(EXIT_PLAN, Outcome::Denied, &input, None, super::super::APPROVE_WAIT)).unwrap();
         assert_eq!(not_yet["behavior"], "deny");
         assert!(not_yet["message"].as_str().unwrap().contains("Stay in plan mode and change nothing"));
+    }
+
+    fn card(id: u64, tool: &str) -> Pending {
+        Pending { id, run: "ab12".into(), conversation: Some(4), origin: Origin::Typed, tool: tool.into(), summary: String::new(), detail: "## Watering".into(), label: "garden-planner".into(), asked_ts: 1, questions: Vec::new() }
+    }
+
+    #[test]
+    fn a_plan_sent_back_with_comments_is_revised_in_plan_mode() {
+        let given = json!([
+            { "quote": "Tomatoes twice a week,\n seedlings every morning", "text": "Seedlings every other morning." },
+            { "quote": "", "text": "Also water the herbs." },
+            { "quote": "Run the tests", "text": "   " },
+        ]);
+        let comments = comments_of(&given);
+        assert_eq!(comments.len(), 2, "a comment with nothing to say goes");
+        assert_eq!(comments[0].quote, "Tomatoes twice a week, seedlings every morning", "the quote on one line");
+        let told = revise_message(&comments);
+        assert!(told.starts_with(REVISE_LEAD), "{told}");
+        assert!(told.contains("Stay in plan mode and change nothing yet"), "{told}");
+        assert!(told.contains("call ExitPlanMode again with the whole revised plan"), "{told}");
+        assert!(told.contains("1. On “Tomatoes twice a week, seedlings every morning”: Seedlings every other morning."), "{told}");
+        assert!(told.contains("2. On the whole plan: Also water the herbs."), "{told}");
+        // Claude Code reads it as ExitPlanMode refused, its words the comments.
+        let input = json!({ "plan": "## Watering" });
+        let back: Value = serde_json::from_str(&decision(EXIT_PLAN, Outcome::Revised, &input, Some(&serde_json::to_value(&comments).unwrap()), super::super::APPROVE_WAIT)).unwrap();
+        assert_eq!(back["behavior"], "deny");
+        assert_eq!(back["message"].as_str().unwrap(), told);
+        assert_eq!(Outcome::Revised.word(), "revised");
+        // Only a plan waiting, and only with something to say.
+        let book = Book::default();
+        let (tx, rx) = mpsc::channel();
+        book.lock().insert(5, Waiting { card: card(5, EXIT_PLAN), live: "run-1".into(), rpc: "1".into(), tx });
+        assert!(!book.revise(5, &json!([{ "quote": "x", "text": "" }]), By::Pc), "nothing to say: it waits");
+        assert!(book.waiting(5).is_some());
+        assert!(book.revise(5, &given, By::Pc));
+        assert!(book.waiting(5).is_none());
+        let (outcome, by, sent) = rx.try_recv().unwrap();
+        assert_eq!((outcome, by), (Outcome::Revised, Some(By::Pc)));
+        assert_eq!(comments_of(&sent.unwrap()), comments);
+        // A step's card can't be "revised".
+        let (tx, _rx) = mpsc::channel();
+        book.lock().insert(6, Waiting { card: card(6, "Bash"), live: "run-1".into(), rpc: "2".into(), tx });
+        assert!(!book.revise(6, &given, By::Pc));
+        // The runner knows such a refusal: not a denial of the agent's.
+        let kept = [crate::agents::store::PlanBefore { plan: "## Watering".into(), comments: comments.clone(), ts: 1 }];
+        assert!(crate::agents::runner::revised_plan(EXIT_PLAN, &json!({ "plan": "## Watering\n" }), &kept));
+        assert!(!crate::agents::runner::revised_plan(EXIT_PLAN, &json!({ "plan": "## Another" }), &kept));
+        assert!(!crate::agents::runner::revised_plan("Bash", &json!({ "plan": "## Watering" }), &kept));
     }
 }
