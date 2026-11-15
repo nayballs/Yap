@@ -108,7 +108,7 @@ const result = (text, cost) => ({
   permission_denials: [],
   terminal_reason: 'completed',
 });
-/** Its first turn: says what it will do, edits notes.md (backed up first), says it's done. */
+/** Its first turn: says what it will do, edits notes.md, says it's done. */
 const WATERING = [
   { _wait_user: true },
   { _dump_args: ARGS },

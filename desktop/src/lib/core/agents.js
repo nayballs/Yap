@@ -42,6 +42,24 @@ export function statusTone(status) {
   return 'idle';
 }
 
+/**
+ * **What a report changed, in a line** (its card's "Changed …"): the marker's
+ * own facts — "Files it changed: notes.md.", then what its commands made or
+ * changed (agents/changes.rs) — as one list. A marker an older Yap wrote
+ * ("… (backed up first).", "… (no backups were made, …).") reads the same. Pure.
+ */
+export function reportChanged(text) {
+  const t = String(text || '');
+  const list = (label) => {
+    const raw = new RegExp(`^${label}: (.+)$`, 'm').exec(t)?.[1] ?? '';
+    return raw
+      .replace(/\s*\((?:backed up first|backed up first, from Git|new: Undo deletes them|no backups? [^)]*|Undo can't [^)]*)\)\.?$/, '')
+      .replace(/\.$/, '')
+      .trim();
+  };
+  return ['Files it changed', 'Files its commands made', 'Files its commands changed', 'Files its commands changed with no backup'].map(list).filter(Boolean).join(', ');
+}
+
 /** Dollars as an answer's byline says them (core/money.js): "$0.04", "$0.0042", "under $0.0001". */
 export const money = (usd) => dollars((Number(usd) || 0) * 1_000_000);
 

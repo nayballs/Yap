@@ -64,6 +64,7 @@ import {
   commandsOf,
   messageIndex,
   pillsByAnswer,
+  reportChanged,
   agentOfReport,
   reportTitle,
   reportFolder,
@@ -402,6 +403,11 @@ test('core/agents.js: status, cost by how it is paid, time, steps, pills, proble
   expect(statusTone('running')).toBe('live');
   expect(statusTone('interrupted')).toBe('idle');
   expect([isLive('queued'), isLive('asking'), isLive('done')]).toEqual([true, true, false]);
+  // A report card's "Changed …": its own edits, then what its commands made or changed; an older marker the same.
+  expect(reportChanged("The agent in garden-planner: it's done.\nFiles it changed: notes.md.\nFiles its commands made: costs.xlsx.\nFiles its commands changed: package.json.")).toBe('notes.md, costs.xlsx, package.json');
+  expect(reportChanged('Files it changed: notes.md, beds.js (backed up first).')).toBe('notes.md, beds.js');
+  expect(reportChanged("Files it changed: notes.md (no backups were made, so Undo can't put them back).")).toBe('notes.md');
+  expect(reportChanged("The agent in garden-planner: it's done.")).toBe('');
   // Plan and key, told apart.
   // (In a plan chat's answers' words: core/aiModel.js paidLine, core/money.js.)
   expect(money(0.041)).toBe('$0.04');

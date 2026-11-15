@@ -156,7 +156,7 @@ const result = (text, cost) => ({
   permission_denials: [],
   terminal_reason: 'completed',
 });
-/** An edit of `file` (backed up first by the run's hook), leaving `text`. */
+/** An edit of `file` (kept by the stand-in's file checkpoints), leaving `text`. */
 const edit = (id, file, text, old_string, new_string) => [
   said(`${id}a`, [{ type: 'tool_use', id, name: 'Edit', input: { file_path: `{{cwd}}\\${file}`, old_string, new_string } }]),
   { _hook: { event: 'PreToolUse', input: { tool_name: 'Edit', tool_use_id: id, tool_input: { file_path: file, old_string, new_string } } } },
@@ -1049,8 +1049,8 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
     ['user', 'agentReport'],
     ['assistant', ''],
   ]);
-  expect(messages[2].text).toContain('Files it changed: notes.md (backed up first).');
-  expect(messages[6].text).toContain('Files it changed: notes.md, minimap.js (backed up first).');
+  expect(messages[2].text).toContain('Files it changed: notes.md.');
+  expect(messages[6].text).toContain('Files it changed: notes.md, minimap.js.');
   expect(messages[6].text).toContain(DONE2);
   expect(agent.turnList.map((t) => t.reportMessageId)).toEqual([`chat:${conversation}:2`, `chat:${conversation}:6`]);
 

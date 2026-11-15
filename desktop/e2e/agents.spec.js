@@ -249,7 +249,7 @@ test('a typed request runs an agent in a workspace, follows it, reports it in th
   await script(yap, EDIT, 'edit');
   await listen(main, 'yap-agent');
   await listen(main, 'yap-agent-report');
-  const REPORT = "Done. I changed notes.md from Draft to Final and the tests pass; npm test was allowed, rm -rf build wasn't. ";
+  const REPORT = "Done. I changed notes.md from Draft to Final and the tests pass; npm test was allowed, rm -rf build wasn't.";
   fakeLlm.scriptChat([
     { tools: [{ name: 'start_agent', args: { folder: 'garden-planner', brief: 'Change Draft to Final in notes.md, then run the tests.' } }] },
     { content: "On it: I've sent an agent to garden-planner." },
@@ -321,7 +321,7 @@ test('a typed request runs an agent in a workspace, follows it, reports it in th
     ['assistant', ''],
   ]);
   expect(messages[2].text).toContain('The agent in garden-planner: it\'s done.');
-  expect(messages[2].text).toContain('Files it changed: notes.md (backed up first).');
+  expect(messages[2].text).toContain('Files it changed: notes.md.');
   expect(messages[2].text).toContain('Not allowed: Run a command: rm -rf build.');
   expect(messages[3].text).toBe(REPORT);
   const reportCall = fakeLlm.requests.filter((r) => r.tools.length === 0).at(-1);
