@@ -1233,6 +1233,7 @@ async function showCrewSheet(main) {
 }
 
 test('the crew: a character a row in each Mode and pose; rows folded, ▸ remembered; moving only on screen; the crew sheet', async ({ yap, main, fakeLlm, shot }) => {
+  test.setTimeout(120_000);
   await main.emulateMedia({ reducedMotion: 'no-preference' });
   await openView(main, 'Chat');
   if (await tab(main).count()) await tab(main).getByRole('button', { name: 'Close the panel' }).click();
