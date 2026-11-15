@@ -703,7 +703,10 @@ in, Esc closes; a click works too. A plain chat's `@` is just an `@`.
 - **In the message**: `@path/to/file`, relative to the workspace (quoted,
   `@"bed plan.md"`, with a space in it), as Claude Code itself writes a
   mention, so the chat's Claude reads it from the folder it works in.
-  Yap sends the words as they are; it doesn't read the file for it. A chip
+  Yap sends the words as they are; it doesn't read the file for it: Claude
+  Code attaches a mentioned file's contents to the message itself (Yap Lab on
+  Opus, 15 Nov 2026: "Your @TODO.md mention attached its contents to your
+  message", no Read step). A chip
   for each file mentioned sits over the box (✕ takes the mention out of the
   words), and the sent message shows each as a pill (`mentionParts`: a
   path-like `@name.ext` or `@folder/…` after a space, never an email or

@@ -397,7 +397,7 @@
 <style>
   /* A workspace file the message mentions (@path, a Code chat's: agents/mention.rs). */
   .mention {
-    padding: 0 4px;
+    padding: 0 2px;
     border-radius: 5px;
     background: var(--yap-primary-wash);
     color: var(--yap-fg);
