@@ -202,7 +202,9 @@ pub struct RunSpec {
     /// run's `ask_user`, `suggest_next_step` and `mark_chapter`, listed for
     /// the whole session as its other tools are (in the session's
     /// fingerprint, `chat/turn/plan.rs`); each turn says what it may use
-    /// (`turn::Context::cards`). Never an agent's run.
+    /// (`turn::Context::cards`). A Code chat's own session (an agent's run
+    /// that [`RunSpec::reads`]) has the box and chapters too
+    /// (`Cards::for_code_session`, 15 Nov 2026); never an agent Chat sent out.
     pub cards: crate::chat::cards::Cards,
 }
 
@@ -351,7 +353,7 @@ impl RunHandle {
     pub fn allowed_tools(&self) -> Vec<String> {
         rpc::tool_names(self.tools, true, self.agents, self.memory, self.eyes, self.reads)
             .into_iter()
-            .chain(if self.tools == Tools::Chat { self.cards.names() } else { Vec::new() })
+            .chain(self.cards.names())
             .filter(|n| *n != approve::NAME)
             .chain(if self.servers { crate::chat::pages::preview::NAMES } else { &[] }.iter().copied())
             .map(str::to_string)

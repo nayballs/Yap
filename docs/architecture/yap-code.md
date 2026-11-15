@@ -653,6 +653,23 @@ workspace, word for word, and no model of Chat's is asked.
     names a site or an app ("bring up <address>", "open Spotify") goes to
     its session like any other, as in Claude Code's own app — before, Yap
     opened the page or app itself and the session was never told.
+- **The next-step box and chapters** (15 Nov 2026, as Claude Code's own
+  app ends a turn and marks its chapters; Chat's own:
+  [chat-and-assistant.md](./chat-and-assistant.md#cards-in-the-thread-a-question-the-next-step-box-chapters-2026-11-15)):
+  its run lists `suggest_next_step` and `mark_chapter`
+  (`Cards::for_code_session`: no box on a phone's turn; never Yap's
+  `ask_user`, its questions are Claude Code's own `AskUserQuestion` on
+  the same form), allowed and named in its instructions, each call the
+  tool loop's own code (`claude_live/cards.rs`) through its turn's stream
+  (`runner.rs` `Carded`), kept with the turn (`store::Beside`
+  `next_step`, `chapter`: a report covering several turns ends with the
+  last turn's box and starts at the first's chapter) and saved on its
+  answer (`report.rs`), where the thread draws them as Chat's: the box
+  under the latest answer (a button's words its session's next message),
+  the divider above the person's message (past the report's marker:
+  `chapters.js`), the contents rail. Neither is a step of its work
+  ("Wrapping up", "Marking a chapter": `steps.rs`, `core/agents.js`
+  `PLUMBING`). An agent Chat sends out never has them.
 - **Not in a direct Code chat**: connectors. Yap's memory stays out of
   every Code chat by the 7 Nov decision. Documents beside the
   chat aren't on the Claude plan's path at all.
@@ -681,7 +698,9 @@ workspace, word for word, and no model of Chat's is asked.
   untouched; a long turn in order — its words between its lines, a
   message sent meanwhile where Claude read it, the plan from before it, a
   step's picture paged across the turn's, the transcript view's Thinking
-  and Verbose from the chat's ⋯, its thinking in its log). The e2e base config has
+  and Verbose from the chat's ⋯, its thinking in its log; a chapter and a
+  next-step box from its session, kept with its answer, a button its next
+  message). The e2e base config has
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 

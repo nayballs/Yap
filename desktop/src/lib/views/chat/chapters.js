@@ -4,8 +4,10 @@
 
 /**
  * The chapters of `messages`, in order: `{ at, title, summary }`, `at` the
- * index of the question it starts at (the message before its answer, or the
- * answer itself when nothing of the person's comes before). Pure.
+ * index of the question it starts at (the person's message before its answer,
+ * past an agent's report marker — kept as a "user" message of kind
+ * `agentReport` in a Code chat —, or the answer itself when nothing of the
+ * person's comes before). Pure.
  */
 export function chaptersOf(messages) {
   const out = [];
@@ -15,11 +17,12 @@ export function chaptersOf(messages) {
     let at = i;
     for (let j = i - 1; j >= 0; j--) {
       const prev = messages[j];
+      if (prev?.kind === 'agentReport') continue;
       if (prev?.role === 'user') {
         at = j;
         break;
       }
-      if (prev?.role === 'assistant' && prev.kind !== 'agentReport') break;
+      if (prev?.role === 'assistant') break;
     }
     // (One divider a place: the later call wins.)
     const same = out.findIndex((x) => x.at === at);
