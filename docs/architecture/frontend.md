@@ -827,7 +827,10 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   that loses unsaved work). Where: Notes' folders and notes (+ its Ask
   thread and transcript lines), Chat's conversations (Rename in place,
   Copy as Markdown, Delete…; the hover ⋯ replaced the trash) and messages
-  (Copy / Copy as Markdown / Read aloud; a question: Copy — `itemMenus.js`),
+  (Copy / Copy as Markdown / Read aloud; a question: Copy — `itemMenus.js`;
+  an answer also has the menu's Copy as a button beside ▶ under it, 15 Nov
+  2026, `ChatMessage`'s `.copybtn`, and each of its code blocks its own Copy:
+  `ui/codeCopy.js`),
   Home's dictations (Copy, Copy raw transcript — or, AI-edited, Paste what
   I said and Copy what I said —, Run again, Play, Delete…; the trash asks
   too), Meetings' past notes (Open, Generate summary, Copy as Markdown,

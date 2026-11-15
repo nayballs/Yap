@@ -4089,6 +4089,30 @@ and its Undo, Preview / Source, find, copy, light and dark).
   Search by meaning — local embeddings, Ask across meetings with cited
   passages — is [search.md](./search.md) (2026-10-25; ROADMAP step 3).
 
+## Ctrl+Enter queues a message for after the answer (2026-11-15)
+
+The Claude app's box says "Enter to send, Ctrl+Enter to queue for later"
+while Claude works (seen on screen, 15 Nov 2026). Yap's Composer does the
+same (`send({ later: true })` in `chatState.svelte.js`):
+
+- **While an answer is written** in any chat, Enter waits for nothing (the
+  box types ahead and `send` ignores it). Ctrl+Enter queues the message:
+  a dashed Queued bubble under the thread (`QueuedMessage.svelte`, `plain`:
+  no Send now, since nothing can take it before that answer is in), Copy
+  and × Cancel and edit as a Code chat's. Once the answer is in
+  (`afterAnswer`, after `send`'s turn ends, never one a Code chat's session
+  writes) the first goes as its own question with its own answer, then the
+  next. Another chat shown by then: it goes when its chat is shown again. A
+  question that failed leaves it waiting.
+- **While a Code chat's Claude works**: kept for the next turn even with a
+  tool call out ([yap-code.md](yap-code.md#a-code-chat-that-works-directly)).
+- **With nothing going on**, Ctrl+Enter sends as Enter does.
+- The empty box says how ("Enter to send, Ctrl+Enter to queue for later"
+  while a Code chat's Claude works; "Ctrl+Enter to queue a message for
+  after this answer" while one is written).
+- e2e: `chat-streaming.spec.js` (plain Chat), `agents-direct.spec.js` (a
+  Code chat, a call out).
+
 ## Skills and one-tap prompts (2026-10-29)
 
 Wispr Flow's Notetaker has one-tap prompts in its hub (Coach me, List
