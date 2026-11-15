@@ -1911,7 +1911,12 @@ something that matches that?").
   "Created notes.md +12", "Read app.ts (424–503)", "Checked the edits
   parse" — with a hairline between. The step the agent is on now is the last
   row, as it is, with a spinner. A row with nothing more to show (a read,
-  another tool's call) doesn't open (`stepOpens`).
+  another tool's call) doesn't open (`stepOpens`). **Another tool's call
+  made again and again** with nothing to show (15 Nov 2026: a plugin of the
+  person's own Claude Code ticking its progress bar, "Used savvy-progress ·
+  progress" five rows) is one row where it was first made, "×5" after it
+  (`rowSteps`' `times`, `.rtimes`); the rows between keep their order, and a
+  call with a picture, or the one going now, keeps its own row.
 - **An edit's row** opens to the file's path and its diff, each line with its
   number in the file, removed lines red and added ones green (`diffRows`).
   A long line wraps under itself beside its number (2026-11-12, as Claude

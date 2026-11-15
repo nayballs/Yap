@@ -357,3 +357,84 @@ test('an answer with a table shows a table', async ({ main, fakeLlm, shot }) => 
   await expect(answer).not.toContainText('|');
   await shot(main, '06-answer-table');
 });
+
+// The Claude app's answers side by side with Yap's (15 Nov 2026): the person's message lost its line breaks,
+// code had no Copy, an answer no Copy button, footnotes and a task's bullet showed raw, and a table's short
+// headers broke mid-word ("Siz e") under the answer's `overflow-wrap: anywhere`.
+test('a message keeps its line breaks; an answer has Copy, its code blocks too, footnotes and tidy tables', async ({ yap, main, fakeLlm, shot }) => {
+  await setConfig(yap, main, {
+    ppApiKeys: { groq: TEST_KEY },
+    theme: 'light',
+    llmScopes: { ...(await yap.invoke('get_config')).llmScopes, chat: groqChat(fakeLlm, 'openai/gpt-oss-20b') },
+  });
+  await openView(main, 'Chat');
+  await main.getByRole('button', { name: 'New chat' }).click();
+  const CODE = 'export function water(bed) {\n  return bed.litres * 2;\n}';
+  fakeLlm.scriptChat([
+    {
+      content: [
+        'Watering, in short.[^1]',
+        '',
+        '```js',
+        CODE,
+        '```',
+        '',
+        '- [x] Fill the can',
+        '- [ ] Water the beds',
+        '',
+        '| Bed | Size |',
+        '|:--|--:|',
+        '| A very long name for the raised bed at the far end of the garden, by the fence and the shed | 2 m |',
+        '',
+        '![The garden plan](https://plans.example.com/garden.png)',
+        '',
+        '[^1]: Twice a week in summer.',
+      ].join('\n'),
+    },
+  ]);
+  await send(main, 'How do I water a bed? And how often?');
+  // The person's words are drawn as written: line breaks kept (the box itself is one line today, so this
+  // shows only a message that has them; a box of several lines is the composer's).
+  const said = main.getByTestId('chat-question-text').last();
+  expect(await said.evaluate((el) => [el.textContent, getComputedStyle(el).whiteSpace])).toEqual(['How do I water a bed? And how often?', 'pre-wrap']);
+  const answer = main.locator('.cbubble.assistant').last();
+  // Footnotes: a raised number, the note under the text; no raw marks.
+  await expect(answer.locator('sup.md-fnref')).toHaveText(['1']);
+  await expect(answer.locator('.md-footnotes li')).toHaveText(['Twice a week in summer.']);
+  await expect(answer).not.toContainText('[^1]');
+  // A task's checkbox stands where the bullet was: no bullet as well.
+  expect(await answer.locator('li.task').first().evaluate((el) => getComputedStyle(el).listStyleType)).toBe('none');
+  // A markdown image: a link to the picture, no stray "!".
+  await expect(answer.getByRole('link', { name: 'The garden plan' })).toHaveAttribute('href', 'https://plans.example.com/garden.png');
+  await expect(answer).not.toContainText('!The garden plan');
+  // The table's short header stays whole: its cell no wider than its word needs, never broken mid-word.
+  const size = answer.getByRole('columnheader', { name: 'Size' });
+  expect(await size.evaluate((el) => getComputedStyle(el).overflowWrap)).toBe('break-word');
+  const lines = await size.evaluate((el) => {
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    return r.getClientRects().length;
+  });
+  expect(lines).toBe(1);
+  await shot(main, '06b-answer-copy-footnotes');
+  // Copies land in the page's stubbed clipboard, never the real one.
+  await main.evaluate(() => {
+    window.__copied = null;
+    navigator.clipboard.writeText = async (t) => {
+      window.__copied = t;
+    };
+  });
+  const copied = () => main.evaluate(() => window.__copied);
+  // The code block's Copy copies the code as written; the block's own text is still just the code.
+  const block = answer.locator('pre.md-code');
+  await expect(block.getByTestId('md-code-copy')).toHaveCount(1);
+  await expect(block.locator('code')).toHaveText(CODE);
+  await block.hover();
+  await block.getByTestId('md-code-copy').click();
+  await expect.poll(copied).toBe(CODE);
+  await expect(main.getByRole('status').filter({ hasText: 'Code copied' })).toBeVisible();
+  // The answer's own Copy, beside ▶: the menu's Copy (as text, the footnote's mark and all).
+  await main.getByTestId('chat-answer-copy').last().click();
+  await expect.poll(copied).toContain('Watering, in short.');
+  expect(await copied()).toContain(CODE);
+});
