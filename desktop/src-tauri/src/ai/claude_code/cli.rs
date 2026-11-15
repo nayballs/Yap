@@ -345,11 +345,6 @@ pub fn clean_env(vars: impl IntoIterator<Item = (OsString, OsString)>) -> Vec<(O
     vars.into_iter().filter(|(k, _)| keeps_env(&k.to_string_lossy())).collect()
 }
 
-/// `cmd`'s environment: Yap's, cleaned ([`clean_env`]).
-pub(crate) fn give_clean_env(cmd: &mut Command) {
-    cmd.env_clear().envs(clean_env(std::env::vars_os()));
-}
-
 // ---- Running it ----
 
 /// What a short run printed.
@@ -364,11 +359,30 @@ pub(crate) struct Captured {
 /// Run `program args` to the end (at most `timeout`), its output captured:
 /// no window, Yap's cleaned environment, in the temp folder, tied to Yap.
 pub(crate) fn run_captured(program: &Program, args: &[&str], timeout: Duration) -> Result<Captured, String> {
+    let place = Place { dir: std::env::temp_dir(), env: clean_env(std::env::vars_os()), what: "Claude Code" };
+    run_captured_at(program, args, place, timeout)
+}
+
+/// Where a short run ([`run_captured_at`]) runs, with what, and its name in
+/// what's said when it can't ("Claude Code", "GitHub's gh").
+pub(crate) struct Place {
+    pub dir: PathBuf,
+    /// Its whole environment (nothing else of Yap's is passed).
+    pub env: Vec<(OsString, OsString)>,
+    pub what: &'static str,
+}
+
+/// [`run_captured`] in `place`: no window, stdin closed, the first MiB of
+/// stdout and 64 KiB of stderr kept, tied to Yap (`shell/procs.rs`), killed
+/// at `timeout`. Any program: a Claude Code's `/context`
+/// (`agents/context.rs`), the person's own `gh` (`agents/prs.rs`).
+pub(crate) fn run_captured_at(program: &Program, args: &[&str], place: Place, timeout: Duration) -> Result<Captured, String> {
+    let what = place.what;
     let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
     let mut cmd = program.command(&args)?;
-    give_clean_env(&mut cmd);
-    cmd.current_dir(std::env::temp_dir()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| format!("Couldn't start Claude Code: {e}"))?;
+    cmd.env_clear().envs(place.env);
+    cmd.current_dir(&place.dir).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("Couldn't start {what}: {e}"))?;
     crate::shell::procs::end_with_yap(&child);
     let mut stdout = child.stdout.take();
     let reader = std::thread::spawn(move || {
@@ -387,7 +401,7 @@ pub(crate) fn run_captured(program: &Program, args: &[&str], timeout: Duration) 
         let text = String::from_utf8_lossy(&buf).into_owned();
         for line in text.lines().map(str::trim).filter(|l| !l.is_empty()).take(20) {
             let cut: String = line.chars().take(300).collect();
-            tracing::debug!("claude code (probe) stderr: {cut}");
+            tracing::debug!("{what} (probe) stderr: {cut}");
         }
         text
     });
@@ -399,9 +413,9 @@ pub(crate) fn run_captured(program: &Program, args: &[&str], timeout: Duration) 
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err("Claude Code didn't answer in time.".into());
+                return Err(format!("{what} didn't answer in time."));
             }
-            Err(e) => return Err(format!("Couldn't wait for Claude Code: {e}")),
+            Err(e) => return Err(format!("Couldn't wait for {what}: {e}")),
         }
     };
     let stdout = reader.join().unwrap_or_default();

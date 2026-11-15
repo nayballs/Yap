@@ -714,6 +714,28 @@ pub fn e2e_claude_script(script: Option<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// Test mode only: **GitHub's `gh` from now on** — `yap.exe fake-gh
+/// <script>` answering from `script` (a JSON file: `agents/prs/fake.rs`), or
+/// none again (`null`: no `gh` on this PC). A test run never reaches the
+/// person's own.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_gh_script(script: Option<String>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let program = match script {
+        Some(s) => {
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            Some(crate::ai::claude_code::cli::Program::new(exe).with_prefix(vec!["fake-gh".into(), s]))
+        }
+        None => None,
+    };
+    tracing::info!(on = program.is_some(), "e2e: gh's stand-in");
+    crate::agents::prs::set_test_program(program);
+    Ok(())
+}
+
 /// Test mode only: `agents` put straight into Yap Code's store (each as
 /// `agents.json` keeps it), and every window told — so a spec can show the
 /// Agent panel's rows in every Mode, model and state at once (its crew,

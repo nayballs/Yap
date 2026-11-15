@@ -62,6 +62,15 @@
 //!   `stderr` and exits with `code` at once, before anything else — a
 //!   Claude Code that doesn't take a flag ("error: unknown option '…'"), or
 //!   one that refuses it (a Rewind's branch point it can't find).
+//! - `{"_context":{"usage":{…},"markdown":"…","turns":0,"cost":0,"dump":"<file>"}}`
+//!   (anywhere in the script): a process started with `/context` as its
+//!   prompt (a Code chat's summary: `agents/context.rs`) answers as Claude
+//!   Code does, itself, before anything else — its `system/init`, an
+//!   assistant message with `usage` as its `context_usage` (left out when
+//!   missing) and `markdown` as its text, and a result (`markdown`, at
+//!   `turns` and `cost`: 0, a local command's) — then exits. `dump`: a line
+//!   appended there with its arguments, folder and whether it would have
+//!   kept a transcript (`persist`). Without `_context`: an empty answer.
 //! - `{"_stderr":"text"}`: a line on stderr.
 //! - `{"_write_file":{"path":"notes.md","text":"…"}}`: write a file inside
 //!   the working folder (an agent's edit, after its backup hook).
@@ -156,6 +165,10 @@ pub fn main(args: Vec<String>) -> i32 {
             return 2;
         }
     };
+    // `/context`: Claude Code's own answer, no turn (`_context`).
+    if claude_args.iter().any(|a| a == "/context") {
+        return context_answer(&script, claude_args);
+    }
     // A Claude Code that doesn't take an argument, or refuses it: said and over at once (`_exit_if_arg`).
     for line in script.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { continue };
@@ -197,6 +210,43 @@ pub fn main(args: Vec<String>) -> i32 {
             1
         }
     }
+}
+
+/// **`/context`, answered** from the script's `_context` (see the module's
+/// notes), as Claude Code answers a local command: no model, no cost.
+fn context_answer(script: &str, args: &[String]) -> i32 {
+    let rule = script.lines().filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok()).find_map(|v| v.get("_context").cloned()).unwrap_or(Value::Null);
+    let ctx = Ctx::from_args(args).unwrap_or_default();
+    if let Some(file) = rule.get("dump").and_then(Value::as_str) {
+        let line = json!({"args": args, "cwd": ctx.cwd, "persist": ctx.persist});
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+    let md = rule.get("markdown").and_then(Value::as_str).unwrap_or_default();
+    let session = ctx.session_id.as_str();
+    let mut said = json!({
+        "type": "assistant",
+        "message": {"id": super::session::new_session_id(), "model": "<synthetic>", "role": "assistant", "type": "message", "stop_reason": "end_turn", "usage": {"input_tokens": 0, "output_tokens": 0}, "content": [{"type": "text", "text": md}]},
+        "parent_tool_use_id": null,
+        "session_id": session,
+        "local_command_run": {"command": "context", "args": ""},
+    });
+    if let Some(usage) = rule.get("usage").filter(|u| !u.is_null()) {
+        said["context_usage"] = usage.clone();
+    }
+    let lines = [
+        json!({"type": "system", "subtype": "init", "cwd": ctx.cwd, "session_id": session, "tools": [], "mcp_servers": [], "model": "<synthetic>", "slash_commands": ["context"], "apiKeySource": "none", "claude_code_version": "2.1.296"}),
+        said,
+        json!({"type": "result", "subtype": "success", "is_error": false, "num_turns": rule.get("turns").and_then(Value::as_u64).unwrap_or(0), "result": md, "session_id": session, "total_cost_usd": rule.get("cost").and_then(Value::as_f64).unwrap_or(0.0), "local_command": "context"}),
+    ];
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    for l in lines {
+        let _ = writeln!(out, "{l}");
+    }
+    let _ = out.flush();
+    0
 }
 
 /// What the fake was started with.
