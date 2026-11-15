@@ -68,14 +68,14 @@ var dev=('_debugOwner' in f)||('_debugSource' in f)||('_debugStack' in f);
 var owners=[],inside=false;
 if(dev&&c){var o=c._debugOwner;for(var m=0;o&&owners.length<5&&m<20;m++){var on=(o.tag!==undefined)?nm(o.type):String(o.name||'');if(on)owners.push(on+((o.tag===undefined&&o.env)?' ('+o.env+')':''));o=o._debugOwner||o.owner||null;}}
 if(!owners.length&&c){inside=true;var p=c.return;for(var q=0;p&&owners.length<5&&q<300;q++){if(COMP[p.tag]){var pn=nm(p.type);if(pn&&owners[owners.length-1]!==pn)owners.push(pn);}p=p.return;}}
-function val(v){var t=typeof v;if(v===null)return 'null';if(t==='undefined')return 'undefined';if(t==='string')return JSON.stringify(v.length>80?v.slice(0,80)+'…':v);if(t==='number'||t==='boolean'||t==='bigint')return String(v);if(t==='function')return 'ƒ '+(v.displayName||v.name||'anonymous');if(t==='symbol')return String(v);
+function val(v){var t=typeof v;if(v===null)return 'null';if(t==='undefined')return 'undefined';if(t==='string')return JSON.stringify(v.length>120?v.slice(0,120)+'…':v);if(t==='number'||t==='boolean'||t==='bigint')return String(v);if(t==='function')return 'ƒ '+(v.displayName||v.name||'anonymous');if(t==='symbol')return String(v);
 if(Array.isArray(v))return '['+v.length+(v.length===1?' item]':' items]');
 try{if(v.$$typeof){var isEl=v.$$typeof===Symbol.for('react.element')||v.$$typeof===Symbol.for('react.transitional.element');return isEl?'<'+(nm(v.type)||'element')+' />':(nm(v)||'a component');}}catch(e){return '{…}';}
 if(typeof Element!=='undefined'&&v instanceof Element)return '<'+v.tagName.toLowerCase()+'>';
 if(v instanceof Date)return isNaN(v)?'Invalid Date':v.toISOString();
 var ks2=[];try{ks2=Object.keys(v);}catch(e){return '{…}';}return '{'+ks2.slice(0,6).join(', ')+(ks2.length>6?', …':'')+'}';}
 var props=[],mp=c?c.memoizedProps:null;
-if(mp&&typeof mp==='object'){var pk=[];try{pk=Object.keys(mp);}catch(e){}for(var r=0;r<pk.length&&props.length<20;r++){var k=pk[r],d=Object.getOwnPropertyDescriptor(mp,k),v2;if(!d)continue;if(!('value' in d))v2='(a getter)';else if(k==='children'&&Array.isArray(d.value))v2='['+d.value.length+' children]';else v2=val(d.value);props.push(k+': '+v2);}}
+if(mp&&typeof mp==='object'){var pk=[];try{pk=Object.keys(mp);}catch(e){}for(var r=0;r<pk.length&&props.length<20;r++){var k=pk[r],d=Object.getOwnPropertyDescriptor(mp,k),v2;if(!d)continue;if(!('value' in d))v2='(a getter)';else if(k==='children'&&Array.isArray(d.value)){var nk=d.value.filter(function(x){return x!==null&&x!==undefined&&x!==false&&x!==true&&x!=='';}).length;v2='['+nk+(nk===1?' child]':' children]');}else v2=val(d.value);props.push(k+': '+v2);}}
 function fromStack(s){var ls=String(s).split('\n');for(var i=0;i<ls.length;i++){var l=ls[i],mm=/((?:[a-z][a-z0-9+.-]*:\/\/)[^\s()]+):(\d+):(\d+)\)?\s*$/i.exec(l);if(!mm)continue;if(/react-stack-top-frame|node_modules|\/\.vite\/deps\/|react-jsx(-dev)?-runtime|react(-dom)?(-client)?\.(development|production)|\/react-dom\/|\/react\/|\bscheduler\b/i.test(mm[1]+' '+l))continue;return mm[1]+':'+mm[2]+':'+mm[3];}return '';}
 var src='',from='';var ds=f._debugSource||(c&&c._debugSource);
 if(ds&&ds.fileName){src=String(ds.fileName)+':'+ds.lineNumber+(ds.columnNumber?':'+ds.columnNumber:'');from='jsx';}
@@ -134,6 +134,9 @@ pub struct ReactPart {
     pub source_from: String,
     /// "development" or "production".
     pub build: String,
+    /// A production build's names, shortened by its minifier ("a", "tR"): said, so a component "a"
+    /// isn't read as an `<a>` (Yap Lab, 15 Nov 2026, on react.dev).
+    pub minified: bool,
 }
 
 impl ReactPart {
@@ -143,6 +146,8 @@ impl ReactPart {
         self.owners = self.owners.into_iter().take(5).map(|o| clip(&o, 80)).collect();
         self.props = self.props.into_iter().take(20).map(|p| clip(&p, 160)).collect();
         self.source = clip(&self.source, 300);
+        let short = |n: &str| n.chars().count() <= 2;
+        self.minified = self.build == "production" && (short(&self.component) || (!self.owners.is_empty() && self.owners.iter().all(|o| short(o))));
         self
     }
 
@@ -205,6 +210,9 @@ pub fn block(el: &Picked) -> String {
         }
         if !r.build.is_empty() {
             open.push_str(&format!(" build=\"{}\"", attr(&r.build)));
+        }
+        if r.minified {
+            open.push_str(" names=\"minified\"");
         }
         open.push('>');
         let mut inner = vec![open];
@@ -471,6 +479,11 @@ mod tests {
         let prod = ReactPart { component: "a".into(), owners: vec!["b".into()], inside: true, source: "/app/src/Row.jsx:3:5".into(), source_from: "jsx".into(), build: "production".into(), ..Default::default() };
         let b = block(&Picked { tag: "div".into(), react: Some(prod), ..Default::default() });
         assert!(b.contains("<react component=\"a\" source=\"/app/src/Row.jsx:3:5\" build=\"production\">\n<inside>b</inside>\n</react>"), "{b}");
+        // A production build's shortened names said as such (a component "a" is no <a>); a development build's never.
+        let mini = ReactPart { component: "a".into(), owners: vec!["d".into(), "tR".into()], inside: true, build: "production".into(), ..Default::default() }.trimmed();
+        assert!(block(&Picked { tag: "h1".into(), react: Some(mini), ..Default::default() }).contains("<react component=\"a\" build=\"production\" names=\"minified\">"));
+        let dev = ReactPart { component: "a".into(), build: "development".into(), ..Default::default() }.trimmed();
+        assert!(!dev.minified);
         // No React: no part.
         assert!(!block(&Picked { tag: "p".into(), id: "build".into(), ..Default::default() }).contains("<react"));
         // Kept to a message's size.

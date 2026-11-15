@@ -51,6 +51,7 @@ function reactOf(inner) {
     source: a.source || '',
     sourceFrom: '',
     build: a.build || '',
+    minified: a.names === 'minified',
     owners: said ? said.split(' ‹ ').filter(Boolean) : [],
     inside: !owners && !!inside,
     props: props ? props.split('\n').filter(Boolean) : [],
@@ -107,7 +108,9 @@ export function elementReact(el) {
   const r = el?.react;
   if (!r || (!r.component && !r.source)) return null;
   const source = r.sourceFrom === 'stack' && r.source && !/\(as the page serves it\)$/.test(r.source) ? `${r.source} (as the page serves it)` : r.source || '';
-  return { component: r.component ? `<${r.component} />` : '', source, build: r.build || '' };
+  // (A production build's shortened names said as such: a component "a" is no <a> element.)
+  const component = r.component ? `<${r.component} />${r.minified ? ' (a minified name)' : ''}` : '';
+  return { component, source, build: r.build || '' };
 }
 
 /** Its card's details past the first: its React owners and props, where it is, its page, its styles, its HTML (those it has). */

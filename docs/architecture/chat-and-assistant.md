@@ -2896,6 +2896,15 @@ of sight. What they share is said once, in the line.
   certain, and when the first two tie — the model judges, as between a
   read's lines. Words on the page as they are still list every match as
   before ("Moss Walker", "button Buy"); nothing ranked, "Found no match".
+  Checked in Yap Lab on Opus (the plan) on a real shop (books.toscrape.com,
+  a public site for scraping practice): 3 of 4 first ("the third book's
+  title link" found the sidebar's "Books"), then 4 of 4 once fixed — a word
+  with an ordinal is one of several like it ("the second book"), the
+  page's main list chosen by how much each item holds and whether it has
+  titles (never a sidebar's 50 categories), "title" its heading's link, a
+  sidebar asked for by role said though its classes don't name its words,
+  and the lines as Opus asked (one way of saying a place, an item's own
+  name, a picture link said, a tie said as Yap not knowing).
   The tool's line for Chat and a Code chat's session alike: "Find words,
   roles or a description (\"the 2nd result's link\"): matches by ref, with
   why." (12 tokens on every step's tools.) **`browser_wait { seconds?, text? }`**
@@ -3367,9 +3376,11 @@ review (safely, for any user, in any language Yap speaks).
     `__reactInternalInstance$…`), the component it's inside, that
     component's owners a few levels (`_debugOwner`, a server component's
     name too; a production build keeps none, so the components it's inside,
-    said as "Inside"), its props (20, each trimmed: a function as `ƒ
-    name`, an element as `<Name />`, an object by its keys, a getter
-    never called), and where its JSX was written when the page carries a
+    said as "Inside", and names a minifier shortened — "a", "tR" — said
+    so: `names="minified"`, the card's "(a minified name)", Yap Lab on
+    react.dev, 15 Nov 2026), its props (20, each trimmed: a function as
+    `ƒ name`, an element as `<Name />`, an object by its keys, children
+    counted as React draws them, a getter never called), and where its JSX was written when the page carries a
     development build's source: React 18's `_debugSource` (the file on
     disk) or React 19's `_debugStack` — its first frame outside React and
     node_modules, the file and line **as the page serves it** (a dev
