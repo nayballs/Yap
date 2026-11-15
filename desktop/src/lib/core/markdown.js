@@ -61,7 +61,8 @@ import DOMPurify from 'dompurify';
 
 // A link Yap may open (in the default browser: main.js routes clicks on
 // `a.md-link` to the opener plugin). Only web and mail links; anything else
-// (javascript:, file:, tauri:, relative) stays plain text.
+// (javascript:, file:, tauri:, relative) stays plain text (a relative one, a
+// file's path, is drawn as `a.md-file` with no address: yap_file_link).
 const SAFE_URL = /^(https?:\/\/|mailto:)/i;
 
 const md = new MarkdownIt('default', {
@@ -353,6 +354,59 @@ md.core.ruler.push('yap_image_link', (state) => {
   }
 });
 
+// A link to a file (15 Nov 2026, a Code chat's answers: "[the lab notes](docs/lab.md:3)"):
+// `validateLink` takes web and mail links only, so its words stay text — here,
+// on the page only, they become `a.md-file` with the path in `data-path` and
+// no address: its words everywhere, a link to the file beside a Code chat
+// (ui/fileLinks.js asks Rust whether it's a file in the chat's workspace,
+// agents/files.rs). A path has no scheme, and no `/`, `\` or `#` before it
+// (a drive's `C:\` or `C:/` aside). Words with marks inside stay as written.
+const FILE_HREF = /^(?![a-z][a-z0-9+.-]+:)(?![a-z]:(?![\\/]))(?![\\/#])[^\s<>"()]{1,512}$/i;
+const FILE_LINK = /\[(?!\^)([^\[\]\n]{1,200})\]\(([^\s<>"()]{1,512})\)/g;
+/** A link's path as written (`my%20file.md` → `my file.md`). */
+const decoded = (p) => {
+  try {
+    return decodeURI(p);
+  } catch {
+    return p;
+  }
+};
+md.core.ruler.push('yap_file_link', (state) => {
+  if (!state.env?.render) return;
+  const Token = state.Token;
+  for (const block of state.tokens) {
+    if (block.type !== 'inline' || !block.children) continue;
+    const out = [];
+    for (const t of block.children) {
+      if (t.type !== 'text' || !t.content.includes('](')) {
+        out.push(t);
+        continue;
+      }
+      let at = 0;
+      for (const m of t.content.matchAll(FILE_LINK)) {
+        if (!FILE_HREF.test(m[2])) continue;
+        const before = new Token('text', '', 0);
+        // (An image's "!" goes, as yap_image_link's does.)
+        before.content = t.content.slice(at, m.index).replace(/!$/, '');
+        const open = new Token('yap_file_open', 'a', 1);
+        open.meta = { path: decoded(m[2]) };
+        const words = new Token('text', '', 0);
+        words.content = m[1];
+        out.push(before, open, words, new Token('yap_file_close', 'a', -1));
+        at = m.index + m[0].length;
+      }
+      if (!at) {
+        out.push(t);
+        continue;
+      }
+      const rest = new Token('text', '', 0);
+      rest.content = t.content.slice(at);
+      out.push(rest);
+    }
+    block.children = out;
+  }
+});
+
 // Footnotes, as GitHub and the Claude app show them: "…a claim.[^1]" and a
 // paragraph "[^1]: The note." become a small raised number and the notes
 // under the text, numbered in the order they're first cited. A note nobody
@@ -511,6 +565,10 @@ rules.link_open = (tokens, idx) => {
   return `<a class="md-link" href="${href}" title="${href}">`;
 };
 
+// A link to a file (yap_file_link): its path, no address.
+rules.yap_file_open = (tokens, idx) => `<a class="md-file" data-path="${escapeHtml(tokens[idx].meta.path)}">`;
+rules.yap_file_close = () => '</a>';
+
 rules.yap_cite = (tokens, idx) => {
   const pills = tokens[idx].meta.sources.map((s) => {
     const label = escapeHtml(`${s.title || s.site}${s.site ? ` · ${s.site}` : ''}`);
@@ -627,7 +685,7 @@ const PURIFY = {
     'ul', 'ol', 'li', 'h2', 'h3', 'h4', 'h5', 'blockquote', 'hr',
     'div', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
   ],
-  ALLOWED_ATTR: ['class', 'href', 'title', 'aria-label', 'start', 'type', 'checked', 'disabled', 'data-line'],
+  ALLOWED_ATTR: ['class', 'href', 'title', 'aria-label', 'start', 'type', 'checked', 'disabled', 'data-line', 'data-path'],
   // (DOMPurify's own URI check stays: it tests every attribute's value, so a
   // web-and-mail-only pattern here would drop start="3"; `href` is held to
   // SAFE_URL in the hook below.)
@@ -636,12 +694,12 @@ const PURIFY = {
 };
 const CLASSES = new Set([
   'md-link', 'md-cite', 'md-cites', 'md-passage', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'md-pending', 'md-pending-key', 'md-pending-intent', 'md-fnref', 'md-footnotes', 'task', 'c', 'r',
-  'md-math', 'md-math-display', 'md-diagram', 'md-image', 'md-diff', 'md-dl', 'md-add', 'md-del', 'md-hunk', 'md-meta',
+  'md-math', 'md-math-display', 'md-diagram', 'md-image', 'md-diff', 'md-dl', 'md-add', 'md-del', 'md-hunk', 'md-meta', 'md-file',
 ]);
 // The one in-page address: a passage pill's (rendered by yap_cite only).
 const PASSAGE_HREF = /^#passage-\d{1,2}$/;
 // Which elements may carry which of the narrower attributes.
-const ONLY_ON = { href: ['A'], 'aria-label': ['A', 'INPUT'], start: ['OL'], type: ['INPUT'], checked: ['INPUT'], disabled: ['INPUT'] };
+const ONLY_ON = { href: ['A'], 'data-path': ['A'], 'aria-label': ['A', 'INPUT'], start: ['OL'], type: ['INPUT'], checked: ['INPUT'], disabled: ['INPUT'] };
 
 let purifier = null;
 let purifierWindow = null;

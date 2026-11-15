@@ -976,13 +976,16 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   **Safety, twice over**: markdown-it never passes HTML through (`html:
   false`: a model's `<img onerror=…>` or `<script>` shows as text), only
   `http(s)://` and `mailto:` become links (`validateLink`; `javascript:`,
-  `data:`, `file:`, relative and `ftp:` stay text), images never become an
+  `data:`, `file:` and `ftp:` stay text; a relative one, a file's path, is
+  `a.md-file` with its path in `data-path` and no address: its words only,
+  until a Code chat makes it a link to the file, ui/fileLinks.js and
+  [yap-code.md](./yap-code.md#file-links-and-the-file-view), 15 Nov 2026), images never become an
   `<img>` (a model's `![x](url)` would make Yap fetch it: it's a link the view
   makes a "Show image" box of, below), and DOMPurify then keeps
   only the tags, attributes and classes the renderer makes (`PURIFY`,
   `CLASSES`; an `href` only on `a` and only web/mail, `start` only on `ol`,
   the one `input` a disabled checkbox; no `style`, no handlers, no `data-`
-  or other `aria-` attributes). DOMPurify needs a DOM: in a test outside a
+  attributes but `data-line` and `data-path` (on `a` only), no other `aria-` attributes). DOMPurify needs a DOM: in a test outside a
   page (`desktop/e2e/markdown.spec.js`) jsdom stands in, and without one it throws
   rather than return unsanitised HTML. **Yap's own rules** (markdown-it
   rules in the file): links are `a.md-link` with the address as their
