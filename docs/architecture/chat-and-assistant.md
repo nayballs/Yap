@@ -5048,6 +5048,15 @@ fits Yap's own tools to the model, for each turn:
   a question naming a picture file; seeing takes their look as it takes a
   web picture's). Never the notes and documents' tools, the web's, or
   memory's `remember` / `forget`.
+- **The cards in the thread go first, and sooner** (15 Nov 2026,
+  `fit::cards_crowd`): `ask_user`, `suggest_next_step` and `mark_chapter`
+  (~700 tokens, `Family::Cards`, first in `ORDER`) also go whenever what they
+  take from the history is more than a tenth of what's left, even with the
+  least room still there. On an 8K model a spoken follow-up in a summarised
+  chat went with no earlier message at all, the cards half of the Voice
+  Assistant's room (`chat-long.spec.js`). Where the history is capped before
+  the context runs out (the Voice Assistant's 6,000 on any model with room)
+  they take nothing from it and stay, as on Claude, GPT-5 and 16K and up.
 - **What the question asks for stays** (`keeps`, cheap checks on its
   words): a Code chat's agents (a new chat made one as its first question
   too: `code_chat::new_chat_folder`), and a plain chat's when the question
@@ -5382,7 +5391,12 @@ stays as any question does.
 
 **Not while an answer is being written** in that chat (`stream::is_answering`;
 the page greys the buttons with "Unavailable while an answer is being
-written").
+written"). The person's message has its actions row from the moment it's
+sent (15 Nov 2026, `ChatThread`'s `actionsFor`): Copy at once, Edit waiting
+for its answer ("Not saved yet" until it has an id), and in a Code chat
+Rewind and Fork joining the same row once its turn is known. Drawn only once
+the answer was in, it pushed the thread 36 px down at every answer's end
+(`chat-scroll.spec.js`).
 
 **In a Code chat** there's no second mechanism: Edit and Retry are Claude
 Code's own **Rewind** ([yap-code.md](./yap-code.md), `agents/rewind.rs`),

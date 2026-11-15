@@ -224,11 +224,16 @@
   // asked first, the files Claude changed since put back as they were unless unticked) and Fork from here (a new chat
   // with the conversation up to its answer).
   function actionsFor(m) {
-    if (m?.role !== 'user' || !m.id || m.kind || chat.activeId == null) return null;
+    if (m?.role !== 'user' || m.kind || chat.activeId == null) return null;
+    // Still being sent (no id until its answer is in): the row is there already, Copy in it and the rest waiting —
+    // drawn only once the answer was in, it pushed the thread 36 px down at every answer's end (15 Nov 2026,
+    // chat-scroll.spec.js; the browser's scroll anchoring hid it but moved the scrollbar).
+    if (!m.id) return code?.current ? {} : { edit: busyWhy || 'Not saved yet', onedit: () => {} };
     // Chat: Copy and Edit (a new version from there, ‹ 1/2 › on it).
     if (!code?.current) return { edit: busyWhy, onedit: () => chat.startEdit(m) };
     const t = messageTurn(agents.list, chat.activeId, m.id);
-    if (!t) return null;
+    // A message no turn of Claude's started (yet): Copy, Rewind and Fork once its turn is known — the same row.
+    if (!t) return {};
     // A Code chat's Edit is a Rewind with new words (agents/rewind.rs): when it can rewind.
     return { rewind: t.rewind, fork: t.fork, onrewind: () => askRewind(m, t.files), onfork: () => chat.forkAt(m), edit: t.rewind || busyWhy, onedit: () => chat.startEdit(m) };
   }
