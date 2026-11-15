@@ -71,17 +71,18 @@
   <span class="rtext"
     >{r.text}{#if r.name}{' '}<span class="rname">{r.name}</span>{/if}{#if r.tail}{' '}<span class="rtail">{r.tail}</span>{/if}</span
   >
+  {#if r.times > 1}<span class="rtimes" title="Made {r.times} times in this stretch">×{r.times}</span>{/if}
   {#if r.added}<span class="plus">+{r.added}</span>{/if}
   {#if r.removed}<span class="minus">−{r.removed}</span>{/if}
   {#if r.failed}<span class="rfailed">failed</span>{/if}
 {/snippet}
 
 <ol class="rows" data-testid="chat-agent-work-rows" data-colours={colours ? 'true' : 'false'}>
-  {#each rowSteps(steps, busy) as { step: s, i: k, now } (k)}
+  {#each rowSteps(steps, busy) as { step: s, i: k, now, times } (k)}
     <!-- (A helper still out is being worked on, whichever row it is: several may be out at once.) -->
     {@const out = busy && stepKind(s) === 'helper' && !s.back && !!s.helped}
     {@const going = now || out}
-    {@const r = stepRow(s, going)}
+    {@const r = { ...stepRow(s, going), times }}
     {@const can = stepOpens(s)}
     {@const isOpen = can && !!open[k]}
     {@const pics = (s.pictures || []).filter((p) => !gone[p.id])}
@@ -236,9 +237,15 @@
   }
   .plus,
   .minus,
-  .rfailed {
+  .rfailed,
+  .rtimes {
     flex: 0 0 auto;
     font-variant-numeric: tabular-nums;
+  }
+  /* A call made again and again, one row (`rowSteps`' `times`). */
+  .rtimes {
+    color: var(--yap-muted);
+    font-size: 11px;
   }
   .plus {
     color: var(--yap-success-text);

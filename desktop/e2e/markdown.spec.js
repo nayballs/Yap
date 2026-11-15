@@ -541,3 +541,53 @@ test('a summary copied for email: headings, lists and tasks in HTML, the same as
   expect(parse(emailHtml('- [ ] one')).querySelector('h2')).toBeNull();
   expect(emailText('- [ ] one')).toBe('☐ one');
 });
+
+// What's only drawn, never kept (15 Nov 2026, the Claude app's answers side by side with Yap's): footnotes
+// and a markdown image's link, at render time only — the document editor reads `markdownTokens`, which keep
+// the markdown as written, so a document saved there never loses its "[^1]" or "![…](…)".
+test('footnotes: a raised number and the notes under the text, in the order first cited', () => {
+  const html = renderMarkdown('Tables wrap.[^b] Maths too.[^a] Again.[^b]\n\n[^a]: The second note.\n\n[^b]: The **first** note.\n\n[^c]: Never cited.');
+  const box = parse(html);
+  expect([...box.querySelectorAll('sup.md-fnref')].map((s) => s.textContent)).toEqual(['1', '2', '1']);
+  const notes = [...box.querySelectorAll('div.md-footnotes li')];
+  expect(notes.map((li) => li.textContent)).toEqual(['The first note.', 'The second note.']);
+  expect(notes[0].querySelector('strong')?.textContent).toBe('first');
+  // No raw marks or definitions left, nothing linked, no ids.
+  expect(box.textContent).not.toMatch(/\[\^/);
+  expect(box.querySelector('[id], a')).toBeNull();
+  // A mark with no note stays as written; no notes, no footnote block.
+  expect(renderMarkdown('A claim.[^9]')).toContain('[^9]');
+  expect(renderMarkdown('No notes here.')).not.toContain('md-footnotes');
+});
+
+test('footnotes in a web answer keep only its sources\u2019 links', () => {
+  const sources = [{ n: 1, title: 'Lighthouses', url: 'https://en.wikipedia.org/wiki/Lighthouse', site: 'en.wikipedia.org' }];
+  const box = parse(renderMarkdown('A tower.[^n] [1]\n\n[^n]: See [the article](https://en.wikipedia.org/wiki/Lighthouse) and [elsewhere](https://phish.example.com).', { sources }));
+  const links = [...box.querySelectorAll('div.md-footnotes a')].map((a) => a.getAttribute('href'));
+  expect(links).toEqual(['https://en.wikipedia.org/wiki/Lighthouse']);
+  expect(box.querySelector('div.md-footnotes').textContent).toContain('elsewhere');
+});
+
+test('a markdown image is a link to the picture, with no stray "!"', () => {
+  const box = parse(renderMarkdown('![A sample picture](https://upload.example.com/sample.png)'));
+  const a = box.querySelector('a.md-link');
+  expect(a.textContent).toBe('A sample picture');
+  expect(a.getAttribute('href')).toBe('https://upload.example.com/sample.png');
+  expect(box.textContent).toBe('A sample picture');
+  expect(box.querySelector('img')).toBeNull();
+  // A "!" that ends a sentence before a space and a link stays.
+  expect(parse(renderMarkdown('Done! [the notes](https://example.com)')).textContent).toBe('Done! the notes');
+  // Bare links aren't touched either.
+  expect(parse(renderMarkdown('Wow!https://example.com')).textContent).toContain('Wow!');
+});
+
+test("the document editor's tokens keep footnotes and images as written", () => {
+  const src = 'A claim.[^1] And ![a picture](https://example.com/p.png)\n\n[^1]: The note.';
+  const text = markdownTokens(src)
+    .filter((t) => t.type === 'inline')
+    .map((t) => t.children.map((c) => c.content).join(''))
+    .join('\n');
+  expect(text).toContain('[^1]');
+  expect(text).toContain('[^1]: The note.');
+  expect(text).toContain('!a picture');
+});

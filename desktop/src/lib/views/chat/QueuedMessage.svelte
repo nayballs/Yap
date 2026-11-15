@@ -5,8 +5,9 @@
   // edit (Cancel and edit); Copy copies its words.
   import { toast } from '../../ui/toast.svelte.js';
 
-  /** `q`: the waiting message ({ qid, text, voice, at }: `voice`, asked out loud or dictated — the mic as on a sent
-   * one); `oncancel(qid)`, `onsend(qid)`. */
+  /** `q`: the waiting message ({ qid, text, voice, at, later?, plain? }: `voice`, asked out loud or dictated — the mic
+   * as on a sent one; `later`, queued on purpose with Ctrl+Enter; `plain`, waiting for an answer of Chat's own, which
+   * nothing can take sooner: no Send now); `oncancel(qid)`, `onsend(qid)`. */
   let { q, oncancel, onsend } = $props();
 
   async function copy() {
@@ -23,7 +24,11 @@
   <!-- prettier-ignore -->
   <div class="qbubble">{#if q.voice}<span class="viavoice" title="Asked by voice" aria-label="Asked by voice" data-testid="chat-queued-voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg></span>{/if}{q.text}</div>
   <div class="qfoot">
-    <span class="qstate" title="Claude reads it at its next step, or as its next message once this answer is in">
+    <span
+      class="qstate"
+      data-later={q.later ? 'true' : undefined}
+      title={q.later ? 'Queued for later: it goes as its own message once this answer is in' : 'Claude reads it at its next step, or as its next message once this answer is in'}
+    >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>
       Queued
     </span>
@@ -33,7 +38,10 @@
     <button type="button" class="qbtn" onclick={() => oncancel(q.qid)} aria-label="Cancel and edit message" title="Cancel and edit message" data-testid="chat-queued-cancel">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
     </button>
-    <button type="button" class="qsend" onclick={() => onsend(q.qid)} title="Send it to Claude now" data-testid="chat-queued-send-now">Send now</button>
+    <!-- (Waiting for an answer of Chat's own, `plain`: nothing can take it before that answer is in.) -->
+    {#if !q.plain}
+      <button type="button" class="qsend" onclick={() => onsend(q.qid)} title="Send it to Claude now" data-testid="chat-queued-send-now">Send now</button>
+    {/if}
   </div>
 </div>
 

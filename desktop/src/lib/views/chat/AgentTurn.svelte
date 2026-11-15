@@ -9,6 +9,7 @@
   // Code chat: each follow-up is a turn of its own (agents/runner.rs).
   import { renderMarkdown } from '../../core/markdown.js';
   import { colourCode } from '../../ui/colourCode.js';
+  import { codeCopy } from '../../ui/codeCopy.js';
   import { markdownVisuals } from '../../ui/markdownVisuals.js';
   import { timelineOf, latestStep, todosOf, todoCount, diffsOf, commandsOf, NO_BACKUPS } from '../../core/agents.js';
   import AgentTimeline from './AgentTimeline.svelte';
@@ -120,7 +121,7 @@
   <div class="section final" data-testid="chat-agent-text">
     <h3>{turn.plan ? 'Its plan' : 'What it said'}</h3>
     <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
-    <div class="md" use:colourCode use:markdownVisuals>{@html renderMarkdown(turn.text)}</div>
+    <div class="md" use:colourCode use:codeCopy use:markdownVisuals>{@html renderMarkdown(turn.text)}</div>
   </div>
 {/if}
 
