@@ -45,6 +45,8 @@
   import PictureTab from './PictureTab.svelte';
   import PageTab from './PageTab.svelte';
   import AgentTab from './AgentTab.svelte';
+  // An Agent panel row's own view (a click on the row: its turn's or its helper's work, as the Claude app opens a background task).
+  import AgentTaskTab from './AgentTaskTab.svelte';
   import FileTab from './FileTab.svelte';
   import SheetTab from './SheetTab.svelte';
   import RunsTab from './RunsTab.svelte';
@@ -132,7 +134,9 @@
                   ? made.of(conversationId).find((m) => m.id === t.id)?.title || t.title || 'Page'
                   : t.kind === 'outputs'
                     ? 'Outputs'
-                    : t.title || 'Untitled document';
+                    : t.kind === 'task'
+                      ? t.title || t.task?.title || 'Agent'
+                      : t.title || 'Untitled document';
 
   // The pages this conversation's answers read or showed, newest first: a
   // new page tab offers them (PageTab's new tab, as Claude Code's offers
@@ -653,7 +657,7 @@
 <aside
   class="docpanel"
   class:cover
-  aria-label={doc.showing === 'page' ? 'Page' : doc.showing === 'agent' ? 'Agent' : doc.showing === 'file' ? 'File' : doc.showing === 'sheet' ? 'Spreadsheet' : doc.showing === 'runs' ? 'Runs' : doc.showing === 'summary' ? 'Summary' : doc.showing === 'kept' ? 'Kept page' : doc.showing === 'outputs' ? 'Outputs' : away ? 'Picture' : 'Document'}
+  aria-label={doc.showing === 'page' ? 'Page' : doc.showing === 'agent' ? 'Agent' : doc.showing === 'task' ? 'Agent' : doc.showing === 'file' ? 'File' : doc.showing === 'sheet' ? 'Spreadsheet' : doc.showing === 'runs' ? 'Runs' : doc.showing === 'summary' ? 'Summary' : doc.showing === 'kept' ? 'Kept page' : doc.showing === 'outputs' ? 'Outputs' : away ? 'Picture' : 'Document'}
   data-testid="chat-doc"
   onkeydown={panelKey}
 >
@@ -698,6 +702,9 @@
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="13" height="13" rx="2" /><path d="M16 16v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h3" /></svg>
             {:else if t.kind === 'outputs'}
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5z" /><path d="M3 13l9 5 9-5" /></svg>
+            {:else if t.kind === 'task'}
+              <!-- (Yap's speech bubble: one of the crew's work.) -->
+              <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H10l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" /><path d="M9 10.5h.01M15 10.5h.01" /></svg>
             {:else}
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
             {/if}
@@ -730,6 +737,11 @@
   {:else if doc.showing === 'agent' && doc.agent}
     <!-- An agent Chat started: what it's doing, live (closing it never stops it). -->
     <AgentTab {doc} {narrow} />
+  {:else if doc.showing === 'task' && doc.task}
+    <!-- An Agent panel row's own view: its turn's or its helper's work, its clock, Stop, its report. -->
+    {#key doc.task.key}
+      <AgentTaskTab {doc} {narrow} />
+    {/key}
   {:else if doc.showing === 'file' && doc.file}
     <!-- A Code chat's file, read only, at the line a link named. -->
     <FileTab {doc} {narrow} {conversationId} />

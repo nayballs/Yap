@@ -5,9 +5,18 @@
   // visual (the `yapmade` scheme's `/p/…`, its own policy, `sandbox="allow-scripts"`: no Yap IPC), Yap's
   // colours handed to it. It scrolls in its frame; a button in it may send a message into this chat on the
   // person's click (`sendPrompt`, visualBridge.js), as a visual's.
+  //
+  // **Its ⋯** (as the Claude app's artifact menu has Download and Open): **Save as…** writes the version shown
+  // to a file the person picks; **Open in browser** opens a copy of it in their browser (a file of Yap's own in
+  // the temp folder, swept after a day). Either way it keeps working there: Yap's colours, the chart libraries
+  // from cdnjs with their pinned hashes, the same policy; its `sendPrompt` buttons do nothing outside Yap.
   import { untrack } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
   import { registerFrame, pageSrc } from './visualBridge.js';
   import { made } from './made.svelte.js';
+  import { openContextMenu } from '../../ui/contextMenu.svelte.js';
+  import { toast } from '../../ui/toast.svelte.js';
+  import { exportName } from './chatExport.js';
 
   /** `doc`: the panel (`doc.kept`: `{id, conversation, title, n, seq}`); `onprompt(text, page)`. */
   let { doc, conversationId = null, onprompt = null } = $props();
@@ -66,6 +75,46 @@
     const next = versions[at + d];
     if (next != null) shown = next;
   };
+
+  // ---- Outside Yap (chat/made/pages.rs)
+  /** The version on screen: the one asked for, else its newest. */
+  const onScreen = () => shown || newest;
+  /** The file Save as… suggests: its title, and the version when it has several. */
+  const suggested = () => `${exportName(title)}${versions.length > 1 ? ` v${onScreen()}` : ''}.html`;
+
+  async function saveAs() {
+    if (!k?.id || conv == null) return;
+    const n = onScreen();
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const path = await save({ defaultPath: suggested(), filters: [{ name: 'Web page', extensions: ['html', 'htm'] }] });
+      if (!path) return;
+      const wrote = await invoke('chat_page_save_as', { conversationId: conv, id: k.id, n, path });
+      toast({ title: 'Page saved', description: wrote, variant: 'success' });
+    } catch (e) {
+      toast({ title: "Couldn't save the page", description: String(e?.message ?? e), variant: 'destructive' });
+    }
+  }
+
+  async function openInBrowser() {
+    if (!k?.id || conv == null) return;
+    try {
+      await invoke('chat_page_open_in_browser', { conversationId: conv, id: k.id, n: onScreen() });
+    } catch (e) {
+      toast({ title: "Couldn't open the page in your browser", description: String(e?.message ?? e), variant: 'destructive' });
+    }
+  }
+
+  function moreMenu(e) {
+    openContextMenu(
+      e,
+      [
+        { label: 'Save as…', icon: 'download', onselect: saveAs },
+        { label: 'Open in browser', icon: 'open', onselect: openInBrowser },
+      ],
+      { label: 'Page' }
+    );
+  }
 </script>
 
 <section class="kept" data-testid="chat-kept-page" aria-label={title}>
@@ -87,6 +136,11 @@
     <button type="button" class="kbtn" onclick={() => (restart += 1)} aria-label="Start it again" title="Start it again" data-testid="chat-kept-restart">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></svg>
     </button>
+    {#if src}
+      <button type="button" class="kbtn" data-more aria-haspopup="menu" onclick={moreMenu} aria-label="More for the page" title="Save as…, Open in browser" data-testid="chat-kept-more">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="18.5" cy="12" r="1.6" /></svg>
+      </button>
+    {/if}
   </header>
   <div class="kbody">
     {#if src}

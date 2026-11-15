@@ -13,6 +13,9 @@
 //!   with the address as its one argument; with none chosen (or the chosen
 //!   one gone), to Windows' default as before (the opener plugin). Mail
 //!   links always go to the default mail app.
+//! - **A page file of Yap's own** ([`open_file`]: a kept page's copy, its
+//!   tab's "Open in browser") goes to the same browser by its `file:`
+//!   address, else to Windows' default browser's program.
 //! - **Its name, for buttons** ([`label`], `browser_label`): "Open in
 //!   Brave". With Windows' default, the default's name when Yap can tell
 //!   (`UrlAssociations\https\UserChoice`'s ProgId → its command → the
@@ -201,6 +204,33 @@ pub fn open(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
     }
     use tauri_plugin_opener::OpenerExt;
     app.opener().open_url(url, None::<&str>).map_err(|e| format!("Couldn't open your browser: {e}"))
+}
+
+/// **Open a page file of Yap's own in the browser** (a kept page's copy,
+/// `chat/made/pages.rs` "Open in browser"): the chosen browser, else Windows'
+/// default browser's program, its `file:` address the one argument — never
+/// the file handed to whatever opens `.html` here, which may be an editor —
+/// and only if neither starts, the file's own app (the opener plugin).
+pub fn open_file(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
+    let url = url::Url::from_file_path(path).map_err(|_| "Couldn't open that page in your browser.".to_string())?.to_string();
+    let exe = chosen().map(|b| b.exe).or_else(|| read().1);
+    if let Some(exe) = exe {
+        let started = std::process::Command::new(&exe)
+            .arg(&url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        match started {
+            Ok(_) => {
+                tracing::info!("Opened a page file in the browser");
+                return Ok(());
+            }
+            Err(e) => tracing::warn!("The browser didn't start for a page file ({e}); using the file's own app"),
+        }
+    }
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| format!("Couldn't open your browser: {e}"))
 }
 
 /// Settings' list: the browsers installed (with their icons), the one

@@ -9,6 +9,8 @@
 // 2026): several can be answering at once, and the thread and the composer
 // show the open one's only.
 import { isLive } from '../../core/agentNow.js';
+import { lastRead, turnsOf } from '../../core/agents.js';
+import { agentLogs } from '../../stores/agentLogs.svelte.js';
 import { splitElements } from '../../core/selectedElements.js';
 import { invoke } from '@tauri-apps/api/core';
 import { tick, untrack } from 'svelte';
@@ -1351,10 +1353,17 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
     const ev = p?.event;
     // Acting on its pages (14 Nov 2026): a card before an action that would buy, send or sign in — kept by its
-    // turn for the thread (`agentConfirms`, under its work), whichever chat is open.
+    // turn for the thread (`agentConfirms`, under its work), whichever chat is open. Stamped as it comes with
+    // the message the turn had read last (`after`, 15 Nov 2026): it goes with that part of the turn's work, the
+    // latest when it asked, as the Claude app keeps a card with the work it's about (core/agents.js `cardPart`).
     if (ev?.kind === 'confirm' && key) {
       const have = agentConfirms[key] || [];
-      agentConfirms = { ...agentConfirms, [key]: have.some((c) => c.id === ev.id) ? have.map((c) => (c.id === ev.id ? ev : c)) : [...have, ev] };
+      const was = have.find((c) => c.id === ev.id);
+      const turn = p.turn ?? 1;
+      const log = agentLogs.by[p.id];
+      const after = was ? was.after : log ? lastRead(turnsOf({ turnList: [{ n: turn }] }, log).find((t) => t.n === turn)?.events) : undefined;
+      const card = after === undefined ? ev : { ...ev, after };
+      agentConfirms = { ...agentConfirms, [key]: was ? have.map((c) => (c.id === ev.id ? card : c)) : [...have, card] };
     }
     if (p?.conversation == null || p.conversation !== activeId) return;
     if (ev?.kind === 'page' && (ev.page?.url || ev.page?.tabKey)) doc.showPage(ev.page);
