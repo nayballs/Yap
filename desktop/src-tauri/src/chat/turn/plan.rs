@@ -161,7 +161,7 @@ const CONNECTORS: &str = "Yap's tools named with a connector's name and two unde
 
 /// **Visuals in the chat itself** (`chat/made.rs`): when to draw one, and
 /// the tool's name as the session sees it.
-const VISUALS: &str = "When the user asks you to draw, diagram, chart or show something visually (\"draw…\", \"show me how…\", \"make me a small calculator\"), call mcp__yap__show_visual with an SVG diagram or a small interactive HTML widget: it appears in the chat itself, so never paste its code into your answer, and say in a sentence or two what it shows.";
+const VISUALS: &str = "When the user asks you to draw, diagram, chart or show something visually (\"draw…\", \"show me how…\", \"make me a small calculator\"), call mcp__yap__show_visual with an SVG diagram or a small interactive HTML widget: it appears in the chat itself, so never paste its code into your answer, and say in a sentence or two what it shows. When they want something to keep and come back to — a small app, a tool, a page (\"make me a tip calculator I can keep\") — call mcp__yap__save_page with a whole HTML page instead: it opens beside the chat and stays in the chat's Outputs; to change it, call it again with its id (a new version).";
 
 /// [`EYES`]'s word on acting: for a session that may act, and one that
 /// doesn't.

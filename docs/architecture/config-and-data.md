@@ -820,7 +820,9 @@
   created, items: [{id, kind, title, format, after: {index, ts}, at,
   outside?, bytes}]}`: `created` the conversation's `createdTs`, so a
   reused id's folder is another chat's; fields a later Yap adds are kept
-  as they are) and each visual's code (`v_<16 hex>.svg` / `.html`); never
+  as they are; a page's `versions: [{n, at, bytes, after, title}]`) and
+  each visual's code (`v_<16 hex>.svg` / `.html`) and each kept page's
+  versions (`pg_<16 hex>.v<n>.html`, `chat/made/pages.rs`); never
   in chats.json, so an older Yap's save can't drop it. `chat-made/lib/`
   keeps the chart libraries a visual loaded (Chart.js, D3: checked against
   their pinned SHA-256). Deleted with its chat, and whole with the chats
