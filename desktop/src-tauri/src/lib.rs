@@ -525,6 +525,8 @@ pub fn run() {
             chat::shares::chat_file_preview,
             // What a chat made: its visuals (chat/made.rs).
             chat::made::chat_made_list,
+            chat::made::pages::chat_page_save_as,
+            chat::made::pages::chat_page_open_in_browser,
             chat::documents::chat_document_save,
             chat::documents::chat_quote_set,
             chat::think::chat_think_info,
@@ -1112,7 +1114,11 @@ pub fn run() {
             pasting::text_injector::init(&handle);
             // Temp files a crash mid-write left behind (config.rs): Yap's
             // own names only, off the startup thread.
-            let _ = std::thread::Builder::new().name("temp-sweep".into()).spawn(config::sweep_temp_files);
+            // And the copies of kept pages "Open in browser" wrote (chat/made/pages.rs), a day on.
+            let _ = std::thread::Builder::new().name("temp-sweep".into()).spawn(|| {
+                config::sweep_temp_files();
+                chat::made::pages::sweep_old_copies();
+            });
 
             // Register the app handle so the usage tracker can emit live
             // `groq-usage` updates after each AI-cleanup call.

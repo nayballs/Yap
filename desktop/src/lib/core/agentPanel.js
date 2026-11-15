@@ -477,6 +477,24 @@ export function statsLine(r) {
   return parts.join(' · ');
 }
 
+/** A helper's "back" event in its turn's `events` (agents/runner.rs: its call, `helper`, its `report`), or null. */
+const helperBack = (h, events) => (events || []).find((e) => e?.helper && e.call === h?.key) ?? null;
+
+/**
+ * **How long a helper has worked** (its own view's clock, 15 Nov 2026): from
+ * the hand-over (`helpersOf`'s `ts`) to its "back" event, or to `now` while
+ * it works. `events`: its turn's. Pure.
+ */
+export function helperSecs(h, events, now = Date.now() / 1000) {
+  const from = Number(h?.ts) || 0;
+  if (!from) return 0;
+  if (h.status === 'working') return Math.max(0, now - from);
+  return Math.max(0, (Number(helperBack(h, events)?.ts) || from) - from);
+}
+
+/** **What a helper came back with** (its own view's report): its "back" event's `report`, or ''. Pure. */
+export const helperReport = (h, events) => String(helperBack(h, events)?.report || '').trim();
+
 /** The thread's to-do card, folded: "7 to-dos · all done", "7 to-dos · 5 done", "1 to-do · none done yet". */
 export function todoSummary(todos) {
   const c = todoCounts(todos);

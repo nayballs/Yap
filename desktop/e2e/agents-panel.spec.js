@@ -70,6 +70,8 @@ import {
   needsOf,
   rowPose,
   rowActions,
+  helperSecs,
+  helperReport,
 } from '../src/lib/core/agentPanel.js';
 
 const CREW_CSS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib', 'views', 'chat', 'crew', 'crew.css');
@@ -248,6 +250,8 @@ const agents = (yap) => yap.invoke('agent_list');
 const script = (yap, lines, name) => yap.invoke('e2e_claude_script', { script: writeScript(name, lines) });
 const tab = (main) => main.getByTestId('chat-agent');
 const panel = (main) => main.getByTestId('chat-agent-panel');
+/** A row's own view (AgentTaskTab: a click on the row). */
+const taskView = (main) => main.getByTestId('chat-task');
 const group = (main, id) => panel(main).locator(`[data-testid="chat-agent-group"][data-group="${id}"]`);
 const row = (main, n) => panel(main).locator(`[data-testid="chat-agent-row"][data-turn="${n}"]`);
 const card = (main, n = 1) => thread(main).locator(`[data-testid="chat-agent-todo-card"][data-turn="${n}"]`);
@@ -298,6 +302,14 @@ test('core/agentPanel.js: tokens and time, the context, progress, the third line
   // As savvy-progress says them.
   expect([fmtTokens(0), fmtTokens(980), fmtTokens(11_280), fmtTokens(999_600), fmtTokens(1_234_567)]).toEqual(['0', '980', '11k', '1.0M', '1.2M']);
   expect([fmtClock(0), fmtClock(42), fmtClock(242), fmtClock(3909)]).toEqual(['0:00', '0:42', '4:02', '1:05:09']);
+  // A helper's own view (AgentTaskTab, 15 Nov 2026): its clock from its hand-over to its "back", its report from that event.
+  const helperEvents = [{ helper: 'back', call: 'toolu_t', ts: 130, report: ' The notes are in order. ' }, { helper: 'failed', call: 'toolu_u', ts: 150 }];
+  expect(helperSecs({ key: 'toolu_t', status: 'done', ts: 100 }, helperEvents)).toBe(30);
+  expect(helperSecs({ key: 'toolu_v', status: 'working', ts: 100 }, helperEvents, 142)).toBe(42);
+  expect(helperSecs({ key: 'toolu_w', status: 'done', ts: 100 }, helperEvents)).toBe(0);
+  expect(helperSecs({ key: 'toolu_t', status: 'done', ts: 0 }, helperEvents)).toBe(0);
+  expect(helperReport({ key: 'toolu_t' }, helperEvents)).toBe('The notes are in order.');
+  expect(helperReport({ key: 'toolu_u' }, helperEvents)).toBe('');
   expect(shortModel('claude-sonnet-5-5')).toBe('Sonnet 5.5');
   // The context: its latest call against the window; not known, none.
   const usage = { input: 100, output: 20, cacheRead: 3000, cacheWrite: 80, context: 340_000, window: 1_000_000 };
@@ -532,10 +544,26 @@ test('the Agent panel: a Code chat’s agent live, needing you, finished; the to
   // Folded, the running row too (its turn's own start opens none); ▸ opens it in place: its to-dos as they stand.
   await expect(row(main, 1)).toHaveAttribute('data-open', 'false');
   await expect(row(main, 1).getByTestId('chat-agent-row-more')).toHaveCount(0);
-  await row(main, 1).locator('.rhead').click();
+  await row(main, 1).getByTestId('chat-agent-row-fold').click();
   await expect(row(main, 1)).toHaveAttribute('data-open', 'true');
   await expect(row(main, 1).getByTestId('chat-agent-row-todos').locator('.todo')).toHaveCount(7);
   await expect(row(main, 1).getByTestId('chat-agent-row-todos').locator('.todo[data-status="completed"]')).toHaveCount(3);
+  // **The row's own view while it works** (a click on the row): its character walking with Auto's flag as the
+  // row's, the line it's on, its clock ticking, Stop.
+  await row(main, 1).locator('.rhead').click();
+  const atWork = taskView(main);
+  await expect(atWork).toBeVisible();
+  await expect(atWork.getByTestId('chat-task-avatar')).toHaveAttribute('data-pose', 'working');
+  await expect(atWork.getByTestId('chat-task-avatar')).toHaveAttribute('aria-label', 'Sonnet, working, Auto mode');
+  await expect(atWork.getByTestId('chat-task-line')).toContainText(/^3\/7 · /);
+  await expect(atWork.getByTestId('chat-task-stop')).toBeVisible();
+  const ticks = await atWork.getByTestId('chat-task-clock').textContent();
+  await expect(atWork.getByTestId('chat-task-clock')).not.toHaveText(ticks, { timeout: 5_000 });
+  await expect(atWork.getByTestId('chat-task-report')).toHaveCount(0);
+  await shot(main, '03a-a-rows-own-view-at-work');
+  // (Back to the panel by its tab: the row as it was, open in place.)
+  await main.getByTestId('chat-panel-tab').filter({ hasText: 'garden-planner' }).click();
+  await expect(row(main, 1)).toHaveAttribute('data-open', 'true');
 
   // The thread's to-do card under the pill, live.
   const live = card(main);
@@ -642,7 +670,7 @@ test('the Agent panel: a Code chat’s agent live, needing you, finished; the to
   // No to-do list in the second turn: no card for it.
   await expect(card(main, 2)).toHaveCount(0);
 
-  // The keys: ↑ ↓ between the rows' heads, Enter folds and opens.
+  // The keys: ↑ ↓ between the rows' heads, Space folds and opens in place (→ opens, ← folds).
   const head2 = row(main, 2).locator('.rhead');
   const head1 = row(main, 1).locator('.rhead');
   await head2.focus();
@@ -651,13 +679,60 @@ test('the Agent panel: a Code chat’s agent live, needing you, finished; the to
   await main.keyboard.press('ArrowUp');
   await expect(head2).toBeFocused();
   const was = await row(main, 2).getAttribute('data-open');
-  await main.keyboard.press('Enter');
+  await main.keyboard.press('Space');
   await expect(row(main, 2)).toHaveAttribute('data-open', was === 'true' ? 'false' : 'true');
   await main.keyboard.press('Space');
   await expect(row(main, 2)).toHaveAttribute('data-open', String(was === 'true'));
+  await main.keyboard.press(was === 'true' ? 'ArrowLeft' : 'ArrowRight');
+  await expect(row(main, 2)).toHaveAttribute('data-open', was === 'true' ? 'false' : 'true');
+  await main.keyboard.press(was === 'true' ? 'ArrowRight' : 'ArrowLeft');
+  await expect(row(main, 2)).toHaveAttribute('data-open', String(was === 'true'));
+
+  // **A click on a row opens its own view** (15 Nov 2026, as the Claude app opens a background task): a tab of the
+  // panel, the row's own character in its header, its to-dos and its work in full, its clock, its report.
+  await head1.click();
+  const view = taskView(main);
+  await expect(view).toBeVisible();
+  await expect(view).toHaveAttribute('data-kind', 'turn');
+  await expect(main.getByTestId('chat-panel-tab').filter({ hasText: 'Build the planner' })).toHaveAttribute('aria-selected', 'true');
+  const face = view.getByTestId('chat-task-avatar');
+  const rowFace = row(main, 1).getByTestId('chat-agent-row-avatar');
+  await expect(view.getByTestId('chat-task-title')).toHaveText('Build the planner');
+  await expect(view.getByTestId('chat-task-sub')).toHaveText('Auto · Sonnet 5.5 · Medium');
+  await expect(face).toHaveAttribute('data-character', 'sonnet');
+  await expect(face).toHaveAttribute('data-prop', 'auto');
+  await expect(face).toHaveAttribute('data-pose', 'done');
+  await expect(view.getByTestId('chat-task-clock')).toHaveText(/^\d+:\d\d$/);
+  await expect(view.getByTestId('chat-task-stop')).toHaveCount(0);
+  await expect(view.getByTestId('chat-task-todos').locator('.todo')).toHaveCount(7);
+  // Its work in full: what it said, each stretch open to its rows.
+  const all = view.getByTestId('chat-task-work').getByTestId('chat-agent-work');
+  await expect(all.getByTestId('chat-agent-work-said').first()).toContainText("I'll plan it out first.");
+  await expect(all.getByTestId('chat-agent-work-steps').first()).toHaveAttribute('data-open', 'true');
+  await expect(all.getByTestId('chat-agent-work-row').locator('.rtext').first()).toHaveText('Read beds.json');
+  // Its report: how it ended, what it ran and changed, what it used; its whole timeline a click away.
+  await expect(view.getByTestId('chat-task-report-title')).toHaveText('Agent done');
+  await expect(view.getByTestId('chat-task-report-counts')).toHaveText(/^1 command · 0 files changed · ctx \d+% · /);
+  await shot(main, '04a-a-rows-own-view-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '04b-a-rows-own-view-dark');
+  await theme(yap, main, 'light');
+  await view.getByTestId('chat-task-timeline').click();
+  await expect(tab(main).locator('.agentbody')).toHaveAttribute('data-view', 'timeline');
+  await expect(tab(main).locator('[data-testid="chat-agent-turn"][data-turn="1"]')).toHaveAttribute('data-open', 'true');
+  await main.getByTestId('chat-agent-back').click();
+  await expect(panel(main)).toBeVisible();
+  // (Its rows unchanged: the same character, nothing restyled.)
+  await expect(rowFace).toHaveAttribute('data-character', 'sonnet');
+  // Enter on a row opens its view too; its tab back to the panel.
+  await head1.focus();
+  await main.keyboard.press('Enter');
+  await expect(taskView(main)).toBeVisible();
+  await main.getByTestId('chat-panel-tab').filter({ hasText: 'garden-planner' }).click();
+  await expect(panel(main)).toBeVisible();
   // ▸ opens a row in place: its to-dos, its work (what it said, a line for each stretch of steps that opens
   // into a row a step), how many commands and files.
-  if ((await row(main, 1).getAttribute('data-open')) !== 'true') await head1.click();
+  if ((await row(main, 1).getAttribute('data-open')) !== 'true') await row(main, 1).getByTestId('chat-agent-row-fold').click();
   const more = row(main, 1).getByTestId('chat-agent-row-more');
   await expect(more.getByTestId('chat-agent-row-todos').locator('.todo')).toHaveCount(7);
   const work = more.getByTestId('chat-agent-row-steps').getByTestId('chat-agent-work');
@@ -734,6 +809,35 @@ async function planAgent(yap, main, fakeLlm, reports) {
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 30_000 }).toBe('asking');
   return agent;
 }
+
+test('a row’s own view: Stop while it works stops its agent, and its report says so', async ({ yap, main, fakeLlm, shot }) => {
+  await script(yap, SLOW, 'slow-stop');
+  await openView(main, 'Chat');
+  if (await tab(main).count()) await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+  await newCodeChat(main, 'garden-planner');
+  const before = (await agents(yap)).length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Sort the seed list by sowing month.', title: 'Sort the seed list' } }] },
+    { content: STARTED },
+  ]);
+  await send(main, 'Sort the seed list by sowing month.');
+  await expect.poll(async () => (await agents(yap)).length, { timeout: 20_000 }).toBe(before + 1);
+  const id = (await agents(yap))[0].id;
+  await expect(row(main, 1)).toHaveAttribute('data-state', 'running', { timeout: 20_000 });
+  await row(main, 1).locator('.rhead').click();
+  const view = taskView(main);
+  await expect(view.getByTestId('chat-task-title')).toHaveText('Sort the seed list');
+  await expect(view.getByTestId('chat-task-avatar')).toHaveAttribute('data-pose', 'working');
+  await view.getByTestId('chat-task-stop').click();
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === id).status, { timeout: 30_000 }).toBe('stopped');
+  // Stopped: no Stop; its character grey and still, as its row; its report.
+  await expect(view.getByTestId('chat-task-stop')).toHaveCount(0);
+  await expect(view.getByTestId('chat-task-avatar')).toHaveAttribute('data-pose', 'stopped');
+  await expect(view.getByTestId('chat-task-report-title')).toHaveText('Agent stopped');
+  await expect(view.getByTestId('chat-task-work')).toContainText('Working on it.');
+  await shot(main, '13-a-rows-own-view-stopped');
+  await view.getByRole('button', { name: 'Close the panel' }).click();
+});
 
 test('Needs you, live: a plan’s Go ahead in the row starts it, and the thread’s card closes too', async ({ yap, main, fakeLlm, shot }) => {
   await yap.invoke('e2e_claude_approve_auto', { allow: null });
@@ -835,7 +939,7 @@ test('a plan nobody acted on: Needs you while it waits, then “Plan not used”
   await script(yap, ECHO, 'echo');
   await ended(yap, n.id);
   await messagesOf(yap, conversation, 8);
-  await r.locator('.rhead').click();
+  await r.getByTestId('chat-agent-row-fold').click();
   const go = r.getByTestId('chat-agent-row-go-ahead');
   await expect(go).toHaveText('Go ahead');
   fakeLlm.scriptChat([{ plain: true, content: 'Done: the bag markers are bolder.' }]);
@@ -1005,7 +1109,7 @@ test('Chat sizes each agent: its model and effort reach Claude Code, the row say
   await expect(panel(main)).toBeVisible();
   await expect(row(main, 1).getByTestId('chat-agent-row-sub')).toHaveText('Auto · Opus 5.5 · High');
   await expect(row(main, 1).getByTestId('chat-agent-row-avatar')).toHaveAttribute('data-character', 'opus');
-  if ((await row(main, 1).getAttribute('data-open')) !== 'true') await row(main, 1).locator('.rhead').click();
+  if ((await row(main, 1).getAttribute('data-open')) !== 'true') await row(main, 1).getByTestId('chat-agent-row-fold').click();
   await expect(row(main, 1).getByTestId('chat-agent-row-sizing')).toHaveText('Opus 5.5 · High: a multi-file change');
   await shot(main, '30-sizing-row-light');
   await theme(yap, main, 'dark');
@@ -1278,15 +1382,48 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
   // Rows start folded, the running one too; ▸ opens one, and it stays open when the tab comes back.
   for (const [id, n] of ROWS) await expect(panel(main).locator(`[data-testid="chat-agent-row"][data-key="${id}:${n}"]`)).toHaveAttribute('data-open', 'false');
   const running = panel(main).locator(`[data-testid="chat-agent-row"][data-key="${A}:4"]`);
-  await running.locator('.rhead').click();
+  await running.getByTestId('chat-agent-row-fold').click();
   await expect(running).toHaveAttribute('data-open', 'true');
   await expect(running.getByTestId('chat-agent-row-todos').locator('.todo')).toHaveCount(7);
   await tab(main).getByRole('button', { name: 'Close the panel' }).click();
   await expect(panel(main)).toHaveCount(0);
   await open();
   await expect(panel(main).locator(`[data-testid="chat-agent-row"][data-key="${A}:4"]`)).toHaveAttribute('data-open', 'true');
-  await panel(main).locator(`[data-testid="chat-agent-row"][data-key="${A}:4"] .rhead`).click();
+  await panel(main).locator(`[data-testid="chat-agent-row"][data-key="${A}:4"]`).getByTestId('chat-agent-row-fold').click();
   await expect(panel(main).locator(`[data-testid="chat-agent-row"][data-key="${A}:4"]`)).toHaveAttribute('data-open', 'false');
+  // **A row's own view shows the row's own character** — who, its Mode's prop, its pose — whichever row:
+  // Opus in Bypass's helmet, failed, its report saying why; Haiku with Plan's glass, done.
+  for (const [id, n, character, prop, pose, title, words] of [
+    [A, 3, 'opus', 'bypass', 'failed', 'Move the beds into their own file', "Agent didn't finish"],
+    [A, 1, 'haiku', 'plan', 'done', 'Plan the watering schedule', 'Agent done'],
+  ]) {
+    await panel(main).locator(`[data-testid="chat-agent-row"][data-key="${id}:${n}"] .rhead`).click();
+    const view = main.getByTestId('chat-task');
+    await expect(view).toHaveAttribute('data-key', `${id}:${n}`);
+    const face = view.getByTestId('chat-task-avatar');
+    await expect(face).toHaveAttribute('data-character', character);
+    await expect(face).toHaveAttribute('data-prop', prop);
+    await expect(face).toHaveAttribute('data-pose', pose);
+    await expect(face.locator(prop === 'bypass' ? '.c-helmet' : '.c-prop')).toHaveCount(1);
+    await expect(view.getByTestId('chat-task-title')).toHaveText(title);
+    await expect(view.getByTestId('chat-task-report-title')).toHaveText(words);
+    if (pose === 'failed') await expect(view.getByTestId('chat-task-report')).toContainText('Claude Code stopped before it finished.');
+    await expect(view.getByTestId('chat-task-stop')).toHaveCount(0);
+    if (pose === 'failed') {
+      await shot(main, '10a-a-failed-rows-own-view-light');
+      await theme(yap, main, 'dark');
+      await shot(main, '10b-a-failed-rows-own-view-dark');
+      await theme(yap, main, 'light');
+    }
+    await main.getByTestId('chat-panel-tab').filter({ hasText: 'garden-planner' }).click();
+    await expect(panel(main)).toBeVisible();
+  }
+  // (The running one, nothing running it: no Stop there — Move to finished is its row menu's.)
+  await panel(main).locator(`[data-testid="chat-agent-row"][data-key="${A}:4"] .rhead`).click();
+  await expect(main.getByTestId('chat-task-avatar')).toHaveAttribute('data-pose', 'working');
+  await expect(main.getByTestId('chat-task-stop')).toHaveCount(0);
+  await main.getByTestId('chat-panel-tab').filter({ hasText: 'garden-planner' }).click();
+
   // Finished collapses, and says Expand.
   const finishedHead = group(main, 'finished').getByTestId('chat-agent-group-head');
   await finishedHead.click();

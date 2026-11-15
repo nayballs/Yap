@@ -101,6 +101,9 @@ const SAYING_EVERY: Duration = Duration::from_millis(70);
 /// A thought's most characters in its log ([`AgentEvent::thought`]): past
 /// them, cut at a character's edge with "…".
 const THOUGHT_CHARS: usize = 12_000;
+/// A helper's report's most characters ([`AgentEvent::report`]), "…" after: a
+/// line of its log keeps 4,000 (`store.rs` `LOG_TEXT_MAX`).
+const REPORT_CHARS: usize = 3_999;
 /// The most agents at once.
 pub const MAX: usize = 3;
 /// What every brief ends with: the report is ready to say.
@@ -203,6 +206,12 @@ pub struct AgentEvent {
     /// stops working then, while the turn carries on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub helper: Option<String>,
+    /// **What a helper came back with** (15 Nov 2026), with its `helper`:
+    /// its `Task` call's answer, at most [`REPORT_CHARS`] — the report its
+    /// own view in the Agent panel ends with, as the Claude app's view of a
+    /// background task does. Never to a phone (`link/code/view.rs`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report: Option<String>,
     /// A picture a tool call's answer carried (`pictures.rs`): its step
     /// (`call`) shows it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1769,10 +1778,11 @@ impl Follow {
         if self.commands.remove(id) {
             self.output_of(id, text, is_error);
         }
-        // A helper is back: said, so its entry in the Agent panel stops working.
+        // A helper is back: said, so its entry in the Agent panel stops working — with what it came back with.
         if self.helpers.remove(id) {
             if let Some(agent) = store::get(&self.id) {
-                emit(&AgentEvent { call: Some(id.to_string()), helper: Some(if is_error { "failed" } else { "back" }.to_string()), ..self.event(&agent) });
+                let report = Some(clipped(text, REPORT_CHARS)).filter(|r| !r.is_empty());
+                emit(&AgentEvent { call: Some(id.to_string()), helper: Some(if is_error { "failed" } else { "back" }.to_string()), report, ..self.event(&agent) });
             }
         }
         if self.open.is_empty() {
@@ -2289,8 +2299,14 @@ fn turn_words(said: &[String], split_at: Option<usize>) -> String {
 /// **A thought as its log keeps it**: trimmed, at most [`THOUGHT_CHARS`]
 /// characters (cut at a character's edge, with "…"). Pure.
 fn thought_of(text: &str) -> String {
+    clipped(text, THOUGHT_CHARS)
+}
+
+/// `text` trimmed, at most `max` characters (cut at a character's edge, with
+/// "…"). Pure.
+fn clipped(text: &str, max: usize) -> String {
     let t = text.trim();
-    match t.char_indices().nth(THOUGHT_CHARS) {
+    match t.char_indices().nth(max) {
         Some((cut, _)) => format!("{}…", t[..cut].trim_end()),
         None => t.to_string(),
     }
@@ -3469,10 +3485,22 @@ mod tests {
         follow.on_tool_result("toolu_task", false, "again", None);
         let back: Vec<(String, String)> = store::log_read(&id).iter().filter_map(|e| Some((e.get("helper")?.as_str()?.to_string(), e.get("call")?.as_str()?.to_string()))).collect();
         assert_eq!(back, [("back".to_string(), "toolu_task".to_string())]);
+        // …with what it came back with: its report, for its own view in the Agent panel.
+        let reports = |log: &[serde_json::Value]| log.iter().filter_map(|e| e.get("report").and_then(|r| r.as_str()).map(str::to_string)).collect::<Vec<_>>();
+        assert_eq!(reports(&store::log_read(&id)), ["The docs are in order."]);
         // One that failed says so.
         follow.on_tool("toolu_task2", "Agent", &json!({ "description": "Check the links" }));
         follow.on_tool_result("toolu_task2", true, "It couldn't.", None);
         assert_eq!(store::log_read(&id).iter().filter_map(|e| e.get("helper").and_then(|h| h.as_str()).map(str::to_string)).collect::<Vec<_>>(), ["back", "failed"]);
+        // A long report is cut at a character's edge; one with no words has none.
+        follow.on_tool("toolu_task3", "Task", &json!({ "description": "Write it all up" }));
+        follow.on_tool_result("toolu_task3", false, &"é".repeat(REPORT_CHARS + 9), None);
+        follow.on_tool("toolu_task4", "Task", &json!({ "description": "Say nothing" }));
+        follow.on_tool_result("toolu_task4", false, "  ", None);
+        let all = reports(&store::log_read(&id));
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[2].chars().count(), REPORT_CHARS + 1);
+        assert!(all[2].ends_with('…'));
         // The agent's to-do list is still the session's own.
         let lists: Vec<&serde_json::Value> = log.iter().filter_map(|e| e.get("todos")).collect();
         assert_eq!(lists.len(), 1);
@@ -3489,7 +3517,7 @@ mod tests {
         assert_eq!(v["status"], "running");
         assert_eq!(v["conversation"], 3);
         assert_eq!(v["step"], "Reading notes.md");
-        for absent in ["file", "command", "about", "said", "todos", "now", "diff", "call", "under", "helper", "done", "range", "output", "picture", "text", "cost", "problem"] {
+        for absent in ["file", "command", "about", "said", "todos", "now", "diff", "call", "under", "helper", "report", "done", "range", "output", "picture", "text", "cost", "problem"] {
             assert!(v.get(absent).is_none(), "{absent}");
         }
         // A diff and a to-do list, as the tab reads them.

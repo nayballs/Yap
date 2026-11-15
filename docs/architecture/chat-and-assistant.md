@@ -2420,7 +2420,27 @@ card's version. Its header: the icon, the title, "Saved", **‹ Version 2 of 3
 ›** (two or more; a turn saving another while the newest shows moves to
 it) and ↻ to start it again; under it the page in the sandboxed frame
 (`pageSrc`, the colours, `sendPrompt` as a visual's, a page navigating
-away put back), filling the panel and scrolling in itself. **The chat's
+away put back), filling the panel and scrolling in itself. **Its ⋯**
+(15 Nov 2026, as the Claude app's artifact menu has Download and Open):
+**Save as…** writes the version on screen to a file the person picks
+(the dialog plugin's Save as, "Watering chart v1.html";
+`chat_page_save_as`, `.html` added when the name has no ending) and **Open
+in browser** writes it to a copy of Yap's own in the system's temp folder
+(`%TEMP%\yap-pages\<title> <tag>.html`, swept once a day old: at each open
+and at start, `pages::sweep_copies`) and hands its `file:` address to the
+person's browser (`chat_page_open_in_browser`, `shell/browsers.rs`
+`open_file`: the browser chosen in Settings, else Windows' default
+browser's program, never whatever opens `.html` here). Either way it's the
+same document, made to keep working outside Yap (`pages::outside_document`,
+pure): the sandbox's policy as a `<meta>` (scripts inline or the pinned
+libraries only, no other network, frames, forms or `<base>`; `sandbox`
+itself can't be said in a file), Yap's colours in light and dark as the
+browser is (no bridge sends them there), each pinned library at its own
+cdnjs address with its hash as `integrity` (a page's jsDelivr, unpkg or
+`/lib/` address pointed there: the browser runs exactly the file the
+sandbox does), its title when it has none, and `sendPrompt` there but doing
+nothing. Only the chat's own page (`list` checks the chat's index); the
+log has ids, versions and sizes. **The chat's
 Outputs** (the Claude app's Outputs list; `chatDoc` `showOutputs`, tab
 `outputs`): **the one list** a Code chat's summary shows too (outputs.js
 `outputItems`, drawn by `OutputsList.svelte`: each kind adds its rows there)
@@ -2445,7 +2465,16 @@ Outputs (the title bar's button) lists it as "Page · 2 versions" and opens it;
 shown again when the chat opens again; a seeded chat's ⋯ → Outputs lists its
 page, its document and its shared file, the title bar's button pressed then,
 closing the panel and opening Outputs again, and no copy of it or of Summary
-in the panel's row; an id not this chat's is refused.
+in the panel's row; an id not this chat's is refused; a page's ⋯ (Save as…,
+Open in browser; light and dark): Open in browser on version 1 hands the
+browser a `file:` copy in `yap-pages` (kept for the suite, nothing opened)
+with the policy first, the title, no bridge; Save as… writes version 2 (and
+version 1 the same as the copy), never another chat's page or a made-up id;
+and the copy in a headless browser, light and dark: its script runs, the
+theme is the browser's, `sendPrompt` does nothing, and a page with Chart.js
+asks only its cdnjs address and refuses a stand-in served there by its hash.
+Unit tests (`chat/made/tests.rs`): the document outside Yap, the libraries
+and their hashes, a copy's name and the sweep.
 
 **Chat looks at the screen** (2026-11-01, `chat/see_screen.rs`): asked
 "here are the speakers, can you have a look?" with the page open in another

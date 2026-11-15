@@ -95,6 +95,7 @@
    * ids of the messages it may have read as it worked), `after` (which part
    * this is: the message it follows, null for the first), `view` (the chat's
    * transcript view), `cards` (its to-do list here) and `onpaged(list, at)`.
+   * A row's own view (AgentTaskTab): `events` as the row, `stretchesOpen`.
    */
   let {
     agent,
@@ -110,6 +111,7 @@
     view = 'normal',
     cards = false,
     onpaged = null,
+    stretchesOpen = false,
   } = $props();
   // A Code chat's paths in what Claude said are links to the file (ChatView's context).
   const codeFiles = getContext(CODE_FILES) ?? null;
@@ -160,7 +162,8 @@
   /** The stretches the person opened or folded (by their first call: a stretch keeps it as more come, and whichever view shows it); Verbose opens them all. */
   let opened = $state({});
   const keyOf = (it, i) => it.steps?.[0]?.calls?.[0] ?? `at${i}`;
-  const isOpen = (key) => opened[key] ?? view === 'verbose';
+  // (`stretchesOpen`: every stretch starts open — a row's own view, AgentTaskTab — its rows folded.)
+  const isOpen = (key) => opened[key] ?? (view === 'verbose' || stretchesOpen);
   const toggle = (key) => (opened = { ...opened, [key]: !isOpen(key) });
 
   // ---- Its to-do list (the thread's)

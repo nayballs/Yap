@@ -114,6 +114,8 @@ export const RUNS_KEY = 'runs';
 export const SUMMARY_KEY = 'summary';
 /** A page Yap keeps (chat/made/pages.rs): its tab's key. The chat's Outputs: its tab's. */
 export const keptKey = (id) => `kept:${id}`;
+/** An Agent panel row's own view (AgentTaskTab): by its row's key (`<agent>:<turn>`, a helper's `…:<call>`). */
+export const taskKey = (rowKey) => `task:${rowKey}`;
 export const OUTPUTS_KEY = 'outputs';
 export const pageKey = (url) => `page:${String(url || '').trim().replace(/#.*$/, '').replace(/\/+$/, '')}`;
 /** A page tab's key: a new tab's own (`page:new:1`), else its page's. */
@@ -147,6 +149,9 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
   // `n` the version asked for (none: its newest), `seq` counts each time it's asked for.
   let kept = $state(null);
   let keptSeq = 0;
+  // An Agent panel row's own view (15 Nov 2026: `{key, agentId, n, helper, title}`; AgentTaskTab): an agent's
+  // turn, or a helper the chat's own Claude sent, as the Claude app opens a background task.
+  let task = $state(null);
   // Each page tab as it is now (tab key → { title, url, went }): its title
   // and address as Rust says, and where the address bar last took it (a
   // tab shown again opens there). New tabs are counted for their keys.
@@ -225,6 +230,10 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
               : null
           : showing === 'outputs'
             ? OUTPUTS_KEY
+          : showing === 'task'
+            ? task
+              ? taskKey(task.key)
+              : null
           : id != null
             ? docKey(id)
             : null
@@ -424,6 +433,22 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     open = true;
   }
 
+  /**
+   * **An Agent panel row's own view** (AgentTaskTab, 15 Nov 2026: a row's click, as the Claude app opens a
+   * background task): `{key, agentId, n, helper?, title}` — an agent's turn, or a helper (`helper`: its call) the
+   * chat's own Claude sent. One tab a row; the panel stays as it was behind it.
+   */
+  function showTask(ref) {
+    if (!ref?.key || !ref.agentId) return;
+    if (showing === 'doc') flushSave();
+    const t = { key: ref.key, agentId: ref.agentId, n: ref.n ?? null, helper: ref.helper ?? null, title: ref.title || '' };
+    inRow({ key: taskKey(t.key), kind: 'task', title: t.title, task: t });
+    extra = extra.map((x) => (x.key === taskKey(t.key) ? { ...x, title: t.title || x.title, task: t } : x));
+    task = t;
+    showing = 'task';
+    open = true;
+  }
+
   /** **The chat's Outputs** (OutputsTab): every page it kept, document it wrote and file it shared. */
   function showOutputs() {
     if (showing === 'doc') flushSave();
@@ -542,7 +567,9 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
   function openTab(t) {
     if (t?.kind === 'picture') showPicture(t.picture);
     else if (t?.kind === 'page') showPage(t.page);
-    else if (t?.kind === 'agent') showAgent(t.agent);
+    // (An agent's tab clicked in the row: its face, the panel — never the turn or the timeline a pill once asked for,
+    // so going back and forth with a row's own view lands where the person left it.)
+    else if (t?.kind === 'agent') showAgent({ ...t.agent, turn: null, view: null, auto: true });
     else if (t?.kind === 'file') showFile(t.file);
     else if (t?.kind === 'runs') showRuns();
     else if (t?.kind === 'summary') {
@@ -552,6 +579,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     }
     else if (t?.kind === 'kept') showKept({ ...t.kept, n: 0 });
     else if (t?.kind === 'outputs') showOutputs();
+    else if (t?.kind === 'task') showTask(t.task);
     else if (t?.kind === 'doc') show(t.id, { title: t.title });
   }
 
@@ -663,6 +691,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     agent = null;
     file = null;
     kept = null;
+    task = null;
     if (page || Object.keys(pageNow).length) closePages();
     page = null;
     pageNow = {};
@@ -799,6 +828,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     get agent() { return agent; },
     get file() { return file; },
     get kept() { return kept; },
+    get task() { return task; },
     get pageNow() { return pageNow; },
     get extra() { return extra; },
     get hidden() { return hidden; },
@@ -832,6 +862,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     toggleSummary,
     showKept,
     showOutputs,
+    showTask,
     toggleOutputs,
     showTab,
     setActing,

@@ -18,7 +18,7 @@
   import { markdownVisuals } from '../../ui/markdownVisuals.js';
   import { getContext } from 'svelte';
   // A Code chat's file paths as links and ▶ Run on a one-line shell block (ChatView's context; none elsewhere).
-  import { fileLinks, CODE_FILES } from '../../ui/fileLinks.js';
+  import { fileLinks, mentionLinks, CODE_FILES } from '../../ui/fileLinks.js';
   import { codeRun } from '../../ui/codeRun.js';
   import { paidLine, whereItRuns } from '../../core/aiModel.js';
   import { closePartial, settle } from '../../core/streaming.js';
@@ -276,7 +276,7 @@
             <span class="viavoice" title="Asked by voice" aria-label="Asked by voice">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
             </span>
-          {/if}<span class="saidtext" data-testid="chat-question-text">{#each mentionParts(said.question) as part, pi (pi)}{#if part.path}<span class="mention" title={part.path} data-testid="chat-mention">@{part.path}</span>{:else}{part.text}{/if}{/each}</span>
+          {/if}<span class="saidtext" data-testid="chat-question-text" use:mentionLinks={codeFiles}>{#each mentionParts(said.question) as part, pi (pi)}{#if part.path}<span class="mention" title={part.path} data-path={part.path} data-testid="chat-mention">@{part.path}</span>{:else}{part.text}{/if}{/each}</span>
         </p>
         {#if said.screenText}
           <!-- What Windows read from the screenshot, sent in its place. -->
@@ -491,6 +491,11 @@
     color: var(--yap-fg);
     font-weight: 600;
     overflow-wrap: anywhere;
+  }
+  /* …a link to its view once Rust says it's a file of the chat's workspace (ui/fileLinks.js `mentionLinks`):
+     the pill as it is, underlined as every file link is (app.css `.md-filelink`). */
+  .mention:global(.md-filelink):hover {
+    background: color-mix(in srgb, var(--yap-primary) 24%, transparent);
   }
   .elchips {
     display: flex;
