@@ -1705,6 +1705,11 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     queueGate = typeof fn === 'function' ? fn : () => false;
   }
   const queuedIn = (conv) => queued.filter((q) => q.conv === conv);
+  // Rust hears which chats have a message waiting here: auto-archive never takes one (chat/auto_archive.rs).
+  $effect(() => {
+    const convs = [...new Set(queued.map((q) => q.conv))];
+    untrack(() => invoke('chat_queued', { conversations: convs }).catch(() => {}));
+  });
 
   /** A queued message, sent: with its words, never the box's (`send`'s `text`), marked to tick as it's read — only
    * while its own chat is the one shown (else it waits until that chat opens again), after a send still going. */
@@ -2502,6 +2507,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   function close() {
     alive = false;
     doc.flushSave();
+    // Its queue goes with the view (auto-archive's "a message waiting", chat/auto_archive.rs).
+    invoke('chat_queued', { conversations: [] }).catch(() => {});
     // The quote over the box goes with the view.
     reportQuote(null);
     // The live pages beside the chat close (their tabs open them again).

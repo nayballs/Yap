@@ -155,6 +155,18 @@
       ? `A meeting's transcript and audio go ${cfg.meetingTranscriptDays} days after it. Its notes, summary and tasks stay`
       : 'Kept until you delete the meeting'
   );
+  // "Archive chats you haven't used in" (config chatArchiveDays; 0 = never: chat/auto_archive.rs).
+  const ARCHIVE_DAYS = [
+    { value: 0, label: 'Never' },
+    { value: 7, label: '7 days' },
+    { value: 30, label: '30 days' },
+    { value: 90, label: '90 days' },
+  ];
+  const archiveDesc = $derived(
+    cfg.chatArchiveDays
+      ? `A chat moves to Archived ${cfg.chatArchiveDays} days after its last message. Nothing is deleted`
+      : 'Chats stay in the list until you archive them'
+  );
   // "Keep chat screenshots" (config chatImageDays; 0 = forever).
   const KEEP_SHOTS = [
     { value: 7, label: '7 days' },
@@ -566,6 +578,18 @@
 </Group>
 
 <MeetingSearchSettings {cfg} />
+
+<!-- Chats not used in a while archived by themselves (chat/auto_archive.rs). -->
+<Group title="Chats" id="settings-chats">
+  <Row
+    label="Archive chats you haven't used in"
+    desc={archiveDesc}
+    hint="Chat and Code chats alike, a project's keeping its project; never one that's working, an incognito chat or a meeting's Ask. Yap looks when it starts and once a day, and says what it archived, with Undo. A new message in an archived chat brings it back."
+    setting="chat-archive"
+  >
+    <Select bind:value={cfg.chatArchiveDays} options={ARCHIVE_DAYS} ariaLabel="Archive chats you haven't used in" />
+  </Row>
+</Group>
 
 <Group title="Chat screenshots" id="settings-chat-images">
   <Row
