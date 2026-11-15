@@ -148,19 +148,22 @@ body {
   --yap-code-glow: rgba(42, 150, 168, 0.95);
   --yap-code-light-width: 1.5px;
   --yap-code-light-dur: 4.5s;
-  /* A Code chat's context, by category (the summary's bar and dots:
-     views/chat/contextBreakdown.js, after the Claude app's): one hue each,
-     the buffer a quiet grey; free space is the bar's own track */
-  --yap-ctx-messages: #7b5cc4;
-  --yap-ctx-memory: #c2662d;
-  --yap-ctx-tools: #2f73b8;
-  --yap-ctx-mcp: #2b8a5e;
-  --yap-ctx-prompt: #8a8478;
-  --yap-ctx-skills: #b0457f;
-  --yap-ctx-instructions: #2a8f97;
-  --yap-ctx-agents: #a7801a;
-  --yap-ctx-buffer: #cfc8ba;
-  --yap-ctx-other: #6b7a8c;
+  /* A Code chat's context, by category (the summary's bar and squares:
+     views/chat/contextBreakdown.js), coloured as the Claude app colours
+     them: messages blue, memory files orange, system tools teal, MCP tools
+     amber, the rest one grey; the buffer a quieter grey, free space a square
+     like the bar's own track */
+  --yap-ctx-messages: #3d7fd9;
+  --yap-ctx-memory: #e0662a;
+  --yap-ctx-tools: #179c86;
+  --yap-ctx-mcp: #d49a12;
+  --yap-ctx-prompt: #a39d91;
+  --yap-ctx-skills: #a39d91;
+  --yap-ctx-instructions: #a39d91;
+  --yap-ctx-agents: #a39d91;
+  --yap-ctx-buffer: #c9c2b4;
+  --yap-ctx-free: #e6e0d4;
+  --yap-ctx-other: #a39d91;
   /* a pull request's state (the summary's Changes): merged violet, as GitHub's */
   --yap-pr-merged: #7b5cc4;
 
@@ -600,16 +603,17 @@ body {
   --yap-code-tint: rgba(108, 192, 204, 0.16);
   --yap-code-label-bg: #1d2a2c;
   --yap-code-glow: rgba(130, 214, 226, 0.95);
-  --yap-ctx-messages: #a98ce8;
-  --yap-ctx-memory: #e3955e;
-  --yap-ctx-tools: #74a9e8;
-  --yap-ctx-mcp: #6cc497;
-  --yap-ctx-prompt: #a8a294;
-  --yap-ctx-skills: #e07fb3;
-  --yap-ctx-instructions: #6cc0cc;
-  --yap-ctx-agents: #d8b45a;
-  --yap-ctx-buffer: #4a453c;
-  --yap-ctx-other: #9aa8b8;
+  --yap-ctx-messages: #4d8fea;
+  --yap-ctx-memory: #ec6f2f;
+  --yap-ctx-tools: #1fae96;
+  --yap-ctx-mcp: #e0a52a;
+  --yap-ctx-prompt: #a39f96;
+  --yap-ctx-skills: #a39f96;
+  --yap-ctx-instructions: #a39f96;
+  --yap-ctx-agents: #a39f96;
+  --yap-ctx-buffer: #5c5850;
+  --yap-ctx-free: #34312b;
+  --yap-ctx-other: #a39f96;
   --yap-pr-merged: #a98ce8;
   /* Chat's status dots: the warning's ring and a blue for the dark surfaces */
   --yap-status-needs-ring: rgba(220, 160, 60, 0.26);

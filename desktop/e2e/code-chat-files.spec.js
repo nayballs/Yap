@@ -377,12 +377,24 @@ test('the summary after the Claude app: context by category from /context, the b
   await yap.invoke('e2e_gh_script', { script: writeGh('gh-list', { stdout: PULLS, dump: GH_DUMP }) });
   const conversation = await rounded(yap, main, [{ _context: { usage: USAGE, markdown: '## Context Usage', dump: CONTEXT_DUMP } }, ...ROUNDS]);
   const agent = (await agents(yap)).find((a) => a.conversation === conversation);
+  // (Context's fold as a person first sees it, whatever an earlier run left.)
+  await main.evaluate(() => localStorage.removeItem('yap.summary.contextOpen'));
   await main.getByTestId('chat-summary-button').click();
   const summary = main.getByTestId('chat-summary');
 
-  // Context: Claude Code's own /context for the chat's session, drawn as the Claude app draws it.
+  // Context: Claude Code's own /context for the chat's session, drawn as the Claude app draws it — folded at first,
+  // "Context ›" with its share and a small bar; opened, the breakdown (and it stays open).
   const context = summary.getByTestId('chat-summary-context');
-  await expect(context.getByTestId('chat-summary-context-head')).toHaveText('16% used · 156k / 1M');
+  const toggle = context.getByTestId('chat-summary-context-toggle');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(context.getByTestId('chat-summary-context-mini')).toHaveText('16%');
+  await expect(context.getByTestId('chat-summary-context-cat')).toHaveCount(0);
+  await shot(main, '07a-context-folded');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(context.getByTestId('chat-summary-context-mini')).toHaveCount(0);
+  await expect(context.getByTestId('chat-summary-context-head').locator('.ctxused')).toHaveText('16% used');
+  await expect(context.getByTestId('chat-summary-context-head').locator('.ctxof')).toHaveText('156k / 1M');
   await expect
     .poll(() => context.getByTestId('chat-summary-context-cat').evaluateAll((els) => els.map((e) => e.dataset.name)))
     .toEqual(['Messages', 'Memory files', 'System tools', 'MCP tools', 'System prompt', 'Skills', 'MCP server instructions', 'Custom agents', 'Autocompact buffer', 'Free space']);
@@ -393,7 +405,10 @@ test('the summary after the Claude app: context by category from /context, the b
   const deferred = context.getByTestId('chat-summary-context-deferred');
   await expect(deferred).toHaveCount(2);
   await expect(deferred.first()).toContainText('MCP tools (deferred)');
-  await expect(deferred.first().locator('.cp')).toHaveText('');
+  await expect(deferred.first().locator('.cp')).toHaveText('—');
+  // The categories with more behind them say what they are on hover.
+  await expect(context.locator('[data-name="Memory files"] .tipped')).toHaveAttribute('title', /CLAUDE\.md/);
+  await expect(context.locator('[data-name="Messages"] .tipped')).toHaveCount(0);
   // The lists behind them, folded, each with its count.
   const lists = context.getByTestId('chat-summary-context-list');
   await expect(lists.locator('summary')).toHaveText([/MCP tools\s*3/, /Memory files\s*2/, /Custom agents\s*1/, /Skills\s*2/]);
@@ -401,6 +416,12 @@ test('the summary after the Claude app: context by category from /context, the b
   await expect(lists.first().locator('.crow')).toHaveCount(3);
   await expect(lists.first().locator('.crow').first()).toContainText('mcp__notes__search');
   await expect(lists.first().locator('.crow').first()).toContainText('notes');
+  // Opened, it stays open: the summary shut and shown again.
+  await main.getByTestId('chat-summary-button').click();
+  await expect(summary).toHaveCount(0);
+  await main.getByTestId('chat-summary-button').click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(context.getByTestId('chat-summary-context-cat').first()).toBeVisible();
   // Run for the session, in its workspace, never written into it.
   const runs = dumped(CONTEXT_DUMP);
   expect(runs.length).toBeGreaterThanOrEqual(1);
@@ -437,6 +458,10 @@ test('the summary after the Claude app: context by category from /context, the b
   await shot(main, '07-the-summary-broken-down');
   await theme(yap, main, 'dark');
   await shot(main, '07-the-summary-broken-down-dark');
+  // Folded again, in the dark too.
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await shot(main, '07b-context-folded-dark');
   await theme(yap, main, 'light');
   await rc.click();
   const ask = main.getByRole('alertdialog', { name: 'Turn on Remote Control?' });
