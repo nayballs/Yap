@@ -985,6 +985,53 @@ test('Rewind takes a Code chat back to before a message: it and what came after 
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two, again']);
 });
 
+// 15 Nov 2026, the Claude app's message actions: in a Code chat, Edit and Retry are Claude Code's own Rewind (no
+// second mechanism, no versions kept), asked first as Rewind is, then the message sent (chat/commands.rs `edit`).
+test('in a Code chat, Edit and Retry rewind to before the message and send it again: new words, or the same', async ({ yap, main, shot }) => {
+  test.setTimeout(150_000);
+  await script(yap, ECHOES, 'echoes');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'One');
+  const agent = await newAgent(yap, before);
+  await ended(yap, agent.id);
+  await send(main, 'Two');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(2);
+  await ended(yap, agent.id);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two']);
+  // Edit "Two": in place, then asked first as a Rewind.
+  await thread(main).locator('.cbubble.user', { hasText: 'Two' }).hover();
+  await actionsOf(main, 'Two').getByTestId('chat-edit-message').click();
+  const input = thread(main).getByTestId('chat-edit-input');
+  await expect(input).toHaveValue('Two');
+  await input.fill('Two, edited');
+  await thread(main).getByTestId('chat-edit-save').click();
+  const ask = main.getByRole('alertdialog', { name: 'Send the edited message?' });
+  await expect(ask).toBeVisible();
+  await shot(main, '98-code-edit-asked-first');
+  await ask.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(thread(main).locator('.cbubble.user')).toHaveText(['One', 'Two, edited']);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two, edited'], { timeout: 30_000 });
+  // Claude Code's own fork of the session at the end of "One": "Two" unseen. No versions in a Code chat.
+  let args = argsSeen().at(-1);
+  expect([after(args, '--resume-session-at'), args.includes('--fork-session')]).toEqual(['end-One', true]);
+  await expect(thread(main).getByTestId('chat-branch')).toHaveCount(0);
+  await ended(yap, agent.id);
+  // Retry under its answer: the same words again, from the same place.
+  const turns = (await agents(yap)).find((j) => j.id === agent.id).turnList.length;
+  await thread(main).locator('.cbubble.assistant', { hasText: 'Answer to: Two, edited' }).hover();
+  await thread(main).getByTestId('chat-retry').last().click();
+  const retry = main.getByRole('alertdialog', { name: 'Retry from this message?' });
+  await expect(retry).toBeVisible();
+  await retry.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(turns + 1);
+  await ended(yap, agent.id);
+  await expect(thread(main).locator('.cbubble.user')).toHaveText(['One', 'Two, edited']);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two, edited']);
+  args = argsSeen().at(-1);
+  expect([after(args, '--resume-session-at'), args.includes('--fork-session')]).toEqual(['end-One', true]);
+});
+
 test('Rewind to before the first message puts back the files Claude changed, and the next message starts a new session', async ({ yap, main }) => {
   test.setTimeout(120_000);
   await script(yap, WATERING_MARKED, 'watering-marked');

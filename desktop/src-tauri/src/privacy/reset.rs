@@ -136,6 +136,7 @@ pub const KINDS: &[About] = &[
             "(tasks.json)",
             "(chats.json)",
             "(chat_files.json)",
+            "(chat_branches.json)",
             "(memory.json)",
             "(search-index/)",
             "(calendar.json)",
@@ -156,6 +157,7 @@ pub const KINDS: &[About] = &[
             "(tasks.json)",
             "(chats.json)",
             "(chat_files.json)",
+            "(chat_branches.json)",
             "(memory.json)",
             "(search-index/)",
             "(calendar.json)",
@@ -175,7 +177,7 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: "Chats",
         says: "Every chat, archived ones too, with its screenshots. Documents Chat wrote stay in Notes",
-        files: &["(chats.json)", "(chat_files.json)", "chat-images/", "claude_sessions.json", "connector_chats.json", "(memory.json)", "(search-index/)"],
+        files: &["(chats.json)", "(chat_files.json)", "(chat_branches.json)", "chat-images/", "claude_sessions.json", "connector_chats.json", "(memory.json)", "(search-index/)"],
         stores: &["chats", "claudeSessions", "memory"],
     },
     About {
@@ -547,6 +549,8 @@ const STORES: &[(&str, Rule)] = &[
     ("chats.json", Choice::chats),
     // (The shares' copy for an older Yap's save: rewritten with chats.json, chat/shares.rs.)
     ("chat_files.json", Choice::chats),
+    // (And the branches' copy, Retry and Edit's versions: chat/chats/branches.rs.)
+    ("chat_branches.json", Choice::chats),
     ("chat-images/", Choice::chat_images),
     ("claude_sessions.json", Choice::claude_sessions),
     ("connector_chats.json", Choice::connector_chats),
