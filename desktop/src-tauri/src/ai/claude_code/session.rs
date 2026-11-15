@@ -593,14 +593,20 @@ pub fn sweep_run_folders() -> usize {
 }
 
 /// The run's own folder of files (settings, MCP config, system prompt),
-/// under `<temp>/yap-claude/`, removed with it.
-struct RunFiles {
+/// under `<temp>/yap-claude/`, removed with it. A short run of its own
+/// writes one too (a Code chat's `/context`: `agents/context.rs`).
+pub(crate) struct RunFiles {
     dir: Option<PathBuf>,
     files: Files,
 }
 
 impl RunFiles {
-    fn write(spec: &Spec) -> Result<RunFiles, String> {
+    /// The files the run's flags name.
+    pub(crate) fn files(&self) -> &Files {
+        &self.files
+    }
+
+    pub(crate) fn write(spec: &Spec) -> Result<RunFiles, String> {
         let wanted = spec.settings.is_some() || spec.mcp_config.is_some() || spec.append_system_prompt.is_some() || spec.system_prompt.is_some();
         if !wanted {
             return Ok(RunFiles { dir: None, files: Files::default() });

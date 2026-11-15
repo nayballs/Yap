@@ -22,6 +22,12 @@ fn main() {
     if std::env::args_os().nth(1).is_some_and(|arg| arg == "fake-claude") {
         std::process::exit(yap_lib::run_fake_claude());
     }
+    // `yap.exe fake-gh <script.json> …` (debug builds): a stand-in for
+    // GitHub's gh answering from a script (agents/prs/fake.rs), for tests.
+    #[cfg(debug_assertions)]
+    if std::env::args_os().nth(1).is_some_and(|arg| arg == "fake-gh") {
+        std::process::exit(yap_lib::run_fake_gh());
+    }
     // `yap.exe eval …` (debug builds): the model evaluation harness
     // (eval.rs, docs/model-evals.md): real models through Chat's own code,
     // nothing launched, logs per run. No window, tray or hook.

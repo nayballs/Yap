@@ -28,6 +28,14 @@ the web, for its searches and page reads) by itself. Yap sends nothing for
 them, so they aren't in the list, and the page says so. Nor are the runs'
 requests to Yap's own endpoint on 127.0.0.1 (`integrations/claude_live.rs`).
 
+**Nor GitHub's `gh`** (2026-11-15): a Code chat's summary lists its branch's
+pull requests by running the person's own GitHub CLI in the workspace
+(`gh pr list`, `agents/prs.rs`), on their own sign-in. The request to GitHub is
+`gh`'s, as Claude Code's are Claude Code's: Yap has no GitHub sign-in or token
+of its own and passes none, so it isn't in the list either. (The summary's
+`/context`, `agents/context.rs`, is Claude Code answering itself: no request
+at all.)
+
 ## `privacy/net.rs` — the recorder
 
 - **One place.** Every reqwest request goes out through

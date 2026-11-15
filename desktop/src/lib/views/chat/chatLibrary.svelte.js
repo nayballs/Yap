@@ -16,6 +16,33 @@ import { askConfirm } from '../../ui/contextMenu.svelte.js';
 import { showSaveError } from '../../notices/saveErrors.js';
 import { typedWords, markWords } from '../../core/findWords.js';
 
+/**
+ * **Archive (`on`) or restore conversations `ids`** of the view's state `chat` (chatState.svelte.js): a
+ * chat archived while shown gives way to a new one, the list is read again (and `after()`: the archive's
+ * own list), and a toast says so, with Undo. The list's own Archive and a Code chat's summary (a merged
+ * pull request's Archive, SummaryTab.svelte) both come here.
+ */
+export async function archiveChats(chat, ids, on, after = null) {
+  if (!ids?.length) return;
+  try {
+    await invoke('chat_archive', { ids, archived: on });
+  } catch (e) {
+    if (!showSaveError(e)) {
+      toast({ title: on ? "Couldn't archive" : "Couldn't restore", description: String(e), variant: 'destructive' });
+      return;
+    }
+  }
+  if (on && ids.includes(chat.activeId)) chat.newChat();
+  chat.clearPicked();
+  await Promise.all([chat.refreshList(), after?.()]);
+  const n = ids.length;
+  toast({
+    title: on ? (n === 1 ? 'Chat archived' : `${n} chats archived`) : n === 1 ? 'Chat restored' : `${n} chats restored`,
+    variant: 'success',
+    ...(on ? { action: { label: 'Undo', onClick: () => archiveChats(chat, ids, false, after) } } : {}),
+  });
+}
+
 /** `chat()`: the view's state (chatState.svelte.js), as the list has it now. */
 export function createChatLibrary(chat) {
   // ---- search ----
@@ -90,25 +117,10 @@ export function createChatLibrary(chat) {
   }
   refreshArchived();
 
-  async function setArchived(ids, on) {
-    if (!ids.length) return;
-    try {
-      await invoke('chat_archive', { ids, archived: on });
-    } catch (e) {
-      if (!showSaveError(e)) {
-        toast({ title: on ? "Couldn't archive" : "Couldn't restore", description: String(e), variant: 'destructive' });
-        return;
-      }
-    }
-    if (on && ids.includes(chat().activeId)) chat().newChat();
-    chat().clearPicked();
-    await Promise.all([chat().refreshList(), refreshArchived()]);
-    if (!archived.length) showArchived = false;
-    const n = ids.length;
-    toast({
-      title: on ? (n === 1 ? 'Chat archived' : `${n} chats archived`) : n === 1 ? 'Chat restored' : `${n} chats restored`,
-      variant: 'success',
-      ...(on ? { action: { label: 'Undo', onClick: () => setArchived(ids, false) } } : {}),
+  function setArchived(ids, on) {
+    return archiveChats(chat(), ids, on, async () => {
+      await refreshArchived();
+      if (!archived.length) showArchived = false;
     });
   }
 
