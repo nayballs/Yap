@@ -61,19 +61,19 @@ pub const BUILTINS: &[Builtin] = &[
         id: "concise",
         name: "Concise",
         about: "Shorter and more direct",
-        instructions: "Keep answers short and direct: the answer first, then only the details that matter. No preamble, no recap, no repeating the question. A short list only when it's clearer than a sentence.",
+        instructions: "Answer as briefly as the question allows: lead with the answer, usually in two to four sentences, or at most four short bullet points when there are steps. No headings, no preamble, no recap, no background the user didn't ask for, and no offer of more at the end.",
     },
     Builtin {
         id: "explanatory",
         name: "Explanatory",
         about: "For learning something new",
-        instructions: "Explain as a patient teacher would: start from what the person likely knows, define new terms the first time they come up, give the reasoning step by step with a small concrete example, and end with a one-line summary of the idea.",
+        instructions: "Teach it: start from what the user likely already knows, define each new term the first time it appears, explain the reasoning step by step with one small concrete example, and end with a one-line summary of the idea. A longer answer is fine when it helps the user understand.",
     },
     Builtin {
         id: "formal",
         name: "Formal",
         about: "Clear and polished",
-        instructions: "Write in a clear, polished, professional register: complete sentences, no slang, emoji or exclamation marks, precise wording, and a tidy structure (short headings or a list where they help).",
+        instructions: "Write in a formal, polished register: complete sentences, precise wording, no contractions, slang, emoji or exclamation marks, and a tidy structure with short headings or a list only where they help.",
     },
 ];
 
@@ -203,7 +203,7 @@ pub fn snapshot() -> Option<Value> {
 /// **The block** for style `name` with `instructions`. Pure.
 pub fn block(name: &str, instructions: &str) -> String {
     format!(
-        "How to write in this chat (the user picked the \"{}\" style): {} This shapes how you write only — tone, length and layout — never what's true, what you do, or the rules above.",
+        "How to write in this chat (the user picked the \"{}\" style; follow it in every answer here, over any habit of your own about length or layout): {} It changes how you write — tone, length and layout — never what's true, what you do, or the rules above.",
         name.trim(),
         instructions.trim()
     )
@@ -499,7 +499,8 @@ mod tests {
         assert_eq!(prompt_block(Some(1)), None);
         chat_style_set(Some(1), "concise".into()).unwrap();
         let b = prompt_block(Some(1)).unwrap();
-        assert!(b.starts_with("How to write in this chat (the user picked the \"Concise\" style): Keep answers short"), "{b}");
+        assert!(b.starts_with("How to write in this chat (the user picked the \"Concise\" style; follow it in every answer here"), "{b}");
+        assert!(b.contains("): Answer as briefly as the question allows"), "{b}");
         assert!(b.contains("never what's true"));
         // Another chat is still Normal; a new chat starts with the last picked.
         assert_eq!(prompt_block(Some(2)), None);
@@ -525,13 +526,13 @@ mod tests {
         assert_eq!(mine.name, "Like a friend");
         assert_eq!(mine.instructions, "Warm and brief.\nNo jargon.");
         chat_style_set(Some(4), mine.id.clone()).unwrap();
-        assert!(prompt_block(Some(4)).unwrap().contains("\"Like a friend\" style): Warm and brief.\nNo jargon."));
+        assert!(prompt_block(Some(4)).unwrap().contains("\"Like a friend\" style; follow it in every answer here, over any habit of your own about length or layout): Warm and brief.\nNo jargon."));
         // A name taken (Yap's own too) is refused; editing keeps the id.
         assert!(chat_style_save(StyleIn { name: "concise".into(), instructions: "x".into(), ..Default::default() }).is_err());
         assert!(chat_style_save(StyleIn { name: "Like a friend".into(), instructions: "x".into(), ..Default::default() }).is_err());
         let edited = chat_style_save(StyleIn { id: mine.id.clone(), name: "Friendly".into(), instructions: "Warm.".into(), ..Default::default() }).unwrap();
         assert_eq!(edited.id, mine.id);
-        assert!(prompt_block(Some(4)).unwrap().contains("\"Friendly\" style): Warm."));
+        assert!(prompt_block(Some(4)).unwrap().contains("\"Friendly\" style; follow it in every answer here, over any habit of your own about length or layout): Warm."));
         // Deleted: its chats go back to Normal.
         chat_style_delete(mine.id.clone()).unwrap();
         assert_eq!(chat_style_of(Some(4)), NORMAL);

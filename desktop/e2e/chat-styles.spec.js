@@ -73,7 +73,8 @@ test('a chat’s style is picked under the message box, carried in its prompt an
 
   await ask(main, fakeLlm, 'How do I repot a fern?', 'Water it, then lift it gently.');
   const sys = systemOf(askedWith(fakeLlm, 'How do I repot a fern?'));
-  expect(sys).toContain('How to write in this chat (the user picked the "Concise" style): Keep answers short and direct');
+  expect(sys).toContain('How to write in this chat (the user picked the "Concise" style; follow it in every answer here');
+  expect(sys).toContain('Answer as briefly as the question allows: lead with the answer');
   // The chat keeps it (chat_styles.json, never chats.json).
   const [conv] = await yap.invoke('chats_list');
   expect(await yap.invoke('chat_style_of', { conversation: conv.id })).toBe('concise');
@@ -122,7 +123,7 @@ test('a style of your own: described, written by the model, edited, used and del
   await expect(chip(main)).toHaveText('Garden chat');
 
   await ask(main, fakeLlm, 'When should I sow beans?', 'Mid-spring, once it warms up.');
-  expect(systemOf(askedWith(fakeLlm, 'When should I sow beans?'))).toContain('(the user picked the "Garden chat" style): Write warmly and briefly, like a note to a neighbour. No jargon.');
+  expect(systemOf(askedWith(fakeLlm, 'When should I sow beans?'))).toContain('(the user picked the "Garden chat" style; follow it in every answer here, over any habit of your own about length or layout): Write warmly and briefly, like a note to a neighbour. No jargon.');
   const conv = (await yap.invoke('chats_list')).find((c) => c.title.includes('sow beans'));
   // Deleted, asked first: its chat goes back to Normal.
   await chip(main).click();

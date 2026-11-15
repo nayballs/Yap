@@ -5616,9 +5616,12 @@ Claude Code's own).
   (`turn_conversation` → `styles::adopt_new`, never a Code chat).
 - **In the prompt** (`styles::prompt_block`, `prompt::build` → `Prompt::end`):
   one block in the system prompt just before About you — "How to write in
-  this chat (the user picked the "Concise" style): … This shapes how you
-  write only — tone, length and layout — never what's true, what you do, or
-  the rules above." — stable from turn to turn, so a model re-uses its
+  this chat (the user picked the "Concise" style; follow it in every answer
+  here, over any habit of your own about length or layout): … It changes how
+  you write — tone, length and layout — never what's true, what you do, or
+  the rules above." (firmer since a Yap Lab check on Opus: the first wording
+  barely changed an answer's length; Concise now asks for two to four
+  sentences or four bullets, no headings) — stable from turn to turn, so a model re-uses its
   cache. The small web pipeline's prompt ends with it too (`small.rs`), and
   so does your Claude plan's session prompt (`plan.rs` `system_prompt`: a
   new style restarts the warm session). A question asked out loud into the

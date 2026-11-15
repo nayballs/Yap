@@ -597,6 +597,8 @@ async function pickStyle(name) {
   await m.getByTestId('chat-style-chip').click({ timeout: 10_000 });
   const wanted = String(name).trim().toLowerCase();
   const items = m.getByRole('menu').first().getByRole('menuitemradio');
+  // (The chip reads the styles before its menu opens: wait for it.)
+  await items.first().waitFor({ state: 'visible', timeout: 10_000 });
   const names = (await items.allTextContents()).map((t) => t.trim().toLowerCase());
   const at = names.indexOf(wanted);
   if (at < 0) throw new Error(`No style called "${name}" (there are: ${names.join(', ')})`);
