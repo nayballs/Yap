@@ -8,6 +8,8 @@
 //   picture as "Show image" — nothing fetched until it's clicked, then the
 //   picture from the (fake) web, through Rust (`markdown_picture`).
 // - The theme changes: the diagram is drawn again in its colours.
+// - KaTeX's sheet and fonts load from its chunk; a diagram with maths in a
+//   node and on an edge still draws (that maths left blank), light and dark.
 // - A note's summary (the Notes view): the same maths and diagram.
 //
 // The conversation and the note are seeded; nothing leaves the PC: the web is
@@ -54,8 +56,33 @@ const ANSWER = [
   `And the map: ![Fort Joy map](${FORT_JOY_MAP})`,
 ].join('\n');
 
+// Maths beside a diagram with maths in its labels (mermaid draws `$$…$$` with
+// KaTeX too: the one copy, vite.config.js `resolve.dedupe`).
+const MATHS_ANSWER = [
+  'The roots, inline: $x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$, for any $a \\neq 0$.',
+  '',
+  '$$',
+  '\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}',
+  '$$',
+  '',
+  '```mermaid',
+  'flowchart LR',
+  '  A["$$x^2$$"] -->|"$$\\sqrt{x}$$"| B[Root]',
+  '```',
+].join('\n');
+
 const CHATS = {
   conversations: [
+    {
+      id: 12,
+      title: 'Maths in a diagram',
+      createdTs: NOW - 900,
+      updatedTs: NOW - 890,
+      messages: [
+        { role: 'user', text: 'Show me the roots and a diagram with maths in it.', ts: NOW - 900 },
+        { role: 'assistant', text: MATHS_ANSWER, ts: NOW - 890 },
+      ],
+    },
     {
       id: 11,
       title: 'Maths and diagrams',
@@ -199,6 +226,50 @@ test('an answer draws its maths, diagram, diff, headings and (when asked) its pi
   await expect(box).toHaveAttribute('data-drawn', 'true', { timeout: 20_000 });
   await expect.poll(async () => (await diagramIn(box))?.fill).not.toBe(light.fill);
   await shot(main, '04-answer-dark');
+  await theme(yap, main, 'light');
+});
+
+/** The KaTeX fonts the window has loaded (from the maths chunk's CSS), as "family style weight". */
+const katexFonts = (main) =>
+  main.evaluate(async () => {
+    await document.fonts.ready;
+    return [...document.fonts]
+      .map((f) => ({ family: f.family.replace(/["']/g, ''), style: f.style, weight: f.weight, status: f.status }))
+      .filter((f) => f.family.startsWith('KaTeX_') && f.status === 'loaded')
+      .map((f) => `${f.family} ${f.style} ${f.weight}`);
+  });
+
+test("KaTeX's fonts and CSS load, and a diagram with maths in its labels still draws, light and dark", async ({ yap, main, shot }) => {
+  await theme(yap, main, 'light');
+  await openView(main, 'Chat');
+  await main.locator('.conv').filter({ hasText: 'Maths in a diagram' }).click();
+  const a = answer(main);
+  await expect(a.locator('.md-math[data-drawn="true"] .katex')).toHaveCount(3);
+  await expect(a.locator('.md-math-display .katex-display')).toHaveCount(1);
+
+  // KaTeX's sheet applies (its own font on the formula, a fraction laid out)
+  // and its fonts load from the chunk, under Yap's own scheme.
+  expect(await a.locator('.md-math .katex').first().evaluate((el) => getComputedStyle(el).fontFamily)).toContain('KaTeX_Main');
+  await expect(a.locator('.md-math .katex .mfrac').first()).toBeVisible();
+  await expect.poll(() => katexFonts(main), { timeout: 10_000 }).toEqual(
+    expect.arrayContaining([expect.stringMatching(/^KaTeX_Main normal/), expect.stringMatching(/^KaTeX_Math italic/), expect.stringMatching(/^KaTeX_Size\d/)])
+  );
+
+  // The diagram draws with maths in a node and on an edge. (Mermaid draws
+  // that maths with KaTeX as MathML; the label rules, ui/diagrams.js
+  // `LABELS`, keep text tags only, so it's left blank: never its TeX.)
+  const box = a.locator('.md-diagram');
+  await expect(box).toHaveAttribute('data-drawn', 'true', { timeout: 20_000 });
+  const light = await diagramIn(box);
+  expect(light.labels).toContain('Root');
+  expect(light.labels).not.toContain('$$');
+  await shot(main, '08-maths-and-diagram-light');
+
+  await theme(yap, main, 'dark');
+  await expect(box).toHaveAttribute('data-drawn', 'true', { timeout: 20_000 });
+  await expect.poll(async () => (await diagramIn(box))?.fill).not.toBe(light.fill);
+  await expect(a.locator('.md-math[data-drawn="true"] .katex')).toHaveCount(3);
+  await shot(main, '09-maths-and-diagram-dark');
   await theme(yap, main, 'light');
 });
 

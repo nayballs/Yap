@@ -62,6 +62,15 @@ export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [svelte(), mainChunkBudget(), chunkBudget()],
   clearScreen: false,
+  resolve: {
+    // One KaTeX (15 Nov 2026): Yap's (package.json, 0.19.x) also draws the
+    // maths in mermaid's labels. npm gives mermaid 12 its own 0.18.10 (its
+    // range is ^0.18.0, and 0.18.11 is deprecated), which would be a second
+    // 260 kB chunk. 0.18.11 was 0.19.0's code published by mistake, which
+    // mermaid already ran on here; 0.19's one break is how `strict` reports
+    // glyphs missing from the fonts, and mermaid passes no `strict`.
+    dedupe: ['katex'],
+  },
   server: {
     port: 51437,
     strictPort: true,

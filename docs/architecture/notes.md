@@ -1093,9 +1093,9 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
     the closing one, no digit, letter or `$` after it, and it ends at the
     next `$` or isn't maths — so "$5 and $10", "$5–$10", "US$5",
     "$HOME/$USER" and "Pay $5 now; then $x^2$" (a price, then maths) read
-    right. `\$` never opens or closes. Drawn by **KaTeX** 0.18.11 (MIT,
-    pinned; the version mermaid's own range takes, so one copy) in a chunk
-    of its own (`ui/maths.js` with its CSS and fonts), loaded the first
+    right. `\$` never opens or closes. Drawn by **KaTeX** 0.19.1 (MIT,
+    pinned; 0.18.11, deprecated, was 0.19.0's code published by mistake)
+    in a chunk of its own (`ui/maths.js` with its CSS and fonts), loaded the first
     time maths shows: no trust (`\href`, `\url`, `\includegraphics` off),
     `maxSize` / `maxExpand` limits, at most `MATH_MAX` (4,000) characters,
     HTML and MathML (for a screen reader), then sanitised again
@@ -1111,7 +1111,11 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
     exempts the drawing libraries' chunks from the 450 kB budget, which
     still holds Yap's own): strict security level, labels' markup cut to
     text tags (`dompurifyConfig`), a diagram's `%%{init}%%` never changing
-    the theme, its CSS or the security keys (`secure`). Never drawn — its
+    the theme, its CSS or the security keys (`secure`). Maths in a label
+    (`$$…$$`) is drawn by mermaid with Yap's own KaTeX (npm gives
+    mermaid its own 0.18.10, its range being `^0.18.0`; `vite.config.js`
+    `resolve.dedupe` builds Yap's one copy instead) as MathML, which
+    those text tags leave blank. Never drawn — its
     code shows, the reason as its `title` — when its source could reach an
     address (`diagramRefused`: a CSS `url(` or `@import`, a CSS escape in a
     style line, `<img>`/`<a>`/`<iframe>`… markup, an `img:`/`icon:` shape)
@@ -1175,5 +1179,6 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   tokens, `diagramRefused`, `cleanDiagram` / `cleanMaths` against hostile
   input, in jsdom), `doc-markdown.spec.js` (round trips), and
   `markdown-visuals.spec.js` in the app (an answer's maths, diagram, `</>`,
-  diff, headings and a picture fetched only on its click; dark; a note's
-  summary).
+  diff, headings and a picture fetched only on its click; dark; KaTeX's
+  sheet and fonts loaded, a diagram with maths in its labels still drawn,
+  light and dark; a note's summary).
