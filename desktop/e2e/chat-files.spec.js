@@ -168,7 +168,7 @@ test('files dropped on Chat wait as chips; sent, their text goes before the ques
   await expect.poll(() => yap.invoke('e2e_opened_urls')).toContainEqual('open-attachment:seed-list.txt');
 });
 
-test('Retry sends a question's files again, once, and the question keeps them', async ({ yap, main, fakeLlm }) => {
+test("Retry sends a question's files again, once, and the question keeps them", async ({ yap, main, fakeLlm }) => {
   await freshChat(main);
   await drop(yap, [SEEDS]);
   await expect(boxFiles(main)).toHaveCount(1);
