@@ -24,7 +24,8 @@ pub(super) enum Source {
     Files,
     /// `share_files`: files shared into the conversation (`chat/shares.rs`).
     Share,
-    /// `show_visual`: a visual in the answer itself (`chat/made.rs`).
+    /// `show_visual`, `save_page`: a visual in the answer itself, a page
+    /// Yap keeps (`chat/made.rs`).
     Made,
     /// `look_at_screen` (`chat/see_screen.rs`).
     Screen,
@@ -239,7 +240,7 @@ impl Loop<'_> {
                 // chat, the page hears it at once. Made after outside content,
                 // a button in it fills the box rather than sending.
                 let outside = self.seen().any();
-                crate::chat::made::show_visual(self.extra.conversation, &args, outside)
+                crate::chat::made::execute(name, self.extra.conversation, &args, outside)
             }
             Source::Screen => {
                 // The screen as it is now (chat/see_screen.rs): its pictures

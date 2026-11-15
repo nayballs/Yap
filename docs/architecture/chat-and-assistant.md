@@ -1261,6 +1261,44 @@ one side.
   weight, a question asking for one, refusals, the scripts and the
   libraries, the policy, the document, the scheme's 404s); `gates.rs`,
   `fit.rs` (offered as the gates say); e2e `chat-visuals.spec.js` (below).
+- **`chat/made/pages.rs`** — **pages Yap keeps** (15 Nov 2026, after the
+  Claude app's artifacts: its look and words, nothing of its code; local
+  only, never published). Asked for "a tip calculator I can keep", Chat
+  could only paste code. **`save_page {title, html, id?}`** (`SAVE_PAGE`,
+  `DESCRIPTION`, `parameters`; offered with `show_visual`, where it is:
+  `made::definitions`, `made::NAMES`, `made::execute` the one door for both,
+  the tool loop's `Source::Made` and the run endpoint's `made_call`): a whole
+  HTML page (a fragment works too), its scripts as a visual's (inline, or
+  the allow-list; any other refused). No `id`: a new page, `pg_` + 16 hex;
+  one of this chat's pages' ids: its **next version**, the earlier ones
+  kept (`MAX_VERSIONS` 40, then "save it as a new page"); an id that isn't
+  this chat's page is refused ("no such page here"). **The line**
+  (`made::INSTRUCTIONS`, `plan.rs` `VISUALS`, `rpc.rs` `VISUALS_INSTRUCTIONS`):
+  something to keep and come back to — a small app or tool — is
+  `save_page`; a quick picture in the answer is `show_visual`; writing to
+  keep stays a document. Both tools' schemas and the line weigh ~580
+  tokens (`the_tool_is_offered_where_a_thread_shows_it`). **Kept** in the
+  chat's `made.json` as a `Made` of kind "page" (its `title` the newest,
+  `after` its first question, `at` and `bytes` the newest's) with
+  **`versions`** (`PageVersion {n, at, bytes, after, title}`: each
+  version's question, so its card shows in the answer that saved it), each
+  version's HTML as `<id>.v<n>.html`; written through `made::with_index`
+  (one writer, the file first, then the index; never over one that can't
+  be read). The result: `{success, data: {saved: "Saved the page “Tip
+  calculator”" | "Saved version 2 of “…”", id, version, next}, displayText:
+  "Saved a page" | "Saved version 2 of a page"}`; `next` asks for a line
+  on what it does and gives the id for a later change. The page hears it
+  (`yap-chat-made`, the page whole, replacing the one it had) and opens it
+  beside the chat. **Shown** at `/p/<chat>/<id>/<n>` (`serve.rs` `page`,
+  `made::page_of`: 0 its newest): the same policy, sandbox and bridge as a
+  visual, its own style (`PAGE_STYLE`: it scrolls in its frame; a fragment
+  in `<main id="yap-page">` with room round it), where a visual's never
+  scrolls (`VISUAL_STYLE`). Step lines: "Saving a page…", "Saved a page"
+  (`chatSteps.js` `kept`), a Code chat's row "Saved a page: …". Logs: ids,
+  versions and sizes. Tests: unit (`made/tests.rs`: ids and files, a page's
+  versions read back by number and its newest, refusals, the one door, the
+  page's document, the scheme's versions and 404s; the claude_live lists);
+  e2e `chat-kept-pages.spec.js` (below).
 - **`chat/activity.rs`** — **what Chat is doing now** (2026-10-31): while
   a turn runs, the thread shows one line — a small moving mark, the step
   under way and the turn's time — as the Claude Code app does:
@@ -2348,6 +2386,36 @@ click does nothing (no link opened, no message); its button, clicked,
 sends "Make the tip 20%" into the chat and the model answers it; its link
 opens in the person's browser; a visual made after outside content (seeded)
 fills the box instead.
+
+**Pages Yap keeps** (15 Nov 2026, `PageCard.svelte`, `KeptPageTab.svelte`,
+`OutputsTab.svelte`, `outputs.js`; `chat/made/pages.rs`). **A card a
+version** in the answer that saved it (`placeMade`: each `PageVersion` by
+its question, above the answer's words, after its visuals): the page icon,
+its title, "Saved" (version 1) or "Version 2", and › — as the Claude app's
+"Published ›" card, Yap's kept on this PC. **Beside the chat** (the panel's
+`kept` tab, `chatDoc` `showKept`, `keptKey`): opened at once when a turn
+saves it (`onMade`, a page of the chat in view), and by its card at that
+card's version. Its header: the icon, the title, "Saved", **‹ Version 2 of 3
+›** (two or more; a turn saving another while the newest shows moves to
+it) and ↻ to start it again; under it the page in the sandboxed frame
+(`pageSrc`, the colours, `sendPrompt` as a visual's, a page navigating
+away put back), filling the panel and scrolling in itself. **The chat's
+Outputs** (the Claude app's Outputs list; `chatDoc` `showOutputs`, tab
+`outputs`): every page it kept, then every document it wrote, then every
+file it shared, newest first in each (`outputsOf`), a row each — its icon,
+its name, what it is ("Page · 2 versions", "Document", "Markdown",
+"Picture"…) — that opens it where it lives (a page or a document beside the
+chat, a picture in its tab, a file in its app: `chat_file_open`); nothing
+yet says what will show there. Opened by the panel's row (the layers
+button beside +, whatever shows) and the conversation's ⋯ → **Outputs**
+(the chat opened first). e2e `chat-kept-pages.spec.js`: "a tip calculator I
+can keep" saved, beside the chat at once in the sandboxed frame (an opaque
+origin; its slider works), a card "Saved"; a change makes version 2 — its
+own card, the panel on the newest, ‹ › between them, the first card on
+version 1; light and dark; kept in `chat-made/` with both versions' files;
+Outputs (the panel's button) lists it as "Page · 2 versions" and opens it;
+shown again when the chat opens again; a seeded chat's ⋯ → Outputs lists its
+page, its document and its shared file; an id not this chat's is refused.
 
 **Chat looks at the screen** (2026-11-01, `chat/see_screen.rs`): asked
 "here are the speakers, can you have a look?" with the page open in another

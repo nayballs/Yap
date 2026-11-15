@@ -153,6 +153,11 @@ export function registerFrame(el, { onsize, onprompt }) {
   };
 }
 
+/** A kept page's version `n` (0: its newest): `http://yapmade.localhost/p/<chat>/<id>/<n>` (chat/made/serve.rs). */
+export function pageSrc(conversation, id, n = 0) {
+  return convertFileSrc(`p/${Number(conversation)}/${String(id).replace(/[^a-z0-9_]/g, '')}/${Math.max(0, Math.floor(Number(n) || 0))}`, 'yapmade');
+}
+
 /** A visual's frame address (the `yapmade` scheme: `http://yapmade.localhost/v/<chat>/<id>` in WebView2; chat/made/serve.rs). */
 export function visualSrc(conversation, id) {
   return convertFileSrc(`v/${Number(conversation)}/${String(id).replace(/[^a-z0-9_]/g, '')}`, 'yapmade');

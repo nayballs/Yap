@@ -108,6 +108,9 @@ export const picKey = (id) => `pic:${id}`;
 /** A page's: its address without its fragment or a trailing slash (one tab a page). */
 /** An agent's tab (Yap Code: AgentTab.svelte). */
 export const agentKey = (id) => `agent:${id}`;
+/** A page Yap keeps (chat/made/pages.rs): its tab's key. The chat's Outputs: its tab's. */
+export const keptKey = (id) => `kept:${id}`;
+export const OUTPUTS_KEY = 'outputs';
 export const pageKey = (url) => `page:${String(url || '').trim().replace(/#.*$/, '').replace(/\/+$/, '')}`;
 /** A page tab's key: a new tab's own (`page:new:1`), else its page's. */
 export const tabKeyOf = (p) => p?.tabKey || pageKey(p?.url);
@@ -133,6 +136,10 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
   // conversation, turn?}`; its Agent tab).
   let agent = $state(null);
   let agentSeq = 0;
+  // A page Yap keeps beside the chat (chat/made/pages.rs: `{id, conversation, title, n?, seq}`; KeptPageTab):
+  // `n` the version asked for (none: its newest), `seq` counts each time it's asked for.
+  let kept = $state(null);
+  let keptSeq = 0;
   // Each page tab as it is now (tab key → { title, url, went }): its title
   // and address as Rust says, and where the address bar last took it (a
   // tab shown again opens there). New tabs are counted for their keys.
@@ -197,6 +204,12 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
             ? agent
               ? agentKey(agent.id)
               : null
+          : showing === 'kept'
+            ? kept
+              ? keptKey(kept.id)
+              : null
+          : showing === 'outputs'
+            ? OUTPUTS_KEY
           : id != null
             ? docKey(id)
             : null
@@ -381,6 +394,30 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
   }
 
   /**
+   * **Show a page Yap keeps** (chat/made/pages.rs: its card, its Outputs row, a turn saving it): its tab
+   * (KeptPageTab), at version `n` or its newest. The document stays as it was behind it.
+   */
+  function showKept(p) {
+    if (!p?.id) return;
+    if (showing === 'doc') flushSave();
+    keptSeq += 1;
+    const k = { id: p.id, conversation: p.conversation ?? null, title: p.title || '', n: p.n || 0, seq: keptSeq };
+    inRow({ key: keptKey(p.id), kind: 'kept', id: p.id, title: k.title, kept: k });
+    extra = extra.map((t) => (t.key === keptKey(p.id) ? { ...t, title: k.title || t.title, kept: k } : t));
+    kept = k;
+    showing = 'kept';
+    open = true;
+  }
+
+  /** **The chat's Outputs** (OutputsTab): every page it kept, document it wrote and file it shared. */
+  function showOutputs() {
+    if (showing === 'doc') flushSave();
+    inRow({ key: OUTPUTS_KEY, kind: 'outputs', title: 'Outputs' });
+    showing = 'outputs';
+    open = true;
+  }
+
+  /**
    * Yap is acting on page tab `key` (a turn's `acting` event, chat/pages/act.rs):
    * its tab says "Yap is using this page", with Stop (`stop`: the turn's ■),
    * until the turn ends.
@@ -443,6 +480,8 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     if (t?.kind === 'picture') showPicture(t.picture);
     else if (t?.kind === 'page') showPage(t.page);
     else if (t?.kind === 'agent') showAgent(t.agent);
+    else if (t?.kind === 'kept') showKept({ ...t.kept, n: 0 });
+    else if (t?.kind === 'outputs') showOutputs();
     else if (t?.kind === 'doc') show(t.id, { title: t.title });
   }
 
@@ -552,6 +591,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     showing = 'doc';
     picture = null;
     agent = null;
+    kept = null;
     if (page || Object.keys(pageNow).length) closePages();
     page = null;
     pageNow = {};
@@ -686,6 +726,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     get picture() { return picture; },
     get page() { return page; },
     get agent() { return agent; },
+    get kept() { return kept; },
     get pageNow() { return pageNow; },
     get extra() { return extra; },
     get hidden() { return hidden; },
@@ -714,6 +755,8 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     showPicture,
     showPage,
     showAgent,
+    showKept,
+    showOutputs,
     showTab,
     setActing,
     stopUsing,

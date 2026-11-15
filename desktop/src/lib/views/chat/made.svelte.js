@@ -1,8 +1,10 @@
-// **What each chat made** (chat/made.rs, 15 Nov 2026): its visuals, read with the chat
-// (`chat_made_list`) and heard the moment one's made (`yap-chat-made`), and where each shows in the
-// thread (`placeVisuals`): in the answer to the question it was made for, above the answer's words.
+// **What each chat made** (chat/made.rs, 15 Nov 2026): its visuals and the pages it keeps, read with the
+// chat (`chat_made_list`) and heard the moment one's made or saved again (`yap-chat-made`), and where each
+// shows in the thread (`placeMade`): in the answer to the question it was made for, above the answer's
+// words — a visual's frame, a page's card for each version an answer saved.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { toast } from '../../ui/toast.svelte.js';
 
 /** conversation id → what it made, oldest first. */
 let byChat = $state({});
@@ -28,14 +30,22 @@ export const made = {
   },
 };
 
-/** One made thing heard (`{conversation, made}`): added to its chat's, once. Pure but for the store. */
+/** Who hears each thing made (`onMade`). */
+const listeners = new Set();
+
+/**
+ * One made thing heard (`{conversation, made}`): added to its chat's, or — a page saved again — in its
+ * place. Pure but for the store.
+ */
 export function heard(p) {
   const id = p?.conversation;
   const m = p?.made;
   if (id == null || !m?.id) return;
   const list = byChat[id] ?? [];
-  if (list.some((x) => x.id === m.id)) return;
-  byChat = { ...byChat, [id]: [...list, m] };
+  const at = list.findIndex((x) => x.id === m.id);
+  if (at >= 0 && m.kind !== 'page') return;
+  byChat = { ...byChat, [id]: at >= 0 ? list.map((x, i) => (i === at ? m : x)) : [...list, m] };
+  for (const fn of listeners) fn(id, m);
 }
 
 /** Listen for what's made, from now on (once). */
@@ -45,6 +55,28 @@ export function followMade() {
   listen('yap-chat-made', (e) => heard(e.payload)).catch(() => {
     following = false;
   });
+}
+
+/** `fn(conversation, made)` for each thing made from now on; returns the function that stops it. */
+export function onMade(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+/**
+ * **A message a visual's or a page's button sent** (`sendPrompt`, visualBridge.js: the person's click,
+ * text only): into `chat` — its own — as if typed; or, made after outside content (a page, the screen, a
+ * connector) or while an answer's being written, into the box for the person to read and send.
+ */
+export function promptFromVisual(chat, text, v, conversation) {
+  if (conversation == null || chat.activeId !== conversation) return;
+  if (v?.outside || chat.sending) {
+    chat.input = text;
+    chat.inputEl?.focus();
+    if (v?.outside) toast({ title: 'From the visual', description: 'In the box for you to read: send it if you want to.' });
+    return;
+  }
+  chat.send({ text });
 }
 
 /**
@@ -66,32 +98,46 @@ export function questionIndex(messages, after) {
   return best;
 }
 
+/** The answer to the question at `q`: its index, or `q` itself while there's none yet. Pure. */
+function answerOf(messages, q) {
+  for (let i = q + 1; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === 'assistant') return { at: i, inAnswer: true };
+    if (m.role === 'user' && !m.kind) break;
+  }
+  return { at: q, inAnswer: false };
+}
+
 /**
- * **Where each visual shows** in `messages`: in the first answer after its question (`inAnswer`, above
+ * **Where each thing made shows** in `messages`: in the first answer after its question (`inAnswer`, above
  * the answer's words), or — no answer yet (a Code chat's Claude still working) — under the question's
- * own work. `Map<index, { inAnswer, visuals }>`, each in the order made. Pure.
+ * own work. A visual by the question it was made for; a page's card once for each version, by the
+ * question whose answer saved it. `Map<index, { inAnswer, visuals, pages: [{page, version}] }>`, each in
+ * the order made. Pure.
  */
-export function placeVisuals(messages, items) {
+export function placeMade(messages, items) {
   const out = new Map();
   if (!items?.length || !messages?.length) return out;
+  const slot = (q) => {
+    const { at, inAnswer } = answerOf(messages, q);
+    if (!out.has(at)) out.set(at, { inAnswer, visuals: [], pages: [] });
+    return out.get(at);
+  };
   for (const v of items) {
-    if (v?.kind !== 'visual') continue;
-    const q = questionIndex(messages, v.after);
-    if (q < 0) continue;
-    let at = q;
-    let inAnswer = false;
-    for (let i = q + 1; i < messages.length; i++) {
-      const m = messages[i];
-      if (m.role === 'assistant') {
-        at = i;
-        inAnswer = true;
-        break;
+    if (v?.kind === 'visual') {
+      const q = questionIndex(messages, v.after);
+      if (q >= 0) slot(q).visuals.push(v);
+    } else if (v?.kind === 'page') {
+      for (const version of v.versions || []) {
+        const q = questionIndex(messages, version.after);
+        if (q >= 0) slot(q).pages.push({ page: v, version });
       }
-      if (m.role === 'user' && !m.kind) break;
     }
-    const slot = out.get(at) ?? { inAnswer, visuals: [] };
-    slot.visuals.push(v);
-    out.set(at, slot);
   }
   return out;
+}
+
+/** [`placeMade`]'s visuals alone (`Map<index, {inAnswer, visuals}>`). Pure. */
+export function placeVisuals(messages, items) {
+  return new Map([...placeMade(messages, items)].filter(([, s]) => s.visuals.length));
 }

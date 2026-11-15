@@ -10,6 +10,9 @@
 //!   inline or from `/lib/` only, styles inline, pictures and fonts from
 //!   `data:` and `blob:` only, no connections, frames, workers, plugins,
 //!   forms or `<base>`.
+//! - **`/p/<chat>/<id>/<n>`** ([`page`]): a page Yap keeps (`pages.rs`), its
+//!   version `n` (0: its newest), the same policy and bridge, its own style
+//!   ([`PAGE_STYLE`]: it scrolls in the panel's frame).
 //! - **`/lib/<file>`** ([`library`]): one of [`LIBS`], the pinned allow-list,
 //!   fetched once through `privacy/net.rs` (a chart library for a visual,
 //!   in the network receipts) and kept only when its SHA-256 is the one
@@ -99,7 +102,7 @@ pub const BASE_STYLE: &str = r#"
 :root{color-scheme:light dark;--text:#23211b;--text-2:rgba(35,33,27,.64);--muted:#6e6a5f;--bg:#faf9f6;--surface:#fff;--surface-2:#f2efe9;--border:#dcd7cb;--accent:#c2690a;--accent-text:#fff;--good:#1e8f4d;--warn:#b07c10;--bad:#c23b32;--font:system-ui,'Segoe UI',sans-serif;--mono:ui-monospace,'Cascadia Code',Consolas,monospace}
 html:not(.yap-themed) body{visibility:hidden}
 html,body{margin:0;padding:0;background:transparent}
-body{font:14px/1.5 var(--font);color:var(--text);overflow-x:auto;overflow-y:hidden;-webkit-font-smoothing:antialiased}
+body{font:14px/1.5 var(--font);color:var(--text);overflow-x:auto;-webkit-font-smoothing:antialiased}
 #yap-visual{padding:2px}
 #yap-visual>svg,#yap-visual.svg svg{display:block;max-width:100%;height:auto;margin:0 auto}
 button,input,select,textarea{font:inherit;color:inherit}
@@ -138,9 +141,25 @@ setTimeout(themed,400);
 post({op:'ready'});
 })();"#;
 
+/// **A visual's own style**, after the base: it never scrolls (its frame
+/// takes its height).
+pub const VISUAL_STYLE: &str = "body{overflow-y:hidden}";
+
+/// **A page's own style**, after the base: it scrolls in the panel's frame,
+/// with room round a fragment.
+pub const PAGE_STYLE: &str = "html,body{min-height:100%}body{overflow:auto}#yap-page{padding:20px 24px}";
+
+/// What a document is: a visual in the answer, or a page beside the chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Visual,
+    Page,
+}
+
 /// The bridge and the base style, as the head's first children.
-fn head_parts() -> String {
-    format!("<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>{BASE_STYLE}</style><script>{BRIDGE}</script>")
+fn head_parts(kind: Kind) -> String {
+    let own = if kind == Kind::Page { PAGE_STYLE } else { VISUAL_STYLE };
+    format!("<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>{BASE_STYLE}{own}</style><script>{BRIDGE}</script>")
 }
 
 /// A visual's `<script src>`s on the allow-list pointed at `/lib/`. Pure.
@@ -158,18 +177,30 @@ pub fn point_libraries(code: &str) -> String {
 /// or — a whole document of the model's — that document with the bridge
 /// and base style first in its head. Pure.
 pub fn document(code: &str, format: &str) -> String {
+    compose(code, format, Kind::Visual)
+}
+
+/// **A page's document** ([`document`], a page's style: it scrolls). Pure.
+pub fn page_document(html: &str) -> String {
+    compose(html, "html", Kind::Page)
+}
+
+fn compose(code: &str, format: &str, kind: Kind) -> String {
     let code = point_libraries(code);
     let lower = code.to_ascii_lowercase();
     let whole = lower.contains("<html") || lower.trim_start().starts_with("<!doctype");
     if whole {
         let at = lower.find("<head").and_then(|i| lower[i..].find('>').map(|j| i + j + 1)).or_else(|| lower.find("<html").and_then(|i| lower[i..].find('>').map(|j| i + j + 1)));
         return match at {
-            Some(i) => format!("{}{}{}", &code[..i], head_parts(), &code[i..]),
-            None => format!("{}{code}", head_parts()),
+            Some(i) => format!("{}{}{}", &code[..i], head_parts(kind), &code[i..]),
+            None => format!("{}{code}", head_parts(kind)),
         };
     }
+    if kind == Kind::Page {
+        return format!("<!doctype html><html lang=\"en\"><head>{}</head><body><main id=\"yap-page\">{code}</main></body></html>", head_parts(kind));
+    }
     let class = if format == "svg" { " class=\"svg\"" } else { "" };
-    format!("<!doctype html><html lang=\"en\"><head>{}</head><body><div id=\"yap-visual\"{class}>{code}</div></body></html>", head_parts())
+    format!("<!doctype html><html lang=\"en\"><head>{}</head><body><div id=\"yap-visual\"{class}>{code}</div></body></html>", head_parts(kind))
 }
 
 type Response = tauri::http::Response<Vec<u8>>;
@@ -202,6 +233,10 @@ pub async fn serve(request: &tauri::http::Request<Vec<u8>>) -> Response {
             let Ok(conv) = conv.parse::<u64>() else { return not_found() };
             visual(conv, id, &origin_of(uri))
         }
+        ["p", conv, id, n] => match (conv.parse::<u64>(), n.parse::<u32>()) {
+            (Ok(conv), Ok(n)) => page(conv, id, n, &origin_of(uri)),
+            _ => not_found(),
+        },
         ["lib", file] => library(file).await,
         _ => not_found(),
     }
@@ -215,6 +250,16 @@ pub fn visual(conv: u64, id: &str, origin: &str) -> Response {
         .header("Content-Security-Policy", csp(origin))
         .header("Cache-Control", "no-store")
         .body(body)
+        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
+/// `/p/<chat>/<id>/<n>`: a page's version `n` (0: its newest), with its policy.
+pub fn page(conv: u64, id: &str, n: u32, origin: &str) -> Response {
+    let Some((_, _, html)) = crate::chat::made::page_of(conv, id, n) else { return not_found() };
+    respond(200, "text/html; charset=utf-8")
+        .header("Content-Security-Policy", csp(origin))
+        .header("Cache-Control", "no-store")
+        .body(page_document(&html).into_bytes())
         .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
 }
 

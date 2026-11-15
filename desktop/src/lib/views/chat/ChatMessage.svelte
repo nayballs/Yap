@@ -45,9 +45,10 @@
    * opened (a `ShownPicture`). `pagethumb(url)`: a page's picture taken
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null, keptPages = null, onkept = null } = $props();
   // `visuals`: what the answer made to be seen, not read (chat/made.rs: "Made a visual", above its words;
-  // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends.
+  // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends. `keptPages`: the
+  // pages it saved (chat/made/pages.rs: `[{page, version}]`, a card each, PageCard); `onkept(page, n)` opens one.
   // **Under the person's message in a Code chat** (14 Nov 2026, the Claude Code app's: Copy, Rewind, Fork from here;
   // `actions`: `{ rewind, fork }` — why each can't run now, '' when it can —, `onrewind`, `onfork`; agents/rewind.rs).
   const act = (why, run) => () => {
@@ -125,6 +126,14 @@
   {#await import('./VisualFrame.svelte') then { default: VisualFrame }}
     {#each visuals as v (v.id)}
       <VisualFrame {v} {conversation} onprompt={onvisualprompt} />
+    {/each}
+  {/await}
+{/if}
+{#if m.role === 'assistant' && keptPages?.length}
+  <!-- The pages it saved (save_page): a card each version, › opens it beside the chat. -->
+  {#await import('./PageCard.svelte') then { default: PageCard }}
+    {#each keptPages as p (`${p.page.id}:${p.version.n}`)}
+      <div class="keptcard"><PageCard page={p.page} version={p.version} onopen={onkept} /></div>
     {/each}
   {/await}
 {/if}

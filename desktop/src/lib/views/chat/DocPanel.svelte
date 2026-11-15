@@ -45,6 +45,10 @@
   import PictureTab from './PictureTab.svelte';
   import PageTab from './PageTab.svelte';
   import AgentTab from './AgentTab.svelte';
+  // Pages Yap keeps and the chat's Outputs (chat/made/pages.rs): their tabs.
+  import KeptPageTab from './KeptPageTab.svelte';
+  import OutputsTab from './OutputsTab.svelte';
+  import { made } from './made.svelte.js';
   import { agentTabName } from '../../core/agents.js';
   import { agentById } from '../../stores/agents.svelte.js';
   import { panelTabs, neighbour } from './panelTabs.js';
@@ -69,7 +73,7 @@
    * and pictures are the row of tabs); `conversationId`: the chat a page's
    * shot is kept in.
    */
-  let { doc, cover = false, narrow = false, onquote = null, messages = [], conversationId = null, workspace = null } = $props();
+  let { doc, cover = false, narrow = false, onquote = null, messages = [], conversationId = null, workspace = null, onvisualprompt = null } = $props();
 
   // **The page's buttons in the tab row** (PageTab.svelte hands them up while it shows: its Dev servers, Save a
   // shot, Open in your browser, expand, close), so the address bar has the row below to itself.
@@ -111,7 +115,11 @@
         ? doc.pageNow[t.key]?.title || t.page?.title || t.page?.site || (t.page?.url || doc.pageNow[t.key]?.went ? 'Page' : 'New tab')
         : t.kind === 'agent'
           ? agentTabName(t, tabs, agentById)
-          : t.title || 'Untitled document';
+          : t.kind === 'kept'
+            ? made.of(conversationId).find((m) => m.id === t.id)?.title || t.title || 'Page'
+            : t.kind === 'outputs'
+              ? 'Outputs'
+              : t.title || 'Untitled document';
 
   // The pages this conversation's answers read or showed, newest first: a
   // new page tab offers them (PageTab's new tab, as Claude Code's offers
@@ -629,8 +637,8 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="docpanel" class:cover aria-label={doc.showing === 'page' ? 'Page' : doc.showing === 'agent' ? 'Agent' : away ? 'Picture' : 'Document'} data-testid="chat-doc" onkeydown={panelKey}>
-  {#if tabs.length > 1 || doc.showing === 'page'}
+<aside class="docpanel" class:cover aria-label={doc.showing === 'page' ? 'Page' : doc.showing === 'agent' ? 'Agent' : doc.showing === 'kept' ? 'Kept page' : doc.showing === 'outputs' ? 'Outputs' : away ? 'Picture' : 'Document'} data-testid="chat-doc" onkeydown={panelKey}>
+  {#if tabs.length > 1 || doc.showing === 'page' || doc.showing === 'kept' || doc.showing === 'outputs'}
     <!-- This conversation's documents, pictures and pages, newest last; + a new page tab. -->
     <div class="tabrow">
     <div class="doctabs" role="tablist" aria-label="In the panel" tabindex="-1" data-testid="chat-panel-tabs" bind:this={tabsEl} onkeydown={tabsKey} onwheel={tabsWheel}>
@@ -659,6 +667,10 @@
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
             {:else if t.kind === 'agent'}
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+            {:else if t.kind === 'kept'}
+              <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="13" height="13" rx="2" /><path d="M16 16v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h3" /></svg>
+            {:else if t.kind === 'outputs'}
+              <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5z" /><path d="M3 13l9 5 9-5" /></svg>
             {:else}
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
             {/if}
@@ -674,6 +686,12 @@
     <button type="button" class="tabnew" onclick={() => doc.newPage()} aria-label="New tab" title="New tab (Ctrl+T)" data-testid="chat-panel-new-tab">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
     </button>
+    {#if doc.showing !== 'outputs'}
+      <!-- The chat's Outputs: every page it kept, document it wrote and file it shared (OutputsTab). -->
+      <button type="button" class="tabnew" onclick={() => doc.showOutputs()} aria-label="Outputs" title="Outputs: what this chat made" data-testid="chat-panel-outputs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5z" /><path d="M3 13l9 5 9-5" /></svg>
+      </button>
+    {/if}
     {#if rowActions && doc.showing === 'page'}
       <!-- The page's own buttons (PageTab.svelte's `actions`), at the row's right, as Claude Code's app has them. -->
       <div class="rowactions" data-testid="chat-page-actions">{@render rowActions()}</div>
@@ -690,6 +708,12 @@
   {:else if doc.showing === 'agent' && doc.agent}
     <!-- An agent Chat started: what it's doing, live (closing it never stops it). -->
     <AgentTab {doc} {narrow} />
+  {:else if doc.showing === 'kept' && doc.kept}
+    <!-- A page Yap keeps (chat/made/pages.rs): its versions, in a sandboxed frame. -->
+    <KeptPageTab {doc} {conversationId} onprompt={onvisualprompt} />
+  {:else if doc.showing === 'outputs'}
+    <!-- What this chat made: its pages, documents and files. -->
+    <OutputsTab {doc} {messages} made={made.of(conversationId)} {conversationId} />
   {/if}
   {#if doc.id != null}
   <!-- The document (behind a picture: still here, out of sight). -->

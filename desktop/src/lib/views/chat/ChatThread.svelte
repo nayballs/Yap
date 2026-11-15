@@ -36,9 +36,8 @@
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { chatStatus } from '../../stores/chatStatus.svelte.js';
   import QueuedMessage from './QueuedMessage.svelte';
-  // What the chat made (chat/made.rs): its visuals, each in the answer to its question.
-  import { made, followMade, placeVisuals } from './made.svelte.js';
-  import { toast } from '../../ui/toast.svelte.js';
+  // What the chat made (chat/made.rs): its visuals and its kept pages' cards, each in the answer to its question.
+  import { made, followMade, onMade, placeMade, promptFromVisual } from './made.svelte.js';
 
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
   // **Visuals** (chat/made.rs, 15 Nov 2026): read with the chat, heard as they're made; each shows in the
@@ -48,22 +47,18 @@
     const id = chat.activeId;
     if (id != null) untrack(() => made.load(id));
   });
-  const placed = $derived(placeVisuals(chat.messages, made.of(chat.activeId)));
-  /**
-   * **A visual's button sent a message** (`sendPrompt`, visualBridge.js: the person's click, text only):
-   * into this chat as if typed — or, made after outside content (a page, the screen, a connector) or while
-   * an answer's being written, into the box for the person to read and send.
-   */
-  function sendFromVisual(text, v, conversation) {
-    if (conversation == null || chat.activeId !== conversation) return;
-    if (v.outside || chat.sending) {
-      chat.input = text;
-      chat.inputEl?.focus();
-      if (v.outside) toast({ title: 'From the visual', description: 'In the box for you to read: send it if you want to.' });
-      return;
-    }
-    chat.send({ text });
-  }
+  const placed = $derived(placeMade(chat.messages, made.of(chat.activeId)));
+  /** A visual's button sent a message (`sendPrompt`): into this chat (made.svelte.js `promptFromVisual`). */
+  const sendFromVisual = (text, v, conversation) => promptFromVisual(chat, text, v, conversation);
+  /** A kept page's card: the page beside the chat, at that version (chat/made/pages.rs). */
+  const openKept = (page, n) => chat.doc.showKept({ id: page.id, conversation: chat.activeId, title: page.title, n });
+  // **A page saved in this chat as its answer comes** (save_page): it opens beside the chat, as a
+  // document a turn writes does.
+  $effect(() =>
+    onMade((conversation, m) => {
+      if (m?.kind === 'page' && conversation === chat.activeId) chat.doc.showKept({ id: m.id, conversation, title: m.title, n: 0 });
+    })
+  );
   // …and under the person's own message, in a Code chat that works directly
   // (agents/direct.rs): its session's work, with no answer of Chat's between.
   const directPills = $derived(pillsByQuestion(agents.list, chat.activeId, chat.messages));
@@ -324,7 +319,9 @@
               onshared={openShared}
               actions={m.role === 'user' ? actionsFor(m) : null}
               visuals={placed.get(i)?.inAnswer ? placed.get(i).visuals : null}
+              keptPages={placed.get(i)?.inAnswer ? placed.get(i).pages : null}
               onvisualprompt={(text, v) => sendFromVisual(text, v, chat.activeId)}
+              onkept={openKept}
             />
           {/if}
           {#if directPills.get(i)?.length}
@@ -370,12 +367,19 @@
             {/if}
           {/if}
           {#if placed.get(i) && !placed.get(i).inAnswer}
-            <!-- Visuals made for this question with no answer yet (a Code chat's Claude still working). -->
+            <!-- Visuals and pages made for this question with no answer yet (a Code chat's Claude still working). -->
             {#await import('./VisualFrame.svelte') then { default: VisualFrame }}
               {#each placed.get(i).visuals as v (v.id)}
                 <VisualFrame {v} conversation={chat.activeId} onprompt={(text) => sendFromVisual(text, v, chat.activeId)} />
               {/each}
             {/await}
+            {#if placed.get(i).pages.length}
+              {#await import('./PageCard.svelte') then { default: PageCard }}
+                {#each placed.get(i).pages as p (`${p.page.id}:${p.version.n}`)}
+                  <div><PageCard page={p.page} version={p.version} onopen={openKept} /></div>
+                {/each}
+              {/await}
+            {/if}
           {/if}
         {/each}
         {#if asks.length || answeredRemote.length}
