@@ -193,6 +193,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `chat/incognito.rs` — Incognito chats (a new chat's ghost): in memory only, never listed, searched or remembered, gone when left.
 - `chat/projects.rs` — Projects: a group of chats sharing instructions and files (read as attachments are), in every chat's prompt sized to the model; its page in Chat; `projects.json`, `projects/`.
 - `chat/styles.rs` — Styles: how a chat's answers are written (Normal, Concise, Explanatory, Formal, your own), from the composer's Style chip; `chat_styles.json`.
+- `chat/auto_archive.rs` — Auto-archive (off by default): chats not used in 7 / 30 / 90 days archived at start and daily, one `set_archived` write a run; never one at work, shown, incognito or a meeting's; said quietly in the window, with Undo.
 - `chat/export.rs` — Export a chat (a conversation's ⋯): a Markdown file and its pictures in a folder beside it, never uploaded.
 - `chat/cards.rs` (+ `cards/ask.rs`, `cards/next_step.rs`, `cards/chapters.rs`) — the cards Chat's model puts in the thread: a question (`ask_user`, answered by click or out loud, kept answered), the next-step box, chapters; the plan's runs and a Code chat's own session (its box and chapters, kept with its report's answer) over `claude_live/cards.rs`.
 - `chat/made.rs` (+ `made/serve.rs`) — `show_visual`: an SVG diagram or small HTML widget in the answer, a sandboxed frame (`yapmade` scheme, its CSP in the response, no Yap IPC); kept in `chat-made/<chat>/`, never chats.json.

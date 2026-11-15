@@ -32,6 +32,7 @@
   import { initMicOffers } from '../notices/micOffer.js';
   import { initMicTips } from '../notices/micTips.js';
   import { initCompanyFolders } from '../notices/companyFolders.js';
+  import { initChatsArchived } from '../notices/chatsArchived.js';
   import { initUpload } from '../stores/upload.svelte.js';
   import { transcriptImport, initTranscriptImport } from '../stores/transcriptImport.svelte.js';
   import { initMemory } from '../stores/memory.svelte.js';
@@ -171,6 +172,8 @@
   // "File every meeting with example.com in Clients?" after a meeting filed
   // by hand (calendar/filing/companies.rs), with Undo after Yes.
   initCompanyFolders();
+  // "Archived 3 chats you hadn't used in 30 days", with Undo (chat/auto_archive.rs).
+  initChatsArchived();
   // Reset app (privacy/reset.rs): the views below are shown afresh — not for
   // the pages beside the chat alone (their cookies went; the pages stay open).
   let dataGeneration = $state(0);

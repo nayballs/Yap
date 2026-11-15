@@ -478,6 +478,12 @@ pub fn stop(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The Code chats with a ▶ Run still running (auto-archive never takes
+/// them: `chat/auto_archive.rs`).
+pub fn running_chats() -> Vec<u64> {
+    runs().iter().filter(|r| r.info.state == "running").map(|r| r.info.conversation).collect()
+}
+
 /// Code chat `conversation`'s runs, oldest first, each with its output.
 pub fn list(conversation: u64) -> Vec<RunInfo> {
     runs().iter().filter(|r| r.info.conversation == conversation).map(|r| RunInfo { output: Some(r.output.clone()), ..r.info.clone() }).collect()

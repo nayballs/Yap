@@ -798,6 +798,12 @@ pub fn is_answering(conversation: u64) -> bool {
     ANSWERING.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|m| m.contains_key(&conversation))
 }
 
+/// **The conversations a turn answers now** (auto-archive never takes one:
+/// `chat/auto_archive.rs`).
+pub fn answering_ids() -> Vec<u64> {
+    ANSWERING.lock().unwrap_or_else(|p| p.into_inner()).as_ref().map(|m| m.keys().copied().collect()).unwrap_or_default()
+}
+
 /// A turn's answer that can be **stopped** (the page's ■, registered under
 /// the page's id) and **superseded** (a newer question to its conversation,
 /// once [`Stoppable::answers`] says which) until dropped.
