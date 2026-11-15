@@ -124,6 +124,17 @@ pub struct ChatMessage {
     /// older Yap's save drops them (the answer stays).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub confirms: Vec<crate::chat::pages::act::confirm::Card>,
+    /// **The next-step box an answer ended with** (`suggest_next_step`,
+    /// `chat/cards/next_step.rs`): its recap, question and buttons — shown
+    /// under the conversation's latest answer only. An older Yap's save drops
+    /// it (the answer stays).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_step: Option<crate::chat::cards::next_step::NextStep>,
+    /// **The chapter an answer's turn started** (`mark_chapter`,
+    /// `chat/cards/chapters.rs`): the divider above its question and an entry
+    /// in the chat's contents. An older Yap's save drops it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chapter: Option<crate::chat::cards::chapters::Chapter>,
     /// A message that isn't the person's nor the model's: `"agentReport"`, an
     /// agent's report Yap put in the chat (`chat/turn/report.rs`), shown as an
     /// agent's card; the model reads it as the agent's ([`ChatMessage::sent_text`]).
@@ -1026,6 +1037,23 @@ pub fn set_confirms(id: u64, index: usize, confirms: &[crate::chat::pages::act::
     });
 }
 
+/// **Keep the next-step box and the chapter a turn made** with its answer
+/// (`chat/cards.rs`, as the turn's watcher saw them last): conversation
+/// `id`'s message `index`, when it's an answer.
+pub fn set_cards(id: u64, index: usize, next_step: Option<&crate::chat::cards::next_step::NextStep>, chapter: Option<&crate::chat::cards::chapters::Chapter>) {
+    if next_step.is_none() && chapter.is_none() {
+        return;
+    }
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "assistant" {
+            m.next_step = next_step.cloned();
+            m.chapter = chapter.cloned();
+            save_to_disk(s);
+        }
+    });
+}
+
 /// The "Search in your browser" an answer offers, as saved (the page's
 /// answer to `chat_send` carries it).
 pub fn browser_search_of(id: u64, index: usize) -> Option<crate::web::BrowserSearch> {
@@ -1271,6 +1299,8 @@ pub fn append_message(
             quote: None,
             browser_search: None,
             confirms: Vec::new(),
+            next_step: None,
+            chapter: None,
             kind: String::new(),
         });
         conv.updated_ts = now_secs();
@@ -2136,6 +2166,8 @@ mod tests {
             quote: None,
             browser_search: None,
             confirms: vec![],
+            next_step: None,
+            chapter: None,
             kind: String::new(),
         };
         let messages = vec![

@@ -982,6 +982,15 @@ fn spoken_ok_answer(app: &AppHandle, now: u64, conversation: Option<u64>, questi
     let meeting = crate::chat::tools::connectors::in_meeting();
     let Some((said, w)) = spoken_ok::take(conversation, question, &langs, meeting) else { return false };
     match said {
+        // A question of Chat's own model (chat/cards/ask.rs): these words are its answer.
+        spoken_ok::Spoken::Words => {
+            let took = crate::chat::cards::ask::answer_said(w.card, question);
+            tracing::info!(question = w.card, took, "Voice Assistant: a question card answered out loud");
+            if !took {
+                return false;
+            }
+            crate::bar::dismiss_card(app, spoken_ok::CARD);
+        }
         spoken_ok::Spoken::Yes | spoken_ok::Spoken::No => {
             let yes = said == spoken_ok::Spoken::Yes;
             // Allow once (never Always allow by voice), whatever the card.
@@ -1166,6 +1175,7 @@ impl Streamed {
             generation,
             since: std::sync::Arc::clone(&self.since),
             owner: self.owner,
+            questions: card.question.as_ref().map(|q| q.questions.clone()).unwrap_or_default(),
         });
         tracing::info!(question = card.id, act = %card.act, spoken = asking.spoken, "Voice Assistant: a call asks first; said, and on the bar");
         if self.may_speak() {
@@ -1320,6 +1330,22 @@ impl Drop for Streamed {
 /// The bar card's Allow once / Don't ([`spoken_ok::bar_card`]): the
 /// question's answer, as the thread's card gives it (✕ only hides it).
 fn ask_first_action(app: &AppHandle, action: &str) {
+    // A question card's (chat/cards/ask.rs): an option, Answer in Chat, Let Yap decide.
+    if let Some(a) = crate::chat::cards::ask::bar_action(action) {
+        if let crate::chat::cards::ask::BarAction::Open(_) = a {
+            open_chat(app);
+            return;
+        }
+        let id = match a {
+            crate::chat::cards::ask::BarAction::Pick(id, _) | crate::chat::cards::ask::BarAction::Decide(id) | crate::chat::cards::ask::BarAction::Open(id) => id,
+        };
+        let questions = spoken_ok::questions_of(id);
+        crate::chat::cards::ask::bar_answer(a, questions.as_deref());
+        if spoken_ok::answered(id) {
+            crate::bar::dismiss_card(app, spoken_ok::CARD);
+        }
+        return;
+    }
     let Some((id, allow)) = spoken_ok::action_of(action) else { return };
     crate::chat::pages::act::confirm::chat_page_confirm(id, allow);
     if spoken_ok::answered(id) {
