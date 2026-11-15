@@ -2233,6 +2233,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     saveEdit,
     switchBranch,
     get editing() { return editing; },
+    get forks() { return forks; },
     agentEvent,
     agentReported,
     spokenWhileWorking,

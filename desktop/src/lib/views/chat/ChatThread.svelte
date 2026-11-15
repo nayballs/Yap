@@ -48,7 +48,7 @@
     const id = chat.activeId;
     if (id != null) untrack(() => made.load(id));
   });
-  const placed = $derived(placeVisuals(chat.messages, made.of(chat.activeId)));
+  const placed = $derived(placeVisuals(chat.messages, made.of(chat.activeId), chat.forks));
   /**
    * **A visual's button sent a message** (`sendPrompt`, visualBridge.js: the person's click, text only):
    * into this chat as if typed — or, made after outside content (a page, the screen, a connector) or while

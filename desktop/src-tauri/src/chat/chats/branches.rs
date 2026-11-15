@@ -62,13 +62,18 @@ pub struct Branch {
 }
 
 /// **A fork as the page shows it** (`chat_get`): the message at `at` says
-/// ‹ shown / count ›.
+/// ‹ shown / count ›. `since`: the time of the newest other version made
+/// before the one shown (its first message's, unix seconds; 0: none) —
+/// what that answer's turn made after it (a visual, `chat/made.rs`) is the
+/// shown one's, what came before it another version's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ForkView {
     pub at: usize,
     pub shown: u32,
     pub count: u32,
+    #[serde(default)]
+    pub since: u64,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -263,7 +268,9 @@ pub fn views(conv: &Conversation) -> Vec<ForkView> {
         .map(|f| {
             let numbers = f.numbers();
             let place = numbers.iter().position(|n| *n == f.shown).unwrap_or(0) + 1;
-            ForkView { at: f.at, shown: place as u32, count: numbers.len() as u32 }
+            let shown_ts = conv.messages[f.at].ts;
+            let since = f.others.iter().filter_map(|b| b.messages.first().map(|m| m.ts)).filter(|ts| *ts < shown_ts).max().unwrap_or(0);
+            ForkView { at: f.at, shown: place as u32, count: numbers.len() as u32, since }
         })
         .collect()
 }
@@ -395,6 +402,11 @@ mod tests {
         }).unwrap()
     }
 
+    /// Each fork's place, as ‹ › says it: (at, shown, count).
+    fn places(c: &Conversation) -> Vec<(usize, u32, u32)> {
+        views(c).iter().map(|v| (v.at, v.shown, v.count)).collect()
+    }
+
     fn texts(c: &Conversation) -> Vec<&str> {
         c.messages.iter().map(|m| m.text.as_str()).collect()
     }
@@ -408,11 +420,14 @@ mod tests {
         assert_eq!(texts(&c), ["Hi", "Hello", "Weather?"]);
         c.messages.push(msg("assistant", "Cloudy", 200));
         settle(&mut c, 3);
-        assert_eq!(views(&c), [ForkView { at: 3, shown: 2, count: 2 }]);
+        assert_eq!(places(&c), [(3, 2, 2)]);
+        // What the retried answer's turn made after the first answer is its own (`since`).
+        assert_eq!(views(&c)[0].since, 103);
         // ‹ back to the first: the follow-up comes back with it.
         assert!(switch(&mut c, 3, 1).unwrap());
         assert_eq!(texts(&c), ["Hi", "Hello", "Weather?", "Sunny", "And tomorrow?", "Rain"]);
-        assert_eq!(views(&c), [ForkView { at: 3, shown: 1, count: 2 }]);
+        assert_eq!(places(&c), [(3, 1, 2)]);
+        assert_eq!(views(&c)[0].since, 0, "no version came before the first");
         assert!(!switch(&mut c, 3, 1).unwrap(), "shown already");
         assert!(switch(&mut c, 3, 2).unwrap());
         assert_eq!(texts(&c), ["Hi", "Hello", "Weather?", "Cloudy"]);
@@ -433,11 +448,11 @@ mod tests {
         c.messages.push(msg("user", "Weather by the sea?", 400));
         c.messages.push(msg("assistant", "Drizzle", 401));
         settle(&mut c, 2);
-        assert_eq!(views(&c), [ForkView { at: 2, shown: 2, count: 2 }]);
+        assert_eq!(places(&c), [(2, 2, 2)]);
         // Back to the original question: its own retried answer is shown, ‹ 2/2 › on it.
         switch(&mut c, 2, 1).unwrap();
         assert_eq!(texts(&c), ["Hi", "Hello", "Weather?", "Sunny", "And tomorrow?", "Snow"]);
-        assert_eq!(views(&c), [ForkView { at: 2, shown: 1, count: 2 }, ForkView { at: 5, shown: 2, count: 2 }]);
+        assert_eq!(places(&c), [(2, 1, 2), (5, 2, 2)]);
         let every: Vec<&str> = other_messages(&c.branches).iter().map(|m| m.text.as_str()).collect();
         assert_eq!(every, ["Weather by the sea?", "Drizzle", "Rain"]);
     }
@@ -457,7 +472,7 @@ mod tests {
         assert_eq!(back, 2);
         undo(&mut c, 3, back);
         assert_eq!(texts(&c).last(), Some(&"Cloudy"));
-        assert_eq!(views(&c), [ForkView { at: 3, shown: 2, count: 2 }]);
+        assert_eq!(places(&c), [(3, 2, 2)]);
         // An edit whose new question was saved but never answered: dropped, for its screenshots.
         let back = branch_off(&mut c, 2).unwrap();
         c.messages.push(msg("user", "Weather by the sea?", 400));
@@ -494,7 +509,7 @@ mod tests {
         c.messages.truncate(2);
         let gone = cut_at(&mut c, 2);
         assert_eq!(gone.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["c", "D"]);
-        assert_eq!(views(&c), [ForkView { at: 1, shown: 2, count: 2 }]);
+        assert_eq!(places(&c), [(1, 2, 2)]);
     }
 
     #[test]
@@ -534,7 +549,7 @@ mod tests {
         theirs.messages.push(msg("user", "more", 70));
         let mut convs = vec![theirs];
         assert_eq!(restore_from(&mut convs, &mirror), 1);
-        assert_eq!(views(&convs[0]), views(&ours));
+        assert_eq!(places(&convs[0]), places(&ours));
         // One its own rewind cut under (the second fork's message rewritten): only the first comes back.
         let mut cut: Conversation = convs[0].clone();
         cut.branches.clear();
@@ -542,7 +557,7 @@ mod tests {
         cut.messages.push(msg("assistant", "other", 80));
         let mut convs = vec![cut];
         assert_eq!(restore_from(&mut convs, &mirror), 1);
-        assert_eq!(views(&convs[0]), [ForkView { at: 1, shown: 2, count: 2 }]);
+        assert_eq!(places(&convs[0]), [(1, 2, 2)]);
         // A conversation that has its own branches keeps them (chats.json wins).
         let mut convs = vec![ours.clone()];
         assert_eq!(restore_from(&mut convs, &mirror), 0);
@@ -556,6 +571,6 @@ mod tests {
             c.messages.push(msg("assistant", "again", 200 + i as u64));
         }
         assert!(branch_off(&mut c, 1).is_err());
-        assert_eq!(views(&c), [ForkView { at: 1, shown: MAX_BRANCHES as u32, count: MAX_BRANCHES as u32 }]);
+        assert_eq!(places(&c), [(1, MAX_BRANCHES as u32, MAX_BRANCHES as u32)]);
     }
 }

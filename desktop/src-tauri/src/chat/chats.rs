@@ -2341,7 +2341,7 @@ mod tests {
         append(c.id, "assistant", "Boots.", &[], None, false).unwrap();
         assert!(end_branch(c.id, b.at, b.back_to, true));
         let page = for_page(get(c.id).unwrap());
-        assert_eq!(page.forks, [branches::ForkView { at: 1, shown: 2, count: 2 }]);
+        assert_eq!(page.forks.iter().map(|f| (f.at, f.shown, f.count)).collect::<Vec<_>>(), [(1, 2, 2)]);
         assert!(page.branches.is_empty(), "a page gets the ‹ › only");
         // A retry that never answered: back to the answer it replaced, nothing lost.
         let again = begin_retry(c.id, 1).unwrap();
@@ -2350,7 +2350,7 @@ mod tests {
         // ‹ 1/2 ›: the first answer and its follow-up again.
         let shown = switch_branch(c.id, 1, 1).unwrap();
         assert_eq!(shown.messages.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["Pack list?", "Socks.", "More?", "A hat."]);
-        assert_eq!(shown.forks, [branches::ForkView { at: 1, shown: 1, count: 2 }]);
+        assert_eq!(shown.forks.iter().map(|f| (f.at, f.shown, f.count)).collect::<Vec<_>>(), [(1, 1, 2)]);
         // Edit the first question: everything set aside; an error before its answer puts it all back.
         let e = begin_edit(c.id, 0).unwrap();
         assert_eq!((e.at, e.question.images.len()), (0, 1));
@@ -2364,7 +2364,7 @@ mod tests {
         append(c.id, "assistant", "Sun cream.", &[], None, false).unwrap();
         assert!(end_branch(c.id, e.at, e.back_to, true));
         let conv = get(c.id).unwrap();
-        assert_eq!(branches::views(&conv), [branches::ForkView { at: 0, shown: 2, count: 2 }]);
+        assert_eq!(branches::views(&conv).iter().map(|f| (f.at, f.shown, f.count)).collect::<Vec<_>>(), [(0, 2, 2)]);
         assert!(image_ids().contains("img_3333333333333333"), "kept for the version set aside");
         // An older Yap reads the branch shown (and drops the rest when it saves).
         let mut v = serde_json::to_value(&conv).unwrap();
