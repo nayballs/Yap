@@ -13,6 +13,9 @@
 //! - `pos`: where the page is scrolled to, its view's size and the headings
 //!   in view; `where`: whether an element is in view; `blocks`: its visible
 //!   text blocks, each with a ref.
+//! - `scene` (15 Nov 2026, `browser_find` by description: `find.rs`): what
+//!   the page holds, each with its role, words, place, the heading it's under
+//!   and the parts it's inside (a navigation, a form, the 2nd of 10 items).
 //! - `click`, `type`, `choose`, `scroll`, `clickAt`, `hover`, `check`, `key`:
 //!   the action — only if the element is still the one described (its role
 //!   and name, checked in the same script run as the action: a page can't
@@ -179,6 +182,36 @@ if(op==='pos')return {r:'ok',scroll:scrollAt(),inView:inView()};
 if(op==='blocks'){var bl=qa('h1,h2,h3,h4,h5,h6,[role=heading],p,li,td,th,dt,dd,caption,figcaption,blockquote,pre,summary,label,legend,a,button,option'),bs=[],tot=0;
 for(var i=0;i<bl.length&&bs.length<a.max;i++){var e=bl[i];if(!vis(e))continue;var t=textOf(e);if(!t)continue;t=t.slice(0,a.chars);tot+=t.length;if(tot>a.total)break;bs.push({ref:refOf(e),tag:tag(e),role:(e.getAttribute('role')||'').toLowerCase(),text:t});}
 return {r:'ok',blocks:bs};}
+if(op==='scene'){var SC=scroller(),SCB=SC?SC.getBoundingClientRect():null,SY=W.scrollY,SX=W.scrollX,HQ='h1,h2,h3,h4,h5,h6,[role=heading]',CQ=SEL+',iframe,frame';
+var PQ='table,[role=table],[role=grid],figure,img,[role=img],svg[aria-label],form,[role=form],dialog,[role=dialog],[role=alertdialog],nav,[role=navigation],[role=search],search,aside,[role=complementary],header,[role=banner],footer,[role=contentinfo],main,[role=main],[role=region],section[aria-label],section[aria-labelledby],[role=tablist],[role=menu],[role=menubar]';
+var TQ='p,li,td,th,dt,dd,caption,figcaption,blockquote,pre,label,legend';
+var IMPL={nav:'navigation',header:'banner',footer:'contentinfo',aside:'complementary',main:'main',form:'form',dialog:'dialog',section:'region',article:'article',search:'search',table:'table',tr:'row',ul:'list',ol:'list',li:'listitem',fieldset:'group',details:'group',menu:'menu',figure:'figure',img:'img',svg:'img',p:'paragraph',td:'cell',th:'columnheader',dt:'term',dd:'definition',caption:'caption',figcaption:'caption',blockquote:'blockquote',pre:'code',label:'label',legend:'label'};
+var LAND={navigation:1,banner:1,contentinfo:1,complementary:1,main:1,form:1,search:1,dialog:1,alertdialog:1,region:1,article:1,table:1,grid:1,row:1,list:1,listitem:1,group:1,menu:1,menubar:1,tablist:1,tabpanel:1,listbox:1};
+var prole=function(e){var r=(e.getAttribute('role')||'').toLowerCase().split(' ')[0];if(r&&r!=='presentation'&&r!=='none')return r;var t=tag(e);if(/^h[1-6]$/.test(t))return 'heading';if((t==='header'||t==='footer')&&e.parentElement&&e.parentElement.closest('article,aside,nav,main,section'))return '';return IMPL[t]||'';};
+var hints=function(e){var c=e.getAttribute('class')||'';return sq([e.id,c,e.getAttribute('name'),e.getAttribute('data-testid')||e.getAttribute('data-test')||e.getAttribute('data-qa')].join(' ')).slice(0,120);};
+var descBy=function(e){var v=e.getAttribute('aria-describedby');if(!v)return '';return v.split(/\s+/).map(function(i){var x=i?byId(e,i):null;return x?textOf(x):'';}).join(' ');};
+var hname=function(p,r){var n=sq(p.getAttribute('aria-label')||'')||lbl(p);if(n)return n;var t=tag(p);if(t==='fieldset'){var lg=p.querySelector('legend');if(lg)return textOf(lg);}if(t==='table'&&p.caption)return textOf(p.caption);if(t==='figure'){var fc=p.querySelector('figcaption');if(fc)return textOf(fc);}
+var h=q1(HQ,p);if(h)return hText(h);if(r==='form'||r==='search'){var sb=submitBtn(p);if(sb)return nameOf(sb);}if(r==='listitem'||r==='row'||r==='article'){var l=q1('a[href]',p);if(l)return textOf(l);}return '';};
+var HM=new Map(),HL=[],GM=new Map(),gn=0;
+var holdOf=function(p){if(HM.has(p))return HM.get(p);var h=null,r=prole(p),t=tag(p),item=0,of=0,grp=0,pn=p.parentNode;
+if(pn&&pn.children&&t!=='html'&&t!=='body'){var cl=p.getAttribute('class')||'',rl=p.getAttribute('role')||'';if(cl||rl||/^(li|article|tr|section|dt|dd)$/.test(t)){var ks=pn.children,like=[];if(ks.length<=600){for(var i=0;i<ks.length;i++){var k=ks[i];if(k.tagName===p.tagName&&(k.getAttribute('class')||'')===cl&&(k.getAttribute('role')||'')===rl)like.push(k);}}
+if(like.length>=2){var gk=GM.get(pn);if(!gk){gk=new Map();GM.set(pn,gk);}var sig=t+'|'+cl+'|'+rl,g=gk.get(sig);if(!g){g=++gn;gk.set(sig,g);}grp=g;item=like.indexOf(p)+1;of=like.length;}}}
+var named=sq(p.getAttribute('aria-label')||'');if(LAND[r]||item||named){var b=rr(p);h={id:HL.length+1,role:r,name:hname(p,r).slice(0,100),words:hints(p),item:item,of:of,group:grp,y:Math.round(b.top+SY)};HL.push(h);}HM.set(p,h);return h;};
+var withinOf=function(e){var ids=[],p=e.parentElement||hostOf(e),n=0;while(p&&n<24&&ids.length<8){n++;var t=tag(p);if(t==='body'||t==='html'){p=hostOf(p);continue;}var h=holdOf(p);if(h)ids.push(h.id);p=p.parentElement||hostOf(p);}return ids;};
+var all=qa(CQ+','+HQ+','+PQ+','+TQ),things=[],lastH='',got=new Set(),nC=0,nO=0;
+for(var i=0;i<all.length;i++){var e=all[i];if(got.has(e))continue;got.add(e);if(!vis(e))continue;var t=tag(e),isH=e.matches(HQ),isC=!isH&&e.matches(CQ),isP=!isC&&!isH&&e.matches(PQ),under=lastH;
+if(isH){var ht=hText(e);if(ht)lastH=ht.slice(0,100);}
+if(isC){if(nC>=400)continue;}else if(nO>=300)continue;
+var b=rr(e);if(!(b.width>0||b.height>0))continue;var y=b.top+SY,x=b.left+SX;if(SC&&SC.contains(e))y=b.top-SCB.top+SC.scrollTop;
+var th={ref:0,role:'',tag:t,kind:'',name:'',label:'',placeholder:'',desc:'',value:'',hints:hints(e),href:'',level:0,search:false,disabled:false,x:Math.round(x),y:Math.round(y),w:Math.round(b.width),h:Math.round(b.height),seen:shown(e),heading:under,within:[]};
+if(isC){var d=desc(e);th.role=d.role;th.name=d.name;th.label=d.label;th.placeholder=d.placeholder;th.value=d.masked?'':String(d.value||'').slice(0,80);th.href=d.href;th.search=d.search;th.disabled=d.disabled;th.kind='control';th.pic=(th.role==='link'||th.role==='button')&&!sq(e.innerText||'')&&!!e.querySelector('img,svg,picture');}
+else if(isH){th.role='heading';th.name=hText(e).slice(0,160);var m=/^h([1-6])$/.exec(t);th.level=m?+m[1]:(+(e.getAttribute('aria-level')||2)||2);th.kind='heading';if(!th.name)continue;}
+else if(isP){th.role=prole(e)||t;th.name=sq(e.getAttribute('aria-label')||lbl(e)||e.getAttribute('alt')||e.getAttribute('title')||'')||hname(e,th.role);th.kind='part';if((th.role==='img'||th.role==='figure')&&!th.name)continue;}
+else{th.role=prole(e)||'text';th.name=textOf(e).slice(0,300);th.kind='text';if(!th.name)continue;}
+if(isC)nC++;else nO++;
+th.desc=sq((e.getAttribute('title')||'')+' '+descBy(e)).slice(0,160);th.within=withinOf(e);th.ref=refOf(e);things.push(th);}
+var de=D.documentElement,ph=SC?SC.scrollHeight:Math.max(de?de.scrollHeight:0,D.body?D.body.scrollHeight:0);
+return {r:'ok',things:things,holders:HL,h:Math.round(ph),w:Math.round(W.innerWidth),vh:Math.round(SC?SC.clientHeight:W.innerHeight)};}
 if(op==='at'){var hit=ptAt(Number(a.x),Number(a.y));return base(hit?(up(hit,SEL)||hit):null);}
 if(op==='active'){var ae=focusIn();return base(bare(ae)?null:ae);}
 if(op==='watch'){var ow=W.__yapWatch;if(ow&&ow.o){try{ow.o.disconnect();}catch(e){}}
@@ -495,6 +528,19 @@ pub fn changes() -> String {
 /// each, `total` in all.
 pub fn blocks(max: usize, chars: usize, total: usize) -> String {
     build("blocks", serde_json::json!({ "max": max, "chars": chars, "total": total }))
+}
+
+/// **What's on the page for a description** (`browser_find`, `find.rs`):
+/// its links, buttons and fields, headings, parts (tables, forms,
+/// landmarks, pictures) and text blocks in the page's order (at most 400
+/// controls and 300 others, visible ones), each with its ref, role, name,
+/// label, placeholder, description, value (never a sensitive field's), id
+/// and class words, where it is on the page, the heading it's under and the
+/// parts it's inside; those parts (`holders`: a landmark, a form, a
+/// dialog, a row, one of several like it — its place among them); the
+/// page's height and the view's size.
+pub fn scene() -> String {
+    build("scene", serde_json::json!({}))
 }
 
 /// The element at point (`x`, `y`) of the view (CSS pixels), described as

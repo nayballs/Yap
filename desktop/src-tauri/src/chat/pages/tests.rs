@@ -208,8 +208,9 @@ fn one_toolset_for_every_model_with_pages_acting_and_shots_only_where_they_may()
     // then browser_zoom saying it takes the shot's pixels too: 656 / 1429 / 1092 / 1841; then browser_read's
     // tree (depth, filter), browser_find by role and browser_scroll left and right, the last of what set Claude
     // Code's own browser apart, and browser_key's repeat: 691 / 1473 / 1132 / 1889; then browser_type saying a
-    // ref sets the field and no ref types at the cursor: 691 / 1473 / 1132 / 1899.)
-    assert!(small <= 695 && acting <= 1475 && seeing <= 1135 && all <= 1900, "{small} / {acting} / {seeing} / {all}");
+    // ref sets the field and no ref types at the cursor: 691 / 1473 / 1132 / 1899; 15 Nov, browser_find by a
+    // description, as Claude Code's own find takes one: 703 / 1485 / 1143 / 1911.)
+    assert!(small <= 705 && acting <= 1487 && seeing <= 1145 && all <= 1913, "{small} / {acting} / {seeing} / {all}");
     // The new parameters: a width for every model, the clicks and the drag where they act.
     assert!(defs_has(Gate::Show, false, "\"width\"") && defs_has(Gate::Show, true, "\"count\"") && defs_has(Gate::Show, true, "browser_drag"));
     assert!(!defs_has(Gate::Show, false, "browser_drag") && !defs_has(Gate::Show, true, "{x, y}") && defs_has(Gate::Look, true, "{x, y}"));
@@ -1153,4 +1154,94 @@ fn a_section_with_only_its_heading_showing_is_folded() {
     assert!(read::folded("Talent Order", ""));
     assert!(!read::folded("Maps", "Maps\ncompass compass"));
     assert!(!read::folded("", "Just a paragraph"), "an element that isn't a heading");
+}
+
+/// **A shop to find things on by description** (made up): a header with a
+/// search box, the main menu and a basket link on the right; three products,
+/// each a card with its own link, size, "Add to basket" and a wishlist
+/// heart; the pages' links; a newsletter form inside a web component (an
+/// open shadow root) and the help's own search at the bottom.
+const TRAIL_URL: &str = "https://shop.example.com/trail";
+const TRAIL: &str = r##"<html><head><title>Trail shoes - Fellside Outdoor</title></head><body>
+  <header class="site-header">
+    <a href="/" class="logo" aria-label="Fellside Outdoor home">Fellside</a>
+    <form role="search" action="/search" class="site-search"><input type="search" name="q" placeholder="Search products" aria-label="Search products"><button>Search</button></form>
+    <nav aria-label="Main"><ul><li><a href="/men">Men</a></li><li><a href="/women">Women</a></li><li><a href="/kids">Kids</a></li><li><a href="/sale">Sale</a></li></ul></nav>
+    <a href="/basket" class="basket-link" aria-label="Basket, 2 items" data-sim-rect="1180,10,80,40">2</a>
+  </header>
+  <main>
+    <h1>Trail shoes</h1>
+    <label>Sort by <select name="sort"><option>Popular</option><option>Price: low to high</option></select></label>
+    <ul class="products">
+      <li class="product-card"><h2><a href="/p/ridge-runner">Ridge Runner</a></h2><p class="price">£95</p><label>Size <select name="size-ridge"><option>7</option><option>8</option></select></label><button type="button" class="add-to-basket">Add to basket</button><button type="button" class="wish" aria-label="Save Ridge Runner to your wishlist">♡</button></li>
+      <li class="product-card"><h2><a href="/p/moss-walker">Moss Walker</a></h2><p class="price">£80</p><label>Size <select name="size-moss"><option>7</option><option>8</option></select></label><button type="button" class="add-to-basket">Add to basket</button><button type="button" class="wish" aria-label="Save Moss Walker to your wishlist">♡</button></li>
+      <li class="product-card"><h2><a href="/p/scree-racer">Scree Racer</a></h2><p class="price">£120</p><label>Size <select name="size-scree"><option>7</option><option>8</option></select></label><button type="button" class="add-to-basket">Add to basket</button><button type="button" class="wish" aria-label="Save Scree Racer to your wishlist">♡</button></li>
+    </ul>
+    <nav aria-label="Pages" class="pager"><a href="?page=1">1</a> <a href="?page=2">2</a> <a href="?page=2" rel="next">Next</a></nav>
+  </main>
+  <footer>
+    <trail-news><template shadowrootmode="open"><form class="newsletter" aria-label="Newsletter"><h2>Get trail news</h2><label for="nl-email">Email</label><input id="nl-email" type="email" name="email"><button>Sign up</button></form></template></trail-news>
+    <form class="help-search" action="/help"><input type="search" name="hq" placeholder="Search help"><button>Go</button></form>
+    <a href="#top">Back to top</a>
+  </footer>
+</body></html>"##;
+
+/// The first line of a `browser_find`'s matches.
+fn first_match(r: &Value) -> String {
+    r["data"]["matches"].as_str().unwrap_or("").lines().next().unwrap_or("").to_string()
+}
+
+#[tokio::test]
+async fn find_by_description_ranks_the_likeliest_first_with_why() {
+    let mut p = BTreeMap::new();
+    p.insert(TRAIL_URL.to_string(), TRAIL.to_string());
+    sim::install(Some(Browser::new(&p)));
+    sim::with(|b| b.open(TRAIL_URL));
+    let mut t = turn("Add the Moss Walker to my basket");
+    let log = Log::default();
+    let find = |q: &str| json!({ "query": q });
+    // Three alike buttons: the first on the page first, each saying what it's under, and the note says they tie.
+    let r = call(&mut t, FIND, find("the button that adds it to the basket"), &log).await.result;
+    assert_eq!(r["data"]["described"], true, "{r}");
+    assert!(r["displayText"].as_str().unwrap().ends_with("likely matches for ‘the button that adds it to the basket’ on shop.example.com"), "{r}");
+    let lines: Vec<&str> = r["data"]["matches"].as_str().unwrap().lines().collect();
+    assert!(lines[0].contains("button \"Add to basket\" — ‘add’, ‘basket’ in its name; in item 1 of 3 (‘Ridge Runner’)"), "{lines:?}");
+    assert!(lines[1].contains("(‘Moss Walker’)") && lines[2].contains("(‘Scree Racer’)"), "{lines:?}");
+    assert!(r["note"].as_str().unwrap().contains("The first two scored the same"), "{r}");
+    assert!(r["note"].as_str().unwrap().contains("no model"), "{r}");
+    // Its words with the product's: that card's.
+    let r = call(&mut t, FIND, find("the add to basket button for the Scree Racer"), &log).await.result;
+    assert!(first_match(&r).contains("button \"Add to basket\"") && first_match(&r).contains("‘scree’, ‘racer’ under ‘Scree Racer’"), "{r}");
+    // A place: the header's search box, not the help's.
+    let r = call(&mut t, FIND, find("the search box at the top"), &log).await.result;
+    assert!(first_match(&r).contains("searchbox \"Search products\"") && first_match(&r).contains("at the top of the page"), "{r}");
+    let r = call(&mut t, FIND, find("the search box at the bottom"), &log).await.result;
+    assert!(first_match(&r).contains("searchbox \"Search help\""), "{r}");
+    // An ordinal of an item: the second product's own link.
+    let r = call(&mut t, FIND, find("the second result's link"), &log).await.result;
+    assert!(first_match(&r).contains("link \"Moss Walker\" → shop.example.com/p/moss-walker") && first_match(&r).contains("in result 2 of 3"), "{r}");
+    let r = call(&mut t, FIND, find("the last product"), &log).await.result;
+    assert!(first_match(&r).contains("\"Scree Racer\""), "{r}");
+    // Inside a part (through the web component's open shadow root).
+    let r = call(&mut t, FIND, find("the email field in the newsletter form"), &log).await.result;
+    assert!(first_match(&r).contains("textbox \"Email\"") && first_match(&r).contains("inside the form ‘Newsletter’"), "{r}");
+    let r = call(&mut t, FIND, find("the second link in the main navigation"), &log).await.result;
+    assert!(first_match(&r).contains("link \"Women\""), "{r}");
+    // Words in its own: "Next", the basket on the right.
+    let r = call(&mut t, FIND, find("the next page link"), &log).await.result;
+    assert!(first_match(&r).contains("link \"Next\""), "{r}");
+    let r = call(&mut t, FIND, find("the basket link on the right"), &log).await.result;
+    assert!(first_match(&r).contains("link \"Basket, 2 items\"") && first_match(&r).contains("on the right"), "{r}");
+    let r = call(&mut t, FIND, find("the third add to basket button"), &log).await.result;
+    assert!(first_match(&r).contains("button 3 of 3 like it, top to bottom; in ‘Scree Racer’"), "{r}");
+    let r = call(&mut t, FIND, find("the 'Sign up' button"), &log).await.result;
+    assert!(first_match(&r).contains("button \"Sign up\" — says ‘sign up’"), "{r}");
+    // Words on the page as they are: found as ever, every match.
+    let r = call(&mut t, FIND, find("Moss Walker"), &log).await.result;
+    assert!(r["data"]["described"].is_null() && r["displayText"].as_str().unwrap().starts_with("Found "), "{r}");
+    assert!(r["data"]["matches"].as_str().unwrap().contains("link \"Moss Walker\""), "{r}");
+    // Nothing like it: said as before.
+    let r = call(&mut t, FIND, find("the video's volume slider"), &log).await.result;
+    assert_eq!(r["displayText"], "Found no match for ‘the video's volume slider’ on shop.example.com", "{r}");
+    sim::install(None);
 }

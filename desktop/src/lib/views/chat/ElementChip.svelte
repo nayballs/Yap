@@ -5,8 +5,10 @@
   // picture, "Element <div class=… />", its words, and "Show N more details"
   // (where it is, its page, its styles, its HTML). In the message box with a
   // ×; in a sent question without (chat/pages/pick.rs, core/selectedElements.js).
+  // On a React page (15 Nov 2026) its component and where its JSX was written
+  // come first, its owners and props with the details.
   import { chatImageUrl } from './chatImages.js';
-  import { elementLabel, elementLine, elementDetails } from '../../core/selectedElements.js';
+  import { elementLabel, elementLine, elementDetails, elementReact } from '../../core/selectedElements.js';
 
   /** `el`: the element; `picture`: its picture's id, or none; `onremove`: the box's ×. */
   let { el, picture = null, onremove = null } = $props();
@@ -15,6 +17,7 @@
   const label = $derived(elementLabel(el));
   const details = $derived(elementDetails(el));
   const words = $derived(String(el?.text || '').trim());
+  const react = $derived(elementReact(el));
 </script>
 
 <span class="elchip" data-testid="chat-element-chip">
@@ -37,6 +40,8 @@
     {/if}
     <span class="elgrid">
       <span class="elkey">Element</span><code class="elval" data-testid="chat-element-line">{elementLine(el)}</code>
+      {#if react?.component}<span class="elkey">Component</span><code class="elval" data-testid="chat-element-component" title={react.build ? `React, ${react.build} build` : 'React'}>{react.component}</code>{/if}
+      {#if react?.source}<span class="elkey">Source</span><code class="elval elsrc" data-testid="chat-element-source">{react.source}</code>{/if}
       {#if words}<span class="elkey">Text</span><span class="elval elwords" data-testid="chat-element-text">{words}</span>{/if}
       {#if more}
         {#each details as d (d.name)}
@@ -181,6 +186,9 @@
   code.elval {
     font-family: var(--yap-font-mono, ui-monospace, monospace);
     font-size: 12px;
+  }
+  code.elsrc {
+    color: var(--yap-paper-muted);
   }
   .elwords {
     white-space: pre-line;

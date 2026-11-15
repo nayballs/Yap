@@ -12,7 +12,8 @@
 //!   the page clicks as ever. [`picked`] reads it in the page
 //!   ([`DESCRIBE`]: tag, id, classes, its words, where it is — its
 //!   ancestors —, key computed styles, its HTML and its neighbours', all
-//!   clipped), crops its picture from a shot of the view, puts the picture in
+//!   clipped; on a React page its component, owners, props and source too:
+//!   [`ReactPart`]), crops its picture from a shot of the view, puts the picture in
 //!   Chat's box (`snip/waiting.rs`, source "element": its chip shows it, not
 //!   a tile), and tells the page tab ([`EVENT`]): the message box's chip.
 //! - **Annotate** ([`page_still`], [`page_annotated`]): a still of the page
@@ -20,8 +21,9 @@
 //!   `PageTab.svelte`), the drawing laid on it there and the picture put in
 //!   Chat's box (source "annotation").
 //! - **Sent** ([`block`]): each element as a `<selected-element>` block
-//!   after the person's words — Claude reads its tag, words, path, styles
-//!   and HTML; its picture goes as the message's picture. Web content: a
+//!   after the person's words — Claude reads its tag, words, path, its
+//!   `<react component source build>` part (owners or what it's inside, its
+//!   props), styles and HTML; its picture goes as the message's picture. Web content: a
 //!   message carrying one is a web turn from its start ([`has_element`]: the
 //!   safety rule), as text selected on a page is.
 //!
@@ -53,9 +55,35 @@ var path=[],p=el.parentElement;while(p&&p!==document.documentElement&&path.lengt
 var keys=['display','position','flex-direction','justify-content','align-items','width','height','padding','margin','background-color','color','font-size','font-weight','border-radius','border-width','border-style','border-color'];
 var styles={};keys.forEach(function(k){styles[k]=cs.getPropertyValue(k);});
 function clip(h,n){return h.length>n?h.slice(0,n)+'…':h;}
+function reactOf(el){
+var key=null,host=el,up=0;
+for(;host&&host.nodeType===1&&up<4;up++){var ks=[];try{ks=Object.keys(host);}catch(e){}for(var i=0;i<ks.length;i++){if(ks[i].indexOf('__reactFiber$')===0||ks[i].indexOf('__reactInternalInstance$')===0){key=ks[i];break;}}if(key)break;host=host.parentElement;}
+if(!key)return null;
+var f=host[key];if(!f||typeof f!=='object')return null;
+function nm(t){if(!t)return '';if(typeof t==='string')return t;if(typeof t==='function')return String(t.displayName||t.name||'');if(typeof t==='object'){if(typeof t.displayName==='string'&&t.displayName)return t.displayName;if(t.render)return nm(t.render);if(t.type)return nm(t.type);}return '';}
+var COMP={0:1,1:1,2:1,11:1,14:1,15:1};
+var c=f;for(var n=0;c&&n<80;n++){if(COMP[c.tag]&&nm(c.type))break;c=c.return;}
+if(c&&!COMP[c.tag])c=null;
+var dev=('_debugOwner' in f)||('_debugSource' in f)||('_debugStack' in f);
+var owners=[],inside=false;
+if(dev&&c){var o=c._debugOwner;for(var m=0;o&&owners.length<5&&m<20;m++){var on=(o.tag!==undefined)?nm(o.type):String(o.name||'');if(on)owners.push(on+((o.tag===undefined&&o.env)?' ('+o.env+')':''));o=o._debugOwner||o.owner||null;}}
+if(!owners.length&&c){inside=true;var p=c.return;for(var q=0;p&&owners.length<5&&q<300;q++){if(COMP[p.tag]){var pn=nm(p.type);if(pn&&owners[owners.length-1]!==pn)owners.push(pn);}p=p.return;}}
+function val(v){var t=typeof v;if(v===null)return 'null';if(t==='undefined')return 'undefined';if(t==='string')return JSON.stringify(v.length>120?v.slice(0,120)+'…':v);if(t==='number'||t==='boolean'||t==='bigint')return String(v);if(t==='function')return 'ƒ '+(v.displayName||v.name||'anonymous');if(t==='symbol')return String(v);
+if(Array.isArray(v))return '['+v.length+(v.length===1?' item]':' items]');
+try{if(v.$$typeof){var isEl=v.$$typeof===Symbol.for('react.element')||v.$$typeof===Symbol.for('react.transitional.element');return isEl?'<'+(nm(v.type)||'element')+' />':(nm(v)||'a component');}}catch(e){return '{…}';}
+if(typeof Element!=='undefined'&&v instanceof Element)return '<'+v.tagName.toLowerCase()+'>';
+if(v instanceof Date)return isNaN(v)?'Invalid Date':v.toISOString();
+var ks2=[];try{ks2=Object.keys(v);}catch(e){return '{…}';}return '{'+ks2.slice(0,6).join(', ')+(ks2.length>6?', …':'')+'}';}
+var props=[],mp=c?c.memoizedProps:null;
+if(mp&&typeof mp==='object'){var pk=[];try{pk=Object.keys(mp);}catch(e){}for(var r=0;r<pk.length&&props.length<20;r++){var k=pk[r],d=Object.getOwnPropertyDescriptor(mp,k),v2;if(!d)continue;if(!('value' in d))v2='(a getter)';else if(k==='children'&&Array.isArray(d.value)){var nk=d.value.filter(function(x){return x!==null&&x!==undefined&&x!==false&&x!==true&&x!=='';}).length;v2='['+nk+(nk===1?' child]':' children]');}else v2=val(d.value);props.push(k+': '+v2);}}
+function fromStack(s){var ls=String(s).split('\n');for(var i=0;i<ls.length;i++){var l=ls[i],mm=/((?:[a-z][a-z0-9+.-]*:\/\/)[^\s()]+):(\d+):(\d+)\)?\s*$/i.exec(l);if(!mm)continue;if(/react-stack-top-frame|node_modules|\/\.vite\/deps\/|react-jsx(-dev)?-runtime|react(-dom)?(-client)?\.(development|production)|\/react-dom\/|\/react\/|\bscheduler\b/i.test(mm[1]+' '+l))continue;return mm[1]+':'+mm[2]+':'+mm[3];}return '';}
+var src='',from='';var ds=f._debugSource||(c&&c._debugSource);
+if(ds&&ds.fileName){src=String(ds.fileName)+':'+ds.lineNumber+(ds.columnNumber?':'+ds.columnNumber:'');from='jsx';}
+else{var st=f._debugStack,txt='';try{txt=(st&&typeof st==='object'&&typeof st.stack==='string')?st.stack:(typeof st==='string'?st:'');}catch(e){}if(txt){src=fromStack(txt);if(src)from='stack';}}
+return {component:c?nm(c.type):'',owners:owners,inside:inside,props:props,source:src,sourceFrom:from,build:dev?'development':'production',up:up};}
 var html=el.outerHTML||'',sib='';
 if(el.parentElement){sib=[].slice.call(el.parentElement.children,0,12).map(function(c){return (c===el?'<!-- SELECTED -->':'')+clip(c.outerHTML||'',300);}).join('\n');}
-return {tag:el.tagName.toLowerCase(),id:el.id||'',classes:[].slice.call(el.classList||[],0,8),text:(el.innerText||el.textContent||'').replace(/\n{3,}/g,'\n\n').trim().slice(0,2000),path:path.join(' > '),styles:styles,html:clip(html,3000),siblings:clip(sib,3000),rect:{x:r.left,y:r.top,w:r.width,h:r.height},vw:innerWidth,url:location.href,title:document.title};
+return {tag:el.tagName.toLowerCase(),id:el.id||'',classes:[].slice.call(el.classList||[],0,8),text:(el.innerText||el.textContent||'').replace(/\n{3,}/g,'\n\n').trim().slice(0,2000),path:path.join(' > '),styles:styles,html:clip(html,3000),siblings:clip(sib,3000),rect:{x:r.left,y:r.top,w:r.width,h:r.height},vw:innerWidth,url:location.href,title:document.title,react:(function(){try{return reactOf(el);}catch(e){return null;}})()};
 }"#;
 
 /// **An element picked**, as the message box keeps it and `chat_send` sends it.
@@ -75,6 +103,64 @@ pub struct Picked {
     /// Its picture in Chat's box (`snip/images.rs`), if one was cropped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
+    /// **Its React details**, on a page made with React ([`ReactPart`]); none elsewhere.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub react: Option<ReactPart>,
+}
+
+/// **What React knows of a picked element** (15 Nov 2026), read from its
+/// internals on the DOM node in the page ([`DESCRIBE`]'s `reactOf`: the
+/// fiber React keeps on it — `__reactFiber$…`, `__reactInternalInstance$…`
+/// before React 17 — read only, never changing the page): the component it's
+/// inside, that component's owners (who rendered it, a few levels; a
+/// production build keeps none, so the components it's inside instead,
+/// [`ReactPart::inside`]), its props (trimmed, a function as `ƒ name`, an
+/// element as `<Name />`), and where its JSX was written when the page
+/// carries a development build's source info — React 18's `_debugSource`
+/// (the file on disk), React 19's `_debugStack` (the file and line as the
+/// page serves it).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ReactPart {
+    pub component: String,
+    pub owners: Vec<String>,
+    /// [`ReactPart::owners`] are the components it's inside, not who rendered it.
+    pub inside: bool,
+    /// "name: value", each.
+    pub props: Vec<String>,
+    /// "src/Basket.jsx:30:7"; empty: the page carries none.
+    pub source: String,
+    /// "jsx" (React 18's own) or "stack" (the line as the page serves it).
+    pub source_from: String,
+    /// "development" or "production".
+    pub build: String,
+    /// A production build's names, shortened by its minifier ("a", "tR"): said, so a component "a"
+    /// isn't read as an `<a>` (Yap Lab, 15 Nov 2026, on react.dev).
+    pub minified: bool,
+}
+
+impl ReactPart {
+    /// Trimmed to what a message carries. Pure.
+    pub fn trimmed(mut self) -> ReactPart {
+        self.component = clip(&self.component, 80);
+        self.owners = self.owners.into_iter().take(5).map(|o| clip(&o, 80)).collect();
+        self.props = self.props.into_iter().take(20).map(|p| clip(&p, 160)).collect();
+        self.source = clip(&self.source, 300);
+        let short = |n: &str| n.chars().count() <= 2;
+        self.minified = self.build == "production" && (short(&self.component) || (!self.owners.is_empty() && self.owners.iter().all(|o| short(o))));
+        self
+    }
+
+    /// Its source as said: "src/Basket.js:12:20 (as the page serves it)" for a stack's line. Pure.
+    pub fn source_words(&self) -> String {
+        if self.source.is_empty() {
+            String::new()
+        } else if self.source_from == "stack" {
+            format!("{} (as the page serves it)", self.source)
+        } else {
+            self.source.clone()
+        }
+    }
 }
 
 
@@ -113,6 +199,32 @@ pub fn block(el: &Picked) -> String {
     }
     if !el.path.is_empty() {
         parts.push(format!("<path>{}</path>", clip(&el.path, 400)));
+    }
+    if let Some(r) = &el.react {
+        let mut open = "<react".to_string();
+        if !r.component.is_empty() {
+            open.push_str(&format!(" component=\"{}\"", attr(&r.component)));
+        }
+        if !r.source.is_empty() {
+            open.push_str(&format!(" source=\"{}\"", attr(&r.source_words())));
+        }
+        if !r.build.is_empty() {
+            open.push_str(&format!(" build=\"{}\"", attr(&r.build)));
+        }
+        if r.minified {
+            open.push_str(" names=\"minified\"");
+        }
+        open.push('>');
+        let mut inner = vec![open];
+        if !r.owners.is_empty() {
+            let tag = if r.inside { "inside" } else { "owners" };
+            inner.push(format!("<{tag}>{}</{tag}>", r.owners.join(" ‹ ")));
+        }
+        if !r.props.is_empty() {
+            inner.push(format!("<props>{}</props>", r.props.join("\n")));
+        }
+        inner.push("</react>".into());
+        parts.push(inner.join("\n"));
     }
     if !styles.is_empty() {
         parts.push(format!("<styles>{styles}</styles>"));
@@ -210,6 +322,13 @@ async fn picked(key: &str, node: u64) -> Result<Picked, String> {
     }
     let mut el: Picked = serde_json::from_value(v.clone()).unwrap_or_default();
     el.text = clip(&el.text, TEXT_MAX);
+    // Addresses as the page's own (a test run's stand-in turned back), a stack's file short.
+    el.url = super::view::shown(&el.url);
+    if let Some(r) = el.react.as_mut().filter(|r| r.source_from == "stack") {
+        r.source = served_path(&super::view::shown(&r.source), &el.url);
+    }
+    // (A page without React: none, as before.)
+    el.react = el.react.take().map(ReactPart::trimmed).filter(|r| !r.component.is_empty() || !r.source.is_empty());
     // Its picture: the view's shot, cropped to it (what shows of it).
     let rect = (v["rect"]["x"].as_f64().unwrap_or(0.0), v["rect"]["y"].as_f64().unwrap_or(0.0), v["rect"]["w"].as_f64().unwrap_or(0.0), v["rect"]["h"].as_f64().unwrap_or(0.0));
     let vw = v["vw"].as_f64().unwrap_or(0.0);
@@ -224,8 +343,32 @@ async fn picked(key: &str, node: u64) -> Result<Picked, String> {
             }
         }
     }
-    tracing::info!(chars = el.text.chars().count(), html = el.html.len(), picture = el.image.is_some(), "Chat: an element picked on a page beside the chat");
+    tracing::info!(chars = el.text.chars().count(), html = el.html.len(), picture = el.image.is_some(), react = el.react.is_some(), "Chat: an element picked on a page beside the chat");
     Ok(el)
+}
+
+/// **A stack frame's file, short** (React 19's `_debugStack`): on its page's
+/// own origin, the path alone — `https://shop.example.com/src/Basket.js?t=1:11:5`
+/// on `https://shop.example.com/basket` is `src/Basket.js:11:5` (a query and
+/// Vite's `/@fs` off); another site's or a bundler's (`webpack-internal:///…`)
+/// as it is, its query off. Pure.
+pub fn served_path(source: &str, page: &str) -> String {
+    let (file, at) = match source.rsplitn(3, ':').collect::<Vec<_>>()[..] {
+        [c, l, f] if c.parse::<u32>().is_ok() && l.parse::<u32>().is_ok() => (f, format!(":{l}:{c}")),
+        _ => (source, String::new()),
+    };
+    let bare = file.split(['?', '#']).next().unwrap_or(file);
+    let Ok(u) = url::Url::parse(file) else { return format!("{bare}{at}") };
+    if !matches!(u.scheme(), "http" | "https") {
+        return format!("{bare}{at}");
+    }
+    let path = u.path();
+    let path = path.strip_prefix("/@fs").filter(|p| p.starts_with('/')).unwrap_or(path);
+    if url::Url::parse(page).is_ok_and(|p| p.origin() == u.origin()) {
+        format!("{}{at}", path.trim_start_matches('/'))
+    } else {
+        format!("{}{path}{at}", u.origin().ascii_serialization())
+    }
 }
 
 /// **Part of a shot**: `rect` (CSS pixels in the view, `vw` wide) of the PNG
@@ -318,6 +461,47 @@ mod tests {
         assert!(text.starts_with("Make this green.\n\n<selected-element ") && has_element(&text));
         assert_eq!(with_elements("Just words", &[]), "Just words");
         assert!(!has_element("Just words about <selected-element>"));
+    }
+
+    #[test]
+    fn a_react_element_carries_its_component_owners_props_and_source() {
+        let raw = json!({
+            "tag": "button", "id": "remove-2", "text": "Remove", "path": "body > div#root > ul > li.basket-row",
+            "react": { "component": "BasketRow", "owners": ["BasketPage", "App"], "inside": false, "props": ["currency: \"GBP\"", "item: {id, name, price}", "onRemove: ƒ remove"], "source": "src/Basket.js:14:12", "sourceFrom": "stack", "build": "development", "up": 0 }
+        });
+        let mut el: Picked = serde_json::from_value(raw).unwrap();
+        el.react = el.react.take().map(ReactPart::trimmed);
+        let b = block(&el);
+        assert!(b.contains("<react component=\"BasketRow\" source=\"src/Basket.js:14:12 (as the page serves it)\" build=\"development\">\n<owners>BasketPage ‹ App</owners>\n<props>currency: \"GBP\"\nitem: {id, name, price}\nonRemove: ƒ remove</props>\n</react>"), "{b}");
+        // After its path, before its styles and HTML.
+        assert!(b.find("<path>").unwrap() < b.find("<react ").unwrap());
+        // A production build: the components it's inside; React 18's own source as it is.
+        let prod = ReactPart { component: "a".into(), owners: vec!["b".into()], inside: true, source: "/app/src/Row.jsx:3:5".into(), source_from: "jsx".into(), build: "production".into(), ..Default::default() };
+        let b = block(&Picked { tag: "div".into(), react: Some(prod), ..Default::default() });
+        assert!(b.contains("<react component=\"a\" source=\"/app/src/Row.jsx:3:5\" build=\"production\">\n<inside>b</inside>\n</react>"), "{b}");
+        // A production build's shortened names said as such (a component "a" is no <a>); a development build's never.
+        let mini = ReactPart { component: "a".into(), owners: vec!["d".into(), "tR".into()], inside: true, build: "production".into(), ..Default::default() }.trimmed();
+        assert!(block(&Picked { tag: "h1".into(), react: Some(mini), ..Default::default() }).contains("<react component=\"a\" build=\"production\" names=\"minified\">"));
+        let dev = ReactPart { component: "a".into(), build: "development".into(), ..Default::default() }.trimmed();
+        assert!(!dev.minified);
+        // No React: no part.
+        assert!(!block(&Picked { tag: "p".into(), id: "build".into(), ..Default::default() }).contains("<react"));
+        // Kept to a message's size.
+        let long = ReactPart { component: "C".repeat(200), props: (0..40).map(|i| format!("p{i}: {}", "x".repeat(300))).collect(), ..Default::default() }.trimmed();
+        assert_eq!((long.component.chars().count(), long.props.len()), (81, 20));
+        assert!(long.props.iter().all(|p| p.chars().count() <= 161));
+    }
+
+    #[test]
+    fn a_stack_frames_file_is_its_path_on_the_pages_own_site() {
+        assert_eq!(served_path("https://shop.example.com/src/Basket.js:11:5", "https://shop.example.com/basket"), "src/Basket.js:11:5");
+        // A dev server's query and Vite's /@fs off.
+        assert_eq!(served_path("http://localhost:5173/src/App.jsx?t=1731600000000:12:7", "http://localhost:5173/"), "src/App.jsx:12:7");
+        assert_eq!(served_path("http://localhost:5173/@fs/work/app/src/Row.tsx:3:1", "http://localhost:5173/"), "work/app/src/Row.tsx:3:1");
+        // Another site's: as it is; a bundler's: as it is, its query off.
+        assert_eq!(served_path("https://cdn.example.net/app.js:1:200", "https://shop.example.com/"), "https://cdn.example.net/app.js:1:200");
+        assert_eq!(served_path("webpack-internal:///(app-pages-browser)/./src/app/page.tsx?abc:20:9", "http://localhost:3000/"), "webpack-internal:///(app-pages-browser)/./src/app/page.tsx:20:9");
+        assert_eq!(served_path("not a url", "https://shop.example.com/"), "not a url");
     }
 
     #[test]

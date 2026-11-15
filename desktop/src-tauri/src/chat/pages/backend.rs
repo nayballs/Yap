@@ -220,6 +220,22 @@ pub async fn blocks(key: &str) -> Result<Vec<super::see::Block>, String> {
     serde_json::from_value(v["blocks"].clone()).map_err(|_| "The page couldn't be read.".to_string())
 }
 
+/// **What page `key` holds for a description** (`browser_find`: `find.rs`):
+/// its things with refs, the parts they're in, its size; addresses as the
+/// page's own.
+pub async fn scene(key: &str) -> Result<super::find::Scene, String> {
+    sim!(|b| b.scene(key));
+    wait_loaded(key).await;
+    let raw = view::run_script(key, super::act::script::scene()).await?;
+    let mut s: super::find::Scene = serde_json::from_str(&raw).map_err(|_| "The page couldn't be read.".to_string())?;
+    for t in &mut s.things {
+        if !t.href.is_empty() {
+            t.href = view::shown(&t.href);
+        }
+    }
+    Ok(s)
+}
+
 /// **What's in view of page `key` now**, a PNG at the device's pixels.
 pub async fn shot(key: &str) -> Result<Vec<u8>, String> {
     sim!(|b| b.shot(key));

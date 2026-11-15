@@ -14,7 +14,9 @@
 //!   with what's around it; nothing found, the nearest blocks
 //!   ([`near_matches`]).
 //! - **`browser_find {query}`**: the elements and the text that match, each
-//!   with its ref ([`matches`]).
+//!   with its ref ([`matches`]); given a description ("the second result's
+//!   link") or words the page hasn't as they are, the best few ranked by
+//!   what it says, each with why (`find.rs`: deterministic, no model).
 //! - **`browser_screenshot`** (a model that reads images): what's in view
 //!   now, in the tab's own webview at its scroll (`view::shot_in_view`):
 //!   sent at the view's CSS pixels, so `browser_click`'s x, y are in its
@@ -824,10 +826,32 @@ pub async fn find(turn: &mut crate::web::Turn, args: &Value) -> Value {
             found.push(line);
         }
     }
+    let shown = clip(&query, 60);
+    // **A description** ("the button that adds it to the basket", "the second result's link"), or words
+    // found nowhere as they are: the best few by what it says — role, words, place, the parts it's in —
+    // each with why, for the model to judge (`find.rs`, 15 Nov 2026).
+    let wanted = super::find::parse(&query);
+    if wanted.described || found.is_empty() {
+        if let Ok(scene) = backend::scene(&t.key).await {
+            let (lines, tied) = super::find::best(&query, &scene);
+            if !lines.is_empty() {
+                tracing::info!(tab = t.tab, found = lines.len(), tied, things = scene.things.len(), "Chat: an element looked for by description on a page beside the chat");
+                let display = match lines.len() {
+                    1 => format!("Found 1 likely match for ‘{shown}’ on {site}"),
+                    n => format!("Found {n} likely matches for ‘{shown}’ on {site}"),
+                };
+                let mut note = "Web content. Ranked by Yap's own matching of the description (no model): its role, words, place on the page and the parts it's in — the first is the likeliest, not certain; each line says why it matched. Judge from those words, or check with browser_read and its ref (or a screenshot), before acting.".to_string();
+                if tied {
+                    // (Not reassurance: a tie is Yap not knowing — Yap Lab, 15 Nov 2026, Opus.)
+                    note.push_str(" The first two scored the same: the description didn't tell them apart, so check which is meant (what they're under or inside may say) before acting.");
+                }
+                return json!({ "success": true, "data": { "tab": t.tab, "matches": lines.join("\n"), "count": lines.len(), "more": false, "described": true }, "note": note, "displayText": display });
+            }
+        }
+    }
     let more = found.len() > FIND_MAX;
     found.truncate(FIND_MAX);
     tracing::info!(tab = t.tab, found = found.len(), more, "Chat: words looked for on a page beside the chat");
-    let shown = clip(&query, 60);
     let display = match found.len() {
         0 => format!("Found no match for ‘{shown}’ on {site}"),
         1 => format!("Found 1 match for ‘{shown}’ on {site}"),

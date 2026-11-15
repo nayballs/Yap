@@ -223,7 +223,7 @@ fn title(name: &str) -> &'static str {
         see_screen::LOOK => "Look at the screen",
         pages::NAVIGATE => "Go to a page beside the chat",
         pages::READ => "Read the page beside the chat",
-        pages::FIND => "Find words on the page",
+        pages::FIND => "Find on the page",
         pages::SCROLL => "Scroll the page",
         pages::SCROLL_TO => "Scroll to part of the page",
         pages::SCREENSHOT => "Look at the page",

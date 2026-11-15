@@ -30,9 +30,37 @@ function stylesOf(s) {
   return out;
 }
 
+const REACT = /<react\b([^>]*)>([\s\S]*?)<\/react>/;
+
+/**
+ * An element's React details from its block's `<react …>` part (pick.rs
+ * `ReactPart`): `{component, source, build, owners, inside, props}`, or
+ * null — the shape the message box's chip has from Rust, `source` already
+ * as said ("… (as the page serves it)").
+ */
+function reactOf(inner) {
+  const m = String(inner).match(REACT);
+  if (!m) return null;
+  const a = attrsOf(m[1]);
+  const owners = part(m[2], 'owners');
+  const inside = part(m[2], 'inside');
+  const said = owners || inside;
+  const props = part(m[2], 'props');
+  return {
+    component: a.component || '',
+    source: a.source || '',
+    sourceFrom: '',
+    build: a.build || '',
+    minified: a.names === 'minified',
+    owners: said ? said.split(' ‹ ').filter(Boolean) : [],
+    inside: !owners && !!inside,
+    props: props ? props.split('\n').filter(Boolean) : [],
+  };
+}
+
 /**
  * A message's text → its own words, and the elements picked with it (in
- * order): `{tag, id, classes, url, picture, text, path, styles, html, siblings}`.
+ * order): `{tag, id, classes, url, picture, text, path, styles, html, siblings, react}`.
  */
 export function splitElements(text) {
   const t = String(text ?? '');
@@ -52,6 +80,7 @@ export function splitElements(text) {
       styles: stylesOf(part(inner, 'styles')),
       html: part(inner, 'html'),
       siblings: part(inner, 'siblings'),
+      react: reactOf(inner),
     });
   }
   return { text: t.replace(BLOCK, '').trim(), elements };
@@ -70,9 +99,26 @@ export function elementLine(el) {
   return elementLabel(el).replace(/>$/, ' />');
 }
 
-/** Its card's details past the first: where it is, its page, its styles, its HTML (those it has). */
+/**
+ * Its React component, as its card's first rows show it: `<BasketRow />` and
+ * where its JSX was written — the box's chip has Rust's `source` and
+ * `sourceFrom`, a sent one's block says it already. Null off React.
+ */
+export function elementReact(el) {
+  const r = el?.react;
+  if (!r || (!r.component && !r.source)) return null;
+  const source = r.sourceFrom === 'stack' && r.source && !/\(as the page serves it\)$/.test(r.source) ? `${r.source} (as the page serves it)` : r.source || '';
+  // (A production build's shortened names said as such: a component "a" is no <a> element.)
+  const component = r.component ? `<${r.component} />${r.minified ? ' (a minified name)' : ''}` : '';
+  return { component, source, build: r.build || '' };
+}
+
+/** Its card's details past the first: its React owners and props, where it is, its page, its styles, its HTML (those it has). */
 export function elementDetails(el) {
   const out = [];
+  const r = el?.react;
+  if (r?.owners?.length) out.push({ name: r.inside ? 'Inside' : 'Owners', value: r.owners.join(' ‹ ') });
+  if (r?.props?.length) out.push({ name: 'Props', value: r.props.join('\n'), code: true });
   if (el?.path) out.push({ name: 'Path', value: el.path });
   if (el?.url) out.push({ name: 'Page', value: el.url });
   const styles = Object.entries(el?.styles || {}).filter(([, v]) => String(v).trim());

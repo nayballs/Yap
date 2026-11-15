@@ -2899,7 +2899,56 @@ of sight. What they share is said once, in the line.
   block has** ("table", "figure", "region", "list", "dialog", "tablist"…:
   `see::node_role`), the page's nodes of that role from the tree
   (`script::roles`: each named by its words, "table Ferry times" the
-  tables holding them); **`browser_wait { seconds?, text? }`**
+  tables holding them) — and **a description** (15 Nov 2026, `pages/find.rs`;
+  as Claude Code's own `find` takes one, "search bar", "login button"):
+  "the button that adds it to the basket", "the search box at the top",
+  "the second result's link", "the email field in the sign-up form", "the
+  Add to basket button under Hill walker". A query that names a place, an
+  ordinal, a part it's in or what it's beside (`find::Wanted::described`),
+  or whose words aren't on the page as they are, is ranked instead of
+  matched, **deterministically, no model**: the page's `scene` op
+  (`script.rs`; the stand-in's, `sim.rs`) lists every visible control,
+  heading, part (a table, a form, a landmark, a picture) and text block
+  with its ref, role, accessible name, label, placeholder, description,
+  value (never a sensitive field's), id and class words, where it is on the
+  page, the heading it's under and the parts it's inside — a landmark, a
+  form, a dialog, a row, or one of several like it in its parent (the same
+  tag, class and role: "the 2nd of 3") — through open shadow roots and
+  same-origin frames (`deep_js!`); `find::parse` reads the description
+  (English: its role word, the last one — "the menu button" is a button —
+  its words stemmed with a few synonyms folded, basket = cart, "log in" =
+  sign in; a place, "at the top", "on the right", never "back to top"; an
+  ordinal; "in / inside / within / under / of …" parts, a possessive's
+  "the second result's"; "next to / below / above …"; words in quotes, on
+  it exactly); `find::rank` scores each (its role +4, each word in its
+  own words +3, in what it's under or inside +1.2, the part it's asked to
+  be in +3 or −2.5, the place by where it is on the page, the nth of those
+  of its kind and words top to bottom +6; an item word for any list,
+  "result", "item", "card", fits the page's main list of like items, one
+  for a kind of thing, "video", only a list that says it) and lists **the
+  best 5, each with why** ("‘add’, ‘basket’ in its name; in item 1 of 3
+  (‘Ridge Runner’)", "inside the form ‘Newsletter’", "in result 2 of 3",
+  "at the top of the page", "inside the ‘pager’"), each line's place in a
+  list of like things and that item's name added — never the heading above
+  it, on a grid the card before's — else a part its classes name or the
+  heading it's under, so alike ones tell apart; a link that's only a
+  picture says so; a block of text that only holds a listed match is left
+  out; its note says it's Yap's own ranking, the first the likeliest not
+  certain, and when the first two tie — the model judges, as between a
+  read's lines. Words on the page as they are still list every match as
+  before ("Moss Walker", "button Buy"); nothing ranked, "Found no match".
+  Checked in Yap Lab on Opus (the plan) on a real shop (books.toscrape.com,
+  a public site for scraping practice): 3 of 4 first ("the third book's
+  title link" found the sidebar's "Books"), then 4 of 4 once fixed — a word
+  with an ordinal is one of several like it ("the second book"), the
+  page's main list chosen by how much each item holds and whether it has
+  titles (never a sidebar's 50 categories), "title" its heading's link, a
+  sidebar asked for by role said though its classes don't name its words,
+  and the lines as Opus asked (one way of saying a place, an item's own
+  name, a picture link said, a tie said as Yap not knowing).
+  The tool's line for Chat and a Code chat's session alike: "Find words,
+  roles or a description (\"the 2nd result's link\"): matches by ref, with
+  why." (12 tokens on every step's tools.) **`browser_wait { seconds?, text? }`**
   waits for the words (folded) or, without them, until the page settles
   (loaded, its text still for 0.8 s), at most 10 s; **`browser_tabs {
   action: list | new | switch | close | width, tab?, width? }`** — the list's titles are web
@@ -3342,9 +3391,10 @@ review (safely, for any user, in any language Yap speaks).
   right**, then what Opus found trying them on Wikipedia (`find "table"`
   missing the tables, a tree cut mid-line, a scroll at its end saying it
   scrolled, `max_x` counting the scrollbar, a wheel step wider than the
-  view) and `browser_key`'s `repeat` ("Pressed Tab ×3"). Still apart: Claude Code's app's `find` by a description (it
-  runs a model over the page; Yap's, as the app's own built-in browser's,
-  matches role, name and text).
+  view) and `browser_key`'s `repeat` ("Pressed Tab ×3"). The last of it, 15 Nov 2026:
+  `find` by a description ("the second result's link"), ranked by Yap's
+  own deterministic scorer (`pages/find.rs`, above) rather than a model —
+  each match says why, the model judges.
 - **Select an element or annotate** (14 Nov 2026, `pages/pick.rs`,
   `PageTab.svelte`, `PageAnnotate.svelte`; the maintainer, showing the Claude
   Code app's browser pane — its arrow at the end of the address bar, Ctrl+Shift+S,
@@ -3361,17 +3411,34 @@ review (safely, for any user, in any language Yap speaks).
     `watch_devtools`) — one pick, then the page clicks as ever. Yap reads it in
     the page (`pick::DESCRIBE` over `Runtime.callFunctionOn`: tag, id,
     classes, its words, its ancestors as a path, 17 key computed styles, its
-    HTML and its neighbours', clipped), crops its picture from a shot of the
+    HTML and its neighbours', clipped — and **on a React page** (15 Nov
+    2026, `pick::ReactPart`) what React keeps on the node, read only: the
+    fiber on it or up to 3 parents (`__reactFiber$…`, before React 17
+    `__reactInternalInstance$…`), the component it's inside, that
+    component's owners a few levels (`_debugOwner`, a server component's
+    name too; a production build keeps none, so the components it's inside,
+    said as "Inside", and names a minifier shortened — "a", "tR" — said
+    so: `names="minified"`, the card's "(a minified name)", Yap Lab on
+    react.dev, 15 Nov 2026), its props (20, each trimmed: a function as
+    `ƒ name`, an element as `<Name />`, an object by its keys, children
+    counted as React draws them, a getter never called), and where its JSX was written when the page carries a
+    development build's source: React 18's `_debugSource` (the file on
+    disk) or React 19's `_debugStack` — its first frame outside React and
+    node_modules, the file and line **as the page serves it** (a dev
+    server's transform may move a line); a page without React, none), crops its picture from a shot of the
     view (`crop_to`) into Chat's box (source "element": no tile — its chip
     shows it; the sent question keeps each picture's source from the box,
     `commands.rs` `keep_sources`, the stored copy alone saying "snip"), and the page tab adds a **chip** to the message box
     (`stores/pickedElements.svelte.js`, `ElementChip.svelte`:
     `<div class="…">`; its card on hover, "Included with your message", its
-    picture, Element, Text, "Show N more details": path, page, styles, HTML,
-    neighbours; × removes it and its picture).
+    picture, Element, Component and Source on a React page, Text, "Show N
+    more details": Owners (or Inside) and Props on a React page, path, page,
+    styles, HTML, neighbours; × removes it and its picture).
   - **Sent**: `chat_send`'s `elements` → `pick::with_elements`: a
     `<selected-element page tag id class picture>` block each (<text>,
-    <path>, <styles>, <html>, <siblings>) after the person's words, its
+    <path>, on a React page `<react component source build>` with
+    `<owners>` (or `<inside>`) and `<props>`, <styles>, <html>,
+    <siblings>) after the person's words, its
     picture with the question's (a model that can't read images: the words
     alone, never stuck). Web content: a message carrying one is a web turn
     from its start (`has_element`: Chat's `web_question`, a plan chat's and a
