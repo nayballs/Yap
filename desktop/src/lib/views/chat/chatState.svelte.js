@@ -26,6 +26,8 @@ import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused, pastedImage, keepPasted, spli
 import { picked as pickedElements, takePicked } from '../../stores/pickedElements.svelte.js';
 import { waitingShots, followWaitingShots, removeWaiting, clearWaiting, followPixelRatio } from './chatShots.svelte.js';
 import { questionTokens, isTooLong } from './chatBudget.js';
+import { isPicturePath, filesTokens, filesPrompt, skippedLine } from './chatFiles.js';
+import { mentionAt, withMention, written as mentionWritten } from './chatMentions.js';
 import { fmtContext } from '../../core/aiUsage.js';
 import { SkillPicker } from '../../stores/skills.svelte.js';
 import { think, takeThink } from './chatThink.svelte.js';
@@ -247,7 +249,38 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     dropTurn(rec);
     rec.conv = conv;
     setTurn(rec);
+    // A new chat asked incognito: its conversation is one.
+    if (rec.ghost) markGhost(conv);
   }
+
+  // ---- Incognito (chat/incognito.rs, 15 Nov 2026; the Claude app's ghost) ----
+  // A new chat's ghost (`ghostNew`) makes its first question start an
+  // incognito chat: kept in memory only, never listed or remembered. The
+  // ones this view holds (`ghostIds`) end when left — another chat opened, a
+  // new one — or, left while their answer was still coming, once it's in.
+  let ghostNew = $state(false);
+  let ghostIds = $state([]);
+  /** The chat shown is (or, a new one, will be) incognito. */
+  const incognito = $derived(activeId == null ? ghostNew : ghostIds.includes(activeId));
+  function markGhost(id) {
+    if (id != null && !ghostIds.includes(id)) ghostIds = [...ghostIds, id];
+  }
+  /** The ghost on a new chat, on or off (never on a Code chat's new chat). */
+  function setGhost(on) {
+    if (activeId != null) return;
+    ghostNew = !!on;
+    reportView();
+  }
+  // Each incognito chat not shown and not answering any more: ended (it goes).
+  $effect(() => {
+    const shown = activeId;
+    const left = ghostIds.filter((id) => id !== shown && !turns[String(id)]);
+    if (!left.length) return;
+    untrack(() => {
+      ghostIds = ghostIds.filter((id) => !left.includes(id));
+      for (const id of left) invoke('chat_incognito_end', { id }).catch(() => {});
+    });
+  });
   /** `rec`'s conversation is the one open (a new chat's: the new chat it was asked in). */
   const isShown = (rec) => (rec.conv != null ? activeId === rec.conv : activeId == null && rec.view === viewSeq);
   /** **The open conversation's answer being written**, if any: the only one the thread and the composer show. */
@@ -413,8 +446,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   let showingSummary = $state(false);
   // The last send's "too long" (Rust's plain sentence), until the next send.
   let tooLong = $state('');
-  // A paste too long for the model: said under the box, never sent.
-  const inputTokens = $derived(questionTokens(input));
+  // **Files attached in the box** (chat/attachments.rs, 15 Nov 2026: + → Attach files…, or dropped): each read and
+  // kept by Rust (`chat_files_add`), waiting here until sent; their text goes before the question. ({ id, name, kind,
+  // bytes, tokens, pages? }.)
+  let files = $state([]);
+  // A paste too long for the model: said under the box, never sent. (The files' text counts too.)
+  const inputTokens = $derived(questionTokens(input) + filesTokens(files));
   const inputTooLong = $derived(!!limits?.questionMax && inputTokens > limits.questionMax);
 
   async function refreshLimits() {
@@ -655,10 +692,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     toast({ title: `A question carries ${MAX_SHOTS} screenshots at most`, description: 'Remove one to add another.', chip: 'Chat' });
   }
 
-  /** Files dropped on Chat (Windows' drag and drop): the pictures among them go in the box. */
-  async function dropFiles(paths) {
+  /** Files dropped on Chat (Windows' drag and drop): the pictures among them go in the box as screenshots, any
+   * other file as an attached file (chat/attachments.rs). */
+  async function dropFiles(dropped) {
     dragging = false;
-    if (!paths?.length) return;
+    const others = (dropped || []).filter((p) => !isPicturePath(p));
+    if (others.length) await attachFiles(others);
+    const paths = (dropped || []).filter(isPicturePath);
+    if (!paths.length) return;
     const room = MAX_SHOTS - waitingShots.list.length;
     if (room <= 0) {
       boxFull();
@@ -677,6 +718,133 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     } catch (err) {
       toast({ title: "Couldn't add the pictures", description: String(err), variant: 'destructive' });
     }
+  }
+
+  /** Files added to the box (their paths): read by Rust, kept, waiting; any it can't read said plainly, each. */
+  async function attachFiles(paths) {
+    const list = (paths || []).filter(Boolean);
+    if (!list.length) return;
+    const room = 20 - files.length;
+    try {
+      const got = await invoke('chat_files_add', { paths: list, room: Math.max(0, room) });
+      const fresh = (got?.files || []).filter((f) => f?.id && !files.some((x) => x.id === f.id));
+      if (fresh.length) files = [...files, ...fresh];
+      const why = skippedLine(got?.skipped);
+      if (why) {
+        toast({
+          title: fresh.length ? `${got.skipped.length} of the files weren't attached` : got.skipped.length === 1 ? "That file wasn't attached" : "Those files weren't attached",
+          description: why,
+          chip: 'Chat',
+        });
+      }
+    } catch (err) {
+      toast({ title: "Couldn't attach the files", description: String(err), variant: 'destructive' });
+    }
+    await tick();
+    inputEl?.focus();
+  }
+
+  /** + → Attach files…: Windows' file picker, several at once. */
+  async function pickFiles() {
+    plusOpen = false;
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const picked = await open({ multiple: true, title: 'Attach files to your message' });
+      const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
+      await attachFiles(paths);
+    } catch (err) {
+      toast({ title: "Couldn't open the file picker", description: String(err), variant: 'destructive' });
+    }
+  }
+
+  // ---- @-mention a file in a Code chat (agents/mention.rs, 15 Nov 2026, as Claude Code's own @)
+
+  /** The picker: open while an `@` is typed in a Code chat's box (`at`: where, from chatMentions.js `mentionAt`). */
+  const mention = $state({ open: false, items: [], active: 0, query: '', loading: false, at: null });
+  let mentionSeq = 0;
+  /** `{ folder }` while the chat shown is a Code chat (ChatView: its workspace), else null. */
+  let mentionGate = () => null;
+  function setMentionGate(fn) {
+    mentionGate = typeof fn === 'function' ? fn : () => null;
+  }
+  /** The box changed or its caret moved: the picker follows the `@` being typed, its files asked of Rust. */
+  async function mentionInput() {
+    const gate = mentionGate();
+    const at = gate ? mentionAt(input, inputEl?.selectionStart ?? input.length) : null;
+    if (!at) {
+      if (mention.open) closeMention();
+      return;
+    }
+    if (mention.open && mention.at?.start === at.start && mention.query === at.query) return;
+    mention.at = at;
+    mention.query = at.query;
+    mention.open = true;
+    mention.loading = true;
+    const seq = ++mentionSeq;
+    try {
+      const items = await invoke('agent_mention_files', { conversation: activeId, folder: gate.folder ?? null, query: at.query });
+      if (seq !== mentionSeq) return;
+      mention.items = Array.isArray(items) ? items : [];
+      mention.active = 0;
+    } catch {
+      if (seq === mentionSeq) mention.items = [];
+    } finally {
+      if (seq === mentionSeq) mention.loading = false;
+    }
+  }
+  function closeMention() {
+    mentionSeq += 1;
+    mention.open = false;
+    mention.items = [];
+    mention.at = null;
+    mention.loading = false;
+  }
+  /** A file picked: `@path` in the box where the `@` was typed, the caret after it. */
+  function pickMention(hit) {
+    const at = mention.at;
+    if (!at || !hit?.path) return;
+    const r = withMention(input, at, hit.path, inputEl?.selectionStart ?? input.length);
+    input = r.text;
+    closeMention();
+    tick().then(() => {
+      inputEl?.focus();
+      inputEl?.setSelectionRange?.(r.caret, r.caret);
+    });
+  }
+  /** A key in the box while the picker is open: ↑ ↓ move, Enter or Tab put the file in, Esc closes (true: taken). */
+  function mentionKey(e) {
+    if (!mention.open || e.isComposing) return false;
+    const n = mention.items.length;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (n) mention.active = (mention.active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+      return true;
+    }
+    if ((e.key === 'Enter' || e.key === 'Tab') && n && !e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      pickMention(mention.items[Math.min(mention.active, n - 1)]);
+      return true;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMention();
+      return true;
+    }
+    return false;
+  }
+  /** A mention's chip ✕: its `@path` out of the box's words. */
+  function dropMention(path) {
+    const said = mentionWritten(path);
+    input = input.split(said).join('').replace(/ {2,}/g, ' ').trim();
+    inputEl?.focus();
+  }
+
+  /** A file's ✕ in the box: out, and gone from this PC (Rust: never one a question carries). */
+  function removeFile(id) {
+    files = files.filter((f) => f.id !== id);
+    invoke('chat_attachment_remove', { id }).catch(() => {});
+    inputEl?.focus();
   }
 
   async function loadVoiceSettings() {
@@ -765,6 +933,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // pills reopen the panel, its tabs with it — less the ones closed in it).
       doc.reset(conv.closedTabs);
       quote = null;
+      if (conv.incognito) markGhost(id);
       activeId = id;
       scope = conv.scope || null;
       summary = conv.summary ?? null;
@@ -919,6 +1088,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     byVoice = false;
     scope = null;
     choseNew = true;
+    // A new chat starts kept, its ghost off (the Claude app's).
+    ghostNew = false;
     // A new chat has every connector on.
     connectors.resetNew();
     reportView();
@@ -999,6 +1170,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       conversationId: activeId,
       newChat: activeId == null && choseNew,
       codeFolder: activeId == null ? (pendingFolder?.() ?? null) : null,
+      // Its ghost on: a question asked out loud there starts it incognito.
+      incognito: activeId == null && ghostNew && !(pendingFolder?.() ?? null),
     }).catch(() => {});
   }
   $effect(() => {
@@ -1210,6 +1383,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         // (its tabs closed before stay closed; a new chat it became keeps what it shows).
         if (activeId != null) doc.reset(conv.closedTabs);
         else doc.takeClosed(conv.closedTabs);
+        // (A question asked out loud into a new chat with its ghost on: incognito.)
+        if (conv.incognito) markGhost(id);
         activeId = id;
         scope = conv.scope || null;
       }
@@ -1756,7 +1931,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const noImages = vision.images === false;
     const boxShots = fromBox ? waitingShots.list : [];
     const shots = noImages ? boxShots.filter((s) => s.source !== 'element') : boxShots;
-    const text = (fromBox ? input.trim() : String(opts.text).trim()) || (shots.length || elements.length ? DEFAULT_PROMPT : '');
+    // The files attached in the box (chat/attachments.rs): sent with the box's words only.
+    const sentFiles = fromBox ? files : [];
+    const text = (fromBox ? input.trim() : String(opts.text).trim()) || (shots.length || elements.length ? DEFAULT_PROMPT : sentFiles.length ? filesPrompt(sentFiles) : '');
     // **Claude is working** (a Code chat's own session): the message waits, a bubble of its own, until Claude can
     // take it (its next step) or its turn ends. With a screenshot, a picked element, a passage or a Skill it goes
     // now, as before.
@@ -1767,8 +1944,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // waits for nothing then). With nothing going on it's sent as Enter sends it.
     const later = fromBox && opts?.later === true;
     // (Asked out loud, `spokenWhileWorking`: its words alone, never the box's screenshots, elements or passage.)
-    // (A retry or an edit is never queued.)
-    const queueable = branching ? false : fromBox ? !shots.length && !elements.length && !quote : opts?.spoken === true;
+    // (A retry or an edit is never queued; nor a message with files.)
+    const queueable = branching ? false : fromBox ? !shots.length && !elements.length && !quote && !sentFiles.length : opts?.spoken === true;
     const gated = queueGate();
     if (queueable && text && activeId != null && (!sending || later) && (gated || later) && !skills.parse(text)?.skill) {
       // Rust says (agents/runner.rs `queue_state`): writing its answer — it waits; a tool call out — it goes now,
@@ -1817,6 +1994,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (fromBox) quote = null;
     // Out of the box (Rust takes them with the question, chat_send).
     if (fromBox) waitingShots.list = [];
+    if (fromBox) files = [];
     const sentElements = fromBox ? takePicked().map((e) => (noImages ? { ...e, image: null } : e)) : [];
     if (noImages) for (const e of elements) if (e.image) invoke('chat_waiting_remove', { id: e.image }).catch(() => {});
     if (fromBox) byVoice = false;
@@ -1847,6 +2025,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         images: from ? (from.images || []).filter((i) => !i.gone) : shots,
         quote: from ? (from.quote ?? null) : sentQuote,
         elements: from ? opts.elements || [] : sentElements,
+        // (Its attached files go again with an edit: chat/attachments.rs.)
+        attachments: from ? from.attachments || [] : sentFiles,
       };
       messages = edit != null ? [...messages.slice(0, edit), question] : [...messages, question];
     }
@@ -1858,6 +2038,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // lands there.
     const rec = new Answer({ conv: activeId, turn, view: viewSeq, question });
     if (retry != null) rec.askedId = question.id ?? null;
+    // A new chat's ghost on (never a Code chat's): its conversation is incognito.
+    rec.ghost = activeId == null && ghostNew && !(newChatFolder?.() ?? null);
     setTurn(rec);
     // (Read again as it ends when it didn't answer: Rust put the chat back as it was.)
     let reloadAfter = false;
@@ -1919,12 +2101,16 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         pageQuote: about?.page ? { text: about.text, site: about.page.site || '' } : null,
         // Elements picked on a page beside the chat (chat/pages/pick.rs `with_elements`).
         elements: sentElements.length ? sentElements : null,
+        // The files attached in the box (chat/attachments.rs).
+        files: sentFiles.length ? sentFiles.map((f) => f.id) : null,
         // A new chat made a Code chat before its first question (agents/code_chat.rs).
         codeFolder: activeId == null ? (newChatFolder?.() ?? null) : null,
         // A new chat's connectors switched off in its + menu (connectors/chats.rs).
         connectorsOff: activeId == null ? connectors.newChatOff() : null,
         // An edit (chat/commands.rs `edit`): the message it replaces, its picked elements again.
         ...(edit != null ? { edit, editFiles: opts.editFiles === true, elements: opts.elements?.length ? opts.elements : null } : {}),
+        // A new chat asked incognito (chat/incognito.rs).
+        incognito: rec.ghost || null,
       },
       onEvent
     );
@@ -2088,8 +2274,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       input = text; // give the message back
       quote = about; // …and the passage it was about
       if (thinkIt) think.on = true; // …thought through, as it was asked
-      // …and its screenshots (Rust puts them back too, yap-chat-waiting).
+      // …and its screenshots (Rust puts them back too, yap-chat-waiting), and its files.
       waitingShots.list = shots;
+      if (sentFiles.length) files = [...sentFiles, ...files.filter((f) => !sentFiles.some((x) => x.id === f.id))];
       byVoice = voice;
       // Too long for the model (Rust's plain sentence, never the provider's
       // JSON): said over the box with what helps — New chat, more room for
@@ -2273,6 +2460,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get conversations() { return conversations; },
     set conversations(v) { conversations = v; },
     get activeId() { return activeId; },
+    /** The chat shown is incognito (a new one: its ghost is on). */
+    get incognito() { return incognito; },
+    setGhost,
     get messages() { return messages; },
     get input() { return input; },
     set input(v) { input = v; },
@@ -2318,6 +2508,17 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     set viewing(v) { viewing = v; },
     get snipHotkey() { return snipHotkey; },
     get dragging() { return dragging; },
+    get files() { return files; },
+    get mention() { return mention; },
+    setMentionGate,
+    mentionInput,
+    mentionKey,
+    pickMention,
+    closeMention,
+    dropMention,
+    attachFiles,
+    pickFiles,
+    removeFile,
     set dragging(v) { dragging = v; },
     get visionBlocked() { return visionBlocked; },
     get switchName() { return switchName; },

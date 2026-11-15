@@ -143,6 +143,10 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// Ignored for an existing conversation (its own switches are saved as
 /// they're flipped, `connector_chat_set`).
 ///
+/// `files`: the files attached in Chat's box (`chat/attachments.rs`: ids
+/// from `chat_files_add`), their text sent before the question and kept
+/// with it; one gone since is said, nothing sent.
+///
 /// `edit`: **Edit** (15 Nov 2026, the Claude app's) — the person's message
 /// at that index replaced by `text`: in Chat, it and everything after it
 /// set aside as a branch (‹ 1/2 › on the message, `chats/branches.rs`), back
@@ -150,6 +154,10 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// Rewind to before it (`agents/rewind.rs`, `editFiles`: the files Claude
 /// changed since go back too), then sent. Either way its screenshots and the
 /// passage it was about go again; the reply's `forks` are the chat's ‹ ›.
+///
+/// `incognito`: a new chat's ghost was on (chat/incognito.rs): the
+/// conversation it makes is kept in memory only. Ignored for an existing
+/// conversation (it is one or it isn't, from its start).
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -169,9 +177,13 @@ pub async fn chat_send(
     elements: Option<Vec<crate::chat::pages::pick::Picked>>,
     code_folder: Option<String>,
     connectors_off: Option<Vec<String>>,
+    files: Option<Vec<String>>,
     edit: Option<usize>,
     edit_files: Option<bool>,
+    incognito: Option<bool>,
 ) -> Result<serde_json::Value, String> {
+    // The files attached in the box (chat/attachments.rs): each still there.
+    let files = crate::chat::attachments::taken(&files.unwrap_or_default())?;
     // A Skill (`/decisions`, a one-tap prompt): asked across the meetings,
     // its own passages and instructions (chat/skills.rs).
     let skill_turn = match skill.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
@@ -184,6 +196,11 @@ pub async fn chat_send(
         (Some(at), Some(id)) => Some(begin_edit(id, at, edit_files.unwrap_or(false)).await?),
         (Some(_), None) => return Err("That chat isn't there any more.".to_string()),
         (None, _) => None,
+    };
+    // (An edit's files: as its message had them, unless new ones came with it.)
+    let files = match &editing {
+        Some(e) if files.is_empty() => e.question.attachments.clone(),
+        _ => files,
     };
     let (images, as_text, selection, page_quote) = match &editing {
         Some(e) => {
@@ -213,16 +230,24 @@ pub async fn chat_send(
         None => taken.iter().map(|i| (i.id.clone(), i.source.clone())).collect(),
     };
     let turn = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, sources, as_text);
+    let turn = crate::chat::attachments::with(files, turn);
     let send = crate::chat::skills::with(skill_turn, crate::chat::documents::with_selection(selection, turn));
     // Text selected on a page beside the chat: what the question is about.
     // (Boxed: the command's future is made on the main thread, whose stack
     // a turn's whole future overflows.)
     let send = Box::pin(crate::chat::assistant::selected::with(page_quote.and_then(|q| q.selected()), Box::pin(send)));
     // A new chat made a Code chat before its first question (agents/code_chat.rs).
-    let send = Box::pin(crate::agents::code_chat::with_new(code_folder.filter(|_| conversation_id.is_none()), send));
+    let code_folder_none = code_folder.as_deref().is_none_or(|f| f.trim().is_empty());
+    // (Its type erased here: the layers' nesting stays under the compiler's
+    // recursion limit for proving the command's future is Send.)
+    let send: std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, String>> + Send>> =
+        Box::pin(crate::agents::code_chat::with_new(code_folder.filter(|_| conversation_id.is_none()), send));
     // A new chat's connectors switched off in its + menu (connectors/chats.rs).
     let new_off = conversation_id.is_none().then(|| connectors_off.unwrap_or_default().into_iter().collect());
     let send = Box::pin(crate::integrations::connectors::chats::with_new(new_off, send));
+    // A new chat asked incognito (never a Code chat: its folder wins).
+    let ghost = conversation_id.is_none() && code_folder_none && incognito.unwrap_or(false);
+    let send = Box::pin(crate::chat::incognito::with_new(ghost, send));
     // Chat's own turn: Think pressed (the model on this PC), or a cloud
     // model at its effort (`ai/effort.rs`): what it thought comes back.
     let (out, thought) = crate::chat::think::scoped(think.unwrap_or(false), send).await;
@@ -360,7 +385,9 @@ pub async fn chat_retry(
     let (image_ids, as_text) = images_again(question);
     // (A screenshot that went as its text: that text is in its words already.)
     let image_ids = if as_text { Vec::new() } else { image_ids };
-    let turn = send_turn(&app, Some(conversation_id), question.sent_text(), None, Some(question.voice), on_stream, turn_id, image_ids, Vec::new(), None);
+    // (Its words, and its attached files through the turn's own: chat/attachments.rs.)
+    let turn = send_turn(&app, Some(conversation_id), question.sent_words(), None, Some(question.voice), on_stream, turn_id, image_ids, Vec::new(), None);
+    let turn = crate::chat::attachments::with(question.attachments.clone(), turn);
     let send = crate::chat::skills::with(skill_again(&question.text), turn);
     let send = Box::pin(crate::chat::turn::again(conversation_id, begun.question_at, send));
     let (out, thought) = crate::chat::think::scoped(false, send).await;

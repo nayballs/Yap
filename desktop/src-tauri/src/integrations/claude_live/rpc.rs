@@ -164,7 +164,7 @@ fn agent_eyes_lines(eyes: eyes::Eyes, unattended: bool) -> Vec<&'static str> {
 }
 /// **Visuals in the user's chat** (`chat/made.rs`, 15 Nov 2026): a Code
 /// chat's own session.
-const VISUALS_INSTRUCTIONS: &str = "Yap's show_visual shows an SVG diagram or a small interactive HTML widget in the user's chat in Yap: when they ask you to draw, diagram or chart something, or for a small calculator or widget to use there, call it rather than writing a file (unless they want it in the project), and say in a sentence or two what it shows.";
+const VISUALS_INSTRUCTIONS: &str = "Yap's show_visual shows an SVG diagram or a small interactive HTML widget in the user's chat in Yap: when they ask you to draw, diagram or chart something, or for a small calculator or widget to use there, call it rather than writing a file (unless they want it in the project), and say in a sentence or two what it shows. Yap's save_page keeps a whole HTML page beside their chat (a small app or tool they keep and come back to, a new version each time you call it again with its id), outside the project.";
 /// And, where the run reads Yap's own data ([`RunSpec::reads`]).
 const READS_INSTRUCTIONS: &str = "Yap's other tools read, never change, the user's own Yap data on this computer: their meetings (summaries, notes and transcripts), their notes, their tasks and their calendar. Use them only when the user's request refers to one of those (\"what we decided in yesterday's meeting\", \"the note about the launch\"), never to look around; what they return is the user's private data, so put into files, commits or commands only what the task needs.";
 
@@ -223,32 +223,40 @@ fn own_chat_tools(calendar: bool, memory: bool) -> Vec<Value> {
     out
 }
 
-/// `show_visual`'s definition (`chat/made.rs`), as MCP lists it.
-fn visual_tool() -> Value {
-    json!({
-        "name": crate::chat::made::SHOW_VISUAL,
-        "title": "Show a visual in the chat",
-        "description": crate::chat::made::DESCRIPTION,
-        "inputSchema": crate::chat::made::parameters(),
-        "annotations": { "title": "Show a visual in the chat", "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false }
-    })
+/// `show_visual`'s and `save_page`'s definitions (`chat/made.rs`), as MCP
+/// lists them.
+fn made_tools() -> Vec<Value> {
+    let tool = |name: &str, title: &str, description: &str, schema: Value| {
+        json!({
+            "name": name,
+            "title": title,
+            "description": description,
+            "inputSchema": schema,
+            "annotations": { "title": title, "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false }
+        })
+    };
+    use crate::chat::made::{self, pages};
+    vec![
+        tool(made::SHOW_VISUAL, "Show a visual in the chat", made::DESCRIPTION, made::parameters()),
+        tool(pages::SAVE_PAGE, "Save a page beside the chat", pages::DESCRIPTION, pages::parameters()),
+    ]
 }
 
-/// **`show_visual` called** (`chat/made.rs`): kept with the turn's chat and
-/// shown in its thread at once — only in a turn asked in Chat
-/// ([`super::turn::Context::visuals`]). Made after outside content came in
-/// (the web, a page, the screen, a connector), a button in it that sends a
-/// message fills the box instead.
-fn visual_call(run: &Run, args: &Map<String, Value>) -> Value {
+/// **`show_visual` or `save_page` called** (`chat/made.rs`): kept with the
+/// turn's chat and shown in its thread (a page beside it) at once — only in
+/// a turn asked in Chat ([`super::turn::Context::visuals`]). Made after
+/// outside content came in (the web, a page, the screen, a connector), a
+/// button in it that sends a message fills the box instead.
+fn made_call(run: &Run, name: &str, args: &Map<String, Value>) -> Value {
     let Some(turn) = run.turn.call() else {
         return text_result("Nothing was done: this isn't part of a chat turn. Answer the user in words.".into(), true);
     };
     if !turn.ctx.visuals {
-        return text_result("There's no chat in view to show a visual in for this question: answer in words.".into(), true);
+        return text_result("There's no chat in view to show this in for this question: answer in words.".into(), true);
     }
     let outside = turn.ctx.web || run.turn.web(turn.n) || run.turn.searched(turn.n) || run.turn.connector(turn.n);
-    let result = crate::chat::made::show_visual(turn.ctx.conversation, &Value::Object(args.clone()), outside);
-    tracing::info!(run = %run.id, ok = result["success"] == json!(true), "Claude Code: a visual asked for");
+    let result = crate::chat::made::execute(name, turn.ctx.conversation, &Value::Object(args.clone()), outside);
+    tracing::info!(run = %run.id, tool = name, ok = result["success"] == json!(true), "Claude Code: a visual or a page asked for");
     eyes::mcp_result(&result, &[])
 }
 
@@ -304,8 +312,8 @@ pub fn tools(ep: &Endpoint, spec: &RunSpec) -> Vec<Value> {
             out.extend(eyes::definitions(spec.eyes));
             // The cards in the thread (chat/cards.rs): a question, the next-step box, chapters.
             out.extend(cards::definitions(spec.cards));
-            // Visuals in the answer itself (chat/made.rs): each turn says whether it may.
-            out.push(visual_tool());
+            // Visuals in the answer itself, pages Yap keeps (chat/made.rs): each turn says whether it may.
+            out.extend(made_tools());
             out.extend(spec.connectors.iter().flat_map(connectors::Listed::definitions));
             out
         }
@@ -321,8 +329,8 @@ pub fn tools(ep: &Endpoint, spec: &RunSpec) -> Vec<Value> {
             if servers_offered(spec) {
                 out.extend(eyes::preview_definitions());
             }
-            // Visuals in the chat's thread (chat/made.rs, 15 Nov 2026).
-            out.push(visual_tool());
+            // Visuals in the chat's thread, pages Yap keeps (chat/made.rs, 15 Nov 2026).
+            out.extend(made_tools());
             // The next-step box and chapters (chat/cards.rs, 15 Nov 2026): its questions are Claude Code's own.
             out.extend(cards::definitions(spec.cards));
             out
@@ -352,7 +360,7 @@ pub fn tool_names(set: Tools, calendar: bool, agents: bool, memory: bool, eyes: 
                 out.extend_from_slice(agents::NAMES);
             }
             out.extend(eyes::names(eyes));
-            out.push(crate::chat::made::SHOW_VISUAL);
+            out.extend_from_slice(crate::chat::made::NAMES);
             out
         }
         Tools::Agent if reads => {
@@ -362,7 +370,7 @@ pub fn tool_names(set: Tools, calendar: bool, agents: bool, memory: bool, eyes: 
                 out.push(reads::CALENDAR_TOOL);
             }
             out.extend(eyes::names(eyes));
-            out.push(crate::chat::made::SHOW_VISUAL);
+            out.extend_from_slice(crate::chat::made::NAMES);
             out
         }
         Tools::Agent => vec![approve::NAME],
@@ -409,8 +417,8 @@ fn call(ep: &Endpoint, run: &Run, id: Value, params: &Value) -> Value {
         // loop's code for the turn the call belongs to, its pictures as
         // image content; it logs its own outcome.
         n if eyes::is_one(n) => return ok(id, eyes::call(run, n, &args)),
-        // A visual in the chat's thread (chat/made.rs): for the turn the call belongs to.
-        crate::chat::made::SHOW_VISUAL => return ok(id, visual_call(run, &args)),
+        // A visual in the chat's thread, a page Yap keeps (chat/made.rs): for the turn the call belongs to.
+        n if crate::chat::made::NAMES.contains(&n) => return ok(id, made_call(run, n, &args)),
         reads::MEMORY_TOOL => {
             let query = args.get("query").and_then(Value::as_str).unwrap_or("").trim();
             if query.is_empty() {

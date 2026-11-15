@@ -217,11 +217,11 @@ fn a_chat_run_connects_lists_and_reads_over_real_http() {
     let list = c.request("tools/list", json!({}));
     assert_eq!(
         names(&list),
-        ["list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_tasks", "list_folders", "search_memory", "check_calendar", "show_visual"]
+        ["list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_tasks", "list_folders", "search_memory", "check_calendar", "show_visual", "save_page"]
     );
     for t in list["result"]["tools"].as_array().unwrap() {
-        // (show_visual keeps a visual in the chat's own folder: never destructive, but not read only.)
-        let reads = t["name"] != "show_visual";
+        // (show_visual and save_page keep a visual or a page in the chat's own folder: never destructive, but not read only.)
+        let reads = t["name"] != "show_visual" && t["name"] != "save_page";
         assert_eq!(t["annotations"]["readOnlyHint"], reads, "{}", t["name"]);
         assert_ne!(t["annotations"]["destructiveHint"], true, "{}", t["name"]);
         assert!(t["inputSchema"].is_object());
@@ -279,7 +279,7 @@ fn a_code_chats_run_reads_meetings_notes_and_tasks_but_never_yaps_memory() {
     let list = c.request("tools/list", json!({}));
     assert_eq!(
         names(&list),
-        ["list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_tasks", "list_folders", "check_calendar", "start_agent", "agent_status", "message_agent", "stop_agent", "show_visual"]
+        ["list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_tasks", "list_folders", "check_calendar", "start_agent", "agent_status", "message_agent", "stop_agent", "show_visual", "save_page"]
     );
     assert!(!h.allowed_tools().iter().any(|t| t.contains("memory")));
     assert_eq!(c.request("tools/call", json!({ "name": "search_memory", "arguments": { "query": "Sam" } }))["error"]["code"], -32602);
@@ -334,14 +334,14 @@ fn an_agents_run_with_reads_lists_yaps_own_data_never_its_memory() {
     let h = ep.register(spec).unwrap();
     let mut c = Client::of(&h);
     let list = c.request("tools/list", json!({}));
-    // (And show_visual: a visual in the chat's thread, chat/made.rs — it writes, so not read only.)
-    assert_eq!(names(&list), ["approve", "list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_tasks", "list_folders", "check_calendar", "show_visual"]);
-    for t in list["result"]["tools"].as_array().unwrap().iter().filter(|t| t["name"] != "approve" && t["name"] != "show_visual") {
+    // (And show_visual, save_page: a visual in the chat's thread, a page Yap keeps, chat/made.rs — they write, so not read only.)
+    assert_eq!(names(&list), ["approve", "list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_tasks", "list_folders", "check_calendar", "show_visual", "save_page"]);
+    for t in list["result"]["tools"].as_array().unwrap().iter().filter(|t| t["name"] != "approve" && t["name"] != "show_visual" && t["name"] != "save_page") {
         assert_eq!(t["annotations"]["readOnlyHint"], true, "{}", t["name"]);
     }
     // Allowed without a prompt (a read of the person's own data); approve is never one.
     // (And a visual in the chat's thread: nothing to ask about, chat/made.rs.)
-    assert_eq!(h.allowed_tools(), ["mcp__yap__list_meetings", "mcp__yap__search_meetings", "mcp__yap__get_meeting", "mcp__yap__search_notes", "mcp__yap__get_note", "mcp__yap__list_tasks", "mcp__yap__list_folders", "mcp__yap__check_calendar", "mcp__yap__show_visual"]);
+    assert_eq!(h.allowed_tools(), ["mcp__yap__list_meetings", "mcp__yap__search_meetings", "mcp__yap__get_meeting", "mcp__yap__search_notes", "mcp__yap__get_note", "mcp__yap__list_tasks", "mcp__yap__list_folders", "mcp__yap__check_calendar", "mcp__yap__show_visual", "mcp__yap__save_page"]);
     let init = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }));
     let told = init["result"]["instructions"].as_str().unwrap();
     assert!(told.contains("approve tool") && told.contains("read, never change") && told.contains("only when the user's request refers to one of those"), "{told}");
@@ -889,7 +889,7 @@ fn a_chat_run_offered_agents_lists_and_allows_their_tools_and_runs_them_for_its_
     let init = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }));
     assert!(init["result"]["instructions"].as_str().unwrap().contains("start_agent, agent_status, message_agent and stop_agent"));
     let list = c.request("tools/list", json!({}));
-    assert_eq!(names(&list)[9..], ["start_agent", "agent_status", "message_agent", "stop_agent", "show_visual"]);
+    assert_eq!(names(&list)[9..], ["start_agent", "agent_status", "message_agent", "stop_agent", "show_visual", "save_page"]);
     let start = list["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "start_agent").unwrap().clone();
     // (The folder may be left out: in a Code chat it's the chat's, agents/code_chat.rs.)
     assert_eq!(start["inputSchema"]["required"], json!(["brief"]));
@@ -946,8 +946,8 @@ fn a_chat_run_offered_the_screen_and_pages_lists_and_allows_them_and_refuses_the
     assert!(init["result"]["instructions"].as_str().unwrap().contains("look_at_screen takes a screenshot of their monitors"));
     let list = c.request("tools/list", json!({}));
     let all = names(&list);
-    assert_eq!(all[9..all.len() - 1], eyes::all_names());
-    assert_eq!(all.last().map(String::as_str), Some("show_visual"), "a visual in the chat's thread, last");
+    assert_eq!(all[9..all.len() - 2], eyes::all_names());
+    assert_eq!(all[all.len() - 2..], ["show_visual", "save_page"], "a visual in the chat's thread and a page Yap keeps, last");
     let look = list["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "look_at_screen").unwrap().clone();
     assert_eq!(look["inputSchema"], crate::chat::see_screen::definitions(Gate::Look, crate::chat::see_screen::Takes::Screen)[0]["function"]["parameters"]);
     for name in eyes::all_names() {

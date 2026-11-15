@@ -74,6 +74,9 @@ pub(crate) fn shutdown_cleanup() {
     // Your Claude plan's warm spares (claude_plan/spare.rs): ended now (the
     // kill-on-close job would anyway).
     ai::claude_plan::spare::end_all("Yap quits");
+    // Incognito chats (chat/incognito.rs): their pictures go with them (their
+    // words were only ever in memory).
+    chat::chats::end_all_incognito();
     // Yap Link: no more phones (link.rs).
     link::stop();
     // Connectors' programs and links (integrations/connectors.rs): stopped,
@@ -407,6 +410,12 @@ pub fn run() {
             snip::attach::chat_image_paste,
             chat::pictures::markdown::markdown_picture,
             snip::attach::chat_image_drop,
+            chat::attachments::chat_files_add,
+            chat::attachments::chat_attachment_remove,
+            chat::attachments::chat_attachment_open,
+            chat::attachments::chat_attachments_usage,
+            chat::attachments::chat_attachments_open_folder,
+            chat::attachments::chat_attachments_delete_all,
             snip::waiting::chat_waiting_get,
             snip::waiting::chat_waiting_remove,
             snip::waiting::chat_waiting_clear,
@@ -484,6 +493,9 @@ pub fn run() {
             chat::commands::chats_list,
             chat::commands::chat_get,
             chat::export::chat_export,
+            chat::incognito::chat_incognito_end,
+            #[cfg(debug_assertions)]
+            chat::incognito::e2e_chat_incognito_ids,
             chat::commands::chat_delete,
             chat::commands::chat_delete_many,
             chat::commands::chat_rename,
@@ -555,6 +567,7 @@ pub fn run() {
             integrations::claude_live::claude_approve_pending,
             agents::commands::agent_list,
             agents::commands::agent_queue,
+            agents::mention::agent_mention_files,
             agents::commands::agent_rewind,
             agents::commands::agent_fork,
             agents::servers::dev_servers,

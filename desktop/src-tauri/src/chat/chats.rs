@@ -142,6 +142,14 @@ pub struct ChatMessage {
     /// Yap Code says `"jobReport"`: read as today's, `agents::renamed`.)
     #[serde(default, skip_serializing_if = "String::is_empty", deserialize_with = "crate::agents::renamed")]
     pub kind: String,
+    /// **The files a question carried** (`chat/attachments.rs`, 15 Nov 2026):
+    /// ids, names, kinds, sizes and tokens; their copies and text live in
+    /// `<data>/chat-files/`. The history sends their text again
+    /// ([`ChatMessage::sent_text`]). Only written when there are some. An
+    /// older Yap's save drops the field; `chat_attachments.json` puts it
+    /// back at the next start (`attachments::restore_from_disk`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<crate::chat::attachments::Attachment>,
 }
 
 /// **Message `i` of `messages` as a model reads it** ([`ChatMessage::sent_text`])
@@ -163,8 +171,20 @@ pub fn sent_text_at(messages: &[ChatMessage], i: usize) -> String {
 impl ChatMessage {
     /// The message as a model reads it in the history: its text, after the
     /// passage a question was asked about (`quote`), so "Make this
-    /// shorter" still says what "this" was.
+    /// shorter" still says what "this" was — and a question's files before
+    /// it all (`attachments::joined`: their text, or a line once removed).
     pub fn sent_text(&self) -> String {
+        let words = self.sent_words();
+        if self.role == "user" && !self.attachments.is_empty() {
+            crate::chat::attachments::joined(&self.attachments, &words)
+        } else {
+            words
+        }
+    }
+
+    /// [`ChatMessage::sent_text`] without the files (a Retry sends those
+    /// through the turn's own, `chat_retry`).
+    pub fn sent_words(&self) -> String {
         // An agent's report: the agent's words, never the person's (web content).
         if self.kind == crate::chat::turn::AGENT_REPORT {
             return format!("{}{}", crate::chat::turn::AGENT_REPORT_PREFIX, self.text);
@@ -264,6 +284,38 @@ pub fn add_question_images(id: u64, images: &[ChatImage]) {
 /// these for their time; anything else goes after a day).
 pub fn image_ids() -> std::collections::HashSet<String> {
     with_store(|s| s.conversations.iter().flat_map(Conversation::every_message).flat_map(ChatMessage::image_ids).collect())
+}
+
+/// Every question's attached files' ids (the sweep keeps them).
+pub fn attachment_ids() -> std::collections::HashSet<String> {
+    with_store(|s| s.conversations.iter().flat_map(Conversation::every_message).flat_map(|m| m.attachments.iter().map(|a| a.id.clone())).collect())
+}
+
+/// The attached file `id`, as a question carries it.
+pub fn attachment(id: &str) -> Option<crate::chat::attachments::Attachment> {
+    with_store(|s| s.conversations.iter().flat_map(Conversation::every_message).flat_map(|m| m.attachments.iter()).find(|a| a.id == id).cloned())
+}
+
+/// **Question `index` of conversation `id` carries `files`**
+/// (`chat/attachments.rs`), kept with it.
+pub fn set_attachments(id: u64, index: usize, files: Vec<crate::chat::attachments::Attachment>) {
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "user" {
+            m.attachments = files;
+            save_to_disk(s);
+        }
+    });
+}
+
+/// Of `files`, those no conversation carries any more (a fork's questions
+/// share their original's).
+fn unshown_files(s: &Store, files: Vec<String>) -> Vec<String> {
+    if files.is_empty() {
+        return files;
+    }
+    let shown: std::collections::HashSet<&str> = s.conversations.iter().flat_map(Conversation::every_message).flat_map(|m| m.attachments.iter().map(|a| a.id.as_str())).collect();
+    files.into_iter().filter(|f| !shown.contains(f.as_str())).collect()
 }
 
 impl ChatMessage {
@@ -393,6 +445,13 @@ pub struct Conversation {
     /// tabs come back once.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub closed_tabs: Vec<String>,
+    /// **An incognito chat** (15 Nov 2026, the Claude app's ghost): kept in
+    /// memory only, never in chats.json ([`Store`]'s save leaves it out, and
+    /// a file read never sets it), never listed, searched, indexed, learned
+    /// from or continued by the Voice Assistant, and gone when the person
+    /// leaves it ([`end_incognito`]) or Yap quits. The page's copy says so.
+    #[serde(default, skip_deserializing, skip_serializing_if = "std::ops::Not::not")]
+    pub incognito: bool,
     /// **Its other versions** (15 Nov 2026, Retry and Edit: `branches.rs`):
     /// where they part from the branch shown, which is `messages`. An older
     /// Yap's save drops it; the copy in `chat_branches.json` puts back what
@@ -449,8 +508,15 @@ impl Conversation {
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Store {
-    #[serde(default)]
+    /// Every conversation, incognito ones too; the file gets the others
+    /// only ([`kept`]).
+    #[serde(default, serialize_with = "kept")]
     conversations: Vec<Conversation>,
+}
+
+/// The conversations a save writes: never an incognito one.
+fn kept<S: serde::Serializer>(all: &[Conversation], s: S) -> Result<S::Ok, S::Error> {
+    s.collect_seq(all.iter().filter(|c| !c.incognito))
 }
 
 #[cfg(not(test))]
@@ -477,6 +543,8 @@ fn load_from_disk() -> Store {
     let mut store: Store = SAVER.load(&chats_path());
     // The shares an older Yap's save dropped (chat/shares.rs), put back.
     crate::chat::shares::restore_from_disk(&mut store.conversations);
+    // …and a question's attached files (chat/attachments.rs).
+    crate::chat::attachments::restore_from_disk(&mut store.conversations);
     // …and the branches (chats/branches.rs); a retry Yap closed during, put right.
     branches::restore_from_disk(&mut store.conversations);
     for c in store.conversations.iter_mut() {
@@ -510,9 +578,19 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     if SAVER.write_json(&chats_path(), store, false).is_ok() {
-        // The shares' and the branches' copies for an older Yap's save (chat/shares.rs, chats/branches.rs).
-        crate::chat::shares::mirror_to_disk(&store.conversations);
-        branches::mirror_to_disk(&store.conversations);
+        // The shares', the attached files' and the branches' copies for an
+        // older Yap's save (chat/shares.rs, chat/attachments.rs,
+        // chats/branches.rs): never an incognito chat's.
+        if store.conversations.iter().any(|c| c.incognito) {
+            let kept: Vec<Conversation> = store.conversations.iter().filter(|c| !c.incognito).cloned().collect();
+            crate::chat::shares::mirror_to_disk(&kept);
+            crate::chat::attachments::mirror_to_disk(&kept);
+            branches::mirror_to_disk(&kept);
+        } else {
+            crate::chat::shares::mirror_to_disk(&store.conversations);
+            crate::chat::attachments::mirror_to_disk(&store.conversations);
+            branches::mirror_to_disk(&store.conversations);
+        }
     }
     // Search by meaning reads what changed, in the background.
     crate::search::changed();
@@ -527,6 +605,7 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     let store = guard.get_or_insert_with(load_from_disk);
     if SAVER.any_unread() && SAVER.refresh(&chats_path(), store) {
         crate::chat::shares::restore_from_disk(&mut store.conversations);
+        crate::chat::attachments::restore_from_disk(&mut store.conversations);
         branches::restore_from_disk(&mut store.conversations);
         save_to_disk(store);
     }
@@ -546,6 +625,12 @@ fn save_to_disk(_store: &Store) {}
 #[cfg(test)]
 fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     TEST_STORE.with(|s| f(&mut s.borrow_mut()))
+}
+
+/// chats.json as a save would write it now (tests: never an incognito chat).
+#[cfg(test)]
+pub fn saved_json() -> String {
+    with_store(|s| serde_json::to_string(s).unwrap_or_default())
 }
 
 /// A model evaluation: each scenario starts with no conversations (its
@@ -599,7 +684,7 @@ pub fn rename(id: u64, title: &str) -> Result<String, String> {
 pub fn list() -> Value {
     with_store(|s| {
         let mut sorted: Vec<&Conversation> =
-            s.conversations.iter().filter(|c| c.note.is_none() && c.archived_ts == 0).collect();
+            s.conversations.iter().filter(|c| c.note.is_none() && c.archived_ts == 0 && !c.incognito).collect();
         sorted.sort_by_key(|c| std::cmp::Reverse(c.updated_ts));
         let items: Vec<Value> = sorted
             .into_iter()
@@ -630,7 +715,7 @@ fn last_answer_and_question(messages: &[ChatMessage]) -> (i64, i64) {
 /// `{ id, title, updatedTs, archivedTs, messageCount }`.
 pub fn list_archived() -> Value {
     with_store(|s| {
-        let mut sorted: Vec<&Conversation> = s.conversations.iter().filter(|c| c.note.is_none() && c.archived_ts > 0).collect();
+        let mut sorted: Vec<&Conversation> = s.conversations.iter().filter(|c| c.note.is_none() && c.archived_ts > 0 && !c.incognito).collect();
         sorted.sort_by_key(|c| (std::cmp::Reverse(c.archived_ts), std::cmp::Reverse(c.id)));
         json!(sorted
             .into_iter()
@@ -691,8 +776,18 @@ pub fn set_archived(ids: &[u64], on: bool) -> usize {
 
 /// Every conversation (archived ones too), read in place under the store's
 /// lock (search). `f` mustn't touch the chats store.
+///
+/// Never an incognito chat: search by meaning, the phone, Download your
+/// data and every other reader of them all see only the chats that are kept.
 pub fn with_all<R>(f: impl FnOnce(&[Conversation]) -> R) -> R {
-    with_store(|s| f(&s.conversations))
+    with_store(|s| {
+        if s.conversations.iter().any(|c| c.incognito) {
+            let kept: Vec<Conversation> = s.conversations.iter().filter(|c| !c.incognito).cloned().collect();
+            f(&kept)
+        } else {
+            f(&s.conversations)
+        }
+    })
 }
 
 /// A cheap fingerprint of every conversation (ids, titles' and messages'
@@ -701,7 +796,7 @@ pub fn stamp() -> u64 {
     use std::hash::{Hash, Hasher};
     with_store(|s| {
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        for c in &s.conversations {
+        for c in s.conversations.iter().filter(|c| !c.incognito) {
             // (Each message's time too: another branch shown has as many.)
             (c.id, c.title.len(), c.messages.len(), c.updated_ts).hash(&mut h);
             c.messages.iter().for_each(|m| m.ts.hash(&mut h));
@@ -721,22 +816,77 @@ pub fn latest() -> Option<(u64, u64)> {
     with_store(|s| {
         s.conversations
             .iter()
-            .filter(|c| c.note.is_none() && c.archived_ts == 0)
+            .filter(|c| c.note.is_none() && c.archived_ts == 0 && !c.incognito)
             .max_by_key(|c| (c.updated_ts, c.id))
             .map(|c| (c.id, c.updated_ts))
     })
 }
 
 pub fn create(title: &str) -> Conversation {
-    create_with(title, None)
+    create_with(title, None, false)
 }
+
+/// **A new incognito chat** ([`Conversation::incognito`]): in memory only.
+pub fn create_incognito(title: &str) -> Conversation {
+    create_with(title, None, true)
+}
+
+/// The incognito chats Yap holds now (their ids).
+pub fn incognito_ids() -> Vec<u64> {
+    with_store(|s| s.conversations.iter().filter(|c| c.incognito).map(|c| c.id).collect())
+}
+
+/// Whether conversation `id` is an incognito chat (one Yap holds now).
+pub fn is_incognito(id: u64) -> bool {
+    with_store(|s| s.conversations.iter().any(|c| c.id == id && c.incognito))
+}
+
+/// **An incognito chat left** (another chat opened, a new one, Chat's
+/// "End"): it goes, its screenshots and pictures with it, and the Claude
+/// plan's session it had. `false` when `id` wasn't one (nothing happens to
+/// a kept chat).
+pub fn end_incognito(id: u64) -> bool {
+    if !is_incognito(id) {
+        return false;
+    }
+    delete_many(&[id]);
+    forget_incognito(id);
+    tracing::info!("Chat: an incognito chat ended");
+    true
+}
+
+/// **Yap quitting**: every incognito chat's pictures go now (their words
+/// were only ever in memory). How many chats there were.
+pub fn end_all_incognito() -> usize {
+    let ids = incognito_ids();
+    for id in &ids {
+        end_incognito(*id);
+    }
+    ids.len()
+}
+
+/// What an incognito chat left beside the chat store: its Claude plan
+/// session (never saved by Claude Code: `--no-session-persistence`), its
+/// per-chat switches. A later chat may take its id once it's gone, and must
+/// find nothing of it.
+#[cfg(not(test))]
+fn forget_incognito(id: u64) {
+    // (As a deleted chat's: `commands::chat_delete`.)
+    crate::apps::moved_on(Some(id));
+    crate::ai::claude_plan::sessions::forget(id);
+    crate::agents::code_chat::chat_deleted(id);
+    crate::integrations::connectors::chats::chat_deleted(id);
+}
+
+#[cfg(test)]
+fn forget_incognito(_id: u64) {}
 
 /// A new Ask thread of note `note` (`note_chats.rs`).
 pub fn create_for_note(note: u64, title: &str) -> Conversation {
-    create_with(title, Some(note))
+    create_with(title, Some(note), false)
 }
 
-fn create_with(title: &str, note: Option<u64>) -> Conversation {
+fn create_with(title: &str, note: Option<u64>, incognito: bool) -> Conversation {
     with_store(|s| {
         let id = SAVER.next_id(s.conversations.iter().map(|c| c.id).max().unwrap_or(0));
         let now = now_secs();
@@ -753,6 +903,7 @@ fn create_with(title: &str, note: Option<u64>) -> Conversation {
             closed_tabs: Vec::new(),
             branches: Vec::new(),
             forks: Vec::new(),
+            incognito,
         };
         s.conversations.push(conv.clone());
         save_to_disk(s);
@@ -1209,6 +1360,7 @@ pub fn append_message(
             next_step: None,
             chapter: None,
             kind: String::new(),
+            attachments: Vec::new(),
         });
         conv.updated_ts = now_secs();
         // Asked again in an archived chat: it's back in the list.
@@ -1260,13 +1412,14 @@ pub fn reset() -> usize {
 /// and "Delete all chats…"). Returns how many were there to delete; ids
 /// already gone are skipped.
 pub fn delete_many(ids: &[u64]) -> usize {
-    let (gone, images) = with_store(|s| {
+    let (gone, images, files) = with_store(|s| {
         let images: Vec<String> = s
             .conversations
             .iter()
             .filter(|c| ids.contains(&c.id))
             .flat_map(|c| c.every_message().flat_map(ChatMessage::image_ids))
             .collect();
+        let files: Vec<String> = s.conversations.iter().filter(|c| ids.contains(&c.id)).flat_map(Conversation::every_message).flat_map(|m| m.attachments.iter().map(|a| a.id.clone())).collect();
         let before = s.conversations.len();
         s.conversations.retain(|c| !ids.contains(&c.id));
         let gone = before - s.conversations.len();
@@ -1274,7 +1427,7 @@ pub fn delete_many(ids: &[u64]) -> usize {
             save_to_disk(s);
         }
         // (A fork's copies share them: one another chat still shows stays.)
-        (gone, unshown(s, images))
+        (gone, unshown(s, images), unshown_files(s, files))
     });
     // Their vectors in the search index go with them.
     if gone > 0 {
@@ -1283,6 +1436,10 @@ pub fn delete_many(ids: &[u64]) -> usize {
     // Their screenshots go with them, once the store no longer has them.
     if !images.is_empty() {
         crate::snip::images::delete(&images);
+    }
+    // …and the files their questions carried (chat/attachments.rs).
+    if !files.is_empty() {
+        crate::chat::attachments::delete(&files);
     }
     // What they made (their visuals: chat/made.rs) goes with them.
     if gone > 0 {
@@ -1306,28 +1463,34 @@ fn unshown(s: &Store, images: Vec<String>) -> Vec<String> {
 /// which goes with everything after it (their screenshots too, unless
 /// another chat still shows them). Returns that message, its words for the
 /// box.
-/// `keep_shots`: the message's own screenshots stay (a Code chat's Edit sends
-/// them again with the new words: `chat_send`'s `edit`). The branches past
-/// `at` go too (`branches::cut_at`).
+/// `keep_shots`: the message's own screenshots and attached files stay (a
+/// Code chat's Edit sends them again with the new words: `chat_send`'s
+/// `edit`). The branches past `at` go too (`branches::cut_at`).
 pub fn rewind(id: u64, at: usize, keep_shots: bool) -> Result<ChatMessage, String> {
-    let (message, images) = with_store(|s| {
+    let (message, images, files) = with_store(|s| {
         let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
         let m = conv.messages.get(at).filter(|m| m.role == "user" && m.kind.is_empty()).cloned().ok_or("That message isn't there any more.")?;
         let mut gone: Vec<String> = conv.messages[at..].iter().skip(usize::from(keep_shots)).flat_map(ChatMessage::image_ids).collect();
+        let files: Vec<String> = conv.messages[at..].iter().skip(usize::from(keep_shots)).flat_map(|m| m.attachments.iter().map(|a| a.id.clone())).collect();
         conv.messages.truncate(at);
         let cut = branches::cut_at(conv, at);
         gone.extend(cut.iter().flat_map(ChatMessage::image_ids));
+        let mut files = files;
+        files.extend(cut.iter().flat_map(|m| m.attachments.iter().map(|a| a.id.clone())));
         // Its summary only while it covers what's left.
         if conv.summary.as_ref().is_some_and(|sum| sum.upto > at || sum.after > at) {
             conv.summary = None;
         }
         conv.updated_ts = now_secs();
         save_to_disk(s);
-        Ok::<_, String>((m, unshown(s, gone)))
+        Ok::<_, String>((m, unshown(s, gone), unshown_files(s, files)))
     })?;
     crate::search::removed();
     if !images.is_empty() {
         crate::snip::images::delete(&images);
+    }
+    if !files.is_empty() {
+        crate::chat::attachments::delete(&files);
     }
     Ok(message)
 }
@@ -1343,6 +1506,8 @@ pub fn fork(id: u64, upto: usize, title: &str) -> Result<Conversation, String> {
         let from = s.conversations.iter().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
         let messages: Vec<ChatMessage> = from.messages[..upto.min(from.messages.len())].iter().filter(|m| m.kind.is_empty()).cloned().collect();
         let scope = from.scope.clone();
+        // (A fork of an incognito chat is one too.)
+        let incognito = from.incognito;
         let new_id = SAVER.next_id(s.conversations.iter().map(|c| c.id).max().unwrap_or(0));
         let now = now_secs();
         let conv = Conversation {
@@ -1358,6 +1523,7 @@ pub fn fork(id: u64, upto: usize, title: &str) -> Result<Conversation, String> {
             closed_tabs: Vec::new(),
             branches: Vec::new(),
             forks: Vec::new(),
+            incognito,
         };
         s.conversations.push(conv.clone());
         save_to_disk(s);
@@ -1377,6 +1543,7 @@ pub fn for_page(mut conv: Conversation) -> Conversation {
             img.gone = !crate::snip::images::exists(&img.id);
         }
         crate::chat::shares::for_page(&mut m.files);
+        crate::chat::attachments::for_page(&mut m.attachments);
     }
     conv
 }
@@ -1444,7 +1611,7 @@ pub fn search(query: &str, exclude: Option<u64>, limit: usize) -> Vec<Found> {
         let mut scored: Vec<(usize, &Conversation, Vec<&ChatMessage>)> = s
             .conversations
             .iter()
-            .filter(|c| Some(c.id) != exclude && c.note.is_none())
+            .filter(|c| Some(c.id) != exclude && c.note.is_none() && !c.incognito)
             .filter_map(|c| {
                 let title = c.title.to_lowercase();
                 let in_title = words.iter().filter(|w| title.contains(w.as_str())).count();
@@ -1896,7 +2063,7 @@ mod tests {
         let kept = closed_keys(&many);
         assert_eq!((kept.len(), kept[0].as_str(), kept.last().map(String::as_str)), (CLOSED_TABS_MAX, "pic:p5", Some("pic:p204")));
         // Saved with the conversation, under its own name; an older file has none.
-        let conv = Conversation { id: 4, title: "Garden".into(), created_ts: 1, updated_ts: 1, messages: Vec::new(), scope: String::new(), note: None, archived_ts: 0, summary: None, closed_tabs: vec![k("doc:7")], branches: Vec::new(), forks: Vec::new() };
+        let conv = Conversation { id: 4, title: "Garden".into(), created_ts: 1, updated_ts: 1, messages: Vec::new(), scope: String::new(), note: None, archived_ts: 0, summary: None, closed_tabs: vec![k("doc:7")], branches: Vec::new(), forks: Vec::new(), incognito: false };
         let saved = serde_json::to_value(&conv).unwrap();
         assert_eq!(saved["closedTabs"], json!(["doc:7"]));
         let older: Conversation = serde_json::from_value(json!({ "id": 4, "title": "Garden", "createdTs": 1, "updatedTs": 1 })).unwrap();
@@ -2073,6 +2240,7 @@ mod tests {
             next_step: None,
             chapter: None,
             kind: String::new(),
+            attachments: vec![],
         };
         let messages = vec![
             msg("user", vec![]),

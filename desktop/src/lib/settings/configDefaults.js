@@ -76,6 +76,7 @@ export const FIELD_DEFAULTS = {
   snipListen: true,
   snipCopy: true,
   chatImageDays: 30,
+  chatFileDays: 30,
   snipSaveDir: '',
   streamingPartials: true,
   historyEnabled: true,

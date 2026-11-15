@@ -7,7 +7,7 @@
   // Today / Yesterday / Previous 7 Days / Older. A conversation — also from
   // its hover ⋯ and the ContextMenu key / Shift+F10 — has Rename (in place:
   // Enter or leaving it saves, Esc cancels; chat/chats.rs `rename`), Copy as
-  // Markdown, Export… (a .md file and its pictures: chatExport.js), Archive
+  // Markdown, Export… (a .md file and its pictures: chatExport.js), Outputs (what it made, beside it), Archive
   // and Delete… (asked first); a right-click opens it too.
   // Shift+click and Ctrl+click pick several (the "N selected" bar deletes
   // them); Delete, Esc and Ctrl+A from the keyboard.
@@ -182,12 +182,20 @@
         { separator: true },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyConversation(c.id) },
         { label: 'Export…', icon: 'download', onselect: () => exportConversation(c) },
+        // What it made (chat/made/pages.rs): its pages, documents and files, beside it.
+        { label: 'Outputs', icon: 'folder', onselect: () => openOutputs(c) },
         { label: 'Archive', icon: 'archive', onselect: () => lib.archive([c.id]) },
         { separator: true },
         { label: 'Delete…', icon: 'trash', danger: true, onselect: () => chat.askDelete(c) },
       ],
       { label: `Conversation ${c.title || 'Untitled'}`, row: chat.convEls[c.id] }
     );
+  }
+
+  /** **Outputs**: the chat open, its Outputs beside it (OutputsTab). */
+  async function openOutputs(c) {
+    if (chat.activeId !== c.id) await chat.selectConversation(c.id);
+    if (chat.activeId === c.id) chat.doc.showOutputs();
   }
 
   function startRename(c) {

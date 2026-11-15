@@ -74,6 +74,11 @@ pub struct Kept {
     /// 2026). 0: nothing kept.
     #[serde(skip_serializing_if = "is_zero")]
     pub total_micros: u64,
+    /// **An incognito chat's** (chat/incognito.rs): kept while Yap runs, so
+    /// its warm session goes on, but never written to claude_sessions.json
+    /// (and Claude Code saved no transcript: `--no-session-persistence`).
+    #[serde(skip)]
+    pub unsaved: bool,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -114,8 +119,14 @@ fn same_folder(a: &str, b: &str) -> bool {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct Store {
-    /// By conversation id.
+    /// By conversation id; the file never has an unsaved one ([`saved_only`]).
+    #[serde(serialize_with = "saved_only")]
     conversations: BTreeMap<String, Kept>,
+}
+
+/// The sessions a save writes: never an incognito chat's ([`Kept::unsaved`]).
+fn saved_only<S: serde::Serializer>(all: &BTreeMap<String, Kept>, s: S) -> Result<S::Ok, S::Error> {
+    s.collect_map(all.iter().filter(|(_, k)| !k.unsaved))
 }
 
 /// claude_sessions.json's saves.

@@ -40,9 +40,8 @@
   // A long chat's chapters (chat/cards/chapters.rs): a divider above the question each starts at, and the
   // floating contents (ChatChapters, its own chunk) to jump between them.
   import { chaptersOf } from './chapters.js';
-  // What the chat made (chat/made.rs): its visuals, each in the answer to its question.
-  import { made, followMade, placeVisuals } from './made.svelte.js';
-  import { toast } from '../../ui/toast.svelte.js';
+  // What the chat made (chat/made.rs): its visuals and its kept pages' cards, each in the answer to its question.
+  import { made, followMade, onMade, placeMade, promptFromVisual } from './made.svelte.js';
 
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
   const chapters = $derived(chaptersOf(chat.messages));
@@ -54,22 +53,18 @@
     const id = chat.activeId;
     if (id != null) untrack(() => made.load(id));
   });
-  const placed = $derived(placeVisuals(chat.messages, made.of(chat.activeId), chat.forks));
-  /**
-   * **A visual's button sent a message** (`sendPrompt`, visualBridge.js: the person's click, text only):
-   * into this chat as if typed — or, made after outside content (a page, the screen, a connector) or while
-   * an answer's being written, into the box for the person to read and send.
-   */
-  function sendFromVisual(text, v, conversation) {
-    if (conversation == null || chat.activeId !== conversation) return;
-    if (v.outside || chat.sending) {
-      chat.input = text;
-      chat.inputEl?.focus();
-      if (v.outside) toast({ title: 'From the visual', description: 'In the box for you to read: send it if you want to.' });
-      return;
-    }
-    chat.send({ text });
-  }
+  const placed = $derived(placeMade(chat.messages, made.of(chat.activeId), chat.forks));
+  /** A visual's button sent a message (`sendPrompt`): into this chat (made.svelte.js `promptFromVisual`). */
+  const sendFromVisual = (text, v, conversation) => promptFromVisual(chat, text, v, conversation);
+  /** A kept page's card: the page beside the chat, at that version (chat/made/pages.rs). */
+  const openKept = (page, n) => chat.doc.showKept({ id: page.id, conversation: chat.activeId, title: page.title, n });
+  // **A page saved in this chat as its answer comes** (save_page): it opens beside the chat, as a
+  // document a turn writes does.
+  $effect(() =>
+    onMade((conversation, m) => {
+      if (m?.kind === 'page' && conversation === chat.activeId) chat.doc.showKept({ id: m.id, conversation, title: m.title, n: 0 });
+    })
+  );
   // …and under the person's own message, in a Code chat that works directly
   // (agents/direct.rs): its session's work, with no answer of Chat's between.
   const directPills = $derived(pillsByQuestion(agents.list, chat.activeId, chat.messages));
@@ -315,6 +310,13 @@
 {#if chat.messages.length === 0 && (code?.current || code?.onCode)}
   <!-- An empty Code chat: the Code side's own greeting. -->
   <CodeEmpty {chat} {code} {onopensettings} />
+{:else if chat.messages.length === 0 && chat.incognito}
+  <!-- A new chat with its ghost on (chat/incognito.rs): what that means. -->
+  <div class="empty" data-testid="chat-incognito-empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11a7 7 0 0 1 14 0v9l-2.33-1.5L14.33 20 12 18.5 9.67 20l-2.34-1.5z" /><circle cx="9.5" cy="11" r="1" fill="currentColor" stroke="none" /><circle cx="14.5" cy="11" r="1" fill="currentColor" stroke="none" /></svg>
+    <p class="across">Incognito chat</p>
+    <p class="asknote">It isn't saved to your chats, and memory isn't used or updated. It's gone when you leave it.</p>
+  </div>
 {:else if chat.messages.length === 0}
   <div class="empty">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8M8 13h5" /></svg>
@@ -356,6 +358,13 @@
     </p>
   </div>
 {:else}
+  {#if chat.incognito}
+    <!-- An incognito chat says so over its thread (chat/incognito.rs). -->
+    <p class="scopeline ghostline" data-testid="chat-incognito-line" style:--thread-gutter="{chat.threadGutter}px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11a7 7 0 0 1 14 0v9l-2.33-1.5L14.33 20 12 18.5 9.67 20l-2.34-1.5z" /></svg>
+      Incognito chat · not saved, not remembered · gone when you leave it
+    </p>
+  {/if}
   {#if chat.scope === 'meetings'}
     <!-- This conversation asks across the meetings, follow-ups too. -->
     <p class="scopeline" data-testid="chat-across-meetings" style:--thread-gutter="{chat.threadGutter}px">
@@ -417,7 +426,9 @@
               onnext={(b) => chat.sendNextStep(b)}
               busy={chat.sending}
               visuals={placed.get(i)?.inAnswer ? placed.get(i).visuals : null}
+              keptPages={placed.get(i)?.inAnswer ? placed.get(i).pages : null}
               onvisualprompt={(text, v) => sendFromVisual(text, v, chat.activeId)}
+              onkept={openKept}
               branch={m.id && !m.streaming ? branchOf(i) : null}
               retry={m.role === 'assistant' ? retryOf(m, i) : null}
               editing={m.role === 'user' && chat.editing?.id === m.id ? chat.editing : null}
@@ -493,12 +504,19 @@
             {/if}
           {/if}
           {#if placed.get(i) && !placed.get(i).inAnswer}
-            <!-- Visuals made for this question with no answer yet (a Code chat's Claude still working). -->
+            <!-- Visuals and pages made for this question with no answer yet (a Code chat's Claude still working). -->
             {#await import('./VisualFrame.svelte') then { default: VisualFrame }}
               {#each placed.get(i).visuals as v (v.id)}
                 <VisualFrame {v} conversation={chat.activeId} onprompt={(text) => sendFromVisual(text, v, chat.activeId)} />
               {/each}
             {/await}
+            {#if placed.get(i).pages.length}
+              {#await import('./PageCard.svelte') then { default: PageCard }}
+                {#each placed.get(i).pages as p (`${p.page.id}:${p.version.n}`)}
+                  <div><PageCard page={p.page} version={p.version} onopen={openKept} /></div>
+                {/each}
+              {/await}
+            {/if}
           {/if}
         {/each}
         {#if asks.length || answeredRemote.length}
@@ -735,6 +753,12 @@
     width: 12px;
     height: 12px;
     color: var(--yap-primary);
+  }
+  .ghostline {
+    color: var(--yap-fg-80);
+  }
+  .ghostline svg {
+    color: var(--yap-fg);
   }
   .asknote kbd {
     padding: 1px 6px;

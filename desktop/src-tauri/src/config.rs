@@ -433,6 +433,12 @@ pub struct YapConfig {
     /// conversation deletes its screenshots whatever this says. Default 30.
     #[serde(default = "default_chat_image_days")]
     pub chat_image_days: u32,
+    /// "Keep chat files" (Settings → Privacy & data, 15 Nov 2026): days the
+    /// files attached to Chat's questions are kept (`chat/attachments.rs`;
+    /// 7, 30, 90; 0 = forever). Deleting a conversation deletes its files
+    /// whatever this says. Default 30.
+    #[serde(default = "default_chat_file_days")]
+    pub chat_file_days: u32,
     /// Snip to Chat's **Save** (Shift as you let go, Ctrl+S, a chat
     /// screenshot's "Save image as…"): the folder the Save dialog opened in
     /// last (`snip::copy_save`). Empty = Pictures.
@@ -1518,6 +1524,9 @@ fn default_snip_hotkey() -> String {
 fn default_chat_image_days() -> u32 {
     crate::snip::images::KEEP_DEFAULT
 }
+fn default_chat_file_days() -> u32 {
+    crate::chat::attachments::KEEP_DEFAULT
+}
 fn default_web_search_service() -> String {
     "exa".into()
 }
@@ -1606,6 +1615,7 @@ impl Default for YapConfig {
             snip_listen: true,
             snip_copy: true,
             chat_image_days: default_chat_image_days(),
+            chat_file_days: default_chat_file_days(),
             snip_save_dir: String::new(),
             model_size: default_model_size(),
             use_gpu: true,

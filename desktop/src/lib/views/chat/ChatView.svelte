@@ -135,6 +135,8 @@
   import { workingDirectly } from '../../core/agents.js';
   import { initChatStatus, setShown, markSeen } from '../../stores/chatStatus.svelte.js';
   import { lastAnswerAt } from '../../core/chatStatus.js';
+  // A message a kept page's button sends (chat/made/pages.rs): into its own chat, as a visual's.
+  import { promptFromVisual } from './made.svelte.js';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…". `onopennote({id, line, ts, field})`: a
@@ -166,6 +168,8 @@
   // A message sent while a Code chat's own session works waits in the queue (chatState's `queued`).
   // (A Code chat: Rust says whether its own session works — the page's list of agents lags a moment behind.)
   chat.setQueueGate(() => code.current != null);
+  // **@ in a Code chat** (agents/mention.rs): its workspace's files; a plain chat's @ is just an @.
+  chat.setMentionGate(() => (code.current ? { folder: code.current.path || code.current.name || null } : null));
 
   // **Yap Code** (stores/agents.svelte.js): the bar card's or a notification's
   // Open (`yap-agent-open`) shows the agent's chat and its tab (a Code chat at
@@ -626,6 +630,7 @@
   <section
     class="thread"
     class:withbtn={!room.listShown}
+    class:incognito={chat.incognito}
     inert={cover || undefined}
     onpointerdown={room.listFloats ? () => layout.dismissFloating() : undefined}
   >
@@ -643,6 +648,22 @@
         data-testid="chat-list-show"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9 4v16" /></svg>
+      </button>
+    {/if}
+    {#if chat.activeId == null && !chat.messages.length && !code?.current && !code?.onCode}
+      <!-- Incognito (chat/incognito.rs): a new chat's ghost, at the thread's
+           top right as the Claude app has it. -->
+      <button
+        type="button"
+        class="ghostbtn"
+        class:on={chat.incognito}
+        aria-pressed={chat.incognito}
+        aria-label="Incognito chat"
+        title={chat.incognito ? 'Incognito chat: on' : "Incognito chat: not saved, and memory isn't used"}
+        data-testid="chat-incognito"
+        onclick={() => chat.setGhost(!chat.incognito)}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11a7 7 0 0 1 14 0v9l-2.33-1.5L14.33 20 12 18.5 9.67 20l-2.34-1.5z" /><circle cx="9.5" cy="11" r="1" fill="currentColor" stroke="none" /><circle cx="14.5" cy="11" r="1" fill="currentColor" stroke="none" /></svg>
       </button>
     {/if}
     <ChatThread {chat} {code} {onopensettings} />
@@ -683,7 +704,7 @@
          reduced motion); the panel's ground while its chunk is on its way. -->
     <div id="chat-panel" class="docslot" class:cover class:ground={!DocPanel} style={cover ? undefined : `width: ${room.panelWidth}px`} data-testid="chat-panel-slot">
       {#if DocPanel}
-        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} messages={chat.messages} conversationId={chat.activeId} workspace={code.current?.path ?? null} />
+        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} messages={chat.messages} conversationId={chat.activeId} workspace={code.current?.path ?? null} onvisualprompt={(text, v) => promptFromVisual(chat, text, v, chat.activeId)} />
       {/if}
     </div>
   {/if}
@@ -877,6 +898,45 @@
   }
   .thread.withbtn > :global(:not(.composer):not(.showchats):not(.threadbox):not(.scopeline)) {
     margin-left: 26px;
+  }
+  /* An incognito chat (chat/incognito.rs): a ring round the whole thread,
+     as the Claude app's border. */
+  .thread.incognito {
+    box-shadow: inset 0 0 0 2px var(--yap-fg-80);
+    border-radius: var(--yap-r-lg);
+  }
+  /* A new chat's ghost, at the thread's top right. */
+  .ghostbtn {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    border-radius: var(--yap-r);
+    background: none;
+    color: var(--yap-muted);
+    cursor: pointer;
+  }
+  .ghostbtn svg {
+    width: 18px;
+    height: 18px;
+  }
+  .ghostbtn:hover {
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+  }
+  .ghostbtn.on {
+    background: var(--yap-fg);
+    color: var(--yap-bg);
+  }
+  .ghostbtn:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 2px;
   }
   /* The list's button where the list was: as in its head, the same place. */
   .showchats {

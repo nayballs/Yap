@@ -524,6 +524,8 @@ fn opening_messages(system: &str, history: &[Value], question: &str, context: &[
     messages.extend(history.iter().cloned());
     messages.extend(crate::chat::chats::question_messages(&context, question));
     crate::snip::turn::attach(&mut messages);
+    // …and its attached files' text before it (chat/attachments.rs).
+    crate::chat::attachments::attach(&mut messages);
     messages
 }
 
