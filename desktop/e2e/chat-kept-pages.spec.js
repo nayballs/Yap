@@ -11,10 +11,17 @@
 //   shared, each opening where it lives.
 // - Kept: shown again when the chat opens again.
 // - Refused: an id that isn't this chat's page.
+// - Its tab's ⋯ (pages.rs `outside_document`): Save as… writes the version shown where the person picks; Open
+//   in browser hands a copy in Yap's own temp folder to their browser (a test run keeps its address, opens
+//   nothing). The copy keeps working in a real browser (headless here, light and dark): its script runs,
+//   Yap's colours as the browser's theme, the chart library asked for at its cdnjs address alone and run only
+//   if it's the pinned file (its hash), sendPrompt doing nothing.
 // The model is the scripted fake AI (support/fake-llm.js), named like a strong model. Fictional content
 // only; nothing leaves the PC. Light and dark.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { chromium } from '@playwright/test';
 import { test as base, expect, setConfig, openView } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
@@ -34,6 +41,19 @@ const NOTES_FILE = path.join(HERE, 'packing.md');
 
 // A chat with a document it wrote and a file it shared (seeded), and a page it kept (seeded).
 const SEEDED_PAGE = 'pg_00000000005eed01';
+// Another chat's page with two versions (its ⋯: Save as…, Open in browser).
+const CHART_PAGE = 'pg_00000000005eed02';
+const chartPage = (litres) => `<h1>Watering</h1><p>Each week: <output id="total"></output></p>
+<button id="ask" onclick="sendPrompt('Water the beans more')">Ask</button>
+<script>document.getElementById('total').textContent=(${litres})+' litres'</script>`;
+// A page with a chart library, never opened in Yap here (the sandbox would fetch the library): only saved.
+const LIB_PAGE = 'pg_00000000005eed03';
+const CHART_JS = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+const LIB_HTML = `<!doctype html><html><head><title>Bean chart</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script></head>
+<body><h1>Beans</h1><p id="drawn">not yet</p><canvas id="c" width="200" height="80"></canvas>
+<script>try{new Chart(document.getElementById('c'),{type:'bar',data:{labels:['Beans'],datasets:[{data:[3]}]}});document.getElementById('drawn').textContent='drawn'}catch(e){document.getElementById('drawn').textContent='no chart'}</script>
+</body></html>`;
 const CHATS = {
   conversations: [
     {
@@ -50,6 +70,28 @@ const CHATS = {
           documents: [{ id: 9_101, title: 'Weekend plan' }],
           files: [{ caption: 'Packing notes', items: [{ name: 'packing.md', path: NOTES_FILE, folder: HERE, kind: 'markdown', bytes: 40 }] }],
         },
+      ],
+    },
+    {
+      id: 82,
+      title: 'Watering plan',
+      createdTs: NOW - 800,
+      updatedTs: NOW - 780,
+      messages: [
+        { role: 'user', text: 'Keep a watering chart page', ts: NOW - 800 },
+        { role: 'assistant', text: 'It’s beside the chat.', ts: NOW - 799 },
+        { role: 'user', text: 'Make it 16 litres', ts: NOW - 790 },
+        { role: 'assistant', text: 'Now 16 litres.', ts: NOW - 789 },
+      ],
+    },
+    {
+      id: 83,
+      title: 'Bean chart',
+      createdTs: NOW - 700,
+      updatedTs: NOW - 699,
+      messages: [
+        { role: 'user', text: 'Keep a bean chart', ts: NOW - 700 },
+        { role: 'assistant', text: 'Kept.', ts: NOW - 699 },
       ],
     },
   ],
@@ -84,6 +126,22 @@ const test = base.extend({
           const item = { id: SEEDED_PAGE, kind: 'page', title: 'Packing list', format: 'html', after, at: (NOW - 899) * 1000, bytes: 30, versions: [{ n: 1, at: (NOW - 899) * 1000, bytes: 30, after, title: 'Packing list' }] };
           fs.writeFileSync(path.join(folder, 'made.json'), JSON.stringify({ version: 1, created: NOW - 900, items: [item] }));
           fs.writeFileSync(path.join(folder, `${SEEDED_PAGE}.v1.html`), '<ul><li>Boots</li><li>Map</li></ul>');
+          // The watering chart: two versions, each after its question.
+          const charts = path.join(dir, 'chat-made', '82');
+          fs.mkdirSync(charts, { recursive: true });
+          const q1 = { index: 0, ts: NOW - 800 };
+          const q2 = { index: 2, ts: NOW - 790 };
+          const v = (n, after, html, title = 'Watering chart') => ({ n, at: (NOW - 800 + n) * 1000, bytes: html.length, after, title });
+          const chart = { id: CHART_PAGE, kind: 'page', title: 'Watering chart', format: 'html', after: q1, at: (NOW - 789) * 1000, bytes: 400, versions: [v(1, q1, chartPage(12)), v(2, q2, chartPage(16))] };
+          fs.writeFileSync(path.join(charts, 'made.json'), JSON.stringify({ version: 1, created: NOW - 800, items: [chart] }));
+          fs.writeFileSync(path.join(charts, `${CHART_PAGE}.v1.html`), chartPage(12));
+          fs.writeFileSync(path.join(charts, `${CHART_PAGE}.v2.html`), chartPage(16));
+          const beans = path.join(dir, 'chat-made', '83');
+          fs.mkdirSync(beans, { recursive: true });
+          const b1 = { index: 0, ts: NOW - 700 };
+          const lib = { id: LIB_PAGE, kind: 'page', title: 'Bean chart', format: 'html', after: b1, at: (NOW - 699) * 1000, bytes: LIB_HTML.length, versions: [v(1, b1, LIB_HTML, 'Bean chart')] };
+          fs.writeFileSync(path.join(beans, 'made.json'), JSON.stringify({ version: 1, created: NOW - 700, items: [lib] }));
+          fs.writeFileSync(path.join(beans, `${LIB_PAGE}.v1.html`), LIB_HTML);
         },
       });
     },
@@ -267,3 +325,106 @@ test('refused: a page id that isn’t this chat’s', async ({ main, fakeLlm }) 
   expect(toolResult(fakeLlm, from)).toMatchObject({ success: false, displayText: "Didn't save a page: no such page here" });
   await expect(cards(main)).toHaveCount(0);
 });
+
+/** A headless browser for a page outside Yap (Chromium as Playwright installs it, else Edge). */
+async function outsideBrowser() {
+  let channel = process.env.YAP_LINK_CHANNEL;
+  if (!channel) {
+    try {
+      channel = fs.existsSync(chromium.executablePath()) ? 'chromium' : 'msedge';
+    } catch {
+      channel = 'msedge';
+    }
+  }
+  return chromium.launch({ channel, headless: true });
+}
+
+test('a kept page’s ⋯: Open in browser hands a copy of the version shown to the browser, Save as… writes it where you pick', async ({ yap, main, shot }) => {
+  test.setTimeout(90_000);
+  await openConversation(main, 'Watering plan');
+  // Its first card: version 1, as it was.
+  await expect(cards(main)).toHaveCount(2);
+  await cards(main).first().click();
+  await expect(kept(main).getByTestId('chat-kept-version')).toHaveText('Version 1 of 2');
+  const frame = await keptFrame(main);
+  await expect(frame.locator('#total')).toHaveText('12 litres');
+
+  // Its ⋯: Save as… and Open in browser.
+  await kept(main).getByTestId('chat-kept-more').click();
+  const menu = main.locator('[data-context-menu]');
+  await expect(menu.getByRole('menuitem')).toHaveText(['Save as…', 'Open in browser']);
+  await shot(main, '05-a-pages-menu');
+  await main.keyboard.press('Escape');
+  await setConfig(yap, main, { theme: 'dark' });
+  await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe('dark');
+  await kept(main).getByTestId('chat-kept-more').click();
+  await expect(menu.getByRole('menuitem')).toHaveCount(2);
+  await shot(main, '06-a-pages-menu-dark');
+  await main.keyboard.press('Escape');
+  await setConfig(yap, main, { theme: 'light' });
+  await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe('light');
+  await kept(main).getByTestId('chat-kept-more').click();
+
+  // Open in browser: a copy in Yap's own temp folder, its address handed to the browser (a test run keeps it).
+  const before = (await yap.invoke('e2e_opened_urls')).length;
+  await menu.getByRole('menuitem', { name: 'Open in browser' }).click();
+  await expect.poll(async () => (await yap.invoke('e2e_opened_urls')).length).toBe(before + 1);
+  const url = (await yap.invoke('e2e_opened_urls')).at(-1);
+  expect(url).toMatch(/^file:\/\/\/.+\/yap-pages\/Watering%20chart%20[0-9a-f]{8}\.html$/);
+  const copy = fileURLToPath(url);
+  const html = fs.readFileSync(copy, 'utf8');
+  // The version shown (1), as it works outside Yap: its policy first, its title, Yap's colours, no bridge.
+  expect(html).toContain("(12)+' litres'");
+  expect(html).not.toContain('(16)');
+  expect(html).toMatch(/^<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https:\/\/cdnjs\.cloudflare\.com\//);
+  expect(html).toContain('<title>Watering chart</title>');
+  expect(html).toContain('window.sendPrompt=function(){}');
+  expect(html).not.toContain('parent.postMessage');
+
+  // Save as… (Windows' own dialog, as Export…'s spec does): what it writes once the dialog gives it a place.
+  const out = path.join(yap.runDir, 'saved-pages', 'Watering chart');
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  const wrote = await yap.invoke('chat_page_save_as', { conversationId: 82, id: CHART_PAGE, n: 2, path: out });
+  expect(wrote).toBe(`${out}.html`);
+  expect(fs.readFileSync(wrote, 'utf8')).toContain("(16)+' litres'");
+  // Version 1 saved is the copy the browser got.
+  const one = await yap.invoke('chat_page_save_as', { conversationId: 82, id: CHART_PAGE, n: 1, path: path.join(path.dirname(out), 'one.html') });
+  expect(fs.readFileSync(one, 'utf8')).toBe(html);
+  // Only a chat's own page.
+  await expect(yap.invoke('chat_page_save_as', { conversationId: 81, id: CHART_PAGE, n: 0, path: out })).rejects.toThrow(/isn't here/);
+  await expect(yap.invoke('chat_page_open_in_browser', { conversationId: 82, id: '../made.json', n: 0 })).rejects.toThrow(/isn't here/);
+
+  // **It keeps working in a browser**, light and dark: its script runs, its theme the browser's, sendPrompt does
+  // nothing; a page with a chart library asks for it at its cdnjs address alone, and runs it only if it's the
+  // pinned file (a stand-in served here is refused by its hash) — nothing else is fetched.
+  const lib = await yap.invoke('chat_page_save_as', { conversationId: 83, id: LIB_PAGE, n: 0, path: path.join(path.dirname(out), 'beans') });
+  const browser = await outsideBrowser();
+  try {
+    for (const scheme of ['light', 'dark']) {
+      const ctx = await browser.newContext({ colorScheme: scheme, viewport: { width: 520, height: 360 } });
+      const page = await ctx.newPage();
+      const asked = [];
+      await page.route(/^https?:/, (r) => {
+        asked.push(r.request().url());
+        return r.fulfill({ status: 200, contentType: 'text/javascript', headers: { 'Access-Control-Allow-Origin': '*' }, body: 'window.Chart=function(){};' });
+      });
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(String(e)));
+      await page.goto(url);
+      await expect(page.locator('#total')).toHaveText('12 litres');
+      expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(scheme);
+      expect(await page.evaluate(() => getComputedStyle(document.body).visibility)).toBe('visible');
+      await page.locator('#ask').click();
+      expect(errors).toEqual([]);
+      await shot(page, `07-open-in-browser-${scheme}`);
+      await page.goto(pathToFileURL(lib).href);
+      await expect(page.locator('#drawn')).toHaveText('no chart');
+      expect(await page.evaluate(() => typeof window.Chart)).toBe('undefined');
+      expect(asked).toEqual([CHART_JS]);
+      await ctx.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+

@@ -54,7 +54,7 @@ import { RUNS } from './support/yap.js';
 import { newCodeChat, toSide } from './support/code-chats.js';
 import { writePng } from './support/png.js';
 import { startFakeWeb, FORT_JOY_URL, LEVELING_URL } from './support/fake-web.js';
-import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine, turnParts, notesAfter, workOf, turnPictures, todosIn } from '../src/lib/core/agents.js';
+import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine, turnParts, notesAfter, workOf, turnPictures, todosIn, lastRead, cardPart } from '../src/lib/core/agents.js';
 import { panelRows, panelGroups, panelTotals } from '../src/lib/core/agentPanel.js';
 import { workingLine } from '../src/lib/core/working.js';
 import { sayingOver, questionAnswers, questionsAnswered } from '../src/lib/core/agentNow.js';
@@ -339,6 +339,24 @@ const CLICKS = [
   result(CLICKED, 0.01),
   { _wait_user: true },
 ];
+const NOT_BOUGHT = 'I didn’t buy it: you said no.';
+/** …a message read mid-turn, then buying asks: the card goes with the work after that message (its latest part). */
+const ASKS_LATER = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  ...call(1, 'browser_navigate', { url: LEVELING_URL }),
+  said('k1', [{ type: 'tool_use', id: 'toolu_slow', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }]),
+  { _sleep_ms: 7000 },
+  // (The person's message is read as this call ends.)
+  toolResult('toolu_slow', '# Notes'),
+  said('k2', [{ type: 'text', text: 'Noted. Looking for the guide.' }]),
+  ...call(7, 'browser_find', { query: 'Buy the full guide' }),
+  ...call(8, 'browser_click', { ref: REF.buy }),
+  said('k99', [{ type: 'text', text: NOT_BOUGHT }], 'end_turn'),
+  result(NOT_BOUGHT, 0.01),
+  { _wait_user: true },
+];
 const BOUGHT = 'Bought it, as you asked.';
 /** …in Bypass permissions, asked to buy: nothing asks (no card), the click goes ahead. */
 const BUYS = [
@@ -580,6 +598,8 @@ const askAloud = (yap, text) => yap.invoke('e2e_assistant_ask', { text, listenMs
 const spoken = async (yap) => (await yap.invoke('tts_e2e_spoken')).map((s) => s.text);
 const script = (yap, lines, name) => yap.invoke('e2e_claude_script', { script: writeScript(name, lines) });
 const tab = (main) => main.getByTestId('chat-agent');
+/** An Agent panel row's own view (AgentTaskTab: a click on the row). */
+const taskView = (main) => main.getByTestId('chat-task');
 
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
@@ -695,13 +715,39 @@ test('@ in a Code chat opens a picker of its workspace files; Enter puts one in,
   await expect(menu).toBeVisible();
   await box.press('Escape');
   await expect(menu).toHaveCount(0);
-  await box.fill('Compare @beds/north.md and @beds/south.md.');
+  // (One more: a file outside the workspace, beside it.)
+  fs.writeFileSync(path.join(GARDEN, '..', 'secret.md'), '# Not the workspace’s\n');
+  const said = 'Compare @beds/north.md and @beds/south.md, not @beds/east.md or @../secret.md.';
+  await box.fill(said);
   await main.getByRole('button', { name: 'Send', exact: true }).click();
   // Claude Code gets the mentions as written; the sent message shows each as a pill.
-  await expect.poll(() => (fs.existsSync(ARGS) ? lastUserText() : ''), { timeout: 20_000 }).toBe('Compare @beds/north.md and @beds/south.md.');
+  await expect.poll(() => (fs.existsSync(ARGS) ? lastUserText() : ''), { timeout: 20_000 }).toBe(said);
   const pills = thread(main).locator('.cbubble.user').last().getByTestId('chat-mention');
-  await expect(pills).toHaveText(['@beds/north.md', '@beds/south.md']);
+  await expect(pills).toHaveText(['@beds/north.md', '@beds/south.md', '@beds/east.md', '@../secret.md']);
+  // **A mention of a file of the workspace is a link to its view** (15 Nov 2026, as the Claude app's sent message):
+  // checked by Rust as an answer's paths are; one that isn't there, or is outside the workspace, stays a pill.
+  await expect(pills.nth(0)).toHaveAttribute('data-rel', 'beds/north.md');
+  await expect(pills.nth(1)).toHaveAttribute('data-rel', 'beds/south.md');
+  await expect(pills.nth(0)).toHaveAttribute('role', 'link');
+  await expect(pills.nth(0)).toHaveClass(/md-filelink/);
+  for (const i of [2, 3]) {
+    await expect(pills.nth(i)).not.toHaveClass(/md-filelink/);
+    expect(await pills.nth(i).getAttribute('data-rel')).toBeNull();
+  }
   await shot(main, '95-a-message-with-mentions');
+  // A click opens it beside the chat; Enter on another opens that one.
+  await pills.nth(1).click();
+  const fileTab = main.getByTestId('chat-file');
+  await expect(fileTab).toHaveAttribute('data-rel', 'beds/south.md');
+  await expect(fileTab.getByTestId('chat-file-body')).toContainText('# South bed');
+  await shot(main, '96-a-mention-opened');
+  await theme(yap, main, 'dark');
+  await shot(main, '97-a-mention-opened-dark');
+  await theme(yap, main, 'light');
+  await pills.nth(0).focus();
+  await main.keyboard.press('Enter');
+  await expect(fileTab).toHaveAttribute('data-rel', 'beds/north.md');
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
 test('@ in a plain chat is just an @: no picker', async ({ main }) => {
@@ -787,6 +833,7 @@ test('a message typed in a Code chat on the plan goes straight to its session, a
 });
 
 test('the chat’s own Claude is no agent: “Thinking”, no tab, “Claude is working” on the bar — and the helpers it sends are the panel’s rows', async ({ yap, main, shot }) => {
+  test.setTimeout(120_000);
   await script(yap, SENDS_A_HELPER, 'sends-a-helper');
   const before = (await agents(yap)).length;
   await codeChat(main);
@@ -833,10 +880,43 @@ test('the chat’s own Claude is no agent: “Thinking”, no tab, “Claude is 
   await expect(rows.first().getByTestId('chat-agent-row-sub')).toHaveText('Helper');
   await expect(rows.first().getByTestId('chat-agent-row-line')).toHaveText('2 steps');
   await expect(rows.first().getByTestId('chat-agent-row-menu')).toHaveCount(0);
-  await rows.first().locator('button.rhead').click();
+  await rows.first().getByTestId('chat-agent-row-fold').click();
   await expect(rows.first().getByTestId('chat-agent-row-steps').getByTestId('chat-agent-work-row').locator('.rtext')).toHaveText(['Read notes.md', 'Edited notes.md']);
   await shot(main, '61-a-helper-is-the-panels-row');
-  await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+
+  // **A click on its row opens the helper's own view** (15 Nov 2026, as the Claude app opens a background task):
+  // its row's character, "Helper", how long it took, its steps (an edit opening to its diff), and what it came
+  // back with.
+  const rowFace = rows.first().getByTestId('chat-agent-row-avatar');
+  const looks = {};
+  for (const a of ['data-character', 'data-prop', 'data-pose']) looks[a] = (await rowFace.getAttribute(a)) ?? '';
+  await rows.first().locator('> button.rhead').click();
+  const view = taskView(main);
+  await expect(view).toHaveAttribute('data-kind', 'helper');
+  await expect(view.getByTestId('chat-task-title')).toHaveText('Check the notes');
+  await expect(view.getByTestId('chat-task-sub')).toHaveText('Helper');
+  const face = view.getByTestId('chat-task-avatar');
+  for (const [a, v] of Object.entries(looks)) await expect(face).toHaveAttribute(a, v);
+  await expect(face).toHaveAttribute('data-pose', 'done');
+  await expect(view.getByTestId('chat-task-clock')).toHaveText(/^0:0[4-9]$/);
+  await expect(view.getByTestId('chat-task-stop')).toHaveCount(0);
+  const steps = view.getByTestId('chat-task-work').getByTestId('chat-agent-work-row');
+  await expect(steps.locator('.rtext')).toHaveText(['Read notes.md', 'Edited notes.md']);
+  await steps.nth(1).locator('button.rhead').click();
+  await expect(view.getByTestId('chat-task-work')).toContainText('Checked');
+  await expect(view.getByTestId('chat-task-report-title')).toHaveText('Helper done');
+  await expect(view.getByTestId('chat-task-report-text')).toHaveText('The notes are in order.');
+  await expect(view.getByTestId('chat-task-report-counts')).toHaveText('2 steps');
+  await shot(main, '62-a-helpers-own-view');
+  await theme(yap, main, 'dark');
+  await shot(main, '63-a-helpers-own-view-dark');
+  await theme(yap, main, 'light');
+  // Its tab in the panel's row, beside the agent's; the panel as it was behind it.
+  await main.getByTestId('chat-panel-tab').filter({ hasText: 'garden-planner' }).click();
+  await expect(rows.first()).toHaveAttribute('data-open', 'true');
+  await main.getByTestId('chat-panel-tab').filter({ hasText: 'Check the notes' }).click();
+  await expect(taskView(main)).toBeVisible();
+  await view.getByRole('button', { name: 'Close the panel' }).click();
 });
 
 
@@ -1801,6 +1881,39 @@ test('its session acts on the page as Claude Code’s own browser does: a collap
   await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
 });
 
+// 15 Nov 2026 (the Claude app keeps a card with the work it's about): a card asked after Claude read a message sent
+// mid-turn goes under that message's part of the work — the latest — not under the message that asked.
+test('a card asking before acting on a page goes with the work it’s about: the latest part, after the message Claude read', async ({ yap, main, shot }) => {
+  test.setTimeout(120_000);
+  fs.rmSync(TOOLS, { force: true });
+  await setConfig(yap, main, { webSearch: true });
+  await script(yap, ASKS_LATER, 'asks-later');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, `Open ${LEVELING_URL} and find the guide.`);
+  const agent = await newAgent(yap, before);
+  // On the slow read the person writes (a call is out: it goes at once, read as that call ends).
+  await expect(thread(main).getByTestId('chat-agent-work').locator('[data-busy="true"] .wtext')).toHaveText('Reading notes.md', { timeout: 30_000 });
+  await send(main, 'Buy the full guide if it is cheap.');
+  const card = thread(main).locator('[data-testid="chat-page-confirm"][data-state="asking"]');
+  await expect(card).toBeVisible({ timeout: 60_000 });
+  await expect(card).toContainText('Buy the full guide');
+  // In order: the message, the work up to where Claude read the next, that message, the work after it — and the card.
+  const order = () =>
+    thread(main)
+      .locator('.cbubble.user, [data-testid="chat-agent-work"], [data-testid="chat-page-confirm"]')
+      .evaluateAll((els) => els.map((e) => (e.dataset.testid === 'chat-agent-work' ? `work ${e.dataset.part}` : e.dataset.testid === 'chat-page-confirm' ? 'card' : 'you')));
+  await expect.poll(order, { timeout: 20_000 }).toEqual(['you', 'work 0', 'you', 'work 1', 'card']);
+  await shot(main, '73-the-card-with-the-latest-work');
+  await card.getByRole('button', { name: "Don't" }).click();
+  const done = await ended(yap, agent.id, 60_000);
+  expect((await messagesOf(yap, done.conversation, 4)).at(-1).text).toBe(NOT_BOUGHT);
+  // Answered, it stays with the work it was about.
+  await expect(thread(main).getByTestId('chat-page-confirm')).toHaveAttribute('data-state', /refused|timedOut/);
+  expect(await order()).toEqual(['you', 'work 0', 'you', 'work 1', 'card']);
+  await main.getByTestId('chat-doc').getByRole('button', { name: 'Close the panel' }).click();
+});
+
 // The maintainer, 14 Nov 2026: the buy card "must not appear in bypass permissions" (Claude asks in the chat instead: its instructions, rpc.rs).
 test('its session has Claude Code’s developer tools: the console, the network (secrets hidden), a script asked first, a phone’s layout in dark', async ({ yap, main }) => {
   test.setTimeout(120_000);
@@ -2295,6 +2408,18 @@ test('core/agents.js: a turn in parts at the messages it read, its thinking in o
   expect(notesAfter(messages, 0, (k) => k === 4)).toEqual(['chat:9:1', 'chat:9:3']);
   expect(notesAfter(messages, 4)).toEqual(['chat:9:5']);
   expect(notesAfter([...messages, { role: 'assistant', kind: 'agentReport', id: 'chat:9:6' }], 5)).toEqual([]);
+  // **An ask-first card goes with the part it asked in** (15 Nov 2026): stamped with the message the turn had
+  // read last when it came; unstamped, or a part not here, the latest.
+  expect(lastRead(events)).toBe('chat:9:7');
+  expect(lastRead(events.slice(0, 7))).toBe('chat:9:1');
+  expect(lastRead(events.slice(0, 5))).toBeNull();
+  expect(lastRead([])).toBeNull();
+  expect(cardPart(parts, null)).toBeNull();
+  expect(cardPart(parts, 'chat:9:1')).toBe('chat:9:1');
+  expect(cardPart(parts, undefined)).toBe('chat:9:1');
+  expect(cardPart(parts, 'chat:9:7')).toBe('chat:9:1');
+  expect(cardPart(turnParts(events.slice(0, 5), ['chat:9:1']), undefined)).toBeNull();
+  expect(cardPart([], undefined)).toBeNull();
 });
 
 test('core/agents.js: the Code chat’s own session at work is what the message box’s ■ stops', () => {
