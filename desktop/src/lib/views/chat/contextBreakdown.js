@@ -21,6 +21,18 @@ export const CATEGORY_ORDER = [
 ];
 
 /**
+ * What the categories with more behind them are, on hover (their names underlined with dots, as the Claude app
+ * marks them).
+ */
+export const CATEGORY_TIPS = {
+  'Memory files': 'The CLAUDE.md files Claude Code reads into every turn: yours, the project’s and any it imports.',
+  'MCP tools': 'Tools from the MCP servers Claude Code has, described to the model on every turn.',
+  Skills: 'Each skill’s name and description, so Claude knows when to use one. A skill’s full text loads only when it’s used.',
+  'MCP server instructions': 'What each MCP server tells Claude about using its tools.',
+  'Custom agents': 'Your subagents’ descriptions, so Claude can hand work to one.',
+};
+
+/**
  * A token count as the Claude app writes it: three figures at most —
  * `628`, `4.3k`, `32.2k`, `156k`, `1M`. Pure.
  */
