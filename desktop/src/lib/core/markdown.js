@@ -33,7 +33,10 @@
 // - a list item holding one paragraph renders tight even when the items
 //   have blank lines between them (models write "1. …\n\n2. …"); one with
 //   several is `li.md-loose`; a change of bullet mark doesn't end a list;
-// - single line breaks are kept (`breaks: true`), and "• " lines are bullets.
+// - single line breaks are kept (`breaks: true`), and "• " lines are bullets;
+// - footnotes ("…[^1]" and "[^1]: …") are a raised number and the notes under
+//   the text, and a markdown image is a link to the picture with no stray
+//   "!" — both only as drawn (`renderMarkdown`), never in `markdownTokens`.
 import MarkdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
 
@@ -184,6 +187,87 @@ md.core.ruler.push('yap_tasks', (state) => {
   }
 });
 
+// --- What's drawn, never what's kept (`env.render`: renderMarkdown only) ----
+// `markdownTokens` feeds the document editor, which writes the markdown back
+// exactly (components/richtext/richMarkdown.js): these rules change what a
+// page shows, so they never run for it, and a document saved there keeps its
+// "![…](…)" and "[^1]" as written.
+
+// A markdown image: images are off (no remote fetch), so "![alt](url)" reads
+// as a "!" and a link to the picture. The link stays, the "!" goes (15 Nov
+// 2026: "!A sample picture" in an answer).
+md.core.ruler.push('yap_image_link', (state) => {
+  if (!state.env?.render) return;
+  for (const block of state.tokens) {
+    const kids = block.type === 'inline' ? block.children : null;
+    if (!kids) continue;
+    for (let i = 0; i + 1 < kids.length; i++) {
+      const [t, next] = [kids[i], kids[i + 1]];
+      if (t.type === 'text' && t.content.endsWith('!') && next.type === 'link_open' && next.markup !== 'linkify' && next.markup !== 'autolink') {
+        t.content = t.content.slice(0, -1);
+      }
+    }
+  }
+});
+
+// Footnotes, as GitHub and the Claude app show them: "…a claim.[^1]" and a
+// paragraph "[^1]: The note." become a small raised number and the notes
+// under the text, numbered in the order they're first cited. A note nobody
+// cites isn't shown (GitHub's rule), a mark with no note stays as written.
+// No links or ids: several answers share one page. (Before the web rule
+// below, so a note in a web answer keeps only its sources' links too.)
+const FOOTNOTE_DEF = /^\[\^([^\]\s]{1,40})\]:[ \t]*/;
+const FOOTNOTE_REF = /\[\^([^\]\s]{1,40})\]/g;
+md.core.ruler.push('yap_footnotes', (state) => {
+  if (!state.env?.render) return;
+  const tokens = state.tokens;
+  const notes = new Map();
+  for (let i = 0; i + 2 < tokens.length; i++) {
+    const [open, inline, close] = [tokens[i], tokens[i + 1], tokens[i + 2]];
+    if (open.type !== 'paragraph_open' || open.level !== 0 || inline.type !== 'inline' || close.type !== 'paragraph_close') continue;
+    const m = FOOTNOTE_DEF.exec(inline.content);
+    const first = inline.children?.[0];
+    if (!m || notes.has(m[1]) || first?.type !== 'text' || !first.content.startsWith(m[0])) continue;
+    first.content = first.content.slice(m[0].length);
+    notes.set(m[1], inline);
+    tokens.splice(i, 3);
+    i -= 1;
+  }
+  if (!notes.size) return;
+  const order = [];
+  for (const block of tokens) {
+    if (block.type !== 'inline' || !block.children) continue;
+    const out = [];
+    for (const t of block.children) {
+      if (t.type !== 'text' || !t.content.includes('[^')) {
+        out.push(t);
+        continue;
+      }
+      let at = 0;
+      for (const m of t.content.matchAll(FOOTNOTE_REF)) {
+        if (!notes.has(m[1])) continue;
+        if (!order.includes(m[1])) order.push(m[1]);
+        if (m.index > at) out.push(textToken(state, t.content.slice(at, m.index)));
+        const mark = new state.Token('yap_fnref', 'sup', 0);
+        mark.meta = { n: order.indexOf(m[1]) + 1 };
+        out.push(mark);
+        at = m.index + m[0].length;
+      }
+      if (at === 0) out.push(t);
+      else if (at < t.content.length) out.push(textToken(state, t.content.slice(at)));
+    }
+    block.children = out;
+  }
+  if (!order.length) return;
+  tokens.push(new state.Token('yap_footnotes_open', 'div', 1));
+  for (const key of order) {
+    tokens.push(new state.Token('yap_footnote_open', 'li', 1));
+    tokens.push(notes.get(key));
+    tokens.push(new state.Token('yap_footnote_close', 'li', -1));
+  }
+  tokens.push(new state.Token('yap_footnotes_close', 'div', -1));
+});
+
 // An answer written from the web (chat/chats.rs `sources`, web.rs): only links
 // its sources gave stay links — any other address the model wrote shows as
 // text (no phishing link, nothing smuggled out in one) — and its citation
@@ -301,6 +385,13 @@ rules.yap_pending = (tokens, idx) => {
   return `<p class="md-pending"${lineAttr(tokens[idx])} title="Not written yet"><span class="md-pending-key">${escapeHtml(key)}</span>${what}</p>\n`;
 };
 
+// A footnote's mark, and the notes under the text (`yap_footnotes`).
+rules.yap_fnref = (tokens, idx) => `<sup class="md-fnref">${tokens[idx].meta.n}</sup>`;
+rules.yap_footnotes_open = () => '<div class="md-footnotes"><ol>';
+rules.yap_footnotes_close = () => '</ol></div>\n';
+rules.yap_footnote_open = () => '<li>';
+rules.yap_footnote_close = () => '</li>';
+
 rules.yap_task = (tokens, idx) => {
   const { checked, label } = tokens[idx].meta;
   return `<input type="checkbox" disabled${checked ? ' checked' : ''} aria-label="${escapeHtml(label || 'Task')}"> `;
@@ -339,7 +430,7 @@ for (const tag of ['thead', 'tbody', 'tr', 'th', 'td']) {
 // Exactly what the rules above make, nothing else.
 const PURIFY = {
   ALLOWED_TAGS: [
-    'p', 'br', 'strong', 'em', 's', 'code', 'pre', 'a', 'span', 'input',
+    'p', 'br', 'strong', 'em', 's', 'code', 'pre', 'a', 'span', 'input', 'sup',
     'ul', 'ol', 'li', 'h2', 'h3', 'h4', 'h5', 'blockquote', 'hr',
     'div', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
   ],
@@ -350,7 +441,7 @@ const PURIFY = {
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
 };
-const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-passage', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'md-pending', 'md-pending-key', 'md-pending-intent', 'task', 'c', 'r']);
+const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-passage', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'md-pending', 'md-pending-key', 'md-pending-intent', 'md-fnref', 'md-footnotes', 'task', 'c', 'r']);
 // The one in-page address: a passage pill's (rendered by yap_cite only).
 const PASSAGE_HREF = /^#passage-\d{1,2}$/;
 // Which elements may carry which of the narrower attributes.
@@ -410,7 +501,7 @@ function purify() {
  * (`data-line="3-7"`): the document panel maps a selection back to them.
  */
 export function renderMarkdown(text, options = {}) {
-  const env = { web: webContext(options.sources), lines: !!options.lines };
+  const env = { web: webContext(options.sources), lines: !!options.lines, render: true };
   const html = md.render(bulletsToDashes(text || ''), env);
   tickable = !!options.tickable;
   try {

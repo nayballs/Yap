@@ -480,6 +480,7 @@ pub fn run() {
             notes::commands::note_ask,
             chat::commands::chats_list,
             chat::commands::chat_get,
+            chat::export::chat_export,
             chat::commands::chat_delete,
             chat::commands::chat_delete_many,
             chat::commands::chat_rename,
