@@ -37,6 +37,8 @@ export function splitSections(md) {
 
 /** A block's HTML as drawn, its lines and its landed mark aside. */
 export const plainHtml = (el) => el.outerHTML.replace(/ data-(line|changed)="[^"]*"/g, '');
+/** A block's HTML as it was made (before the page drew its maths and diagrams: ui/markdownVisuals.js). */
+const madeHtml = (el) => el.__yapMade ?? plainHtml(el);
 
 /**
  * Draw the page's pieces (`[{html, live, line}]`, in order) into `root`,
@@ -54,7 +56,7 @@ export function drawParts(root, parts, { compare = false } = {}) {
   root.__yapCaret?.remove();
   const old = root.__yapParts ?? [];
   if (!old.length) compare = false;
-  const before = compare ? new Set(old.flatMap((p) => p.nodes).filter((n) => n.nodeType === 1).map(plainHtml)) : null;
+  const before = compare ? new Set(old.flatMap((p) => p.nodes).filter((n) => n.nodeType === 1).map(madeHtml)) : null;
   const pool = new Map();
   for (const p of old) {
     if (!pool.has(p.html)) pool.set(p.html, []);
@@ -71,6 +73,7 @@ export function drawParts(root, parts, { compare = false } = {}) {
     const t = root.ownerDocument.createElement('template');
     t.innerHTML = part.html;
     const nodes = [...t.content.childNodes];
+    for (const n of nodes) if (n.nodeType === 1) n.__yapMade = plainHtml(n);
     next.push({ html: part.html, nodes, live: !!part.live });
     if (!part.live) made.push(...nodes.filter((n) => n.nodeType === 1));
   }
@@ -93,7 +96,7 @@ export function drawParts(root, parts, { compare = false } = {}) {
     at = n;
   }
   root.__yapParts = next;
-  return compare ? made.filter((el) => !before.has(plainHtml(el))) : [];
+  return compare ? made.filter((el) => !before.has(madeHtml(el))) : [];
 }
 
 /**

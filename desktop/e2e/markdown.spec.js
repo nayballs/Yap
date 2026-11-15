@@ -9,7 +9,9 @@
 // file's tests only.
 import { test, expect } from '@playwright/test';
 import { JSDOM } from 'jsdom';
-import { renderMarkdown, markdownToText, taskLines, emailHtml, emailText, markdownTokens } from '../src/lib/core/markdown.js';
+import katex from 'katex';
+import { renderMarkdown, markdownToText, taskLines, emailHtml, emailText, markdownTokens, mathOf, mathAt, MATH_MAX, diffLineKind } from '../src/lib/core/markdown.js';
+import { diagramRefused, cleanDiagram, cleanMaths } from '../src/lib/core/visualSafety.js';
 
 let dom;
 test.beforeAll(() => {
@@ -220,6 +222,12 @@ test('whatever the input, only the elements and attributes Yap makes come out', 
     '> <details open ontoggle=alert(1)>',
     '# <span style="color:red">big</span>',
     'mailto:x@y.z?subject=<script>',
+    '![x](https://ok.example/a.png "a\\" onerror=\\"alert(1)")',
+    '![<img src=x onerror=alert(1)>](https://ok.example/a.png)',
+    '![x](javascript:alert(1))',
+    '$<svg onload=alert(1)>$ and $$<script>x</script>$$',
+    '```mermaid\n<img src=x onerror=alert(1)>\n```',
+    '```diff\n+<script>alert(1)</script>\n```',
   ];
   for (const md of hostile) {
     for (const el of parse(renderMarkdown(md, { sources: SOURCES })).querySelectorAll('*')) {
@@ -252,6 +260,170 @@ test('code: fences, indented blocks and inline code; a cut-off fence still shows
   expect(renderMarkdown('```\nplain\n```')).toBe('<pre class="md-code"><code>plain</code></pre>');
   expect(renderMarkdown('```"><img/src=x>\nx\n```')).toBe('<pre class="md-code"><code>x</code></pre>');
   expect(renderMarkdown(`\`\`\`${'a'.repeat(40)}\nx\n\`\`\``)).toBe('<pre class="md-code"><code>x</code></pre>');
+});
+
+// Maths, diagrams, diffs and pictures (15 Nov 2026, after the Claude app's
+// answers): marked here, as the model wrote them, and drawn by the view
+// (ui/markdownVisuals.js: KaTeX, mermaid, a "Show image" box).
+test('maths is marked for the view to draw; prices and shell variables stay text', () => {
+  expect(renderMarkdown('Inline $E = mc^2$ and $\\sum_{i=1}^n i = \\frac{n(n+1)}{2}$.')).toBe(
+    '<p>Inline <span class="md-math">$E = mc^2$</span> and <span class="md-math">$\\sum_{i=1}^n i = \\frac{n(n+1)}{2}$</span>.</p>'
+  );
+  // Display maths on lines of its own, breaking into a paragraph as models write it.
+  expect(renderMarkdown('The area:\n$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$\nSo a third.')).toBe(
+    '<p>The area:</p>\n<div class="md-math md-math-display">$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$</div>\n<p>So a third.</p>'
+  );
+  expect(renderMarkdown('$$ a^2 + b^2 = c^2 $$')).toBe('<div class="md-math md-math-display">$$ a^2 + b^2 = c^2 $$</div>');
+  expect(renderMarkdown('\\[\n\\nabla \\cdot E = 0\n\\]')).toBe('<div class="md-math md-math-display">\\[\n\\nabla \\cdot E = 0\n\\]</div>');
+  // Inline in other delimiters, and `$$…$$` within a line.
+  expect(renderMarkdown('so \\(a+b\\), \\[c\\] and $$d$$ end')).toBe(
+    '<p>so <span class="md-math">\\(a+b\\)</span>, <span class="md-math md-math-display">\\[c\\]</span> and <span class="md-math md-math-display">$$d$$</span> end</p>'
+  );
+  // Never maths: prices, a currency, shell variables, an escaped dollar, one sign alone.
+  for (const text of [
+    'It costs $5 and $10 with tax.',
+    'Between $5–$10, or $5-$10.',
+    'Pay US$5 now.',
+    'Set $HOME/$USER and $PATH.',
+    'Price $1,000.',
+    'Not \\$5 or \\$6$.',
+    'A $ sign and another $ here.',
+    'Odd $x$y and $x$5.',
+    'Unclosed $$\nx^2',
+    '\\(not maths',
+  ]) {
+    expect(renderMarkdown(text), text).not.toContain('md-math');
+  }
+  // A price, then maths: never one formula from the 5 to the 2.
+  expect(renderMarkdown('Pay $5 now; the formula $x^2$ is next.')).toBe('<p>Pay $5 now; the formula <span class="md-math">$x^2$</span> is next.</p>');
+  // An escaped dollar inside maths is the formula's own.
+  expect(renderMarkdown('$\\$100 + x$')).toBe('<p><span class="md-math">$\\$100 + x$</span></p>');
+  // Not in code.
+  expect(renderMarkdown('`$x$` and\n\n```\n$$y$$\n```')).not.toContain('md-math');
+  // A blank line ends a display block: unclosed, it's text.
+  expect(renderMarkdown('$$\nx\n\ny\n$$')).not.toContain('md-math-display">$$\nx');
+  // In lists, quotes and tasks too.
+  expect(renderMarkdown('- [ ] pay $x$ now\n> $y$')).toContain('pay <span class="md-math">$x$</span> now');
+  // Hostile TeX is still only text in a span (KaTeX draws it, sanitised, in the view).
+  expect(renderMarkdown('$<img src=x onerror=alert(1)>$')).toBe('<p><span class="md-math">$&lt;img src=x onerror=alert(1)&gt;$</span></p>');
+});
+
+test('mathOf reads drawn maths back to its TeX', () => {
+  expect(mathOf('$E = mc^2$')).toEqual({ tex: 'E = mc^2', display: false });
+  expect(mathOf('$$\n\\int\n$$')).toEqual({ tex: '\n\\int\n', display: true });
+  expect(mathOf('\\(a\\)')).toEqual({ tex: 'a', display: false });
+  expect(mathOf('\\[b\\]')).toEqual({ tex: 'b', display: true });
+  for (const not of ['$ x$', 'plain', '$x$ and more', '', '$$$$']) expect(mathOf(not), not).toBeNull();
+  // Too long to draw.
+  expect(mathOf(`$${'x'.repeat(MATH_MAX + 1)}$`)).toBeNull();
+  expect(mathAt('a $b$', 2)).toMatchObject({ end: 5, tex: 'b', display: false });
+});
+
+test('a mermaid fence is a diagram box round its code; a diff is a line each', () => {
+  expect(renderMarkdown('```mermaid\nflowchart LR\n  A[Hotkey] --> B[Record]\n```')).toBe(
+    '<div class="md-diagram"><pre class="md-code"><code class="lang-mermaid">flowchart LR\n  A[Hotkey] --&gt; B[Record]</code></pre></div>'
+  );
+  // Its source lines on the box (a document's page maps a selection back by them).
+  expect(renderMarkdown('Hi\n\n```mermaid\nA-->B\n```', { lines: true })).toContain('<div class="md-diagram" data-line="2-5"><pre class="md-code">');
+  // Hostile code stays text.
+  expect(renderMarkdown('```mermaid\n<script>alert(1)</script>\n```')).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+
+  const diff = renderMarkdown('```diff\ndiff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n- const old = "removed";\n+ const neu = "<added>";\n  same\n```');
+  expect(diff).toBe(
+    '<pre class="md-code md-diff"><code>' +
+      '<span class="md-dl md-meta">diff --git a/x b/x\n</span>' +
+      '<span class="md-dl md-meta">--- a/x\n</span>' +
+      '<span class="md-dl md-meta">+++ b/x\n</span>' +
+      '<span class="md-dl md-hunk">@@ -1,2 +1,2 @@\n</span>' +
+      '<span class="md-dl md-del">- const old = "removed";\n</span>' +
+      '<span class="md-dl md-add">+ const neu = "&lt;added&gt;";\n</span>' +
+      '<span class="md-dl">  same\n</span>' +
+      '</code></pre>'
+  );
+  // Its text is the diff as written (a copy gives it back), with no code colours on top (no `lang-` class).
+  expect(parse(diff).textContent).toBe('diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n- const old = "removed";\n+ const neu = "<added>";\n  same\n');
+  expect(renderMarkdown('```patch\n+a\n```')).toContain('<span class="md-dl md-add">+a\n</span>');
+  expect(['+x', '-x', '@@ -1 +1 @@', '--- a', '+++ b', 'index 1..2', ' x', ''].map(diffLineKind)).toEqual(['md-add', 'md-del', 'md-hunk', 'md-meta', 'md-meta', 'md-meta', '', '']);
+});
+
+test("a picture is a link the view makes a Show image box; it's never fetched by the page", () => {
+  expect(renderMarkdown('![A *map* of Fort Joy](https://wiki.example.com/images/map.png)')).toBe(
+    '<p><a class="md-link md-image" href="https://wiki.example.com/images/map.png" title="https://wiki.example.com/images/map.png">A map of Fort Joy</a></p>'
+  );
+  expect(renderMarkdown('![](https://example.org/a.png)')).toContain('>Picture</a>');
+  // Not a web address: its alt text (no "!", no link).
+  for (const md of ['![a cat](mailto:x@example.org)', '![a cat](file:///C:/cat.png)', '![a cat](data:image/png;base64,AAAA)']) {
+    expect(renderMarkdown(md), md).not.toContain('<a');
+  }
+  // A web answer: a picture only from a source's own address; any other is its alt text.
+  expect(renderMarkdown('See ![the map](https://evil.example/x.png?leak=1) [1]', { sources: SOURCES })).toBe(`<p>See the map ${'<span class="md-cites">'}${PILL1}</span></p>`);
+  expect(renderMarkdown('![Gale](https://bg3.wiki/wiki/Gale)', { sources: SOURCES })).toContain('class="md-link md-image" href="https://bg3.wiki/wiki/Gale"');
+});
+
+test("the document editor's tokens never change: maths and pictures stay text there", () => {
+  const text = 'Inline $E = mc^2$ and ![a map](https://example.org/map.png).\n\n$$\nx^2\n$$\n\n```mermaid\nA-->B\n```';
+  const inline = markdownTokens(text).filter((t) => t.type === 'inline');
+  expect(inline[0].children.map((c) => c.type)).toEqual(['text', 'link_open', 'text', 'link_close', 'text']);
+  expect(inline[0].children[0].content).toBe('Inline $E = mc^2$ and !');
+  expect(inline[1].content).toBe('$$\nx^2\n$$');
+  expect(markdownTokens(text).map((t) => t.type)).not.toContain('yap_math_block');
+  expect(markdownTokens(text).find((t) => t.type === 'fence').info).toBe('mermaid');
+  // And a summary's tasks map to the same lines either way.
+  expect(taskLines('- [ ] pay $x$\n$$\ny\n$$\n- [x] done')).toEqual([0, 4]);
+});
+
+test('a diagram that could reach an address is never drawn; a drawing keeps nothing that could', () => {
+  expect(diagramRefused('flowchart LR\n  A[Hotkey] --> B{Cleanup on?}\n  B -- yes --> C[AI cleanup]')).toBeNull();
+  expect(diagramRefused('sequenceDiagram\n  You->>Yap: Hi\n  Note right of Yap: C:\\data is fine in a label')).toBeNull();
+  for (const [source, why] of [
+    ['', 'empty'],
+    ['flowchart LR\n  A --> B\n  style A fill:url(https://evil.example/x)', 'an address in its styles'],
+    ['flowchart LR\n  classDef x fill:\\75rl(https://evil.example)', 'an escape in its styles'],
+    ['%%{init: {"themeCSS": "@import \'https://evil.example\'"}}%%\nflowchart LR\n A-->B', 'an address in its styles'],
+    ['flowchart LR\n  A["<img src=https://evil.example/x.png>"]', 'markup'],
+    ['flowchart LR\n  A["<a href=https://evil.example>x</a>"]', 'markup'],
+    ['flowchart LR\n  A@{ img: "https://evil.example/x.png", label: "x" }', 'a picture shape'],
+    [`flowchart LR\n${'A-->B\n'.repeat(5000)}`, 'too long'],
+  ]) {
+    expect(diagramRefused(source), source.slice(0, 60)).toBe(why);
+  }
+
+  // What mermaid makes, with everything a hostile one might add.
+  const svg =
+    '<svg id="d1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50" style="max-width: 100px;" onload="alert(1)">' +
+    '<style>#d1 .node rect{fill:#fff;stroke:#333}</style>' +
+    '<defs><marker id="d1_end"><path d="M0,0L10,5"/></marker></defs>' +
+    '<path d="M0,0L50,0" marker-end="url(#d1_end)" style="fill:none"/>' +
+    '<g class="node"><rect width="40" height="20"/><foreignObject width="40" height="20"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel"><p>Hotkey</p></span></div></foreignObject></g>' +
+    '<a href="https://evil.example"><text>link</text></a>' +
+    '<image href="https://evil.example/x.png"/><use href="https://evil.example/s.svg#x"/><use href="#d1_end"/>' +
+    '<rect style="fill:url(https://evil.example/x)" width="1" height="1"/>' +
+    '<script>alert(1)</script></svg>';
+  const box = dom.window.document.createElement('div');
+  box.append(cleanDiagram(svg));
+  const html = box.innerHTML;
+  expect(html).not.toMatch(/evil|<script|onload|<image|<a\b/);
+  expect(html).toContain('marker-end="url(#d1_end)"');
+  expect(html).not.toContain('<use');
+  expect(box.querySelector('foreignObject p')?.textContent).toBe('Hotkey');
+  expect(box.querySelector('style').textContent).toContain('#d1 .node rect');
+  // A sheet that loads something: the whole drawing is refused.
+  expect(cleanDiagram('<svg><style>@import url(https://evil.example/x.css);</style><rect/></svg>')).toBeNull();
+  expect(cleanDiagram('<svg><style>rect{fill:url( "https://evil.example")}</style></svg>')).toBeNull();
+  expect(cleanDiagram('<p>not a drawing</p>')).toBeNull();
+});
+
+test("KaTeX's maths, sanitised: drawn, with nothing that links or loads", () => {
+  const drawn = cleanMaths(katex.renderToString('\\frac{1}{3} + \\sqrt{x}', { displayMode: true, output: 'htmlAndMathml' }));
+  const box = parse(drawn);
+  expect(box.querySelector('.katex-display .katex-html')).not.toBeNull();
+  // Its TeX stays with it (a copy gives it back, KaTeX's copy-tex).
+  expect(box.querySelector('annotation[encoding="application/x-tex"]')?.textContent).toBe('\\frac{1}{3} + \\sqrt{x}');
+  // Without trust KaTeX never links; and whatever it gave, no link, picture or script gets through.
+  expect(katex.renderToString('\\href{javascript:alert(1)}{x}', { throwOnError: false })).not.toMatch(/<a[\s>]/);
+  const hostile = cleanMaths('<span class="katex"><a href="https://evil.example">x</a><img src="https://evil.example/x.png"><span style="background:url(https://evil.example/y)">y</span><script>alert(1)</script></span>');
+  expect(hostile).not.toMatch(/evil|<a\b|<img|<script/);
+  expect(hostile).toContain('<span>y</span>');
 });
 
 const SOURCES = [
