@@ -310,3 +310,95 @@ fn the_scheme_serves_a_pages_versions_with_its_policy() {
         assert_eq!(get(bad).status(), 404, "{bad}");
     }
 }
+
+// ---- a page outside Yap: Save as…, Open in browser (pages.rs) ------------------------------
+
+#[test]
+fn a_page_outside_yap_has_yaps_colours_its_policy_and_no_bridge() {
+    let doc = pages::outside_document("<h1>Tips</h1>", "Tip calculator");
+    assert!(doc.starts_with("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\""), "{doc}");
+    assert!(doc.contains("<title>Tip calculator</title>"));
+    assert!(doc.contains("<main id=\"yap-page\"><h1>Tips</h1></main>"));
+    // Yap's colours, dark as the browser is; shown at once (nothing sends colours there).
+    assert!(doc.contains("--accent:#c2690a") && doc.contains("@media (prefers-color-scheme: dark){:root{--text:#f2efe8"));
+    assert!(!doc.contains("visibility:hidden"));
+    assert!(doc.contains(serve::PAGE_STYLE));
+    // sendPrompt is there and does nothing; none of the sandbox's bridge.
+    assert!(doc.contains("window.sendPrompt=function(){}"));
+    assert!(!doc.contains("parent.postMessage") && !doc.contains("__TAURI"));
+    // The policy as a <meta>: no other network, frames or forms; nothing only a response can say.
+    let policy = pages::outside_csp();
+    assert!(doc.contains(&policy));
+    for want in ["default-src 'none'", "connect-src 'none'", "frame-src 'none'", "form-action 'none'", "base-uri 'none'", "img-src data: blob:"] {
+        assert!(policy.contains(want), "{want}");
+    }
+    assert!(!policy.contains("sandbox"));
+    for lib in LIBS {
+        assert!(policy.contains(lib.urls[0]), "{}", lib.name);
+    }
+    // A whole document keeps its own title, the head's parts first in its head.
+    let whole = pages::outside_document(TIPS, "Tip calculator");
+    assert!(whole.starts_with("<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv"), "{whole}");
+    assert_eq!(whole.matches("<title>").count(), 1);
+    assert!(whole.contains("<title>Tips</title>"));
+    // No <head>: after <html>; a doctype alone: after it (never before it, which would be quirks mode).
+    assert!(pages::outside_document("<html><body>x</body></html>", "X").starts_with("<html><meta charset"));
+    assert!(pages::outside_document("<!DOCTYPE html><p>x</p>", "X").starts_with("<!DOCTYPE html><meta charset"));
+    // The title as text.
+    assert!(pages::outside_document("<p>x</p>", "A <b> & \"c\"").contains("<title>A &lt;b&gt; &amp; &quot;c&quot;</title>"));
+}
+
+#[test]
+fn a_pages_libraries_outside_yap_come_from_cdnjs_with_their_pinned_hash() {
+    use base64::Engine;
+    for lib in LIBS {
+        let sri = pages::integrity(lib);
+        let raw = base64::engine::general_purpose::STANDARD.decode(sri.strip_prefix("sha256-").unwrap()).unwrap();
+        let hex: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, lib.sha256, "{}", lib.name);
+    }
+    let chart = &LIBS[0];
+    let d3 = &LIBS[1];
+    // Any of its addresses, or the sandbox's own /lib/: its cdnjs address with its hash.
+    let page = r#"<script src="/lib/chart.umd.min.js"></script><script src='https://cdn.jsdelivr.net/npm/d3@7.9.0' defer></script><script>new Chart(c,{})</script>"#;
+    let out = pages::outside_libraries(page);
+    assert_eq!(
+        out,
+        format!(
+            "<script src=\"{}\" integrity=\"{}\" crossorigin=\"anonymous\" referrerpolicy=\"no-referrer\"></script><script src=\"{}\" integrity=\"{}\" crossorigin=\"anonymous\" referrerpolicy=\"no-referrer\"></script><script>new Chart(c,{{}})</script>",
+            chart.urls[0],
+            pages::integrity(chart),
+            d3.urls[0],
+            pages::integrity(d3)
+        )
+    );
+    // A page with none, as it was; the document has them too.
+    assert_eq!(pages::outside_libraries(TIPS), TIPS);
+    let doc = pages::outside_document(page, "Chart");
+    assert!(doc.contains(&format!("src=\"{}\" integrity=", chart.urls[0])));
+    assert!(!doc.contains("/lib/"));
+}
+
+#[test]
+fn a_copys_name_and_the_sweep_of_old_copies() {
+    assert_eq!(pages::file_name_for("Tip: calc / v2?"), "Tip calc v2");
+    assert_eq!(pages::file_name_for("  ...  "), "Page");
+    assert_eq!(pages::file_name_for(""), "Page");
+    assert_eq!(pages::file_name_for(&"a".repeat(90)).chars().count(), 60);
+    // Only .html files older than a day, in Yap's own folder of them.
+    let dir = dir().parent().unwrap().join("copies");
+    std::fs::create_dir_all(&dir).unwrap();
+    let old = dir.join("Old a1b2c3d4.html");
+    let new = dir.join("New e5f6a7b8.html");
+    let other = dir.join("notes.txt");
+    for f in [&old, &new, &other] {
+        std::fs::write(f, "x").unwrap();
+    }
+    let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 24 * 60 * 60);
+    for f in [&old, &other] {
+        std::fs::File::options().write(true).open(f).unwrap().set_modified(long_ago).unwrap();
+    }
+    assert_eq!(pages::sweep_copies(&dir, pages::COPY_KEEP), 1);
+    assert!(!old.exists() && new.exists() && other.exists());
+    assert_eq!(pages::sweep_copies(&dir.join("none"), pages::COPY_KEEP), 0);
+}

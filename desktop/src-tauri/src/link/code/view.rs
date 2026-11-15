@@ -52,11 +52,13 @@ pub fn worth_listing(agents: &[Agent], now: u64) -> Vec<&Agent> {
     out
 }
 
-/// What a command printed is for its row in the PC's thread, and Claude's
-/// thinking for the thread's Thinking view: a phone's view has neither, so
-/// their text never goes (`output`, `thought` null). Pure.
+/// What a command printed is for its row in the PC's thread, Claude's
+/// thinking for the thread's Thinking view, and what a helper came back
+/// with for its own view in the PC's Agent panel: a phone's view has none
+/// of them, so their text never goes (`output`, `thought`, `report` null).
+/// Pure.
 fn without_output(event: &mut Value) {
-    for key in ["output", "thought"] {
+    for key in ["output", "thought", "report"] {
         if event.get(key).is_some_and(|o| !o.is_null()) {
             event[key] = Value::Null;
         }
@@ -253,6 +255,10 @@ mod tests {
         let thought = json!({ "id": "ab12", "thought": "Check the notes first." });
         assert_eq!(live(thought.clone()), json!({ "id": "ab12", "thought": null }));
         assert_eq!(stripped(thought), json!({ "id": "ab12", "thought": null }));
+        // Nor what a helper came back with (its view in the PC's Agent panel); that it's back still goes.
+        let back = json!({ "id": "ab12", "call": "toolu_task", "helper": "back", "report": "The docs are in order." });
+        assert_eq!(live(back.clone()), json!({ "id": "ab12", "call": "toolu_task", "helper": "back", "report": null }));
+        assert_eq!(stripped(back), json!({ "id": "ab12", "call": "toolu_task", "helper": "back", "report": null }));
     }
 
     #[test]

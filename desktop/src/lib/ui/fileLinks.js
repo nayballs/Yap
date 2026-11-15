@@ -19,6 +19,13 @@
 //   `files` (null): nothing is looked for and every path stays text.
 // - **Never markup**: the words are split into text nodes and an `a` made
 //   here, never set as HTML.
+//
+// **The person's own @-mentions too** (`mentionLinks`, 15 Nov 2026, as the
+// Claude app's sent message links a mentioned file): on a Code chat's sent
+// message, each `@path` pill (`chatMentions.js` `mentionParts`, its path in
+// `data-path`) that names a file in the chat's workspace becomes a link to
+// its view, checked by Rust the same way and kept in the same cache. Only
+// the pills: a path typed without an @ stays as the person wrote it.
 import { invoke } from '@tauri-apps/api/core';
 
 /** The context key Chat sets in a Code chat: `{ conversation, open(ref) }` (ChatView.svelte). */
@@ -123,7 +130,23 @@ function linkText(conv, list) {
   }
 }
 
+/** A sent message's @-mention pills not looked at yet: `{ kind, el, path }`. */
+function mentionCandidates(node) {
+  return [...node.querySelectorAll('.mention[data-path]:not([data-rel]):not([data-nofile])')].map((el) => ({ kind: 'mention', el, path: el.dataset.path }));
+}
+
+/** A Code chat's answer: its paths that are the workspace's files, links. */
 export function fileLinks(node, files) {
+  return linker(node, files, candidates);
+}
+
+/** A Code chat's sent message: its @-mentions of the workspace's files, links. */
+export function mentionLinks(node, files) {
+  return linker(node, files, mentionCandidates);
+}
+
+/** The action itself: `find(node)` lists what may be a path there. */
+function linker(node, files, find) {
   let ctx = files;
   let timer = 0;
   let here = true;
@@ -132,7 +155,7 @@ export function fileLinks(node, files) {
     timer = 0;
     const conv = ctx?.conversation;
     if (!here || conv == null) return;
-    const list = candidates(node);
+    const list = find(node);
     if (!list.length) return;
     const need = [...new Set(list.map((c) => c.path))].filter((p) => cached(conv, p) === undefined).slice(0, MAX);
     if (need.length) {
@@ -147,7 +170,7 @@ export function fileLinks(node, files) {
       if (!here || ctx?.conversation !== conv) return;
     }
     // (Looked at again: the answer may have been rendered anew meanwhile.)
-    const now = candidates(node);
+    const now = find(node);
     for (const c of now) {
       const ref = c.kind === 'text' ? null : cached(conv, c.path);
       if (c.kind !== 'text' && ref) mark(c.el, ref);

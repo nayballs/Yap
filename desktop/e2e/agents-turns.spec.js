@@ -400,7 +400,7 @@ async function panelWork(main, n = 1) {
   if (await back.count()) await back.click();
   const row = rowAt(main, n);
   await expect(row).toBeVisible();
-  if ((await row.getAttribute('data-open')) !== 'true') await row.locator('.rhead').click();
+  if ((await row.getAttribute('data-open')) !== 'true') await row.getByTestId('chat-agent-row-fold').click();
   return row.getByTestId('chat-agent-row-steps').getByTestId('chat-agent-work');
 }
 

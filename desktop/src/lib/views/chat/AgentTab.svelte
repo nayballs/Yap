@@ -449,6 +449,7 @@
           {want}
           onopen={openRow}
           onpicture={(p) => doc.showPicture(p)}
+          ontask={(r) => doc.showTask({ key: r.key, agentId: r.agentId, n: r.n, helper: r.helper?.key ?? null, title: r.title })}
         />
         {#if undone}
           <p class="undone" aria-live="polite" data-testid={many ? 'chat-agent-undone-all' : 'chat-agent-undone'}>{undoneLine(undone)}</p>
