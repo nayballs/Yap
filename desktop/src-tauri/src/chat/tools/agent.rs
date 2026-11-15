@@ -949,6 +949,153 @@ mod tests {
         assert!(crate::memory::items().is_empty());
     }
 
+    /// A turn with a document's outline shown first (`cards/outline.rs`):
+    /// the model's steps scripted, the person's answer given at once
+    /// (`confirm::reply_in_test`). The reply, the chips, the turn's
+    /// documents, and the requests the model was sent.
+    async fn outline_turn(steps: Vec<Value>, answer: crate::chat::pages::act::confirm::Reply) -> (String, Vec<String>, Vec<crate::chat::documents::DocRef>, Vec<Value>) {
+        crate::chat::pages::act::confirm::reply_in_test(Some(answer));
+        let fake = fake_server(steps, Value::Null);
+        let docs = crate::chat::documents::Turn::new(&[]);
+        let extra = Extra { docs: Some(&docs), cards: crate::chat::cards::Cards { outline: true, ..Default::default() }, ..Default::default() };
+        let question = "Make me a lone wolf build guide";
+        let out = tool_loop("You are helpful.", &[], question, &[], &format!("{}/v1", fake.base), "", "fake-gpt-5", "custom", false, false, &|_| {}, None, FirstStep::Model, extra, None).await;
+        crate::chat::pages::act::confirm::reply_in_test(None);
+        let (reply, chips) = out.expect("an answer");
+        let chat = fake.requests.lock().unwrap().iter().filter(|(u, _)| u.ends_with("/chat/completions")).map(|(_, b)| b.clone()).collect();
+        (reply, chips, docs.touched(), chat)
+    }
+
+    /// The tool message the model got for its call `n` (0: the first).
+    fn tool_message(requests: &[Value], n: usize) -> Value {
+        let msgs = requests.last().unwrap()["messages"].as_array().unwrap().clone();
+        let tool = msgs.iter().filter(|m| m["role"] == "tool").nth(n).expect("a tool result").clone();
+        serde_json::from_str(tool["content"].as_str().unwrap_or("null")).unwrap_or(tool["content"].clone())
+    }
+
+    fn lone_wolf_outline() -> Value {
+        json!({ "title": "Lone wolf build", "summary": "A solo build.", "sections": [
+            { "key": "Gear", "intent": "what to wear" },
+            { "key": "Skills", "intent": "the ones to take" },
+            { "key": "Tips", "intent": "what to watch for" },
+        ] })
+    }
+
+    /// **The outline waits for the person, and the writing follows their
+    /// Edit** (15 Nov 2026): reordered, one taken out, one of theirs added,
+    /// a note — the document is made with their sections, in their order,
+    /// and the model is told what changed and the note.
+    #[tokio::test]
+    async fn a_new_documents_outline_is_edited_before_the_writing_and_the_writing_follows_it() {
+        use crate::chat::pages::act::confirm::Reply;
+        let edit = json!({ "sections": [{ "key": "Skills", "intent": "the ones to take" }, { "key": "Gear", "intent": "what to wear" }, { "key": "Costs", "intent": "" }], "note": "Keep it short" });
+        let (reply, chips, docs, requests) = outline_turn(
+            vec![
+                calls(&[("create_document", lone_wolf_outline())]),
+                calls(&[("write_section", json!({ "note_id": 1, "key": "Skills", "markdown": "- Ember Bolt" }))]),
+                calls(&[("write_section", json!({ "note_id": 1, "key": "Gear", "markdown": "- A hood" }))]),
+                calls(&[("write_section", json!({ "note_id": 1, "key": "Costs", "markdown": "- 200 gold" }))]),
+                json!({ "role": "assistant", "content": "It's open on the right." }),
+            ],
+            Reply::Picked(edit),
+        )
+        .await;
+        assert_eq!(reply, "It's open on the right.");
+        assert!(chips[0].starts_with("Started \"Lone wolf build\" (3 sections)"), "{chips:?}");
+        let doc = crate::notes::get(docs[0].id).expect("the document");
+        let at = |k: &str| doc.content.find(k).unwrap_or_else(|| panic!("{k} in {}", doc.content));
+        assert!(at("Skills") < at("Gear") && at("Gear") < at("Costs"), "{}", doc.content);
+        assert!(!doc.content.contains("Tips"), "the section taken out never comes back");
+        assert!(crate::chat::documents::pending_keys(&doc.content).is_empty(), "every section written");
+        // What the model was told about the outline, with its result.
+        let made = tool_message(&requests, 0);
+        assert_eq!(made["success"], true);
+        assert_eq!(made["data"]["sections"], json!(["Skills", "Gear", "Costs"]));
+        let told = made["data"]["outline"].as_str().unwrap();
+        assert!(told.contains("The user changed the outline before you wrote it"), "{told}");
+        assert!(told.contains("\"Skills\", \"Gear\" and \"Costs\""), "{told}");
+        assert!(told.contains("“Keep it short”"), "{told}");
+        assert_eq!(made["data"]["next"], "Now call write_section for \"Skills\".");
+    }
+
+    /// Go as it is, and "drop the second part" out loud: written as
+    /// outlined, or without that part.
+    #[tokio::test]
+    async fn go_writes_the_outline_as_it_is_and_a_part_dropped_out_loud_is_left_out() {
+        use crate::chat::pages::act::confirm::Reply;
+        let (_, _, docs, requests) = outline_turn(
+            vec![calls(&[("create_document", lone_wolf_outline())]), json!({ "role": "assistant", "content": "It's open on the right." })],
+            Reply::Once,
+        )
+        .await;
+        let doc = crate::notes::get(docs[0].id).unwrap();
+        assert_eq!(crate::chat::documents::pending_keys(&doc.content), ["Gear", "Skills", "Tips"]);
+        assert!(tool_message(&requests, 0)["data"]["outline"].as_str().unwrap().starts_with("The user read the outline and said go"));
+        let (_, _, docs, requests) = outline_turn(
+            vec![calls(&[("create_document", lone_wolf_outline())]), json!({ "role": "assistant", "content": "It's open on the right." })],
+            Reply::Said("go ahead, but drop the second part".into()),
+        )
+        .await;
+        let doc = crate::notes::get(docs[0].id).unwrap();
+        assert_eq!(crate::chat::documents::pending_keys(&doc.content), ["Gear", "Tips"]);
+        let told = tool_message(&requests, 0)["data"]["outline"].as_str().unwrap().to_string();
+        assert!(told.contains("They said: “go ahead, but drop the second part”"), "{told}");
+    }
+
+    /// Asked out loud for something Yap can't apply: nothing is made yet,
+    /// the model outlines again (and that one is shown too); a "no": nothing
+    /// made at all.
+    #[tokio::test]
+    async fn a_change_said_out_loud_has_the_model_outline_again_and_a_no_makes_nothing() {
+        use crate::chat::pages::act::confirm::Reply;
+        let mut again = lone_wolf_outline();
+        again["sections"].as_array_mut().unwrap().push(json!({ "key": "Costs", "intent": "what it costs" }));
+        let (reply, chips, docs, requests) = outline_turn(
+            vec![
+                calls(&[("create_document", lone_wolf_outline())]),
+                // (The test's answer stands for each outline: the second is "drop" nothing it has, so made again… then the cap.)
+                calls(&[("create_document", again.clone())]),
+                calls(&[("create_document", again.clone())]),
+                calls(&[("create_document", again)]),
+                json!({ "role": "assistant", "content": "It's open on the right." }),
+            ],
+            Reply::Said("add a part about costs".into()),
+        )
+        .await;
+        // (Its sections aren't written here: the loop's "finish it" nudges get the fake's plain "OK".)
+        assert!(!reply.is_empty());
+        let first = tool_message(&requests, 0);
+        assert_eq!(first["success"], false);
+        assert!(first["error"].as_str().unwrap().contains("call create_document again"));
+        // Shown at most REVIEWS_MAX times a turn: the next is made as it is.
+        assert_eq!(docs.len(), 1, "{chips:?}");
+        let doc = crate::notes::get(docs[0].id).unwrap();
+        assert!(crate::chat::documents::pending_keys(&doc.content).contains(&"Costs".to_string()));
+        assert!(chips.iter().all(|c| !c.is_empty()));
+
+        let (_, chips, docs, requests) = outline_turn(
+            vec![calls(&[("create_document", lone_wolf_outline())]), json!({ "role": "assistant", "content": "What would you like instead?" })],
+            Reply::Said("no thanks".into()),
+        )
+        .await;
+        assert!(docs.is_empty(), "nothing made");
+        assert!(tool_message(&requests, 0)["error"].as_str().unwrap().contains("don't make it"));
+        assert_eq!(chips, ["Didn't start the document: you said not to"]);
+    }
+
+    /// The switch off (or nobody to ask): made at once, as before.
+    #[tokio::test]
+    async fn with_the_outline_off_the_document_is_made_at_once() {
+        crate::chat::pages::act::confirm::reply_in_test(Some(crate::chat::pages::act::confirm::Reply::Deny));
+        let fake = fake_server(vec![calls(&[("create_document", lone_wolf_outline())]), json!({ "role": "assistant", "content": "It's open on the right." })], Value::Null);
+        let docs = crate::chat::documents::Turn::new(&[]);
+        let extra = Extra { docs: Some(&docs), ..Default::default() };
+        let out = tool_loop("You are helpful.", &[], "Make me a build guide", &[], &format!("{}/v1", fake.base), "", "fake-gpt-5", "custom", false, false, &|_| {}, None, FirstStep::Model, extra, None).await;
+        crate::chat::pages::act::confirm::reply_in_test(None);
+        out.expect("an answer");
+        assert_eq!(docs.touched().len(), 1, "made, though the test would have said no");
+    }
+
     /// **A new document's outline before any search** (2026-10-31): the
     /// first step's search is refused (no chip) unless it makes the outline
     /// too; a first step answered in words is asked once to make it; then

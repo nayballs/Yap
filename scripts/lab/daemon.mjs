@@ -19,7 +19,7 @@ import { drawPng, pngSize } from './png.mjs';
 import { templated } from './fake.mjs';
 import { captureElement, captureLivePage, capturePanel, captureThread, captureWindow, livePage, pinTheme, shotNames, slug, themeNow, themesOf } from './shots.mjs';
 import { makeSheet } from './sheet.mjs';
-import { conversationOf, endOf, cardsOf, pendingOf, summarize, toolsOf, cut } from './turns.mjs';
+import { conversationOf, endOf, cardsOf, pendingOf, summarize, toolsOf, cut, planCommentsOf } from './turns.mjs';
 import { makeWorkspace, NAME as WORKSPACE_NAME } from './workspace.mjs';
 
 const LAB = path.resolve(process.argv[2] ?? '');
@@ -633,19 +633,44 @@ async function answerQuestion(card, picks) {
   return invoke('chat_question_answer', { id, answers });
 }
 
-/** The question card the current turn waits on, if one (chat/cards/ask.rs). */
+/** The question card (chat/cards/ask.rs) or document outline (chat/cards/outline.rs) the current turn waits on, if one. */
 async function waitingQuestion() {
   readRecord();
   const cards = cardsOf(turn?.items ?? [], { approvals: [], agents: [] });
-  return pendingOf(cards).find((c) => c.kind === 'question' && !turn.answered.has(c.id)) ?? null;
+  return pendingOf(cards).find((c) => (c.kind === 'question' || c.kind === 'outline') && !turn.answered.has(c.id)) ?? null;
 }
+
+/**
+ * **A document's outline answered as the person would** (chat/cards/outline.rs): `edit` null — Go, clicked on the card
+ * when it's there; else `{sections: [{key, intent}] | ["Heading", …], note}` sent as Edit's Go would.
+ */
+async function answerOutline(card, edit) {
+  const id = Number(card.id.split(':')[1]);
+  if (edit == null) {
+    const box = main().locator(`[data-testid="chat-outline-card"][data-state="asking"]`).first();
+    if (await box.isVisible().catch(() => false)) {
+      await box.getByRole('button', { name: 'Go', exact: true }).click({ timeout: 5_000 });
+      return true;
+    }
+    return invoke('chat_outline_answer', { id, outline: null });
+  }
+  const sections = (edit.sections ?? []).map((s) => (typeof s === 'string' ? { key: s, intent: '' } : { key: s.key ?? '', intent: s.intent ?? '' }));
+  return invoke('chat_outline_answer', { id, outline: { sections, note: String(edit.note ?? '') } });
+}
+
 
 /** Answer `card` as the person would: "allow" (Allow once / Go ahead), "deny", or "always" (a connector's Always allow). */
 async function answerCard(card, how, pick) {
   const [kind, raw] = card.id.split(/:(.*)/s);
   const allow = how !== 'deny';
   let answered;
-  if (kind === 'confirm' && card.kind === 'question' && how === 'said') {
+  if (kind === 'confirm' && card.kind === 'outline' && how !== 'said') {
+    // Go ("allow"), or Edit's Go with the sections and note given ("edit '<json>'").
+    answered = await answerOutline(card, how === 'edit' ? JSON.parse(String(pick ?? '{}')) : null);
+  } else if (kind === 'approve' && how === 'revise') {
+    // A plan sent back with comments (claude_live/approve.rs): Claude Code stays in Plan mode and answers with a new plan.
+    answered = await invoke('claude_approve_revise', { id: Number(raw), comments: planCommentsOf(pick) });
+  } else if (kind === 'confirm' && (card.kind === 'question' || card.kind === 'outline') && how === 'said') {
     // Out loud: the Voice Assistant's next question in that chat, its words the answer (spoken_ok.rs).
     await invoke('e2e_assistant_ask', { text: String(pick ?? ''), listenMs: 300 });
     answered = true;
@@ -1163,7 +1188,7 @@ const COMMANDS = {
   answer: async (a) => {
     const [id, how = 'allow', ...rest] = a._;
     if (!id) throw new Error('Which card? answer <card-id> allow|deny|always, or a question: pick "<option>"');
-    if (!['allow', 'deny', 'always', 'pick', 'said'].includes(how)) throw new Error('A card is answered allow, deny or always (a question: pick "<option>", or said "<words>")');
+    if (!['allow', 'deny', 'always', 'pick', 'said', 'edit', 'revise'].includes(how)) throw new Error('A card is answered allow, deny or always (a question: pick "<option>", or said "<words>"; an outline: edit \'<json>\' or said; a plan: revise "<quote>::<comment>|…")');
     const pick = a.pick ?? rest.join(' ');
     if (how === 'pick' && !String(pick).trim()) throw new Error('pick what? answer <card-id> pick "<option>" ("A|B" for several questions, "A,B" for several picks)');
     if (how === 'said' && !String(pick).trim()) throw new Error('said what? answer <card-id> said "<words>" (a question asked out loud)');
@@ -1176,7 +1201,11 @@ const COMMANDS = {
     const card = cards.find((c) => c.id === id) ?? (prefix ? { id, kind: prefix === 'confirm' ? 'page' : prefix } : null);
     if (!card) throw new Error(`No card ${id}: the cards are ${cards.map((c) => c.id).join(', ') || 'none'}`);
     if (how === 'always' && card.kind !== 'connector') throw new Error('Only a connector’s card has Always allow');
-    if ((how === 'pick' || how === 'said') && card.kind !== 'question') throw new Error('Only a question card is answered with pick or said');
+    if (how === 'pick' && card.kind !== 'question') throw new Error('Only a question card is answered with pick');
+    if (how === 'said' && card.kind !== 'question' && card.kind !== 'outline') throw new Error('Only a question card or an outline is answered with said');
+    if (how === 'edit' && card.kind !== 'outline') throw new Error('Only an outline is answered with edit');
+    if (how === 'revise' && !(card.kind === 'approve' && card.tool === 'ExitPlanMode')) throw new Error("Only an agent's plan card (approve:<n>, ExitPlanMode) is sent back with revise");
+    if (how === 'revise' && !planCommentsOf(pick).length) throw new Error('revise with what? answer approve:<n> revise "<words of the plan>::<your comment>|::<a comment on the whole plan>"');
     const answered = await answerCard(card, how, pick);
     const answeredNote = { answered: { id, how, wasWaiting: !!answered } };
     // An agent's card: the agents, as they go on.

@@ -94,7 +94,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-pub use approve::{By, Pending, ASK, EVENT as APPROVE_EVENT, EVENT_DONE as APPROVE_DONE_EVENT, EXIT_PLAN};
+pub use approve::{By, Pending, ASK, EVENT as APPROVE_EVENT, EVENT_DONE as APPROVE_DONE_EVENT, EXIT_PLAN, REVISE_LEAD};
 #[cfg(test)]
 pub use approve::{Choice, Question};
 #[cfg(debug_assertions)]
@@ -452,6 +452,17 @@ pub fn claude_approve_reply(id: u64, answers: serde_json::Value) -> bool {
     let answered = started().is_some_and(|ep| ep.approvals.reply(id, &answers, By::Pc));
     tracing::info!(id, answered, "Claude Code: the user answered a question");
     answered
+}
+
+/// **A plan sent back with comments** (ExitPlanMode's card: Revise the
+/// plan, `comments` `[{quote, text}]`): `true` if that plan was still
+/// waiting and a comment came with it. Claude Code stays in Plan mode and
+/// answers with a new plan (`approve.rs`).
+#[tauri::command]
+pub fn claude_approve_revise(id: u64, comments: serde_json::Value) -> bool {
+    let revised = started().is_some_and(|ep| ep.approvals.revise(id, &comments, By::Pc));
+    tracing::info!(id, revised, "Claude Code: the user sent a plan back with comments");
+    revised
 }
 
 /// **An answer from somewhere other than this PC's card** (Remote Control:
