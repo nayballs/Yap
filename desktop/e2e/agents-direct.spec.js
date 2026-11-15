@@ -2085,6 +2085,60 @@ test('its session reads Yap’s own data on request: meetings, notes, tasks and 
   expect(log.some((e) => e.step === 'Using yap · list tasks')).toBe(true);
 });
 
+test('its own Claude marks a chapter and ends with a next-step box: kept with its answer, a button its next message', async ({ yap, main, shot }) => {
+  fs.rmSync(TOOLS, { force: true });
+  await script(yap, SAYS_BACK, 'says-back-before-cards');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Hello there.');
+  const agent = await newAgent(yap, before);
+  const turnDone = (n) => expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList[n]?.status, { timeout: 30_000 }).toBe('done');
+  await turnDone(0);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Got: Hello there.'], { timeout: 30_000 });
+  // A new piece of work: the chapter and the box, through its run (as Chat's own model has them).
+  await script(yap, CARDS, 'cards');
+  await send(main, 'Now add the watering line.');
+  await turnDone(1);
+  await expect(thread(main).locator('.cbubble.assistant').last()).toHaveText(CARDED, { timeout: 30_000 });
+  const [listed, chaptered, boxed] = toolDumps();
+  const names = listed.tools.map((t) => t.name);
+  expect(names).toEqual(expect.arrayContaining(['suggest_next_step', 'mark_chapter']));
+  // (Its questions are Claude Code's own AskUserQuestion: never Yap's ask_user.)
+  expect(names).not.toContain('ask_user');
+  expect(after(argsSeen().at(-1), '--allowedTools').split(',')).toEqual(expect.arrayContaining(['mcp__yap__suggest_next_step', 'mcp__yap__mark_chapter']));
+  expect([chaptered.tool, chaptered.isError, boxed.tool, boxed.isError]).toEqual(['mark_chapter', false, 'suggest_next_step', false]);
+  // The divider above the message that started it, the contents, and the box under its answer.
+  const divider = thread(main).getByTestId('chat-chapter');
+  await expect(divider).toHaveText('Watering line');
+  const order = await thread(main).evaluate((el) => {
+    const d = el.querySelector('[data-testid="chat-chapter"]');
+    const asked = [...el.querySelectorAll('.cbubble.user')].at(-1);
+    return d && asked ? !!(d.compareDocumentPosition(asked) & Node.DOCUMENT_POSITION_FOLLOWING) : false;
+  });
+  expect(order).toBe(true);
+  await expect(main.getByTestId('chat-chapters')).toBeVisible();
+  // Neither is a step of the work: no "Used yap" line for them (the box and the divider are what they show).
+  await expect(thread(main)).not.toContainText('Used yap');
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  expect(log.filter((e) => ['Wrapping up', 'Marking a chapter'].includes(e.step)).map((e) => e.step)).toEqual(['Marking a chapter', 'Wrapping up']);
+  const box = thread(main).getByTestId('chat-next-step');
+  await expect(box).toContainText(BOX.recap);
+  await expect(box.getByTestId('chat-next-step-button')).toHaveText(['Yes, add it', 'Not now']);
+  await shot(main, '60-chapter-and-next-step-in-a-code-chat');
+  // Kept with its answer: the chat read again has them.
+  const saved = (await yap.invoke('chat_get', { id: agent.conversation })).messages.filter((m) => m.role === 'assistant' && m.text === CARDED);
+  expect(saved).toHaveLength(1);
+  expect(saved[0].chapter).toEqual({ title: 'Watering line', summary: 'The watering schedule in notes.md.' });
+  expect(saved[0].nextStep).toEqual(BOX);
+  // A button: its words, the session's next message; the box goes once something follows.
+  await script(yap, SAYS_BACK, 'says-back-after-cards');
+  await box.getByRole('button', { name: 'Not now' }).click();
+  await turnDone(2);
+  await expect(thread(main).locator('.cbubble.assistant').last()).toHaveText('Got: Not now', { timeout: 30_000 });
+  await expect(thread(main).getByTestId('chat-next-step')).toHaveCount(0);
+  await expect(thread(main).getByTestId('chat-chapter')).toHaveText('Watering line');
+});
+
 // The maintainer, 14 Nov 2026, of the bar's "Claude replied" card: "I have Yap open in full screen and I
 // see what is said… need to figure out what this is in settings and turn it off".
 test('the bar’s “Claude replied” card: none while its chat is in view beside the app in front, none once switched off, else it shows', async ({ yap, main }) => {
@@ -2358,58 +2412,4 @@ test('“Work directly in Code chats” off: the message goes to Chat, never to 
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Chat answered this one itself.'], { timeout: 30_000 });
   expect((await agents(yap)).length).toBe(before);
   expect(argsSeen()).toHaveLength(0);
-});
-
-test('its own Claude marks a chapter and ends with a next-step box: kept with its answer, a button its next message', async ({ yap, main, shot }) => {
-  fs.rmSync(TOOLS, { force: true });
-  await script(yap, SAYS_BACK, 'says-back-before-cards');
-  const before = (await agents(yap)).length;
-  await codeChat(main);
-  await send(main, 'Hello there.');
-  const agent = await newAgent(yap, before);
-  const turnDone = (n) => expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList[n]?.status, { timeout: 30_000 }).toBe('done');
-  await turnDone(0);
-  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Got: Hello there.'], { timeout: 30_000 });
-  // A new piece of work: the chapter and the box, through its run (as Chat's own model has them).
-  await script(yap, CARDS, 'cards');
-  await send(main, 'Now add the watering line.');
-  await turnDone(1);
-  await expect(thread(main).locator('.cbubble.assistant').last()).toHaveText(CARDED, { timeout: 30_000 });
-  const [listed, chaptered, boxed] = toolDumps();
-  const names = listed.tools.map((t) => t.name);
-  expect(names).toEqual(expect.arrayContaining(['suggest_next_step', 'mark_chapter']));
-  // (Its questions are Claude Code's own AskUserQuestion: never Yap's ask_user.)
-  expect(names).not.toContain('ask_user');
-  expect(after(argsSeen().at(-1), '--allowedTools').split(',')).toEqual(expect.arrayContaining(['mcp__yap__suggest_next_step', 'mcp__yap__mark_chapter']));
-  expect([chaptered.tool, chaptered.isError, boxed.tool, boxed.isError]).toEqual(['mark_chapter', false, 'suggest_next_step', false]);
-  // The divider above the message that started it, the contents, and the box under its answer.
-  const divider = thread(main).getByTestId('chat-chapter');
-  await expect(divider).toHaveText('Watering line');
-  const order = await thread(main).evaluate((el) => {
-    const d = el.querySelector('[data-testid="chat-chapter"]');
-    const asked = [...el.querySelectorAll('.cbubble.user')].at(-1);
-    return d && asked ? !!(d.compareDocumentPosition(asked) & Node.DOCUMENT_POSITION_FOLLOWING) : false;
-  });
-  expect(order).toBe(true);
-  await expect(main.getByTestId('chat-chapters')).toBeVisible();
-  // Neither is a step of the work: no "Used yap" line for them (the box and the divider are what they show).
-  await expect(thread(main)).not.toContainText('Used yap');
-  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
-  expect(log.filter((e) => ['Wrapping up', 'Marking a chapter'].includes(e.step)).map((e) => e.step)).toEqual(['Marking a chapter', 'Wrapping up']);
-  const box = thread(main).getByTestId('chat-next-step');
-  await expect(box).toContainText(BOX.recap);
-  await expect(box.getByTestId('chat-next-step-button')).toHaveText(['Yes, add it', 'Not now']);
-  await shot(main, '60-chapter-and-next-step-in-a-code-chat');
-  // Kept with its answer: the chat read again has them.
-  const saved = (await yap.invoke('chat_get', { id: agent.conversation })).messages.filter((m) => m.role === 'assistant' && m.text === CARDED);
-  expect(saved).toHaveLength(1);
-  expect(saved[0].chapter).toEqual({ title: 'Watering line', summary: 'The watering schedule in notes.md.' });
-  expect(saved[0].nextStep).toEqual(BOX);
-  // A button: its words, the session's next message; the box goes once something follows.
-  await script(yap, SAYS_BACK, 'says-back-after-cards');
-  await box.getByRole('button', { name: 'Not now' }).click();
-  await turnDone(2);
-  await expect(thread(main).locator('.cbubble.assistant').last()).toHaveText('Got: Not now', { timeout: 30_000 });
-  await expect(thread(main).getByTestId('chat-next-step')).toHaveCount(0);
-  await expect(thread(main).getByTestId('chat-chapter')).toHaveText('Watering line');
 });
