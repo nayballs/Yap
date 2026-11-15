@@ -399,6 +399,8 @@
   // Files its commands changed with no copy from before: the confirm says so (never "Yap kept their backups" for them).
   const unbackedNow = $derived(unbackedFiles((shown?.turnList || []).filter((t) => !t.undone)));
   const undoBody = $derived.by(() => {
+    // (Claude Code's hooks didn't run: only what its commands made, or Git had, can be undone.)
+    if (shown?.noBackups) return "The files its commands made are deleted, and those they changed that Git had are put back. No backups were made of Claude Code's own edits, so Undo can't put those back.";
     const lost = unbackedLine(unbackedNow);
     if (lost) {
       const when = many ? 'before its first turn' : 'before it';
