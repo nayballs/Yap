@@ -1550,8 +1550,11 @@ test('a stretch opened is a row a step: an edit opens to its numbered diff, a co
   await expect(rows.nth(1).locator('.plus')).toHaveText('+1');
   await expect(rows.nth(4).locator('.plus')).toHaveText('+3');
   await expect(rows.nth(2).locator('.rfailed')).toHaveText('failed');
-  // A row with nothing more to show doesn't open; the others do.
-  await expect(rows.nth(0).getByRole('button')).toHaveCount(0);
+  // A row with nothing more to show doesn't open; the others do. (Its file's name opens the file beside
+  // the chat, a Code chat's: code-chat-files.spec.js.)
+  await expect(rows.nth(0).locator('button.rhead')).toHaveCount(0);
+  await expect(rows.nth(0).getByRole('button')).toHaveText(['notes.md']);
+  await expect(rows.nth(0).getByTestId('chat-agent-work-file')).toHaveAttribute('title', 'Open notes.md');
   await expect(rows.locator('button.rhead')).toHaveCount(5);
   // The highlighter isn't loaded until a row is opened.
   await expect(work.getByTestId('chat-agent-work-rows')).toHaveAttribute('data-colours', 'false');

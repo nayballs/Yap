@@ -43,6 +43,7 @@
   import HomeView from './home/HomeView.svelte';
   import { chatRequest } from '../stores/chatRequest.svelte.js';
   import { chatBrowser } from '../stores/chatBrowser.svelte.js';
+  import { chatSummary } from '../stores/chatSummary.svelte.js';
   import { menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
   import { noteAccountPicture } from '../core/connections.js';
   import { prefetchHome } from './home/homeData.js';
@@ -413,6 +414,20 @@
       <span class="brandname" data-tauri-drag-region>Yap</span>
     </div>
     <div class="winbtns">
+      {#if activeView === 'chat' && chatSummary.shown}
+        <!-- A Code chat's summary beside the chat (views/chat/SummaryTab.svelte), as the Claude app's Code tab has it. -->
+        <button
+          class="winbtn browser"
+          class:open={chatSummary.open}
+          aria-label="Summary"
+          aria-pressed={chatSummary.open}
+          data-tip="Summary"
+          data-testid="chat-summary-button"
+          onclick={() => chatSummary.presses++}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" /></svg>
+        </button>
+      {/if}
       {#if activeView === 'chat'}
         <!-- Chat's browser: pages beside the chat (Ctrl+Shift+B), as Claude Code's button is. -->
         <button
