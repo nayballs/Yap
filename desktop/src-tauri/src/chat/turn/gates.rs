@@ -134,7 +134,30 @@ impl Gates {
             window: &crate::chat::assistant::may_look_at_window,
             phone: &crate::chat::cards::from_phone,
         };
-        Gates::for_turn_on(cfg, ep, scope, meetings, chat_in_view, &here)
+        let gates = Gates::for_turn_on(cfg, ep, scope, meetings, chat_in_view, &here);
+        // A routine's run (chat/routines.rs): nobody's there.
+        if crate::chat::routines::unattended() {
+            return gates.unattended();
+        }
+        gates
+    }
+
+    /// **A routine's run** (chat/routines.rs): Chat's tools, less anything
+    /// that acts on the screen or apps with nobody there — no look at the
+    /// screen, no clicks or typing on pages, no opening apps, no agents or
+    /// connectors, and no cards (a question nobody answers, a next step
+    /// nobody takes, a document's outline nobody reviews). Pure.
+    pub(super) fn unattended(self) -> Gates {
+        Gates {
+            screen: Gate::Off,
+            act: false,
+            apps: false,
+            agents: false,
+            connectors: false,
+            // (None: a question, a next step, an outline to wait on — nobody's there.)
+            cards: crate::chat::cards::Cards::default(),
+            ..self
+        }
     }
 
     /// [`Gates::for_turn`] with what it reads of this PC given (`here`, each
@@ -506,6 +529,30 @@ mod tests {
             assert_eq!(chat.agents, chat.tools, "{provider} {model}");
             assert_eq!(names(&prompt, "start_agent"), chat.tools, "{provider} {model}");
             assert_eq!(offered.iter().any(|n| n == "start_agent"), chat.tools, "{provider} {model}");
+        }
+    }
+
+    #[test]
+    fn a_routines_turn_never_acts_on_the_screen_or_apps() {
+        // Everything on, a strong model, typed in Chat: a routine's run (its
+        // Skill across the meetings, or any turn) offers none of what acts
+        // with nobody there — the screen, pages, apps, agents, connectors,
+        // cards — and keeps the rest (tools, documents, memory).
+        let cfg = YapConfig { agents_enabled: true, web_search: true, open_apps: true, assistant_screen: true, ..Default::default() };
+        let here = Here { yap_code: &|| true, calendar: &|| true, connectors: &|| true, window: &|| true, phone: &|| false };
+        for (provider, model, base) in MODELS {
+            let ep = keyed(provider, model, base);
+            for (scope, meetings, in_view) in [(None, false, true), (None, true, true), (Some("meetings"), true, false)] {
+                let g = Gates::for_turn_on(&cfg, &ep, scope, meetings, in_view, &here).unattended();
+                assert_eq!((g.screen, g.act, g.apps, g.agents, g.connectors, g.cards.any(), g.cards.outline), (Gate::Off, false, false, false, false, false, false), "{provider} {model}");
+                let (prompt, offered) = sent(&g, &ep.persona, false);
+                for name in ["open_app", "list_apps", "look_at_screen", "start_agent", "ask_user", "suggest_next_step"] {
+                    assert!(!offered.iter().any(|n| n == name), "{provider} {model}: {name} offered");
+                }
+                // (A strong model's lines may name it among the tools locked after the web; never how to use it.)
+                assert!(!prompt.contains("Use open_app when"), "{provider} {model}");
+                assert_eq!(g.tools, Gates::for_turn_on(&cfg, &ep, scope, meetings, in_view, &here).tools);
+            }
         }
     }
 

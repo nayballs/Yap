@@ -68,6 +68,8 @@ pub enum Feature {
     Brief,
     /// Search by meaning's embeddings (on this PC).
     Search,
+    /// A routine's run (a Skill that ran by itself: chat/routines.rs).
+    Routines,
     /// Spoken replies and Read aloud in a cloud voice that bills by the
     /// token or the character (OpenAI, Gemini, Groq: `tts/hosted.rs`).
     Voice,
@@ -90,6 +92,7 @@ impl Feature {
             Feature::Brief => "brief",
             Feature::Search => "search",
             Feature::Voice => "voice",
+            Feature::Routines => "routines",
             Feature::Other => "other",
         }
     }

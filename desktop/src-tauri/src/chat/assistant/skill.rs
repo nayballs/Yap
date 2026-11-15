@@ -804,7 +804,7 @@ pub fn turn(mut skill: Skill, words: String) -> SkillTurn {
     if !skill.runs_on.across() && skill.gather.is_empty() {
         skill.gather = "latest".into();
     }
-    SkillTurn { skill, words }
+    SkillTurn { skill, words, meeting: None }
 }
 
 // ---- Yap's question, waiting for its answer ---------------------------------------------------

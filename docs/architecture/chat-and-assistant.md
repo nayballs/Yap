@@ -289,6 +289,10 @@ one side.
 - **`chat/skills.rs`** — **Skills** (2026-10-29; Wispr Flow's Skills): saved
   instructions run with `/name`. See
   [Skills and one-tap prompts](#skills-and-one-tap-prompts-2026-10-29).
+- **`chat/routines.rs`** (+ `routines/schedule.rs`, pure: when each is due;
+  `routines/run.rs`: the worker, the guards, where a run goes, its notice) —
+  **Routines** (2026-11-15): Skills that run by themselves on this PC while
+  Yap runs. See [Routines](#routines-skills-that-run-by-themselves-2026-11-15).
 - **`chat/budget.rs`** — **a chat sized to its model** (2026-10-25): the
   context of the model a call goes to (`context_window`, shared with the
   ring), the budget (`budget`), the token counter (`Counter`, `estimate`),
@@ -4926,7 +4930,135 @@ copyable. Yap's, in `chat/skills.rs`:
   its own Skills: the six kept, their switches on); prompts measured with
   `yap.exe eval --chips` and the `skills` scenarios (`--tag skills`, a
   turn's `skill`) ([model-evals.md](../model-evals.md#more-skills-31-oct-2026)).
+- **Run by themselves** (a schedule, after a meeting, before one):
+  [Routines](#routines-skills-that-run-by-themselves-2026-11-15), above
+  Your Skills on the same page.
 - **Said to the Voice Assistant**: [below](#skills-by-voice-2026-11-03).
+
+## Routines: Skills that run by themselves (2026-11-15)
+
+The Claude app's scheduled routines, on this PC: a routine is a Skill, the
+words to run it with (optional: "/project-update Atlas"), a trigger and a
+switch (`chat/routines.rs`, `routines.json`). It runs only while Yap runs,
+never in a cloud, and nothing of a phone's starts one.
+
+- **Triggers** (`Trigger`; when each is due, pure, the clock passed in:
+  `routines/schedule.rs`):
+  - **a schedule**: every day, on weekdays (Monday to Friday) or once a week
+    on a day, at a time of day in the PC's own time zone (`latest_slot`,
+    `next_slot`; a clock change: the first moment after the gap, the first
+    of a doubled hour);
+  - **after a meeting ends** — any, only meetings in a folder, or only with
+    someone from outside the person's own email domains (the folder rules'
+    companies: `calendar/filing/companies.rs` `outside_of`, the invite's
+    addresses less the person's own) — once its summary is written:
+    `meetings/end.rs` marks a meeting that ended (not one started by
+    mistake: `meeting_ending`), and the action plan's job, however it ends,
+    queues its routines (`summary_done`); a summary written again later
+    runs none;
+  - **before a calendar meeting**, 1–60 minutes ahead (`events_due`): each
+    meeting once (its key kept a day, `events`), only one with someone
+    invited or a call link (not a day's event or a block of time), never
+    one that has begun (Yap opened after its start: too late to prepare);
+    its title the Skill's words unless the routine has its own (/prep finds
+    that meeting by it). The calendar is read as it is (`calendar::agenda`:
+    no sync, no network, nothing touched under its lock).
+- **The scheduler** (`init`): a tick every 30 s (the first 20 s after
+  start), `due_now` (pure) finding each routine's due runs and moving its
+  marks — `handled`, a schedule's last time run or skipped (a routine made,
+  changed or switched on counts from that moment: nothing earlier runs).
+- **Missed runs** (`schedule::due`): the PC off or asleep, Yap not running —
+  only the latest missed time counts; found up to 3 hours late it runs once
+  ("Ran late", cause `missed`), later it's skipped and the runs list says so
+  ("Missed at 09:00: Yap wasn't running, and that was over 3 hours ago.").
+  Runs Yap left waiting or running when it closed read as failed at the
+  next start ("Yap closed before it finished.").
+- **The guards** (`routines/run.rs`): **one at a time** (one worker, a
+  queue; a run for the same thing never queued twice); **never during a
+  dictation or while a meeting records**, nor while its own chat is
+  answering — it waits, and the runs list says what for; waited past 3
+  hours (a "before" one: past its meeting's start) it's skipped; **a daily
+  cap** of 20 runs (every routine, Run now too; a skipped run isn't
+  counted); **on the chat's default model** (Chat's scope:
+  `turn::resolve_chat_endpoint`; none set up: failed, said), every call
+  counted as **Routines** (`usage::Feature::Routines`, Insights' AI usage);
+  **Chat's tools for a Skill, less anything that acts with nobody there**
+  (`routines::as_routine` around the run, read by `turn/gates.rs`
+  `Gates::unattended`: no look at the screen, no clicks or typing on pages,
+  no opening apps, no agents or connectors, no cards — a question nobody
+  answers). A Skill with nothing to run on (/prep and no calendar) fails
+  with Yap's own question as the reason, no model called (`ask_first`).
+- **Where a run goes** (`Dest`):
+  - **its own chat** — Chat's own turn (`chat_turn`, scope Chat) under
+    `skills::with`, asked as typed ("/standup", "/project-update Atlas"),
+    into the routine's chat: made at its first run and named after the
+    Skill, every later run there (`Routine::chat`, kept in routines.json —
+    never in chats.json, which an older Yap rewrites); Chat's list marks it
+    (`chats_list` adds `routine`, the Skill's command: a clock-arrow before
+    the title, "a routine's chat" to a screen reader). Deleted (Chat's
+    Delete, Delete some of your data → Chats): the next run makes another
+    (`chats_deleted`, `reset_chats`: a later conversation may get the id);
+    archived (by hand or auto-archive): a run brings it back. A meeting's
+    run there reads **that meeting** whatever the Skill gathers
+    (`SkillTurn::meeting`: `skills::gather` reads its passages as a Skill
+    on one meeting does, "The passages are from the meeting …"); a Skill
+    that runs only on one meeting runs across the meetings on the latest
+    (`assistant::skill::turn`'s "latest", as said aloud).
+  - **with the meeting's note** — for a meeting's routine whose Skill runs
+    on one meeting: the Skill as its Ask box runs it (`meetings::assist`
+    `skill_input_for`, `skill_messages`; its citations checked) on the
+    chat's model, kept as a new Ask thread on the note (`note_chats::add`,
+    `yap-note-chat` with origin "routine"), where its Past chats lists it.
+- **One quiet notice** (`run::notice`): a card on the Yap bar, kind
+  "routine" in `notices/policy.rs` (held over a dictation and a meeting,
+  dropped unseen after ten minutes; a newer one takes its place): "Routine
+  ran: /standup" and the answer's first words, **Open** (its chat: the main
+  window on it, as the Voice Assistant's Open in Chat; its note: Notes on
+  it, `yap-open-note`); "Routine didn't run: /prep" and why, **Settings**.
+  Never with Yap's main window in front, nor with its chat in view beside
+  the app in front; no bar, nothing (the runs list has it). Chat's list
+  reads itself again (`yap-routine-ran`): the chat's "new" dot.
+- **Settings → Skills → Routines** (`settings/RoutinesSection.svelte`,
+  `stores/routines.svelte.js`, `core/routines.js` the wording, pure): above
+  Your Skills, each routine a row — its `/command` and name, its line
+  ("Weekdays at 09:00 · In its own chat · Next: tomorrow, 09:00"; "After
+  meetings in Clients · With the meeting's note"; "10 min before each
+  meeting · … · No meeting coming up"), **Run now** (`routine_run_now`:
+  queued at once under the same guards; a meeting's on the latest meeting,
+  a "before" one on the next meeting on the calendar), Edit, Delete behind
+  Yap's confirm dialog, and its switch (`routine_set_on`). **New routine**
+  (≤ 20; also "Make a routine" in one of Yap's Skills opened, and "Routine"
+  on your own): the Skill (yours first, then Yap's), When (On a schedule:
+  Every day / Weekdays / Once a week, the day, the time in 15-minute steps;
+  After a meeting: the folder, "Only with people from outside your
+  company"; Before a meeting: 5–60 min), the words, and — a meeting's, a
+  Skill on one meeting — Where it goes (Its own chat / With the meeting's
+  note). Checked in Rust (`cleaned`: a folder by its own spelling, one that
+  isn't there said; "with the note" kept only where it can go). **Recent
+  runs** (the newest 50, six shown, Show all): the Skill, its state (Ran,
+  Ran late, Failed, Skipped, Waiting, Running…), when, what started it (On
+  its schedule, Run now, After "Supplier call", Before "Weekly sync",
+  Missed 09:00), why, and **Open chat** / **Open note**
+  (`routine_open`); the group's line: "3 of 20 runs today." Saved at once
+  in routines.json (not Settings' auto-saved config); `yap-routines-changed`
+  to every window. The search finds Routines, New routine and Recent runs.
+- **Logs**: ids, a trigger's kind, counts — never a Skill's words or an
+  answer.
+- **Tests**: unit (`routines/schedule.rs`: daily, weekdays and weekly
+  times, a missed run within the grace and past it, only the latest of
+  several, a clock change in a real zone, before a meeting once and never
+  after it began, the meeting filters, the cap's day; `routines.rs`: a
+  routine checked and tidied, `due_now` on time, late and skipped with its
+  marks moved, before a meeting with its title, save from now keeping its
+  chat, the count's limit, a deleted chat let go, the runs list's length
+  and what Yap left, the file's shape and an older one's; `run.rs`: the
+  notice's words; `skills.rs`: a meeting's routine reads that meeting
+  whatever it gathers; `gates.rs`: a routine's turn offers nothing that
+  acts on the screen or apps), e2e `routines.spec.js` (the wording; a
+  routine made in the form, Run now, its own chat named and marked, a
+  second run in the same chat, the switch, counted as Routines, light and
+  dark; a fake meeting ended: its routine with the note, a new Ask thread,
+  the bar's card and its Open; one for another folder not run).
 
 ## Skills by voice (2026-11-03)
 

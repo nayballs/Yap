@@ -255,6 +255,8 @@ export function initChatStatus() {
   readList();
   listen('yap-chat-answering', (e) => onAnswering(e.payload)).catch(() => {});
   listen('yap-agent-report', () => refreshListSoon()).catch(() => {});
+  // A routine's answer (chat/routines.rs): "new" on its chat.
+  listen('yap-routine-ran', () => refreshListSoon()).catch(() => {});
   listen('yap-assistant-turn', (e) => {
     if (['answered', 'failed', 'superseded'].includes(e.payload?.phase)) refreshListSoon();
   }).catch(() => {});

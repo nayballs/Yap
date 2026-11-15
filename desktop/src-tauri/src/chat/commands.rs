@@ -6,10 +6,13 @@ use tauri::AppHandle;
 use crate::chat::turn::{chat_turn, resolve_chat_endpoint};
 use crate::config;
 
-/// Conversation summaries for the chat sidebar.
+/// Conversation summaries for the chat sidebar; a routine's own chat
+/// marked `routine` (its Skill's command: chat/routines.rs).
 #[tauri::command]
 pub fn chats_list() -> serde_json::Value {
-    crate::chat::chats::list()
+    let mut list = crate::chat::chats::list();
+    crate::chat::routines::chat_marks(&mut list);
+    list
 }
 
 /// One conversation with its messages.
@@ -33,6 +36,8 @@ pub fn chat_delete(id: u64) -> Result<(), String> {
     crate::integrations::connectors::chats::chat_deleted(id);
     crate::chat::styles::chats_deleted(&[id]);
     crate::chat::projects::chats_deleted(&[id]);
+    // A routine's own chat: its next run makes another (chat/routines.rs).
+    crate::chat::routines::chats_deleted(&[id]);
     Ok(crate::chat::chats::saved()?)
 }
 
@@ -44,6 +49,7 @@ pub fn chat_delete_many(ids: Vec<u64>) -> Result<usize, String> {
     crate::integrations::connectors::chats::chats_deleted(&ids);
     crate::chat::styles::chats_deleted(&ids);
     crate::chat::projects::chats_deleted(&ids);
+    crate::chat::routines::chats_deleted(&ids);
     for id in ids {
         crate::apps::moved_on(Some(id));
         crate::ai::claude_plan::sessions::forget(id);

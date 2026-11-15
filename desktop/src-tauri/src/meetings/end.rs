@@ -227,6 +227,8 @@ pub fn end_steps(app: &AppHandle, note_id: u64, origin: Option<&str>) -> bool {
         return true;
     }
     crate::meetings::assist::maybe_title(app, note_id, true);
+    // Its "after a meeting" routines run once the summary is (chat/routines.rs).
+    crate::chat::routines::meeting_ending(note_id);
     start_summary(app, note_id);
     false
 }
@@ -464,6 +466,8 @@ fn start_summary_with(app: &AppHandle, note_id: u64, replace: bool) -> bool {
         if jobs().get(&note_id).is_some_and(|j| j.run == run) {
             publish(&app, Summary { note_id, run, state, step: STEPS, steps: STEPS, error });
         }
+        // The meeting that just ended: its routines now (chat/routines.rs).
+        crate::chat::routines::summary_done(note_id);
     });
     true
 }
