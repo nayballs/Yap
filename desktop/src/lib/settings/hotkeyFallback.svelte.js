@@ -9,7 +9,8 @@
 // The meeting shortcut (Win+Alt+M) goes first: a combo is more specific than
 // a bare dictation key; then the Voice Assistant's shortcut, Ask about the
 // selection (with what this page has selected), Read aloud, Snip to Chat,
-// Copy last, Quick note and the language shortcuts (My languages). Down and up go to
+// Copy last, Quick note and the language shortcuts (My languages), then Chat's
+// own side question (Ctrl+;, stores/sideQuestionKey.js). Down and up go to
 // `dictation_key` / `assistant_key` / `ask_selection_key` / `language_key`, the hook's own paths:
 // the recording mode (and push-to-talk's tap / double-tap) is Rust's to
 // decide. A mouse button on Dictate (a side button) goes the same way.
@@ -24,6 +25,7 @@ import {
 import { askSelectionKey, readPageSelection } from '../stores/speech.svelte.js';
 import { hotkeyCapture } from './hotkeys.svelte.js';
 import { languageShortcuts } from './languages.svelte.js';
+import { sideQuestionKey } from '../stores/sideQuestionKey.js';
 
 /** Call while the component initialises; `getCfg()` = Settings' config copy (or null). */
 export function followHotkeyFallback(getCfg) {
@@ -91,10 +93,18 @@ export function followHotkeyFallback(getCfg) {
       invoke('language_key', { id: lang.id, pressed: true }).catch(() => {});
       return;
     }
-    if (!downOn(e, cfg, 'hotkey')) return;
-    e.preventDefault();
-    e.stopPropagation();
-    invoke('dictation_key', { pressed: true }).catch(() => {});
+    if (downOn(e, cfg, 'hotkey')) {
+      e.preventDefault();
+      e.stopPropagation();
+      invoke('dictation_key', { pressed: true }).catch(() => {});
+      return;
+    }
+    // Chat's side question (Ctrl+;, chat/side.rs), after every shortcut of the
+    // person's own: Chat, while it's on screen, takes it (stores/sideQuestionKey.js).
+    if (sideQuestionKey(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
   }
   function onKeyUp(e) {
     if (hotkeyCapture.on) return;

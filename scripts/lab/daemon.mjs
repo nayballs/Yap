@@ -847,6 +847,49 @@ async function click({ window: which = 'main', css }) {
 }
 
 /**
+ * **A side question** (Ctrl+;, chat/side.rs, 15 Nov 2026): asked about the chat shown, in the box over its thread, as
+ * the person asks one — the key, the words, Enter — and its answer read back from the box. Nothing of it is in the
+ * chat (the next `state` or `ask` shows so) unless `keep`: Keep it, once it can be pressed (the chat's own answer,
+ * or its Claude's work, done first). `close`: the box closed after (Esc), as the person throws it away.
+ */
+async function side({ text, keep = false, close = false, timeout = 180 }) {
+  const question = String(text ?? '').trim();
+  if (!question) throw new Error('side needs a question');
+  const m = main();
+  const box = m.getByTestId('chat-sideq');
+  if (!(await box.count())) await m.keyboard.press('Control+;');
+  await box.waitFor({ state: 'visible', timeout: 10_000 });
+  const input = m.getByTestId('chat-sideq-input');
+  await input.fill(question);
+  await input.press('Enter');
+  const started = Date.now();
+  const deadline = started + Number(timeout) * 1000;
+  // Answered: Keep it shows (a whole answer), or an error does.
+  let error = null;
+  while (Date.now() < deadline) {
+    if (await m.getByTestId('chat-sideq-keep').count()) break;
+    error = await box.locator('.err').first().innerText({ timeout: 200 }).catch(() => null);
+    if (error) break;
+    await sleep(250);
+  }
+  const answer = await m.getByTestId('chat-sideq-answer').innerText({ timeout: 1_000 }).catch(() => '');
+  const out = { question: cut(question, 200), answer: cut(answer, 2000), error, seconds: Math.round((Date.now() - started) / 100) / 10, conversation: turn?.conversation ?? null };
+  if (keep && answer) {
+    const btn = m.getByTestId('chat-sideq-keep');
+    out.keptAfterWaiting = await btn.isDisabled().catch(() => false);
+    while (Date.now() < deadline && (await btn.isDisabled().catch(() => false))) await sleep(500);
+    await btn.click({ timeout: 5_000 });
+    await box.waitFor({ state: 'detached', timeout: 10_000 });
+    out.kept = true;
+  } else if (close) {
+    await input.press('Escape');
+    await box.waitFor({ state: 'detached', timeout: 5_000 });
+    out.closed = true;
+  }
+  return out;
+}
+
+/**
  * **Select an element on the page beside the chat**, as a person does (the page tab's arrow, Ctrl+Shift+S):
  * its tools open with Select on, the element showing `text` (the smallest that holds the words) — or `css` —
  * scrolled into view and clicked through DevTools' own inspect overlay (real input, `e2e_page_click`), and its
@@ -1139,6 +1182,7 @@ const COMMANDS = {
   agents: async () => agentsView(),
   probe: async (a) => probe(a),
   click: async (a) => click(a),
+  side: async (a) => side(a),
   pick: async (a) => pick(a),
   set: async (a) => setThings(a),
   answer: async (a) => {

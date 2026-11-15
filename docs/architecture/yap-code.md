@@ -761,6 +761,14 @@ a message that works directly carries their text after its words, so the
 turn's title and brief start with the person's words (`after_text`); such a
 message is never queued.
 
+**A side question in a Code chat** (2026-11-15, Ctrl+;:
+[chat-and-assistant.md](chat-and-assistant.md#side-questions-ctrl-2026-11-15)):
+Chat's model answers it from the thread's text. It never enters the chat's
+session, and it can be asked while that session works. Kept, the exchange
+goes with the next message that works directly, after the person's words
+(and after attached files' text) as an `<earlier_in_this_chat>` block
+(`side::with_kept`), once.
+
 ## Dev servers
 
 A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 Nov 2026; the maintainer, on the Claude Code app's Dev servers menu in its browser pane: "Can we add this to Yap, please? And an ability to do this"). Built from Anthropic's public docs for the app ("Configure preview servers") and the preview tools as Claude Code's own session is given them, never from the app's files (Anthropic's terms forbid taking it apart).
