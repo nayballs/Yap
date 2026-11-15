@@ -229,6 +229,9 @@ export const FIELD_DEFAULTS = {
   // "Clean up what you say in Chat": a spoken question cleaned up as an AI
   // prompt, word for word, on Dictation cleanup's model (cleanup_styles.rs).
   chatCleanSpeech: true,
+  // "Show the outline before writing": a new document's outline as a card
+  // first, Go or Edit (chat/cards/outline.rs).
+  chatOutlineReview: true,
   // Settings → Phone (link.rs): Yap Link for paired phones on the home Wi-Fi.
   linkEnabled: false,
   // Settings → Phone → Remote Control (link/code.rs): Yap Code from the paired

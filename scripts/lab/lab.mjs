@@ -15,6 +15,8 @@
 //   answer <card-id> allow|deny|always [--timeout 600] [--no-wait]
 //   answer <card-id> pick "<option>"       a question card ("A|B": several questions, "A,B": several picks)
 //   answer <card-id> said "<words>"        a question card answered out loud (or: ask "<words>" --spoken --chat same)
+//   answer <card-id> edit '<json>'         a document's outline: Edit's Go ({"sections":[…],"note":"…"}); allow is Go
+//   answer <card-id> revise "<q>::<c>|…"   an agent's plan sent back with comments (Plan mode)
 //   cancel | state | agents | logs [--since N]
 //   shot [--window thread|main|bar|panel|page] [--theme light|dark|both]
 //        [--name <n>] [--selector <css>]

@@ -982,10 +982,11 @@ fn spoken_ok_answer(app: &AppHandle, now: u64, conversation: Option<u64>, questi
     let meeting = crate::chat::tools::connectors::in_meeting();
     let Some((said, w)) = spoken_ok::take(conversation, question, &langs, meeting) else { return false };
     match said {
-        // A question of Chat's own model (chat/cards/ask.rs): these words are its answer.
+        // A question of Chat's own model (chat/cards/ask.rs), or a document's
+        // outline (chat/cards/outline.rs): these words are its answer.
         spoken_ok::Spoken::Words => {
             let took = crate::chat::cards::ask::answer_said(w.card, question);
-            tracing::info!(question = w.card, took, "Voice Assistant: a question card answered out loud");
+            tracing::info!(question = w.card, took, "Voice Assistant: a card answered out loud");
             if !took {
                 return false;
             }
@@ -1176,6 +1177,7 @@ impl Streamed {
             since: std::sync::Arc::clone(&self.since),
             owner: self.owner,
             questions: card.question.as_ref().map(|q| q.questions.clone()).unwrap_or_default(),
+            words: card.question.is_some() || card.outline.is_some(),
         });
         tracing::info!(question = card.id, act = %card.act, spoken = asking.spoken, "Voice Assistant: a call asks first; said, and on the bar");
         if self.may_speak() {

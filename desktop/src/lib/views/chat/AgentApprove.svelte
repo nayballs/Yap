@@ -14,6 +14,14 @@
   // carries the plan out at the chat's Mode once its turn ends
   // (agents/runner.rs); Not yet keeps it a plan.
   //
+  // **Comments on the plan** (15 Nov 2026, the Claude app's plan review):
+  // select words of the plan and **Comment** (or **Add a comment** on the
+  // whole plan); each comment is listed under the plan, its words marked in
+  // it. **Revise the plan** sends them back (`claude_approve_revise`):
+  // Claude Code stays in Plan mode and answers with a new plan, another card;
+  // this one is kept folded with its comments (PlanHistory.svelte, from the
+  // turn's `plansBefore`). Go ahead works as before.
+  //
   // **A question** (Claude Code's AskUserQuestion, 12 Nov 2026), as Claude
   // Code's own app asks one: "The agent has a question", each question with
   // its options as buttons and their descriptions, **Something else…** for
@@ -25,10 +33,12 @@
   // pick's place, or join the picks where several are allowed). Before, a question was
   // refused at once and Claude chose for itself. Never under Bypass
   // permissions, where nothing asks.
-  import { agents, answerApproval, replyToQuestion } from '../../stores/agents.svelte.js';
+  import { tick } from 'svelte';
+  import { agents, answerApproval, replyToQuestion, revisePlan, agentById } from '../../stores/agents.svelte.js';
   import QuestionForm from './QuestionForm.svelte';
   import { renderMarkdown } from '../../core/markdown.js';
   import { longSaid } from '../../core/agents.js';
+  import { selectionIn, withComment, markQuotes, plansBeforeOf } from './planComments.js';
 
   /**
    * `approvals`: this chat's prompts waiting (`Pending`), oldest first;
@@ -64,6 +74,70 @@
     await replyToQuestion(a.id, answers);
     sending = { ...sending, [a.id]: false };
   }
+
+  // ---- comments on a plan ----
+  /** A plan card's comments so far (kept in the store: a card drawn again keeps them). */
+  const commentsOf = (a) => agents.planComments[a.id] || [];
+  const setComments = (a, list) => (agents.planComments = { ...agents.planComments, [a.id]: list });
+  // The plan's shown markdown, and the card's body, by card: where a selection counts and its button goes.
+  let planEls = $state({});
+  let boxEls = $state({});
+  // The selection's Comment button: `{id, quote, top, left}` (in the card's body).
+  let picked = $state(null);
+  // The comment being written: `{id, quote, text}`.
+  let draft = $state(null);
+
+  /** After a mouse-up or a key in the plan: the selected words, and where its Comment button goes. */
+  function noticeSelection(a) {
+    const box = boxEls[a.id];
+    const sel = selectionIn(planEls[a.id]);
+    if (!sel || !box) {
+      if (picked?.id === a.id) picked = null;
+      return;
+    }
+    const b = box.getBoundingClientRect();
+    picked = { id: a.id, quote: sel.quote, top: Math.max(0, sel.rect.bottom - b.top + 4), left: Math.min(Math.max(0, sel.rect.right - b.left - 40), Math.max(0, b.width - 96)) };
+  }
+  /** Start a comment: on the selected words (`quote`), or on the whole plan (`''`). */
+  async function startComment(a, quote = '') {
+    picked = null;
+    // (A plan folded: open it, so the words commented on show.)
+    unfolded = { ...unfolded, [a.id]: true };
+    draft = { id: a.id, quote, text: '' };
+    await tick();
+    document.querySelector(`[data-plan-draft="${a.id}"] textarea`)?.focus();
+  }
+  /** "Add a comment": on the selected words if some are, else the whole plan. */
+  const addComment = (a) => startComment(a, selectionIn(planEls[a.id])?.quote || '');
+  function saveComment(a) {
+    if (!draft || draft.id !== a.id) return;
+    setComments(a, withComment(commentsOf(a), draft.quote, draft.text));
+    draft = null;
+  }
+  function draftKey(e, a) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      saveComment(a);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      draft = null;
+    }
+  }
+  const removeComment = (a, i) => setComments(a, commentsOf(a).filter((_, k) => k !== i));
+  async function revise(a) {
+    const list = commentsOf(a);
+    if (!list.length || sending[a.id]) return;
+    sending = { ...sending, [a.id]: true };
+    const taken = await revisePlan(a.id, list);
+    sending = { ...sending, [a.id]: false };
+    if (taken) setComments(a, []);
+  }
+  /** How many times this turn's plan was sent back with comments already (the card says it's a revision). */
+  function revisions(a) {
+    const list = agentById(a.run)?.turnList || [];
+    const t = [...list].reverse().find((x) => x.status === 'running' || x.status === 'asking') || list.at(-1);
+    return plansBeforeOf(t).length;
+  }
 </script>
 
 {#each answered as a (a.id)}
@@ -97,27 +171,74 @@
     </div>
   {:else if isPlan(a)}
     {@const folds = longSaid(a.detail)}
+    {@const comments = commentsOf(a)}
+    {@const revised = revisions(a)}
     <div class="japprove plan" role="group" aria-label="The agent's plan is ready" data-testid="chat-agent-approve" data-tool={a.tool} data-kind="plan">
       <svg class="aicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1z" /><path d="M16 5h2a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h2" /><path d="M9 12h6M9 16h4" /></svg>
-      <div class="abody">
+      <div class="abody" bind:this={boxEls[a.id]}>
         <p class="aq">
-          <strong>The agent's plan is ready</strong> · <button type="button" class="alink" onclick={() => onopen?.(a.run)}>{a.label || 'your folder'}</button>
+          <strong>{revised ? "The agent's revised plan is ready" : "The agent's plan is ready"}</strong> · <button type="button" class="alink" onclick={() => onopen?.(a.run)}>{a.label || 'your folder'}</button>
         </p>
         {#if a.detail?.trim()}
-          <div class="aplan" class:folded={folds && !unfolded[a.id]} data-testid="chat-agent-plan">
+          <!-- svelte-ignore a11y_no_static_element_interactions (selecting words to comment on; Add a comment does it by keyboard) -->
+          <div class="aplan" class:folded={folds && !unfolded[a.id]} data-testid="chat-agent-plan" onmouseup={() => noticeSelection(a)} onkeyup={() => noticeSelection(a)}>
             <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
-            <div class="md">{@html renderMarkdown(a.detail)}</div>
+            <div class="md" bind:this={planEls[a.id]} use:markQuotes={comments}>{@html renderMarkdown(a.detail)}</div>
           </div>
           {#if folds}
             <button type="button" class="fold" aria-expanded={!!unfolded[a.id]} onclick={() => (unfolded = { ...unfolded, [a.id]: !unfolded[a.id] })}>
               {unfolded[a.id] ? 'Show less' : 'Show more'}
             </button>
           {/if}
+          {#if picked?.id === a.id}
+            <!-- The selection's own button, by its end (as the Claude app's plan review has it). -->
+            <button type="button" class="pcomment" style:top="{picked.top}px" style:left="{picked.left}px" data-testid="chat-plan-comment-selection" onmousedown={(e) => e.preventDefault()} onclick={() => startComment(a, picked.quote)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /></svg>
+              Comment
+            </button>
+          {/if}
         {/if}
-        <p class="awhy">Go ahead and it carries the plan out at this chat's Mode. Not yet keeps it a plan, with nothing changed.</p>
+        {#if comments.length}
+          <ul class="pcomments" data-testid="chat-plan-comments">
+            {#each comments as c, i (i)}
+              <li>
+                {#if c.quote}<span class="pquote">“{c.quote}”</span>{:else}<span class="pquote whole">The whole plan</span>{/if}
+                <span class="ptext">{c.text}</span>
+                <button type="button" class="pdrop" aria-label="Remove this comment" title="Remove" onclick={() => removeComment(a, i)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#if draft?.id === a.id}
+          <div class="pdraft" data-plan-draft={a.id} data-testid="chat-plan-draft">
+            {#if draft.quote}<p class="pquote">“{draft.quote}”</p>{:else}<p class="pquote whole">On the whole plan</p>{/if}
+            <textarea rows="2" maxlength="2000" placeholder="Your comment…" aria-label="Your comment on the plan" bind:value={draft.text} onkeydown={(e) => draftKey(e, a)}></textarea>
+            <div class="pdbtns">
+              <button type="button" class="padd" onclick={() => saveComment(a)} disabled={!draft.text.trim()}>Add comment</button>
+              <button type="button" onclick={() => (draft = null)}>Cancel</button>
+            </div>
+          </div>
+        {/if}
+        <p class="awhy">
+          {#if comments.length}
+            Revise the plan sends your comments back: it stays in Plan mode and answers with a new plan. Go ahead carries this one out as it is.
+          {:else}
+            Go ahead and it carries the plan out at this chat's Mode. Not yet keeps it a plan, with nothing changed. Select words in it to comment.
+          {/if}
+        </p>
         <div class="abtns">
-          <button type="button" class="aallow" onclick={() => answerApproval(a.id, true)}>Go ahead</button>
-          <button type="button" class="adeny" onclick={() => answerApproval(a.id, false)}>Not yet</button>
+          {#if comments.length}
+            <button type="button" class="aallow" data-testid="chat-plan-revise" onclick={() => revise(a)} disabled={!!sending[a.id]}>Revise the plan · {comments.length}</button>
+            <button type="button" class="adeny" onclick={() => answerApproval(a.id, true)} disabled={!!sending[a.id]}>Go ahead</button>
+          {:else}
+            <button type="button" class="aallow" onclick={() => answerApproval(a.id, true)}>Go ahead</button>
+          {/if}
+          <button type="button" class="adeny" onclick={() => answerApproval(a.id, false)} disabled={!!sending[a.id]}>Not yet</button>
+          {#if draft?.id !== a.id}
+            <button type="button" class="acomment" data-testid="chat-plan-add-comment" onmousedown={(e) => e.preventDefault()} onclick={() => addComment(a)}>Add a comment</button>
+          {/if}
         </div>
       </div>
     </div>
@@ -203,6 +324,7 @@
     color: var(--yap-primary);
   }
   .abody {
+    position: relative;
     flex: 1 1 auto;
     min-width: 0;
   }
@@ -314,6 +436,154 @@
     margin-top: 6px;
     font-size: 12px;
     color: var(--yap-paper-muted);
+  }
+  /* Comments on a plan: its words marked, the list under it, the one being written. */
+  .aplan .md :global(mark.pmark) {
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--yap-warning) 28%, transparent);
+    color: inherit;
+  }
+  .pcomment {
+    position: absolute;
+    z-index: 2;
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid var(--yap-primary-line);
+    border-radius: 999px;
+    background: var(--yap-paper);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--yap-paper-ink) 18%, transparent);
+    color: var(--yap-primary);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .pcomment svg {
+    width: 13px;
+    height: 13px;
+  }
+  .pcomment:hover {
+    background: var(--yap-paper-s2);
+  }
+  .pcomment:focus-visible,
+  .pdrop:focus-visible,
+  .pdraft textarea:focus-visible,
+  .pdbtns button:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  .pcomments {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .pcomments li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 1px 8px;
+    padding: 6px 8px 6px 10px;
+    border-left: 3px solid color-mix(in srgb, var(--yap-warning) 55%, var(--yap-paper-rule));
+    border-radius: 0 7px 7px 0;
+    background: var(--yap-paper-s1);
+    font-size: 12.5px;
+  }
+  .pquote {
+    grid-column: 1;
+    margin: 0;
+    color: var(--yap-paper-muted);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+  .pquote.whole {
+    font-style: italic;
+  }
+  .ptext {
+    grid-column: 1;
+    overflow-wrap: anywhere;
+  }
+  .pdrop {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--yap-paper-muted);
+    cursor: pointer;
+  }
+  .pdrop svg {
+    width: 13px;
+    height: 13px;
+  }
+  .pdrop:hover {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
+  }
+  .pdraft {
+    margin: 8px 0 0;
+    padding: 8px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 8px;
+    background: var(--yap-paper-s1);
+  }
+  .pdraft textarea {
+    box-sizing: border-box;
+    width: 100%;
+    margin-top: 4px;
+    padding: 5px 8px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 7px;
+    background: var(--yap-paper);
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 12.5px;
+    resize: vertical;
+  }
+  .pdbtns {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .pdbtns button {
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 999px;
+    background: var(--yap-paper);
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .pdbtns .padd {
+    border-color: var(--yap-primary-line);
+    background: var(--yap-primary);
+    color: var(--yap-primary-fg);
+  }
+  .pdbtns button:disabled {
+    cursor: default;
+    opacity: 0.55;
+  }
+  .abtns .acomment {
+    margin-left: auto;
+    border-color: transparent;
+    background: none;
+    color: var(--yap-primary);
+  }
+  .abtns .acomment:hover {
+    background: var(--yap-paper-s2);
   }
   .abtns {
     display: flex;
