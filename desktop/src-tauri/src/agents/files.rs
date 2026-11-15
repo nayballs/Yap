@@ -1,0 +1,477 @@
+//! **A Code chat's files beside the chat** (15 Nov 2026, after the Claude
+//! app's Code tab, where a path in an answer opens the file): a path in a
+//! Code chat's answer or rows (`src/convert.js`, `docs/lab.md:105`) is a link
+//! when it names a file in the chat's workspace, and opens a read-only view
+//! of it beside the chat (`FileTab.svelte`), scrolled to the line named.
+//!
+//! - **Only the chat's own workspace** ([`resolve`]): the workspace comes
+//!   from the conversation, in Rust ([`code_chat::folder_of`]), never from
+//!   the page. A path is taken relative to it, or as a full path inside it.
+//!   Refused: `..` that climbs out (any `..` in a full path), a device or
+//!   network path (`\\?\`, `\\.\`, `\\server`), a drive-relative one
+//!   (`\x`), a scheme (`file:`, `http:`), a colon past the drive letter (an
+//!   alternate data stream), wildcards, control characters, and anything
+//!   whose real place, once the file system has followed symlinks and
+//!   junctions (`canonicalize`), isn't under the workspace's real place.
+//!   Only files: a folder is no link.
+//! - **Read only** ([`read`]): at most [`READ_MAX`] bytes and [`LINES_MAX`]
+//!   lines shown (the rest said), a file with a NUL in its first bytes is
+//!   "not text", its text decoded as UTF-8 with any bad bytes replaced.
+//! - **Open in editor** ([`open_editor`]): the person's code editor, started
+//!   directly (never through a shell, never the file's own default app,
+//!   which for a `.js` or `.ps1` would run it): VS Code or Cursor at the
+//!   line (`-g file:line`), else Notepad++ (`-n<line>`), else Notepad.
+//! - **The Environment** of the summary panel ([`environment`]): the
+//!   workspace's git branch and whether it's a linked worktree, read from
+//!   `.git` itself (no git run).
+//!
+//! The log has counts and kinds, never a path.
+
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
+
+use serde::Serialize;
+
+use super::code_chat;
+use crate::chat::pictures::local;
+
+/// The most bytes of a file the view shows.
+pub const READ_MAX: u64 = 1_000_000;
+/// The most lines the view shows.
+pub const LINES_MAX: usize = 20_000;
+/// The most paths checked in one call (an answer's).
+pub const CHECK_MAX: usize = 200;
+/// A path longer than this is no path.
+const PATH_MAX: usize = 1_024;
+/// The bytes looked at for a NUL (not text).
+const SNIFF: usize = 8_000;
+
+/// **A file in the workspace**, as a link names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileRef {
+    /// From the workspace's root, with `/` (`src/app.ts`).
+    pub rel: String,
+    /// Its full path, as Windows writes it.
+    pub abs: String,
+    /// The line named (from 1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+}
+
+/// Why a path isn't a link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refused {
+    /// Nothing that could be a path.
+    NotAPath,
+    /// Outside the workspace (or climbing out of it).
+    Outside,
+    /// Not there.
+    Missing,
+    /// A folder, or something else that isn't a file.
+    NotAFile,
+}
+
+impl Refused {
+    pub fn words(self) -> &'static str {
+        match self {
+            Refused::NotAPath => "That isn't a file's path.",
+            Refused::Outside => "That file isn't in this chat's workspace.",
+            Refused::Missing => "There's no such file in this chat's workspace.",
+            Refused::NotAFile => "That's a folder, not a file.",
+        }
+    }
+}
+
+/// **A path and the line it names**: `docs/lab.md:105` → (`docs/lab.md`,
+/// 105); also `:105:7` (a column), `#L105` and `#L105-L120` (a web link's).
+/// A drive letter's colon is the path's. Line 0 is none. Pure.
+pub fn split_line(raw: &str) -> (&str, Option<u32>) {
+    let digits = |s: &str| !s.is_empty() && s.len() <= 7 && s.bytes().all(|b| b.is_ascii_digit());
+    // "#L105", "#L105-L120", "#L105C3"
+    if let Some((head, frag)) = raw.rsplit_once("#L") {
+        let n: String = frag.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let rest = &frag[n.len()..];
+        if !head.is_empty() && digits(&n) && (rest.is_empty() || rest.starts_with("-L") || rest.starts_with('C')) {
+            return (head, n.parse().ok().filter(|&l| l > 0));
+        }
+    }
+    let mut s = raw;
+    let mut nums: Vec<&str> = Vec::new();
+    for _ in 0..2 {
+        match s.rsplit_once(':') {
+            Some((head, tail)) if digits(tail) && !head.is_empty() && !(head.len() == 1 && head.as_bytes()[0].is_ascii_alphabetic()) => {
+                nums.push(tail);
+                s = head;
+            }
+            _ => break,
+        }
+    }
+    (s, nums.last().and_then(|n| n.parse().ok()).filter(|&l| l > 0))
+}
+
+/// A drive letter and its colon (`C:`).
+fn has_drive(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+}
+
+/// A full path: `C:\…` or `C:/…` (and `/…` off Windows).
+fn is_full(s: &str) -> bool {
+    if cfg!(windows) {
+        has_drive(s) && matches!(s.as_bytes().get(2), Some(b'\\') | Some(b'/'))
+    } else {
+        s.starts_with('/')
+    }
+}
+
+/// The path a link gives, tidied: quotes, backticks and angle brackets
+/// round it gone, `./` dropped. `None`: nothing that could be a path.
+fn tidy(raw: &str) -> Option<&str> {
+    let s = raw.trim().trim_matches(|c| matches!(c, '`' | '"' | '\'' | '<' | '>')).trim();
+    let s = s.strip_prefix("./").or_else(|| s.strip_prefix(".\\")).unwrap_or(s);
+    (!s.is_empty() && s.len() <= PATH_MAX).then_some(s)
+}
+
+/// **Is `given` (a path, its line split off) acceptable as written?** The
+/// checks that need no file system. Pure.
+fn shape(given: &str) -> Result<(), Refused> {
+    // Device and network paths (`\\?\`, `\\.\`, `\\server`), and Windows' drive-relative "\x".
+    if given.starts_with("\\\\") || given.starts_with("//") {
+        return Err(Refused::Outside);
+    }
+    if given.chars().any(|c| c.is_control() || matches!(c, '*' | '?' | '<' | '>' | '|' | '"')) {
+        return Err(Refused::NotAPath);
+    }
+    if cfg!(windows) && (given.starts_with('\\') || given.starts_with('/')) {
+        return Err(Refused::Outside);
+    }
+    // A colon anywhere but a drive letter's: a scheme (`file:`, `http:`) or a stream.
+    let after_drive = if has_drive(given) { &given[2..] } else { given };
+    if after_drive.contains(':') {
+        return Err(Refused::NotAPath);
+    }
+    // `C:x` (relative to that drive's own folder).
+    if has_drive(given) && !is_full(given) {
+        return Err(Refused::Outside);
+    }
+    Ok(())
+}
+
+/// A relative path's `..` never climbs above where it starts; a full one has
+/// none at all. Pure.
+fn stays_in(given: &str) -> bool {
+    let p = Path::new(given);
+    if is_full(given) {
+        return !p.components().any(|c| c == Component::ParentDir);
+    }
+    let mut depth: i32 = 0;
+    for c in p.components() {
+        match c {
+            Component::Normal(_) => depth += 1,
+            Component::ParentDir => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            Component::CurDir => {}
+            Component::RootDir | Component::Prefix(_) => return false,
+        }
+    }
+    true
+}
+
+/// `path`'s place under `root` with `/` between its parts (both real paths). Pure.
+fn rel_of(root: &Path, path: &Path) -> Option<String> {
+    let rest = path.strip_prefix(root).ok()?;
+    let parts: Vec<String> = rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    (!parts.is_empty()).then(|| parts.join("/"))
+}
+
+/// **The file `raw` names in the workspace at `root`**, if it's one there
+/// (see the module's rules).
+pub fn resolve(root: &Path, raw: &str) -> Result<FileRef, Refused> {
+    let given = tidy(raw).ok_or(Refused::NotAPath)?;
+    let (path, line) = split_line(given);
+    shape(path)?;
+    if !stays_in(path) {
+        return Err(Refused::Outside);
+    }
+    let joined = if is_full(path) { PathBuf::from(path) } else { root.join(path) };
+    // The file system's say: symlinks, junctions and short names followed, both sides.
+    let real_root = std::fs::canonicalize(root).map_err(|_| Refused::Missing)?;
+    let real = std::fs::canonicalize(&joined).map_err(|_| if is_full(path) { Refused::Outside } else { Refused::Missing })?;
+    if !real.starts_with(&real_root) || real == real_root {
+        return Err(Refused::Outside);
+    }
+    let meta = std::fs::metadata(&real).map_err(|_| Refused::Missing)?;
+    if !meta.is_file() {
+        return Err(Refused::NotAFile);
+    }
+    let rel = rel_of(&real_root, &real).ok_or(Refused::Outside)?;
+    Ok(FileRef { rel, abs: local::plain(&real), line })
+}
+
+/// **A file as the view shows it.**
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileView {
+    #[serde(flatten)]
+    pub file: FileRef,
+    /// Its text (as much as is shown; empty when it isn't text).
+    pub text: String,
+    /// Its size in bytes.
+    pub size: u64,
+    /// More than the view shows.
+    pub truncated: bool,
+    /// Not text (a NUL in its first bytes).
+    pub binary: bool,
+}
+
+/// `bytes` as the view's text: a BOM gone, bad UTF-8 replaced, at most
+/// [`LINES_MAX`] lines and cut at a line's end when `cut` (more than was
+/// read). `(text, truncated)`. Pure.
+pub fn as_text(bytes: &[u8], cut: bool) -> (String, bool) {
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    let mut text = String::from_utf8_lossy(bytes).into_owned();
+    let mut truncated = cut;
+    if cut {
+        if let Some(at) = text.rfind('\n') {
+            text.truncate(at);
+        }
+    }
+    if let Some((at, _)) = text.match_indices('\n').nth(LINES_MAX - 1) {
+        text.truncate(at);
+        truncated = true;
+    }
+    (text, truncated)
+}
+
+/// **Read the file `raw` names** in the workspace at `root`.
+pub fn read(root: &Path, raw: &str) -> Result<FileView, Refused> {
+    let file = resolve(root, raw)?;
+    let mut f = std::fs::File::open(&file.abs).map_err(|_| Refused::Missing)?;
+    let size = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let mut bytes = Vec::new();
+    (&mut f).take(READ_MAX + 1).read_to_end(&mut bytes).map_err(|_| Refused::Missing)?;
+    let cut = bytes.len() as u64 > READ_MAX;
+    if cut {
+        bytes.truncate(READ_MAX as usize);
+    }
+    if bytes[..bytes.len().min(SNIFF)].contains(&0) {
+        return Ok(FileView { file, text: String::new(), size, truncated: false, binary: true });
+    }
+    let (text, truncated) = as_text(&bytes, cut);
+    Ok(FileView { file, text, size, truncated, binary: false })
+}
+
+// ---- Open in editor -----------------------------------------------------------------------------
+
+/// The code editors Yap starts, in the order it looks for them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Editor {
+    VsCode,
+    Cursor,
+    NotepadPlusPlus,
+    Notepad,
+}
+
+impl Editor {
+    pub fn name(self) -> &'static str {
+        match self {
+            Editor::VsCode => "VS Code",
+            Editor::Cursor => "Cursor",
+            Editor::NotepadPlusPlus => "Notepad++",
+            Editor::Notepad => "Notepad",
+        }
+    }
+
+    /// Its arguments to open `abs` at `line`. Pure.
+    pub fn args(self, abs: &str, line: Option<u32>) -> Vec<String> {
+        match (self, line) {
+            (Editor::VsCode | Editor::Cursor, Some(l)) => vec!["-g".into(), format!("{abs}:{l}")],
+            (Editor::NotepadPlusPlus, Some(l)) => vec![format!("-n{l}"), abs.into()],
+            _ => vec![abs.into()],
+        }
+    }
+}
+
+/// Where each editor is usually installed, and its program's name on PATH's
+/// `bin` (VS Code's `code.cmd` sits in `bin\` beside `..\Code.exe`).
+fn editor_at() -> Option<(Editor, PathBuf)> {
+    let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
+    let mut tries: Vec<(Editor, PathBuf)> = Vec::new();
+    if let Some(l) = env("LOCALAPPDATA") {
+        tries.push((Editor::VsCode, l.join(r"Programs\Microsoft VS Code\Code.exe")));
+        tries.push((Editor::Cursor, l.join(r"Programs\cursor\Cursor.exe")));
+    }
+    for k in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(p) = env(k) {
+            tries.push((Editor::VsCode, p.join(r"Microsoft VS Code\Code.exe")));
+        }
+    }
+    // VS Code found on PATH by its `code.cmd`.
+    if let Some(path) = std::env::var_os("PATH") {
+        for d in std::env::split_paths(&path) {
+            if d.join("code.cmd").is_file() {
+                if let Some(app) = d.parent() {
+                    tries.push((Editor::VsCode, app.join("Code.exe")));
+                }
+            }
+        }
+    }
+    for k in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(p) = env(k) {
+            tries.push((Editor::NotepadPlusPlus, p.join(r"Notepad++\notepad++.exe")));
+        }
+    }
+    if let Some(w) = env("SystemRoot") {
+        tries.push((Editor::Notepad, w.join(r"System32\notepad.exe")));
+    }
+    tries.into_iter().find(|(_, p)| p.is_file())
+}
+
+/// **Open the file `raw` names in the person's code editor** (see the
+/// module's rules). Which editor it was.
+pub fn open_editor(root: &Path, raw: &str, line: Option<u32>) -> Result<&'static str, String> {
+    let file = resolve(root, raw).map_err(|r| r.words().to_string())?;
+    let line = line.or(file.line);
+    if crate::shell::e2e::active() {
+        crate::shell::commands::e2e_kept(&format!("editor:{}:{}", file.rel, line.unwrap_or(0)));
+        return Ok("VS Code");
+    }
+    let (editor, exe) = editor_at().ok_or("Yap couldn't find a code editor on this PC.")?;
+    std::process::Command::new(&exe)
+        .args(editor.args(&file.abs, line))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Couldn't start {}: {e}", editor.name()))?;
+    tracing::info!(editor = editor.name(), at_line = line.is_some(), "Code chat: a file opened in an editor");
+    Ok(editor.name())
+}
+
+// ---- Environment --------------------------------------------------------------------------------
+
+/// **A Code chat's workspace, for the summary panel's Environment.**
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Environment {
+    pub name: String,
+    pub path: String,
+    /// The folder is there.
+    pub exists: bool,
+    /// In a git repository.
+    pub repo: bool,
+    /// Its branch (a detached HEAD: its commit's first 7 characters).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub detached: bool,
+    /// A linked worktree (`git worktree add`).
+    pub worktree: bool,
+}
+
+/// What a `HEAD` file says: `(branch, detached)`. Pure.
+pub fn head_of(head: &str) -> (Option<String>, bool) {
+    let h = head.trim();
+    if let Some(r) = h.strip_prefix("ref:") {
+        let r = r.trim();
+        let name = r.strip_prefix("refs/heads/").unwrap_or(r);
+        return ((!name.is_empty()).then(|| name.to_string()), false);
+    }
+    if h.len() >= 7 && h.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return (Some(h[..7].to_string()), true);
+    }
+    (None, false)
+}
+
+/// The git folder of the repository `dir` is in: `(git_dir, linked_worktree)`.
+/// A `.git` file ("gitdir: …") is a worktree's or a submodule's: a worktree's
+/// points into `<repo>/.git/worktrees/<name>`.
+pub fn git_dir_of(dir: &Path) -> Option<(PathBuf, bool)> {
+    for d in dir.ancestors() {
+        let dot = d.join(".git");
+        if dot.is_dir() {
+            return Some((dot, false));
+        }
+        if dot.is_file() {
+            let text = std::fs::read_to_string(&dot).ok()?;
+            let at = text.lines().find_map(|l| l.trim().strip_prefix("gitdir:")).map(str::trim)?;
+            let git = if Path::new(at).is_absolute() { PathBuf::from(at) } else { d.join(at) };
+            let worktree = git.parent().and_then(|p| p.file_name()).is_some_and(|n| n == "worktrees");
+            return Some((git, worktree));
+        }
+    }
+    None
+}
+
+/// The Environment of the workspace `name` at `path`.
+pub fn environment(name: &str, path: &str) -> Environment {
+    let dir = Path::new(path);
+    let mut env = Environment { name: name.to_string(), path: path.to_string(), exists: dir.is_dir(), ..Default::default() };
+    if !env.exists {
+        return env;
+    }
+    if let Some((git, worktree)) = git_dir_of(dir) {
+        env.repo = true;
+        env.worktree = worktree;
+        if let Ok(head) = std::fs::read_to_string(git.join("HEAD")) {
+            let (branch, detached) = head_of(&head);
+            env.branch = branch;
+            env.detached = detached;
+        }
+    }
+    env
+}
+
+// ---- the commands -------------------------------------------------------------------------------
+
+/// The workspace root of Code chat `conversation`.
+fn root_of(conversation: u64) -> Result<PathBuf, String> {
+    let folder = code_chat::folder_of(Some(conversation)).ok_or("This chat isn't a Code chat.")?;
+    Ok(PathBuf::from(folder.path))
+}
+
+/// **Which of `paths` are files in Code chat `conversation`'s workspace**:
+/// each its file, or `None` (at most [`CHECK_MAX`] looked at; none in a
+/// chat that isn't a Code chat).
+#[tauri::command]
+pub async fn code_files_check(conversation: u64, paths: Vec<String>) -> Vec<Option<FileRef>> {
+    let Ok(root) = root_of(conversation) else { return vec![None; paths.len()] };
+    tauri::async_runtime::spawn_blocking(move || {
+        let found: Vec<Option<FileRef>> = paths.iter().enumerate().map(|(i, p)| if i < CHECK_MAX { resolve(&root, p).ok() } else { None }).collect();
+        tracing::debug!(asked = paths.len(), files = found.iter().flatten().count(), "Code chat: paths checked");
+        found
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// **A file of Code chat `conversation`'s workspace, read** for its view.
+#[tauri::command]
+pub async fn code_file_read(conversation: u64, path: String) -> Result<FileView, String> {
+    let root = root_of(conversation)?;
+    tauri::async_runtime::spawn_blocking(move || read(&root, &path).map_err(|r| r.words().to_string())).await.map_err(|e| e.to_string())?
+}
+
+/// **Open in editor**: the file at its line in the person's code editor.
+#[tauri::command]
+pub async fn code_file_open_editor(conversation: u64, path: String, line: Option<u32>) -> Result<String, String> {
+    let root = root_of(conversation)?;
+    tauri::async_runtime::spawn_blocking(move || open_editor(&root, &path, line).map(str::to_string)).await.map_err(|e| e.to_string())?
+}
+
+/// **The summary panel's Environment**: Code chat `conversation`'s workspace,
+/// or (a new code chat, no conversation yet) the workspace at `workspace`,
+/// when it's one of Yap Code's.
+#[tauri::command]
+pub async fn code_chat_environment(conversation: Option<u64>, workspace: Option<String>) -> Result<Environment, String> {
+    let folder = conversation.and_then(|c| code_chat::folder_of(Some(c))).or_else(|| workspace.as_deref().and_then(code_chat::folder_at)).ok_or("That isn't one of Yap Code's workspaces.")?;
+    tauri::async_runtime::spawn_blocking(move || environment(&folder.name, &folder.path)).await.map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+#[path = "files/tests.rs"]
+mod tests;

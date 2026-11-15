@@ -69,9 +69,20 @@ export function questionIndex(messages, after) {
 /**
  * **Where each visual shows** in `messages`: in the first answer after its question (`inAnswer`, above
  * the answer's words), or — no answer yet (a Code chat's Claude still working) — under the question's
- * own work. `Map<index, { inAnswer, visuals }>`, each in the order made. Pure.
+ * own work. `Map<index, { inAnswer, visuals }>`, each in the order made. `forks`: the chat's versions
+ * (chat_get's `forks`, chat/chats/branches.rs): an answer retried shows only what its own turn made —
+ * after the version before it (`since`), by the time it was saved — never another version's. Pure.
  */
-export function placeVisuals(messages, items) {
+/** Was visual `v` made by the turn of `answer`, the version shown of `fork` (none: it has no other)? */
+function ownVersion(v, answer, fork) {
+  if (!fork) return true;
+  const made = Math.floor((Number(v?.at) || 0) / 1000);
+  if (!made) return true;
+  const saved = Number(answer?.ts) || 0;
+  return made > (Number(fork.since) || 0) && (!saved || made <= saved);
+}
+
+export function placeVisuals(messages, items, forks = []) {
   const out = new Map();
   if (!items?.length || !messages?.length) return out;
   for (const v of items) {
@@ -89,6 +100,7 @@ export function placeVisuals(messages, items) {
       }
       if (m.role === 'user' && !m.kind) break;
     }
+    if (inAnswer && !ownVersion(v, messages[at], (forks || []).find((f) => f.at === at))) continue;
     const slot = out.get(at) ?? { inAnswer, visuals: [] };
     slot.visuals.push(v);
     out.set(at, slot);

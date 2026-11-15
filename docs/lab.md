@@ -102,7 +102,7 @@ old or **not signed in, it says so and stops** — the lab never signs in.
 `start` on the plan, then `stop`: is Claude Code on this PC and signed in, as Yap sees
 it? Asks the model nothing.
 
-### `ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
+### `ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>] [--retry] [--edit] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
 
 Puts a question to Chat and waits until the turn ends (answered, stopped or failed),
 **or a card waits for the person**, or `--timeout` seconds pass.
@@ -119,6 +119,12 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   would mid-answer (14 Nov 2026, the message box's queue), with no turn of the lab's
   own: returns at once; the queued bubble, its ✓✓ and the answers show in the thread
   (`probe`, `shot`, `wait --agents`).
+- `--retry`: ↻ **Retry** under the chat's last answer instead (15 Nov 2026, the Claude
+  app's message actions: chat/chats/branches.rs), in the chat shown — its question
+  answered again, the old answer kept as a version (‹ 2/2 ›; `probe --css
+  '[data-testid="chat-branch-count"]'`). No words needed. `--edit`: **Edit** the
+  person's last message to `<text>` — the pencil, the words in place, Save and send —
+  a new version from there. Both are turns of the lab's own, waited on as `ask` is.
 - `--cards allow|deny`: answer every card this turn asks at once (otherwise `ask`
   returns `status: "waiting"` and you `answer` it).
 - `shots`: the turn's screenshots ([Screenshots](#screenshots)) — after it ends, and

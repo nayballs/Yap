@@ -271,11 +271,25 @@ export function timelineOf(log, final = '') {
  * `timelineOf` leaves them. A group of housekeeping alone ("Starting Claude
  * Code") is kept only at the end of a turn still working (`live`), where
  * it's what the agent is on.
+ *
+ * `thinking` (15 Nov 2026, the thread's Thinking and Verbose views, as
+ * Claude Code's app has them): its thinking too, in order — `{kind:
+ * 'thought', text, ts}` (the log's `thought`, agents/runner.rs) — each
+ * between the stretches it came between. Without it, thinking is no item and
+ * never splits a stretch.
  */
-export function workOf(log, final = '', live = false) {
+export function workOf(log, final = '', live = false, { thinking = false } = {}) {
   const out = [];
   let group = null;
   for (const e of log || []) {
+    if (typeof e?.thought === 'string') {
+      const t = e.thought.trim();
+      if (thinking && t) {
+        group = null;
+        out.push({ kind: 'thought', text: t, ts: Number(e.ts) || 0 });
+      }
+      continue;
+    }
     // A picture its call came back with: on that step, in whichever stretch.
     const pic = stepPicture(e);
     if (pic) {
@@ -349,7 +363,64 @@ export function workOf(log, final = '', live = false) {
   }
   // (Yap's own housekeeping alone — "Starting Claude Code", a note read, a denial — isn't a stretch of work, unless a step of it came back with a picture.)
   const real = (g) => g.steps.some((s) => s.pictures.length > 0 || !['other', 'ask'].includes(stepKind(s)));
-  return out.filter((x, i) => x.kind === 'said' || real(x) || (live && i === out.length - 1));
+  return out.filter((x, i) => x.kind !== 'work' || real(x) || (live && i === out.length - 1));
+}
+
+/**
+ * **A turn's work in parts, at the person's messages** (15 Nov 2026, as
+ * Claude Code's app lays a turn out): a message the person sent while it
+ * worked shows where Claude read it, and the work after it under it — not
+ * all of the turn above that message. `events`: the turn's (`turnsOf`);
+ * `notes`: the ids of the thread's messages that may have been read into it
+ * (`notesAfter`). Split at each one's `read` event (agents/runner.rs: "Read
+ * your note", the message's id), the first time it's read, in order:
+ * `[{after: null | id, events}]`, the first part always there. Pure.
+ */
+export function turnParts(events, notes = []) {
+  const wanted = new Set((notes || []).filter(Boolean));
+  const parts = [{ after: null, events: [] }];
+  for (const e of events || []) {
+    if (e?.read && wanted.has(e.read)) {
+      wanted.delete(e.read);
+      parts.push({ after: e.read, events: [] });
+    }
+    parts[parts.length - 1].events.push(e);
+  }
+  return parts;
+}
+
+/**
+ * **The messages a direct turn may have read while it worked**: the ids of
+ * the person's messages after the one that asked (at `i`), up to the next
+ * message that started a turn of its own (`startsTurn(k)`). Which of them
+ * it read — and where — its log says (`turnParts`). Pure.
+ */
+export function notesAfter(messages, i, startsTurn = () => false) {
+  const out = [];
+  const list = messages || [];
+  for (let k = i + 1; k < list.length; k++) {
+    if (startsTurn(k)) break;
+    const m = list[k];
+    if (m?.role === 'user' && !m.kind && m.id) out.push(m.id);
+  }
+  return out;
+}
+
+/**
+ * **Every picture of a turn's steps**, in order — its helpers' too (a
+ * helper's after the row that sent it): the viewer pages through them
+ * (‹ 2 of 4 ›), as Claude Code's app does across a turn's pictures. Pure.
+ */
+export function turnPictures(events) {
+  return everyStep(workOf(events, '', false)).flatMap((s) => s.pictures || []);
+}
+
+/** **Claude Code's to-do list in a stretch of a log**: as its latest `TodoWrite` there left it, or null when it wrote none there. Pure. */
+export function todosIn(events) {
+  for (let i = (events?.length ?? 0) - 1; i >= 0; i--) {
+    if (Array.isArray(events[i]?.todos)) return events[i].todos.filter((t) => t && typeof t.content === 'string');
+  }
+  return null;
 }
 
 const fileName = (f) => String(f || '').split(/[\\/]/).pop();
@@ -751,7 +822,7 @@ const stepsWord = (n) => (n === 1 ? '1 step' : n > 0 ? `${n} steps` : 'No steps'
  * **A turn's helpers** (12 Nov 2026): Claude Code's own subagents, one for
  * each part its session handed over — the Agent panel's entries under the
  * turn's row, as Claude Code's own app lists a session's subagents. Each
- * `{key, title, steps, status, line}`: its hand-over's words ("Check the
+ * `{key, title, steps, status, line, ts}` (`ts`: when it was handed over, unix seconds): its hand-over's words ("Check the
  * docs"), its own steps (`workOf`'s `helped`), `status` working (not back
  * yet, the turn still going: `live`), done or failed, and the line it's on
  * while it works, else how many steps it took. Pure.
@@ -766,7 +837,7 @@ export function helpersOf(events, live = false) {
       const status = st.back === 'failed' ? 'failed' : st.back || !live ? 'done' : 'working';
       const title = String(st.step || '').replace(/^Handing part of it to a helper(?: · )?/, '').trim() || 'A helper';
       const line = status === 'working' ? steps.at(-1)?.step || 'Starting' : status === 'failed' ? `Didn't finish · ${stepsWord(steps.length).toLowerCase()}` : stepsWord(steps.length);
-      out.push({ key: st.calls[0] || `helper-${out.length + 1}`, title, steps, status, line });
+      out.push({ key: st.calls[0] || `helper-${out.length + 1}`, title, steps, status, line, ts: Number(st.ts) || 0 });
     }
   }
   return out;

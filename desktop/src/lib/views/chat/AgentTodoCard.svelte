@@ -7,19 +7,32 @@
   // for the rest. Live while the turn works; once it ends it stays as its
   // record, folded to "7 to-dos · all done" with ▸ to open. No list, no
   // card. ChatThread loads it (its own small chunk) only in Code chats.
+  //
+  // **The plan from before a message** (15 Nov 2026, as Claude Code's app
+  // has it): when the person writes while the chat's Claude works, the list
+  // as it stood then stays in the thread just above their message —
+  // "Plan from before your last message" (`before`), never ticked on after
+  // (`list`: those to-dos, as they were) — and the live list goes on under
+  // their message once Claude writes it again (AgentWork places both).
   import { isLive } from '../../core/agentNow.js';
   import { todoCounts, todoSummary } from '../../core/agentPanel.js';
 
-  /** `agent`: the agent as stores/agents.svelte.js has it; `turn`: its turn's `n`; `line`: the line the agent is on now. */
-  let { agent, turn = 1, line = '' } = $props();
+  /**
+   * `agent`: the agent as stores/agents.svelte.js has it; `turn`: its turn's `n`; `line`: the line the agent is on now;
+   * `list`: a plan as it stood (not the turn's live one); `before`: its label ("Plan from before your last message").
+   */
+  let { agent, turn = 1, line = '', list = null, before = '' } = $props();
 
   const note = $derived((agent?.turnList || []).find((t) => t.n === turn) ?? (agent?.turnList?.length ? null : agent));
-  const todos = $derived((note?.todos || []).filter((t) => t && typeof t.content === 'string'));
-  const live = $derived(isLive(note?.status ?? agent?.status));
+  const todos = $derived((list ?? note?.todos ?? []).filter((t) => t && typeof t.content === 'string'));
+  /** Its turn is still working: open, as the live list is. */
+  const turnLive = $derived(isLive(note?.status ?? agent?.status));
+  /** The live list (a plan as it stood never ticks on). */
+  const live = $derived(turnLive && list == null);
   const counts = $derived(todoCounts(todos, live));
   /** The person's own fold (null: open while it works, folded once it ends). */
   let mine = $state(null);
-  const open = $derived(mine ?? live);
+  const open = $derived(mine ?? turnLive);
   /** Under the one in progress: the line the agent is on (never the item's own words again). */
   const under = (t) => {
     if (!live) return '';
@@ -29,14 +42,24 @@
 </script>
 
 {#if todos.length}
-  <section class="todocard" class:live data-testid="chat-agent-todo-card" data-agent={agent?.id} data-turn={turn} data-live={live} data-open={open} aria-label="To-dos">
+  <section
+    class="todocard"
+    class:live
+    class:before={!!before}
+    data-testid={before ? 'chat-agent-todo-before' : 'chat-agent-todo-card'}
+    data-agent={agent?.id}
+    data-turn={turn}
+    data-live={live}
+    data-open={open}
+    aria-label={before || 'To-dos'}
+  >
     <button type="button" class="chead" aria-expanded={open} onclick={() => (mine = !open)} data-testid="chat-agent-todo-head">
       <svg class="chev" class:down={open} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
       {#if open}
-        <span class="ctitle">To-dos</span>
+        <span class="ctitle">{before || 'To-dos'}</span>
         <span class="ccount">{counts.done} of {counts.total} done</span>
       {:else}
-        <span class="ctitle" data-testid="chat-agent-todo-summary">{todoSummary(todos)}</span>
+        <span class="ctitle" data-testid="chat-agent-todo-summary">{before ? `${before} · ` : ''}{todoSummary(todos)}</span>
       {/if}
     </button>
     {#if open}
@@ -113,6 +136,12 @@
   }
   .ctitle {
     font-weight: 650;
+  }
+  /* A plan as it stood before a message: its label quieter, as the Claude app's. */
+  .before .ctitle {
+    color: var(--yap-muted);
+    font-size: 11.5px;
+    font-weight: 600;
   }
   .ccount {
     margin-left: auto;
