@@ -1880,8 +1880,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (words) input = input.trim() ? `${words}\n${input}` : words;
     }
     refreshList();
-    const changed = r.restored + r.deleted;
-    const filesLine = !files ? 'The files stay as they are.' : changed ? `${changed === 1 ? '1 file' : `${changed} files`} put back as they were.` : '';
+    const filesLine = !files ? 'The files stay as they are.' : r.filesBack ? 'Its files are back as they were.' : '';
     toast({
       title: 'Rewound',
       description: [filesLine, ...(r.problems || [])].filter(Boolean).join(' ') || undefined,

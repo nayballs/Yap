@@ -9,15 +9,16 @@
 //
 // Claude Code is this build's own stand-in (`yap.exe fake-claude <script>`,
 // ai/claude_code/fake.rs), switched per turn with the debug-only
-// `e2e_claude_script`; its scripts here call the run's backup hook (`_hook`),
-// edit the file (`_write_file`) and ask the run's `approve` (`_mcp`), which
+// `e2e_claude_script`; its scripts here edit the file (`_write_file`, which
+// the stand-in's own file checkpoints keep) and ask the run's `approve` (`_mcp`), which
 // `e2e_claude_approve_auto` answers. Nobody's real Claude Code, account or
 // files are ever touched: the workspaces are in this run's own folder.
 //
 // - A typed request in a workspace: the agent runs, its steps, files,
 //   commands, denials and cost are kept; it's reported in the chat (a
 //   `agentReport` marker the model reads as the agent's) and not read aloud;
-//   Undo puts the file back; Open in terminal once it's done.
+//   no Undo (as the Claude app: Claude Code's own checkpoints, Rewind);
+//   Open in terminal once it's done.
 // - Only the person's own words start one, in a folder they name, at the
 //   chat's Mode or lower (a folder's cap lowers it; Bypass needs its OK).
 // - Asked first in a folder new to agents (a card, Allow once); after the
@@ -244,11 +245,11 @@ test.beforeEach(async ({ yap, main, fakeLlm }) => {
   }
 });
 
-test('a typed request runs an agent in a workspace, follows it, reports it in the chat, and Undo puts the file back', async ({ yap, main, fakeLlm, shot }) => {
+test('a typed request runs an agent in a workspace, follows it, reports it in the chat, with Claude Code’s own checkpoints and no copies of Yap’s', async ({ yap, main, fakeLlm, shot }) => {
   await script(yap, EDIT, 'edit');
   await listen(main, 'yap-agent');
   await listen(main, 'yap-agent-report');
-  const REPORT = "Done. I changed notes.md from Draft to Final and the tests pass; npm test was allowed, rm -rf build wasn't. There's a backup if you want it back.";
+  const REPORT = "Done. I changed notes.md from Draft to Final and the tests pass; npm test was allowed, rm -rf build wasn't. ";
   fakeLlm.scriptChat([
     { tools: [{ name: 'start_agent', args: { folder: 'garden-planner', brief: 'Change Draft to Final in notes.md, then run the tests.' } }] },
     { content: "On it: I've sent an agent to garden-planner." },
@@ -288,12 +289,12 @@ test('a typed request runs an agent in a workspace, follows it, reports it in th
   expect(agent.cost).toBeCloseTo(0.041, 5);
   expect(agent.session).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   expect(agent.messageId).toBe(`chat:${agent.conversation}:0`);
-  // The agent really edited the file, after the backup hook copied it.
+  // The agent really edited the file. Claude Code's own file checkpoints were on for the run, and the turn kept
+  // where they can take its files back to (its session, its first message): never a copy of Yap's.
   expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Final notes\n');
-  // (Each turn's own backups: backup/<turn>/, agents-turns.spec.js.)
-  const backup = path.join(yap.dataDir, 'agents', agent.id, 'backup', '1');
-  const manifest = JSON.parse(fs.readFileSync(path.join(backup, 'manifest.json'), 'utf8'));
-  expect(manifest.files.map((f) => [path.basename(f.original), f.state])).toEqual([['notes.md', 'copied']]);
+  expect(agent.turnList[0].checkpoint).toMatchObject({ session: agent.session });
+  expect(agent.turnList[0].checkpoint.at).toMatch(/^[0-9a-f-]{36}$/);
+  expect(fs.existsSync(path.join(yap.dataDir, 'agents', agent.id, 'backup'))).toBe(false);
 
   // Its log: what the tab replays, the yap-agent events as they went out.
   const { log } = await yap.invoke('agent_get', { id: agent.id });
@@ -337,12 +338,9 @@ test('a typed request runs an agent in a workspace, follows it, reports it in th
   expect(await spoken(yap)).toEqual([]);
   await shot(main, '01-agent-started-and-reported');
 
-  // Open in terminal once it's done (test runs open nothing), then Undo.
+  // Open in terminal once it's done (test runs open nothing). No Undo of Yap's any more.
   await yap.invoke('agent_open_terminal', { id: agent.id });
-  const undo = await yap.invoke('agent_undo', { id: agent.id });
-  expect(undo.restored.map((p) => path.basename(p))).toEqual(['notes.md']);
-  expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Draft notes\n');
-  expect((await agents(yap)).find((j) => j.id === agent.id).undone).toBe(true);
+  await expect(yap.invoke('agent_undo', { id: agent.id })).rejects.toThrow();
 });
 
 test('an agent only starts on the person own words, in a folder they name, at the chat Mode or lower', async ({ yap, main, fakeLlm }) => {

@@ -13,14 +13,13 @@
 //!   that run's key: 32 random bytes per run, sent as `Authorization: Bearer`
 //!   (403 / 404 / 401). No CORS headers, ever. The key is only ever in
 //!   memory and in the run's environment ([`RunHandle::env`], as
-//!   `YAP_RUN_KEY`): its MCP config and hook settings say `${YAP_RUN_KEY}`,
+//!   `YAP_RUN_KEY`): its MCP config says `${YAP_RUN_KEY}`,
 //!   which Claude Code fills in itself, so the key is never in a file, on a
 //!   command line or in a log. (The run's own commands inherit its
 //!   environment; they already run with the person's own rights.)
 //! - **A run** ([`register_run`] → [`RunHandle`]): its label, its tools
 //!   ([`Tools::Chat`]: read only, plus Yap Code's when offered; [`Tools::Agent`]:
-//!   `approve`), where its
-//!   backups go, and who to ask ([`Approval`]). The handle gives the run's
+//!   `approve`), and who to ask ([`Approval`]). The handle gives the run's
 //!   `--mcp-config` and `--settings` JSON and the environment they name;
 //!   dropping it unregisters the run, and a permission prompt still waiting
 //!   is denied.
@@ -66,17 +65,14 @@
 //!   ([`claude_approve_answer`]), no answer in 10 minutes a no. Claude Code
 //!   keeps it out of the model's own tools. Test mode can answer every card
 //!   at once (`e2e_claude_approve_auto`).
-//! - **The backup hook** ([`backup`]): before Claude Code edits or writes a
-//!   file, an http `PreToolUse` hook (`POST /hook/<run>/PreToolUse`) copies
-//!   it into the run's backup folder once, with a `manifest.json`; a file
-//!   that didn't exist yet is noted as created. [`backup::restore_all`]
-//!   puts them back (Undo: an agent's turn, or all of them, each its own run).
+//! - **No backup hook** (16 Nov 2026): an agent's files go back through
+//!   Claude Code's own checkpoints (`agents/rewind.rs`), as the Claude app's
+//!   Rewind; Yap keeps no copies of its own.
 //!
 //! **The log** has ids, counts, tool names and outcomes, never a command,
 //! a file's path or contents, a prompt or a key.
 
 mod approve;
-pub mod backup;
 mod cards;
 pub mod connectors;
 pub mod eyes;
@@ -115,10 +111,6 @@ pub const APPROVE_WAIT: Duration = Duration::from_secs(10 * 60);
 /// call, and the floor of its idle limit (5 minutes for an HTTP server
 /// otherwise), so a prompt can wait its 10 minutes.
 pub const TOOL_TIMEOUT_MS: u64 = 11 * 60 * 1000;
-/// The backup hook's `timeout` (s): a copy of at most 50 MB.
-pub const HOOK_TIMEOUT_SECS: u64 = 60;
-/// The tools the backup hook runs before.
-pub const BACKUP_MATCHER: &str = "Edit|Write|MultiEdit|NotebookEdit";
 
 /// Which tools a run gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,12 +154,7 @@ pub struct RunSpec {
     /// A short name for the card and the UI ("Shadow talents"); never logged.
     pub label: String,
     pub tools: Tools,
-    /// Where the backup hook copies files before they're edited (an agent's
-    /// `agents/<id>/backup/`). `None`: no hook in the run's settings.
-    pub backup_dir: Option<PathBuf>,
-    /// The run's working folder: approve's cards name files relative to it,
-    /// and the hook resolves a relative path against it when Claude Code
-    /// gives no `cwd`.
+    /// The run's working folder: approve's cards name files relative to it.
     pub folder: Option<PathBuf>,
     pub approval: Option<Approval>,
     /// A Chat run offered Yap Code's tools too ([`agents`]): agents on, Claude Code
@@ -210,7 +197,7 @@ pub struct RunSpec {
 
 impl RunSpec {
     pub fn new(label: impl Into<String>, tools: Tools) -> RunSpec {
-        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), connectors: None, reads: false, cards: crate::chat::cards::Cards::default() }
+        RunSpec { label: label.into(), tools, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), connectors: None, reads: false, cards: crate::chat::cards::Cards::default() }
     }
 
     /// The same, with the cards in the thread a Chat run's turns may use.
@@ -266,7 +253,6 @@ pub struct RunHandle {
     servers: bool,
     /// The cards in the thread ([`RunSpec::cards`], a Chat run's).
     cards: crate::chat::cards::Cards,
-    has_backup: bool,
     /// The chat turn its calls belong to ([`RunHandle::begin_turn`]).
     turn: Arc<turn::Slot>,
 }
@@ -323,27 +309,11 @@ impl RunHandle {
         })
     }
 
-    /// **`--settings`**: the backup hook for a run with a backup folder,
-    /// else nothing (`{}`). An http hook's headers take only the variables
-    /// it lists in `allowedEnvVars`.
+    /// **`--settings`**: nothing of Yap's (`{}`; there was a backup hook
+    /// until 16 Nov 2026: files go back through Claude Code's own
+    /// checkpoints now).
     pub fn settings(&self) -> Value {
-        if !self.has_backup {
-            return json!({});
-        }
-        json!({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": BACKUP_MATCHER,
-                    "hooks": [{
-                        "type": "http",
-                        "url": format!("http://127.0.0.1:{}/hook/{}/PreToolUse", self.endpoint.port, self.id),
-                        "headers": { "Authorization": authorization() },
-                        "allowedEnvVars": [RUN_KEY_VAR],
-                        "timeout": HOOK_TIMEOUT_SECS,
-                    }]
-                }]
-            }
-        })
+        json!({})
     }
 
     /// The run's own tools as `--allowedTools` names (`mcp__yap__list_meetings`

@@ -236,8 +236,8 @@ workspace, word for word, and no model of Chat's is asked.
 
 - **The session is what an agent always was** (`runner.rs`), so nothing
   about safety is new: the chat's Mode is its permission mode, its prompts
-  are Yap's cards below Bypass permissions (where nothing asks), each file
-  is backed up before it's changed (Undo), one session a Code chat and
+  are Yap's cards below Bypass permissions (where nothing asks), Claude
+  Code's own checkpoints before each edit (Rewind), one session a Code chat and
   workspace with each message its next turn on `--resume`, a message while
   it works handed over at once, a phone's turn at most at Auto.
 - **The person's words** (`direct::send`): the first message is its brief,
@@ -289,7 +289,7 @@ workspace, word for word, and no model of Chat's is asked.
   `worksDirectly`: the turn it's on is the person's own message):
   - **no tab opens by itself**, typed or asked out loud. A turn's line (one
     with something to report) and its report line open its tab on that turn's
-    timeline, with its Undo (`AgentTab`: a direct turn asked for goes to
+    timeline (`AgentTab`: a direct turn asked for goes to
     the timeline), and the bar card's or a notification's Open shows the chat
     alone (`yap-agent-open`'s `direct`);
   - **no row in the Agent panel**: the panel lists the agents at work for
@@ -433,11 +433,13 @@ workspace, word for word, and no model of Chat's is asked.
     chat back to before the message: it and everything after go from the
     thread (`chats::rewind`; their screenshots too, unless another chat
     shows them), its words come back in the box, and that turn and every
-    later one are marked `rewound` (kept for their backups and log, never
-    shown: `pillsAt` skips them). The files they changed go back as they
-    were, newest turn first, through Undo's own backups
-    (`runner::undo_turn`), unless "Also put back the files Claude changed
-    since" is unticked (it shows only when they changed some). Claude never
+    later one are marked `rewound` (kept for their log, never shown:
+    `pillsAt` skips them). The files Claude Code's own tools changed go back
+    as they were, through Claude Code's own checkpoints ([Rewind's files:
+    Claude Code's checkpoints](#rewinds-files-claude-codes-checkpoints)),
+    unless "Also put back the files Claude changed since" is unticked (it
+    shows only when they changed some; what a command changed isn't
+    counted: it stays, and the toast says so). Claude never
     sees those turns again: the agent's `branch` makes its next run Claude
     Code's own fork of the session up to the end of the turn before
     (`--resume <session> --fork-session --resume-session-at <its end_uuid>`,
@@ -886,7 +888,7 @@ carrying on with its context; so are agents now.
   `store::title_of`), its `request`, the person's message that asked for it
   (`messageId`: its pill), its status and times, the mode, model and effort
   it ran at, its own cost, files, denials and final words, its report's
-  marker, whether it's undone. **Continue carries on the same turn.** An agent
+  marker, and its checkpoint (Rewind's files). **Continue carries on the same turn.** An agent
   without a `turnList` (from before, or saved by an older Yap, which drops
   the field) reads as one turn made from the agent (`Agent::turn_notes`).
 - **Continuation by default** (`chat/tools/agents.rs` `decide`): `start_agent` in
@@ -976,7 +978,9 @@ carrying on with its context; so are agents now.
   path (`queue_agent_report(id, turn)`: that turn's facts, with those of the
   turns it went straight on from, `Agent::as_of_report`), each spoken per
   `agents_speak`.
-- **Undo this turn** and **Undo all**: [Undo and backups](#undo-and-backups).
+- **No Undo** (16 Nov 2026, as the Claude app): the person asks Claude to take
+  a change back, or rewinds a Code chat to before their message ([Rewind's
+  files](#rewinds-files-claude-codes-checkpoints)).
 
 ## Starting an agent
 
@@ -1263,7 +1267,7 @@ under Bypass:
 | The person's plain go-ahead after outside content | As ever: no card | Yap's own fixed words. |
 | Bypass permissions' one-time OK ("Claude Code can run anything on your PC… Yap won't ask before it sends an agent either, even after the chat read the web or looked at your screen…", `core/agents.js` `BYPASS_WARNING`) | Kept | It's how Bypass becomes the person's confirmed choice, and where they're told nothing asks. |
 | A phone's question or action (Remote Control) | Not Bypass | A phone's turn runs at most at Auto, so today's rules ask there. |
-| Undo this turn / Undo all's confirm (`AgentTab.svelte`) | Kept | The person's own click putting files back, not an approval of the agent's work. Continue has no confirm. |
+| Rewind's confirm ("Rewind to before this message?") | Kept | The person's own click taking the chat and its files back, not an approval of the agent's work. Continue has no confirm. |
 
 Under Auto, Manual and Accept edits everything asks as before.
 
@@ -1274,7 +1278,7 @@ by a model, a page or a card; a workspace's cap and a phone's Auto lower it
 (then it isn't Bypass, and the card is back); after outside content the
 person's plain "go ahead" still goes in Yap's own words, never the model's;
 the brief shows in the thread as it goes ("Sent to the agent"), with Stop
-and Undo beside it. **What's given up**: a page, a screenshot or a
+beside it. **What's given up**: a page, a screenshot or a
 connector's result that fooled Chat's model could word the brief of an
 agent that asks nothing. Someone who wants that check keeps the chat on
 Auto.
@@ -1470,9 +1474,11 @@ and each call runs the tool loop's own code and rules.
     person ([The Agent tab](#around-the-tab)), never answered by voice; in a
     Bypass turn answered no at once with no card ([Bypass permissions: no
     approvals](#bypass-permissions-no-approvals));
-  - `--settings` with the backup hook ([Undo and backups](#undo-and-backups));
+  - `--settings`: nothing of Yap's (`{}`; the backup hook went on 16 Nov
+    2026: Claude Code's own checkpoints instead, `CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=true`
+    in its environment, [Rewind's files](#rewinds-files-claude-codes-checkpoints));
   - the run's key in its environment only (`YAP_RUN_KEY`, `RunHandle::env`):
-    both files name it as `${YAP_RUN_KEY}`.
+    its MCP config names it as `${YAP_RUN_KEY}`.
 - **The flags**: `--permission-mode` from the agent's mode, `--model` (a full
   id), `--effort`, `--session-id` for its first turn, then `--resume`; a
   read-only turn's `--disallowedTools Edit,Write,MultiEdit,NotebookEdit,EnterPlanMode`,
@@ -1480,7 +1486,7 @@ and each call runs the tool loop's own code and rules.
   runs](#read-only-runs)). How it pays: [Paying](#paying-your-plan-or-a-key).
 - **Checked first**: Claude Code found, at least 2.1.259 ("Claude Code 2.1.200
   is too old for agents: update it to 2.1.259 or later."), the folder still
-  there, its backup folder made.
+  there.
 - **The brief goes over stdin**, always ending "When you're done, finish with
   a short summary of what you changed and anything you couldn't do."
   (`SUMMARY_LINE`), so the report is ready to say.
@@ -1489,7 +1495,8 @@ and each call runs the tool loop's own code and rules.
   need it, and it's theirs, as if they'd run Claude Code themselves. Yap never
   deletes an agent's transcript (Delete some of your data → Yap Code neither).
 - **Followed** (`Follow`): every `tool_use` as a line (`steps.rs`); the file it
-  changes (Edit, Write, MultiEdit, NotebookEdit, and the backup manifest) and,
+  changes (Edit, Write, MultiEdit, NotebookEdit; what its commands changed:
+  [Files a command made or changed](#files-a-command-made-or-changed)) and,
   once the call came back without an error, what changed in it (`diff.rs`);
   the commands it runs (Bash, PowerShell) with their descriptions; a
   `TodoWrite`'s list; its text between tool calls (a helper's under a Task left
@@ -1535,7 +1542,7 @@ and each call runs the tool loop's own code and rules.
   question) are reported in its chat; stopped and interrupted agents aren't.
 - **A message for an agent** (`message_agent`, the tab's "Tell the agent…", a Code
   chat's follow-up): a turn of its own ([Turns](#turns-one-agent-per-code-chat),
-  `runner::follow_up`), its own process (`--resume`), backups and report:
+  `runner::follow_up`), its own process (`--resume`), checkpoint and report:
   while it works, queued as its next turn, never sent into the turn working;
   after its turn, the next starts now; while its process starts, or it waits
   for a slot, the turn about to run takes it ("Also: …"). "Go ahead" after a
@@ -1573,7 +1580,7 @@ Code chat's own session working on the person's words opens no tab by itself
 ([The chat itself is no agent](#a-code-chat-that-works-directly)).
 
 Two views: **the panel**, what it opens on, and **the timeline**, a row's
-Open (Back returns to the panel). The footer (Stop, Continue, Undo, Open in
+Open (Back returns to the panel). The footer (Stop, Continue, Open in
 terminal, "Tell the agent…") is the same under both.
 
 ### The panel
@@ -1879,15 +1886,13 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
 - **The header**: the folder and status, mode and model, how long it has run,
   its cost ([Paying](#paying-your-plan-or-a-key); "in all" once it has
   turns), a problem with its one button (Sign in), and **Stop**,
-  **Continue**, **Undo the agent's changes** / **Undo all** (a confirm, then what was put
-  back; `core/agents.js` `canUndo`), **Open in terminal** and "Tell the agent…"
-  (its next turn).
+  **Continue**, **Open in terminal** and "Tell the agent…" (its next turn).
+  No Undo (16 Nov 2026, as the Claude app).
 - **Its turns** (`AgentTurn.svelte`, `core/agents.js` `turnsOf`: each log event's
   `turn`; [Turns](#turns-one-agent-per-code-chat)): a section a turn, its
   request as its header with its status, time and cost; the newest open, the
   earlier folded; a request queued behind the turn working, a line. Each
-  turn's section has what follows, and **Undo this turn** under its files
-  once the agent has several.
+  turn's section has what follows.
 - **The running line**: the latest step; once every call came back, the to-do
   in progress (`activeForm`, "Adding a watering schedule"), as Claude Code's
   spinner says it.
@@ -1916,21 +1921,16 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   removed, opening to what changed (`diff.rs`): an Edit's or MultiEdit's
   `old_string` → `new_string`, removed lines red and added green with three
   unchanged around them (`⋯` between parts), in `--yap-danger` /
-  `--yap-success`; a Write as "New file · N lines" (the manifest says it
-  didn't exist), "Rewritten · N lines" (it was there, or the agent wrote it
-  before) or "Written" (no backups: Yap can't tell), with its first lines.
+  `--yap-success`; a Write as "New file · N lines" (Claude Code's own
+  result says it made it: `tool_use_result.type` "create", or "File created
+  successfully"), "Rewritten · N lines" (it was there, or the agent wrote it
+  before) or "Written" (nothing says), with its first lines.
   **Caps**: 200 lines an edit, 2,000 an agent (`diffLines`), 300 characters a
   line; past them "…N more lines". A diff goes out with the call's result, so
-  a refused or failed edit has none. An agent marked `noBackups` says "No
-  backups were made, so Undo can't put these files back." and offers no Undo.
-  A file one of its commands made or changed (the turn's `byCommand`,
-  [Files a command made or changed](#files-a-command-made-or-changed)) says
-  "New · By a command", "By a command", or "By a command · No backup", with
-  "Undo can't put back data.csv: a command changed it, and Yap had no copy of
-  it from before." under the list; Undo's confirm says the same instead of
-  "Yap kept their backups for this", its line says what it left ("lab.md left
-  as it is (…)"), and a turn whose only files can't be put back offers no
-  Undo (`core/agents.js` `undoableFiles`).
+  a refused or failed edit has none. A file one of its commands made or
+  changed (the turn's `byCommand`, [Files a command made or
+  changed](#files-a-command-made-or-changed)) says "New · By a command" or
+  "By a command".
 - **Commands run**: each with its description above and the command whole
   below (its `cd` into the folder gone); three, then "Show N more".
 - **What wasn't allowed**: the denials.
@@ -2061,8 +2061,8 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   shown** (2026-11-08, `chat/shares.rs` `of_agent_turn`): under the card,
   the pictures its turn created or changed — by their own bytes, copied into
   `chat-images/` as a picture shared into the chat is — as a grid, four
-  then "+N more", and the other files it created (its backups' manifest,
-  `Created`) as compact cards (Open, Show in folder), four then "+N more";
+  then "+N more", and the other files it created (the turn's `created`: its
+  Write of a new file, a command's new file) as compact cards (Open, Show in folder), four then "+N more";
   checked as any share (`pictures/local.rs`: an agent of this chat's files),
   kept on the marker (`files`), no tool call ([chat-and-assistant.md,
   `chat/shares.rs`](./chat-and-assistant.md)).
@@ -2138,10 +2138,10 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   path, "Never above:", Remove, Add workspace…, the small print, the Bypass
   warning on a workspace with no cap once Bypass is confirmed, **Animate Code
   chats**); **Ask before sending an agent**; **Read agent reports aloud**; the
-  limits ("Backups of changed files are kept 7 days. One agent at a time per
-  workspace, at most 3 at once.") and the hooks line ("Undo needs Claude
-  Code's hooks…"); **History** (each agent's status, folder, when and cost, Open
-  and Undo).
+  limits ("One agent at a time per workspace, at most 3 at once. To take a
+  change back, ask Claude, or rewind to before your message: Claude Code's
+  own checkpoints put its edits back."); **History** (each agent's status,
+  folder, when and cost, and Open).
 - **The stores**: `stores/agents.svelte.js` (every agent kept in step with
   `yap-agent`, the prompts waiting, the latest report, the bar's Open; started
   once per window by ControlPanel); `core/agents.js` (the words they share:
@@ -2315,8 +2315,9 @@ something that matches that?").
     isn't in the log (an older log) is a step like any other.
   - **Never counted in the stretch's line**: "Ran a command, handed part of
     it to a helper" counts the session's own steps, and its `+3 −1` the
-    session's own edits. The agent's files changed, its report and Undo
-    still have the helper's edits: they're the agent's.
+    session's own edits. The agent's files changed and its report still
+    have the helper's edits: they're the agent's (Claude Code's checkpoints
+    don't cover a helper's: [Rewind's files](#rewinds-files-claude-codes-checkpoints)).
   - **While the helper works**, the stretch's line says the step the helper
     is on, and inside the opened row its last step has the spinner.
   - A helper's pictures show by its own row, not at the end of the
@@ -2521,7 +2522,7 @@ failed, or done with a question, with that turn's facts
     is in (`chatState.svelte.js` `reloadWanted`).
 - **The marker**: a message of kind `agentReport` (`ChatMessage.kind`) with the
   agent's facts ("The agent in garden-planner: it's done.", the files it changed
-  and that they were backed up — or that no backups were made —, how many
+  and those its commands made or changed (`changes::file_facts`), how many
   commands it ran, what wasn't allowed, what went wrong) and its own words.
   Shown as an agent card, not a bubble. The model reads it prefixed "Report from
   the agent you started (not from the person): " (`ChatMessage::sent_text`).
@@ -2530,8 +2531,9 @@ failed, or done with a question, with that turn's facts
   "You"). An older Yap drops `kind` on its save, and the marker then reads as
   the person's.
 - **The answer**: Chat's model, no tools, the last 10 messages and the rule:
-  one to three short sentences, what it changed, what it couldn't do, that a
-  backup was kept (unless none was); a plan summed up with "go ahead?" (a
+  one to three short sentences, what it changed, what it couldn't do, never
+  a word of backups or an Undo button (there are none: the person can ask);
+  a plan summed up with "go ahead?" (a
   plan the person allowed: that it's building from it, no question); its
   question put to the person. The model failing: the agent's own summary, as it
   is.
@@ -2566,8 +2568,8 @@ failed, or done with a question, with that turn's facts
 `agent.js`, reading this side's own `core/agents.js` and `core/chatStatus.js`):
 a paired phone (Yap Link) may follow and steer Yap Code — the Code side's
 list, an agent's live view, its Allow once / Deny and plan cards, the ask-first
-card, Stop, Continue, "Tell the agent…", Go ahead, Undo (after the phone's
-confirm), the Mode up to Auto, a new Code chat in an existing workspace.
+card, Stop, Continue, "Tell the agent…", Go ahead (no Undo since 16 Nov
+2026, as the Claude app), the Mode up to Auto, a new Code chat in an existing workspace.
 Off by default (Settings → Phone → Remote Control), each phone ticked for it,
 each workspace allowing it (its **Environment card**, opened from the "Code ·
 garden-planner" label: `CodeEnvironment.svelte`). Every message is checked
@@ -2676,7 +2678,8 @@ Each rule is in full above; together:
   a card, in Yap's own words ([The safety rule](#the-safety-rule)).
 - **Every permission prompt is a card** (Allow once / Deny; a plan's Go ahead /
   Not yet), never answered by voice.
-- **Undo from backups** ([Undo and backups](#undo-and-backups)).
+- **Files back through Claude Code's own checkpoints** (Rewind: [Rewind's
+  files](#rewinds-files-claude-codes-checkpoints)); no copies of Yap's.
 
 ## Data and files
 
@@ -2696,8 +2699,9 @@ saves ([config-and-data.md](./config-and-data.md)).
     Code (`{kind, message, resetsAt?}`), an error, its turns, whether its
     latest turn was a plan (`plan`; its plan allowed: `planAllowed`, its
     turns' too) or ends in a question (`asks`), whether
-    it was reported (and the report's marker id), `undone`, `swept`,
-    `noBackups`, `diffLines`; `turnList` (its turns, a field of its own:
+    it was reported (and the report's marker id), `swept`, `diffLines`
+    (`undone` and `noBackups` went with Undo on 16 Nov 2026: an older
+    Yap's are ignored); `turnList` (its turns, a field of its own:
     [Turns](#turns-one-agent-per-code-chat)), `modelAsked` / `effortAsked`
     (the person's own model or effort, kept for its next turns), `sized`
     (its latest turn's model or effort was the chat's pick: Continue and a
@@ -2740,74 +2744,84 @@ saves ([config-and-data.md](./config-and-data.md)).
 - **`agents/<id>/pictures/`**: the pictures its steps came back with, as
   PNGs by id, and their thumbnails in `thumbs/`
   ([A step's pictures](#a-steps-pictures)).
-- **`agents/<id>/backup/<turn>/`**: the files each turn changed, as they were
-  before it (`manifest.json` and `0001-<name>`…), its commands' files among
-  them (`command`, `after`; a clean file's copy from Git). An agent from before turns
-  has one right in `backup/`, read as its turn 1's (`store::backup_dirs`).
+- **No `agents/<id>/backup/`** any more (16 Nov 2026): an older Yap's copies
+  are deleted at start (`store::drop_old_backups`); files go back through
+  Claude Code's own checkpoints (in its own config folder, its own clean-up).
 - **`workspaces.json`** (`agents/workspaces.rs`): the workspaces.
 - An agent id is Yap's own: the time and four random bytes in hex, letters and
   digits only (`valid_id`), so it's never a path.
 - **Interrupted at start**: an agent still queued, running or asking when Yap
   starts died with the last Yap. `store::at_start` marks it interrupted;
   Continue picks it up.
-- **The sweep**: an agent's backups, log and pictures go 7 days after it ended
+- **The sweep**: an agent's log and pictures go 7 days after it ended
   (`KEEP_SECS`, at start and then daily); its record stays in History, marked
   `swept`. An `agents/<id>/` folder no agent names goes once it's as old.
 - **Delete some of your data → Yap Code** stops every agent, then deletes every agent,
-  its log and backups, each chat's Mode and Code chat folder, the Bypass OK
+  its log and pictures, each chat's Mode and Code chat folder, the Bypass OK
   and the workspaces. The files the agents changed stay as they are. **Download
   your data** has `agents/agents.json`, `agents/folders.json`, each agent's log
-  and the pictures its steps came back with, never its backups (copies of
-  the person's own files):
+  and the pictures its steps came back with:
   [privacy-receipts.md](./privacy-receipts.md).
 
-### Undo and backups
+### Rewind's files: Claude Code's checkpoints
 
-The run endpoint's backup hook (`integrations/claude_live/backup.rs`,
-[integrations.md](./integrations.md)) and the runner's Undo.
+16 Nov 2026, the maintainer: Yap's own Undo (the Agent tab's Undo the
+agent's changes, Undo this turn and Undo all, Settings → Yap Code's
+History, the phone's) made the person do what, in the Claude app, they
+either ask Claude to do or do with Rewind; and Yap kept copies of every
+file an agent edited beside Claude Code's own. Now it works as the Claude
+app does:
 
-- **Before a file is first changed**, Claude Code's http `PreToolUse` hook on
-  `Edit|Write|MultiEdit|NotebookEdit` posts its input to Yap. A file that
-  exists is copied into the turn's `agents/<id>/backup/<turn>/` as
-  `0001-<name>` (a plain name, never a path); one that doesn't is noted as
-  **created**, so Undo deletes it; one over 50 MB is noted as too big, not
-  copied. `manifest.json` maps each copy to the original's absolute path.
-- **The first copy wins within a turn**: a later edit of the same file in
-  that turn changes nothing, so its backup is the file from before the turn.
-  The next turn backs it up again, as it was then.
-- **The hook never blocks or denies** a tool: it answers `{}` at once.
-- **Undo this turn** (`agent_undo_turn {id, turn}`, a turn's own button once an
-  agent has several; not while it runs): that turn's files put back as they
-  were before it, the files it made deleted (`backup::restore_all`).
-  **Refused while a later turn, not undone, changed one of the same files**:
-  "Undo the later change first: “Add a minimap button” changed notes.md too."
-  (`runner::later_change`).
-- **Undo all** (`agent_undo`; **Undo the agent's changes** while the agent has one turn; asked
-  first): every turn not undone already, each file put back as its earliest
-  backup has it — as it was before the agent's first turn — and every file a
-  turn made deleted; touching only the paths the manifests name; what was
-  restored, deleted, skipped, refused or failed comes back to the page. The
-  agent is marked `undone` (every turn with backups undone) until its next
-  turn.
-- **An agent from before turns**: its one backup (right in `backup/`) is its
-  turn 1's; a turn 1 carried on since (its own `backup/1/` too) undoes from
-  the older copy first.
-- **Kept 7 days** after the agent ended, then swept: "Its backups are gone: Yap
-  keeps them 7 days."
-- **Limits**: a denied Write is still noted as created (the hook runs before
-  the permission check), so Undo would delete a file of that name made later
-  by something else. A file a command deleted isn't listed, and Undo doesn't
-  bring it back.
+- **Asking**: "undo that" in a Code chat goes to Claude, which takes the
+  change back with its own tools (an edit, `git`), as in the Claude app.
+- **Rewind** on the person's message ([Rewind and Fork from
+  here](#a-code-chat-that-works-directly)) takes the chat back and, ticked, the
+  files with it — through **Claude Code's own file checkpoints**, the Agent
+  SDK's file checkpointing ([code.claude.com/docs/en/agent-sdk/file-checkpointing](https://code.claude.com/docs/en/agent-sdk/file-checkpointing)):
+  - every agent run has `CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=true`
+    (`runner::CHECKPOINT_ENV`, allowed in `cli::RUN_SETS_ENV`): before
+    Write, Edit or NotebookEdit changes a file, Claude Code keeps it;
+  - each turn keeps its **checkpoint** (`TurnNote::checkpoint`: the session
+    it ran in and the `uuid` of its first message, echoed back by
+    `--replay-user-messages`; a Continue keeps the turn's first);
+  - Rewind runs, per session (a rewound chat's next turn is a new or
+    forked one), newest first, to the earliest rewound turn in it that
+    edited a file: `claude -p --resume <session> --rewind-files <uuid>
+    --no-session-persistence --settings <{"disableAllHooks":true}>`, in the
+    workspace (`rewind::rewinds_for`, `rewind_session`). Checked on 2.1.296
+    (16 Nov 2026, a throwaway folder on Haiku): no model call, "Files
+    rewound to state at message <uuid>", the edited file back and the file
+    it made deleted, and with `--no-session-persistence` the session's
+    transcript byte for byte as it was (without it, two bookkeeping lines);
+  - **what stays as it is**, said in Rewind's toast: what a command changed
+    ("What its commands changed stays as it is (costs.xlsx): ask Claude to
+    undo it.": Claude Code's checkpoints cover its edit tools only, as the
+    Claude app's Rewind), a helper's own edits (not tracked by Claude Code,
+    unless the main session edited the file too), and a turn from before the
+    checkpoints ("Files from before Yap used Claude Code's checkpoints stay
+    as they are.").
+- **No copies of Yap's**: the backup hook, its manifests, `agent_undo` /
+  `agent_undo_turn`, the phone's `agent_undo` and the `noBackups` check are
+  gone; an older Yap's `agents/<id>/backup/` folders are deleted at start.
+  What filled the maintainer's add-on folder with copies on 15 Nov wasn't
+  Yap's: it was Claude's own habit there (copying an add-on before each
+  change, from that project's own memory), which Yap neither asks for nor
+  sees.
+- **The report** never mentions backups or an Undo button
+  (`report::RULES`, `AGENT_REPORT_UNTOLD_PREFIX`, `JUST_FINISHED_NOTE`): the
+  facts say what changed (`changes::file_facts`).
+- **The document panel's Undo** ("Undo Chat's last change", a document's
+  versions) and dictation's Undo are another thing, and stay.
 
 ### Files a command made or changed
 
-15 Nov 2026 (`agents/changes.rs`). Claude Code's edit tools go through the
-hook; a command never does — a script (exceljs, Python), `npm`, a formatter.
-The Lab pass after the parity round found it: an exceljs script wrote
-`costs.xlsx`, Outputs said "Nothing made yet", Undo didn't know the file, and
-the report still said a backup was kept. Claude Code's own checkpoints have
-the same gap (its docs: "Checkpointing does not track files modified by bash
-commands"). So each turn reads its workspace before and after:
+15 Nov 2026 (`agents/changes.rs`). Claude Code's edit tools say which file
+they change; a command never does — a script (exceljs, Python), `npm`, a
+formatter. The Lab pass after the parity round found it: an exceljs script
+wrote `costs.xlsx` and Outputs said "Nothing made yet". So each turn reads
+its workspace before and after, and lists what its commands made or
+changed. Nothing is copied: Rewind doesn't undo a command's change (as in
+the Claude app), and the person asks Claude to.
 
 - **Before** (`changes::before`, as the turn starts, alongside Claude Code's
   status check, before its process does: no command can have run yet):
@@ -2836,79 +2850,36 @@ commands"). So each turn reads its workspace before and after:
   end), 2 s either side — a new file by its birth time (unpacking an archive
   sets a file's last write back, never its birth), a changed one by its last
   write. So the person's own edits in the workspace meanwhile are never the
-  turn's. A file Yap hadn't seen before whose birth is older than any command
-  (it was there, out of the scan's sight) is changed, never new; with no
-  birth time, never new either. With Git, `HEAD` moving (Claude committed)
-  adds the files between the two commits (`git diff --name-only`). At most
-  500 files; past that nothing is noted (logged).
-- **What Undo can do with each** — decided, not guessed:
-  - **New** (not there before): noted `Created`, so Undo deletes it.
-  - **Changed, and clean in Git at the turn's start**: Git's own copy
-    (`git cat-file --filters <commit>:<path>`, line endings and filters as a
-    checkout writes them; `git cat-file --batch-check` says which files the
-    commit has) copied into the turn's backups: Undo puts it back. Over
-    50 MB, too big, as the hook's.
-  - **Changed, anything else** (the person's uncommitted work, a folder with
-    no Git): no backup — `Failed` with the note "a command changed it, and
-    Yap had no copy of it from before" (an older Yap's Undo skips a `Failed`
-    as it should) — and it's said: the Files changed list, Undo's confirm and
-    what it did, and the report.
-  - **Why not a copy before each command**: a command's words don't say
-    which files it will write (an exceljs script names its file inside the
-    script); a snapshot of "the files it's about to touch" from the command
-    line (what some hooks for Claude Code do for `rm` and `mv`) would be a
-    guess, and copying the whole workspace before every command (a shadow
-    Git repository, as Cline's checkpoints do) costs every turn in a big
-    folder. Git already holds every clean file as it was.
-- **Claude Code's copy that came too late**: a file a command made that
-  Claude Code then edited is new (its hook copied the command's file, so that
-  copy is dropped and the entry is `Created`); one a command changed before
-  Claude Code's copy (the hook's copy now carries the original's size and
-  time, `was`, which no longer match the turn's start) has no copy from
-  before — unless it was clean in Git, when Git's copy replaces the hook's.
-- **Kept**: in the turn's `manifest.json`, marked `command` (`tool:
-  "command"`), each with `after` (its size and time as the turn left it,
-  refreshed at every turn's end, a Continue's too); and in the turn's `files`
-  and `byCommand` (`[{file, new, kept}]`, `store::CommandFile`), so Outputs,
-  the summary, the file view (a spreadsheet in the sheet view), Files changed
-  and the report have them, and the report card shows a new file as any.
-- **Undo leaves a command's file alone once it changed after the turn**
-  (`backup::restore_all`: the latest entry's `after` against the file now):
-  "it changed after the turn, so it was left as it is". The person's own work
-  since is never deleted or written over.
-- **The hook's `noBackups` check** counts only its own entries (a command's
-  files aren't the hook running).
+  turn's, and neither is a file Claude Code's own edit tools named this turn
+  (an edit just before a command is the edit's). A file Yap hadn't seen
+  before whose birth is older than any command (it was there, out of the
+  scan's sight) is changed, never new; with no birth time, never new
+  either. With Git, `HEAD` moving (Claude committed) adds the files between
+  the two commits (`git diff --name-only`), and a file the commit had at the
+  start (`git cat-file --batch-check`) is changed, never new. At most 500
+  files; past that nothing is noted (logged).
+- **Kept** in the turn's `files`, `byCommand` (`[{file, new}]`,
+  `store::CommandFile`) and `created` (its new files, with its Write's), so
+  Outputs ("New" for one it made), the summary, the file view (a
+  spreadsheet in the sheet view), Files changed ("By a command"), the
+  report's facts ("Files its commands made: costs.xlsx.", "Files its
+  commands changed: package.json.") and the report card have them.
 - **Git runs as the person's own** (`changes::find_git`: `git.exe` in an
   absolute folder on `PATH`, else Git for Windows' own `cmd\git.exe`; never one
   in the workspace), no window, in the kill-on-close job, its environment
   Yap's with nothing pointing it at another repository, `GIT_OPTIONAL_LOCKS=0`
   (`git status` never refreshes the index: Claude Code may be running Git
-  there at the same time), `-c core.fsmonitor=false`, literal pathspecs, no
-  prompts.
-- **The report's words** (`changes::file_facts`, the report's facts and
-  `agent_status`'s `undo`): "Files it changed: notes.md (backed up first).",
-  "Files its commands made: costs.xlsx (new: Undo deletes them).", "Files its
-  commands changed: package-lock.json (backed up first, from Git).", "Files
-  its commands changed with no backup: data.csv (Undo can't put them back)."
-  The report's rules have the model say what Undo can do as the facts say it,
-  and never a backup they don't mention.
+  there at the same time), `-c core.fsmonitor=false`, literal pathspecs
+  (`check-ignore`, which refuses them, runs with `--no-literal-pathspecs`),
+  no prompts.
 - **Tests**: `agents/changes/tests.rs` (the compare and its windows, Git's
-  answers, the caps, a folder with no Git, a real Git repository in a
-  subfolder with a clean file, the person's uncommitted work, an ignored log
-  and a commit in the turn, Undo's guard, Claude Code's late copies, finding
-  Git), `chat/turn/report.rs` (the facts), and `code-chat-files.spec.js` (the
-  stand-in's `Bash` call writes `costs.csv` and rewrites `docs/lab.md`: Outputs
-  "New", the sheet view, the tags, the report, Undo's confirm and what it
-  did).
-- **When hooks don't run**: a managed policy can turn them off
-  (`disableAllHooks`, `allowManagedHooksOnly`, `allowedHttpHookUrls`, or
-  `httpHookAllowedEnvVars` keeping the run's key out of the header), and they
-  never run under `--bare`. Then nothing is backed up, and **the runner tells**
-  (`runner::no_backups`, no guess): an edit tool's call came back without an
-  error, yet the backup list is empty at the turn's result (Yap's hook notes
-  every file it's called for, copied or not). The agent is marked `noBackups`:
-  its tab says so with no Undo, History offers none, and the report's facts
-  say so, so the chat's model never promises a backup.
+  answers, the caps, a folder with no Git, the person's own edit, Claude
+  Code's own edit before a command, a real Git repository in a subfolder
+  with uncommitted work, an ignored log, a commit and a deleted file in the
+  turn, an ignored workspace, finding Git), `chat/turn/report.rs` (the
+  facts), and `code-chat-files.spec.js` (the stand-in's `Bash` call writes
+  `costs.csv` and rewrites `docs/lab.md`: Outputs "New", the sheet view, the
+  tags, the report, and Rewind leaving them, said).
 
 ### Privacy
 
@@ -2933,7 +2904,7 @@ What the person sees, decided 7 Nov 2026: the feature is **Yap Code**
 ("Send an agent to garden-planner", "On it: I've sent an agent to
 garden-planner", "1 agent working", the **Agent · garden-planner** tab,
 "Agent done · garden-planner", "The agent's plan is ready", "Tell the
-agent…", "Undo the agent's changes", "Stop", the running list "Agents
+agent…", "Stop", the running list "Agents
 working"); a folder is a **workspace**. The **Chat | Code** switch and **Code
 chats** keep their names. Anthropic's rule: the feature's name never says
 "Claude Code" or "Anthropic" ("runs your own Claude Code" is fine). The app
@@ -3047,8 +3018,6 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 | `agent_go_ahead {id, turn?}` | a report card's or an Agent panel row's Go ahead: a plan waiting (or set aside: Plan not used) carried out (Yap's go-ahead at the chat's Mode), once; `turn` an earlier turn's plan, as a turn of its own naming it; refused while it works or with no plan there |
 | `agent_move_to_finished {id, turn}` | a panel row's Move to finished: a turn whose record says it's at work but that nothing runs marked interrupted (its agent too), a waiting plan Plan not used; refused while the runner has the agent |
 | `agent_dismiss {id, turn, dismissed?}` | a panel row's Dismiss (`dismissed` true, the default) or Restore (false): hidden from the panel, kept in the log and History; a waiting plan dismissed waits no more |
-| `agent_undo {id}` | Undo all: `{restored, deleted, skipped, refused, failed, error?}` |
-| `agent_undo_turn {id, turn}` | Undo this turn, the same; refused ("Undo the later change first…") while a later turn changed one of its files |
 | `agent_open_terminal {id}` | its session in Windows Terminal, once it isn't running |
 | `workspaces_list` / `workspaces_add {path, name?, cap?}` / `workspaces_pick` / `workspaces_remove {name}` / `workspaces_set_cap {name, cap?}` | the workspaces (`pick`: the folder picker, then added) |
 | `agent_mode_get {conversation?}` / `agent_mode_set {conversation, mode}` | a chat's Mode: `{mode, label, bypassConfirmed, modes}` (Bypass refused until confirmed) |
@@ -3098,12 +3067,12 @@ the build's own stand-in replaying `script` from now on),
   folder, the workspaces by use), the spoken answer, the runner's slots and
   spec (the run key only in its environment), the steps' words, the to-do
   list, the diffs and their caps, a write's kind, the report's marker and
-  fallback, the approve card, `noBackups`; turns: a Code chat's `start_agent`
+  fallback, the approve card, Claude Code's checkpoints on every run; turns: a Code chat's `start_agent`
   after its agent carries it on, `fresh` or another workspace a new agent, a
   session gone a new agent and why, a request while it works queued as one
   next turn, a turn's title, an older agent read as one turn, interrupted with
-  a request waiting, per-turn backups, Undo this turn, Undo all, "Undo the
-  later change first", an older agent's single backup as its turn 1. The
+  a request waiting, a Write's kind from Claude Code's own result, Rewind's
+  checkpoints a session each, newest first (`rewind.rs`). The
   rename from Jobs (`agents.rs`, `config.rs`): an older data folder's files
   moved with nothing lost and a new one never written over, the old words
   in a chat read as today's, the `jobs…` settings saved under their new
@@ -3121,8 +3090,9 @@ the build's own stand-in replaying `script` from now on),
 - **E2E** ([`docs/e2e-tests.md`](../e2e-tests.md)): the scripted fake AI calls
   `start_agent`, and Claude Code is the build's own stand-in (`yap.exe
   fake-claude <script>`, switched per turn with `e2e_claude_script`), whose
-  scripts call the run's backup hook (its key expanded from the run's
-  environment, as Claude Code does), write the file and ask `approve`. The
+  scripts write the file (an edit's kept by the stand-in's own file
+  checkpoints, a command's not: `_write_file`'s `command`; `--rewind-files`
+  answered as Claude Code's) and ask `approve`. The
   workspaces are in the run's own folder: nobody's real Claude Code, account
   or files.
   - `code-chat-files.spec.js` (15 Nov 2026): a Code chat's answer's paths as
@@ -3155,8 +3125,8 @@ the build's own stand-in replaying `script` from now on),
     spoken request with no "Should I…?", and no card after a web read
     either: the agent starts with its brief).
   - `agents-ui.spec.js`: the Mode chip, the Agent tab read like Claude Code, the
-    pill, the report card, Undo, the cards in the thread and on the bar, an agent
-    not signed in and one paid by key, no backups, Settings → Yap Code, the Network
+    pill, the report card, no Undo, the cards in the thread and on the bar, an agent
+    not signed in and one paid by key, Settings → Yap Code, the Network
     connections note.
   - `agents-code-chats.spec.js`: the switch, the workspace picker, a Code chat's
     composer and look, an agent left unnamed running in its workspace, a plain
@@ -3208,8 +3178,8 @@ the build's own stand-in replaying `script` from now on),
     in from the edge in the timeline; its entry in the Agent panel under
     the turn's row: working with the step it's on, then done with how many
     steps, opening to them); "start fresh" a
-    second agent, its tab named apart; Undo this turn (refused while a later
-    turn changed the same file), Undo all asked first. Light and dark.
+    second agent, its tab named apart; each turn's own checkpoint, no
+    copies of Yap's, no Undo. Light and dark.
   - `agents-plans.spec.js`: plans and the go-ahead — a Bypass chip never stops
     for a plan: "look into this and make our own version" and "make a plan
     first" with the model's plan run read only at Bypass (its result says
@@ -3355,7 +3325,8 @@ was found here and fixed).
   any plan run is).
 - In the dev build: the bar's cards while another app is in front, the real
   folder picker, "1 agent working" beside the idle and meeting pills.
-- A real managed policy that turns hooks off (`noBackups` outside the
+- Rewind's `--rewind-files` on the real Claude Code inside Yap (checked by
+  hand on 2.1.296 in a throwaway folder; Yap's own call only on the
   stand-in).
 
 **Not built:**

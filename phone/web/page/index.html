@@ -300,18 +300,6 @@
       <button id="env-sheet-close" class="btn secondary-btn sheet-close" type="button">Done</button>
     </dialog>
 
-    <!-- Undo from the phone: its own confirm first (agent.js), then `agent_undo {sure: true}`. -->
-    <dialog id="undo-sheet" class="sheet" aria-labelledby="undo-title" data-testid="undo-sheet">
-      <div class="grab" aria-hidden="true"></div>
-      <h2 id="undo-title"></h2>
-      <p id="undo-body" class="hint"></p>
-      <ul id="undo-files" class="undofiles" data-testid="undo-files"></ul>
-      <div class="sheet-btns">
-        <button id="undo-cancel" class="btn secondary-btn" type="button" data-testid="undo-cancel">Cancel</button>
-        <button id="undo-go" class="btn danger-btn" type="button" data-testid="undo-go">Undo</button>
-      </div>
-    </dialog>
-
     <!-- The settings: hands-free talk's wait, the headset's sound, the mic, Sound details. -->
     <dialog id="settings" class="sheet" aria-labelledby="settings-title" data-testid="settings-sheet">
       <div class="grab" aria-hidden="true"></div>

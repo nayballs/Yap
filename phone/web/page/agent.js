@@ -15,8 +15,8 @@
 //   (`agent_diff`, diff.js); the commands it ran (three, then Show N more);
 //   what it wasn't allowed to do; its final words.
 // - Its cards (Allow once / Deny, a plan's Go ahead): cards.js, in place.
-// - Stop while it works, Continue once it stopped, Go ahead with a plan,
-//   Undo this turn / Undo all after the phone's own confirm (`sure`).
+// - Stop while it works, Continue once it stopped, Go ahead with a plan.
+//   No Undo (16 Nov 2026, as the Claude app): ask Claude to take a change back.
 // - Older steps on request (`agent_log`), and opened again when the PC
 //   says the phone fell behind (`agent_resync`) or a number's missing.
 //
@@ -44,11 +44,8 @@ import {
   problemWords,
   modeLabel,
   modelLabel,
-  canUndo,
-  canUndoTurn,
   planWaits,
   longSaid,
-  NO_BACKUPS,
 } from './core/agents.js';
 import { renderAnswer } from './markdown.js';
 import { fileFacts, counts, renderDiff } from './diff.js';
@@ -65,7 +62,7 @@ export function normEvent(e) {
 
 /**
  * The view. `els`: its root, head (title, status, ✕), body (scrolls),
- * foot (its buttons), follow (↓), the undo sheet's parts; `send(msg)` to
+ * foot (its buttons), follow (↓); `send(msg)` to
  * the PC; `cards` (cards.js); `onClose()` back to the chat; `onChange()`
  * redraws the page (the composer's words); `pcName()`.
  */
@@ -88,7 +85,6 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
     busy: '',
     note: '',
     error: '',
-    undo: null,
     wentAhead: {},
     holding: false,
     dirty: false,
@@ -113,7 +109,7 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
     if (!brief?.id) return;
     const again = V.id === brief.id;
     if (!again) {
-      Object.assign(V, { agent: { ...brief, files: [], commands: [], denials: [] }, log: new Map(), loose: [], more: false, seq: 0, folded: {}, file: null, allCommands: {}, unfolded: new Set(), note: '', error: '', busy: '', undo: null, pinned: true });
+      Object.assign(V, { agent: { ...brief, files: [], commands: [], denials: [] }, log: new Map(), loose: [], more: false, seq: 0, folded: {}, file: null, allCommands: {}, unfolded: new Set(), note: '', error: '', busy: '', pinned: true });
     }
     V.id = brief.id;
     V.asked = turn;
@@ -136,7 +132,6 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
     clearInterval(V.tick);
     clearTimeout(V.refreshTimer);
     els.root.hidden = true;
-    closeUndo();
     onClose?.();
     onChange?.();
   }
@@ -223,7 +218,6 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
     V.busy = '';
     V.error = '';
     V.note = String(m.message || '');
-    if (m.action === 'undo') refreshSoon();
     render();
     onChange?.();
     return true;
@@ -265,39 +259,6 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
     act('tell', { type: 'agent_message', id: V.agent.id, text: t });
     return V.busy === 'tell';
   }
-
-  const shortPath = (p) => String(p || '').split(/[\\/]/).pop() || String(p || '');
-
-  /** Undo this turn (`turn`), or all: the phone's own confirm first. */
-  function askUndo(turn) {
-    const a = V.agent;
-    if (!a) return;
-    const t = turn != null ? turnsOf(a, events()).find((x) => x.n === turn) : null;
-    const files = (t ? t.files : a.files) || [];
-    V.undo = { turn };
-    const n = files.length;
-    els.undoTitle.textContent = `Put back ${n === 1 ? '1 file' : `${n} files`} in ${a.folder}?`;
-    els.undoBody.textContent = t
-      ? 'The files this turn changed go back to how they were before it, and the files it made are deleted. Yap kept their backups for this.'
-      : 'Every file it changed goes back to how it was before it, and the files it made are deleted. Yap kept their backups for this.';
-    els.undoFiles.replaceChildren(...files.map((f) => h('li', { text: shortPath(f), title: f })));
-    els.undoGo.textContent = t ? 'Undo this turn' : 'Undo all';
-    if (typeof els.undoSheet.showModal === 'function') {
-      if (!els.undoSheet.open) els.undoSheet.showModal();
-    } else els.undoSheet.setAttribute('open', '');
-  }
-  function closeUndo() {
-    if (typeof els.undoSheet.close === 'function' && els.undoSheet.open) els.undoSheet.close();
-    else els.undoSheet.removeAttribute('open');
-  }
-  els.undoGo.addEventListener('click', () => {
-    const u = V.undo;
-    closeUndo();
-    if (!u || !V.agent) return;
-    act('undo', { type: 'agent_undo', id: V.agent.id, ...(u.turn != null ? { turn: u.turn } : {}), sure: true });
-  });
-  els.undoCancel.addEventListener('click', closeUndo);
-  els.undoSheet.addEventListener('click', (e) => e.target === els.undoSheet && closeUndo());
 
   els.close.addEventListener('click', close);
 
@@ -424,7 +385,7 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
             h('span', { class: 'tfacts', text: turnFacts(a, t, now) }),
           ),
         );
-        if (open) sec.append(turnBody(a, t, live && t.n === current, !many, many && canUndoTurn(a, t)));
+        if (open) sec.append(turnBody(a, t, live && t.n === current, !many));
       }
       frag.append(sec);
     }
@@ -481,7 +442,7 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
   }
 
   /** One turn's body (AgentTurn.svelte's parts). */
-  function turnBody(a, t, live, single, undoable) {
+  function turnBody(a, t, live, single) {
     const ev = t.events || [];
     const body = h('div', { class: 'tbody' });
     const latest = live ? latestStep(ev, a.status) : '';
@@ -579,8 +540,6 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
           { class: 'avsec', testid: 'agent-files' },
           h('h3', {}, 'Files changed ', h('span', { class: 'cnt', text: String(t.files.length) })),
           list,
-          a.noBackups ? h('p', { class: 'avhint', text: NO_BACKUPS }) : null,
-          undoable && !V.busy ? h('button', { type: 'button', class: 'pillbtn', testid: 'agent-undo-turn', text: 'Undo this turn', on: { click: () => askUndo(t.n) } }) : null,
         ),
       );
     }
@@ -618,7 +577,6 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
     if (!live && t.text) {
       body.append(h('div', { class: 'avsec final', testid: 'agent-text' }, h('h3', { text: t.plan ? 'Its plan' : 'What it said' }), h('div', { class: 'md' }, renderAnswer(t.text))));
     }
-    if (t.undone) body.append(h('p', { class: 'avhint', text: 'Undone: its files are back as they were.' }));
     return body;
   }
 
@@ -627,8 +585,7 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
     const last = turns.at(-1) || null;
     const goAhead = planWaits(a, last, true) && !(a.id in V.wentAhead);
     const stopped = a.status === 'stopped' || a.status === 'interrupted' || a.status === 'failed';
-    const undo = canUndo(a);
-    const key = [a.id, live, stopped, goAhead, undo, many, V.busy].join('|');
+    const key = [a.id, live, stopped, goAhead, many, V.busy].join('|');
     if (key === footKey) return;
     footKey = key;
     const busy = !!V.busy;
@@ -652,7 +609,6 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
         }),
       );
     }
-    if (undo) btns.push(h('button', { type: 'button', class: 'pillbtn', testid: 'agent-undo', disabled: busy, text: many ? 'Undo all' : "Undo the agent's changes", on: { click: () => askUndo(null) } }));
     els.foot.replaceChildren(...btns);
     els.foot.hidden = btns.length === 0;
   }
@@ -706,7 +662,6 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
       V.id = '';
       clearInterval(V.tick);
       els.root.hidden = true;
-      closeUndo();
     },
     /** The tests' view. */
     snapshot: () => (V.id ? { id: V.id, status: V.agent?.status || '', events: V.log.size + V.loose.length, seq: V.seq, more: V.more, file: V.file ? { file: V.file.file, lines: V.file.lines.length, wrap: !!V.file.wrap } : null, busy: V.busy, pinned: V.pinned } : null),

@@ -31,7 +31,7 @@ export function out(type, over = {}) {
 }
 
 /** Fields a phone message may leave out (the wire's examples have them). */
-const OPTIONAL = { agent_diff: ['turn'], agent_undo: ['turn'] };
+const OPTIONAL = { agent_diff: ['turn'] };
 
 /**
  * **Does a message from the page keep to the wire?** Its type is one of
@@ -128,7 +128,6 @@ export function record(over = {}) {
     planAllowed: false,
     asks: false,
     reported: false,
-    undone: false,
     noBackups: false,
     swept: false,
     diffLines: 6,
@@ -151,8 +150,7 @@ export function record(over = {}) {
         plan: false,
         planAllowed: false,
         asks: false,
-        undone: false,
-      },
+          },
     ],
     modelAsked: false,
     effortAsked: false,
@@ -239,10 +237,6 @@ export async function mockCodePc(page, opts = {}) {
           break;
         case 'agent_message':
           acted('message', 'Passed that to the agent in garden-planner.');
-          break;
-        case 'agent_undo':
-          if (!msg.sure) say({ type: 'error', message: "Confirm it on the phone first: Undo puts the agent's files back." });
-          else acted('undo', 'Put back 1 file in garden-planner.');
           break;
         case 'approve':
           if (msg.shownMs < MIN_SHOWN_MS) say({ type: 'error', message: 'Tap it again: the card had only just come.' });

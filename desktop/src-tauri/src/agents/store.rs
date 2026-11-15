@@ -1,9 +1,9 @@
 //! **The agents store**: `agents.json` (every agent, each chat's Mode, each Code
 //! chat's folder, the one-time Bypass OK), and each agent's own folder under
 //! `agents/<id>/` — `log.jsonl`,
-//! the `yap-agent` events it sent (the tab replays them), and `backup/`, the
-//! files Claude Code changed as they were before (the run endpoint's backup
-//! hook writes them, `integrations/claude_live/backup.rs`).
+//! the `yap-agent` events it sent (the tab replays them), and the pictures
+//! its steps came back with. Files go back through Claude Code's own
+//! checkpoints (Rewind, `agents/rewind.rs`), never copies of Yap's.
 //!
 //! A file of its own, never fields in chats.json: the installed Yap and a
 //! newer dev build share the data folder, and an older Yap drops fields it
@@ -33,7 +33,7 @@ use serde_json::Value;
 
 use crate::integrations::claude_live::Origin;
 
-/// How long an agent's backups and log are kept after it ends.
+/// How long an agent's log and pictures are kept after it ends.
 pub const KEEP_SECS: u64 = 7 * 24 * 60 * 60;
 /// The most lines an agent's log keeps (the rest of a runaway agent isn't).
 pub const LOG_MAX_LINES: usize = 5_000;
@@ -95,11 +95,18 @@ pub struct Denial {
 pub struct CommandFile {
     /// As the turn's `files` say it (relative to the workspace).
     pub file: String,
-    /// It wasn't there before the turn: Undo deletes it.
+    /// It wasn't there before the turn.
     pub new: bool,
-    /// (Changed) Yap kept a copy from before (Git's own, for a file that was
-    /// clean in Git): Undo puts it back. False: it can't.
-    pub kept: bool,
+}
+
+/// **Where Claude Code can take a turn's files back to** (its own file
+/// checkpointing, `CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING`): the session
+/// the turn ran in and the `uuid` of the message that started it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Checkpoint {
+    pub session: String,
+    pub at: String,
 }
 
 /// What went wrong with Claude Code itself (`claude_code::events::Problem`),
@@ -214,13 +221,7 @@ pub struct Agent {
     /// The report's marker message ("chat:<conversation>:<index>").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report_message_id: Option<String>,
-    /// Undo agent put its files back.
-    pub undone: bool,
-    /// It changed files and no backups were made: Claude Code's hooks
-    /// didn't run (a managed policy turned them off), so Undo can't put
-    /// them back (`runner::no_backups`).
-    pub no_backups: bool,
-    /// Its backups and log are gone (7 days after it ended).
+    /// Its log and pictures are gone (7 days after it ended).
     pub swept: bool,
     /// The diff lines its log has so far (`diff::AGENT_MAX` at most).
     pub diff_lines: u32,
@@ -316,7 +317,6 @@ impl Beside {
 
 /// **One turn of an agent**: one request to it (its brief, a follow-up, a
 /// plan's go-ahead) and what came of it. Continue carries on the same turn.
-/// Its backups are `agents/<id>/backup/<n>/` ([`turn_backup_dir`]).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TurnNote {
@@ -414,16 +414,24 @@ pub struct TurnNote {
     /// Yap drops it on its save, and the answer then comes without them.
     #[serde(skip_serializing_if = "Beside::is_empty")]
     pub beside: Beside,
-    /// Undo this turn put its files back.
-    pub undone: bool,
     /// **The files its commands made or changed** (15 Nov 2026, found by
     /// comparing the workspace before and after: `agents/changes.rs`), each
-    /// also in `files`: whether it's new (Undo deletes it) and whether a copy
-    /// from before was kept (Undo puts it back). A new field of the turn's
-    /// own: an older Yap drops it on its save, and the files then read as
-    /// any it changed.
+    /// also in `files`, and whether it's new. A new field of the turn's own:
+    /// an older Yap drops it on its save, and the files then read as any it
+    /// changed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub by_command: Vec<CommandFile>,
+    /// **The files it made** (16 Nov 2026): Claude Code's Write of a file that
+    /// wasn't there, and a command's new file — the report card's new files.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub created: Vec<String>,
+    /// **Claude Code's own file checkpoint before it** (16 Nov 2026): the
+    /// session it ran in and its first message's `uuid`, which `claude -p
+    /// --resume <session> --rewind-files <uuid>` takes the files back to
+    /// (Rewind, `agents/rewind.rs`). None for a turn from before Yap turned
+    /// Claude Code's checkpoints on, or one that never started.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<Checkpoint>,
     /// **Its to-do list**, as its latest `TodoWrite` left it (the Agent
     /// panel's row, the thread's to-do card). New fields of the turn's own
     /// (2026-11-08), as `usage`: an older Yap drops them on its save, and the
@@ -595,7 +603,6 @@ impl Agent {
             plan_allowed: self.plan_allowed,
             asks: self.asks,
             report_message_id: self.report_message_id.clone(),
-            undone: self.undone,
             plan_unused: self.plan_unused,
             ..Default::default()
         }]
@@ -828,42 +835,23 @@ pub fn dir(id: &str) -> Option<PathBuf> {
     valid_id(id).then(|| root().join(id))
 }
 
-/// `agents/<id>/backup/`: every turn's backups (an agent from before turns had
-/// one backup, here, read as its turn 1's: [`backup_dirs`]).
-pub fn backup_dir(id: &str) -> Option<PathBuf> {
-    dir(id).map(|d| d.join("backup"))
-}
-
-/// `agents/<id>/backup/<n>/`: turn `n`'s backups (first copy wins within it).
-pub fn turn_backup_dir(id: &str, n: u32) -> Option<PathBuf> {
-    backup_dir(id).map(|d| d.join(n.to_string()))
-}
-
-/// **Every turn's backup folders** on disk, oldest first: `(turn, folder)` —
-/// an agent from before turns (its manifest right in `backup/`) as turn 1's,
-/// before a `backup/1/` of its own (its turn 1 continued since). Only
-/// folders with a manifest.
-pub fn backup_dirs(id: &str) -> Vec<(u32, PathBuf)> {
-    let Some(root) = backup_dir(id) else { return Vec::new() };
-    let manifest = crate::integrations::claude_live::backup::MANIFEST;
-    let mut out: Vec<(u32, PathBuf)> = Vec::new();
-    if root.join(manifest).is_file() {
-        out.push((1, root.clone()));
+/// **The copies an older Yap kept** (`agents/<id>/backup/`, for its Undo:
+/// gone 16 Nov 2026, files go back through Claude Code's own checkpoints
+/// now): deleted at start. How many folders went.
+pub fn drop_old_backups() -> usize {
+    let Ok(list) = std::fs::read_dir(root()) else { return 0 };
+    let mut gone = 0;
+    for e in list.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let backup = e.path().join("backup");
+        if valid_id(&name) && backup.is_dir() && std::fs::remove_dir_all(&backup).is_ok() {
+            gone += 1;
+        }
     }
-    let mut turns: Vec<(u32, PathBuf)> = std::fs::read_dir(&root)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.path().is_dir())
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().into_owned();
-            let n = name.parse::<u32>().ok().filter(|n| *n > 0 && name == n.to_string())?;
-            e.path().join(manifest).is_file().then(|| (n, e.path()))
-        })
-        .collect();
-    turns.sort_by_key(|(n, _)| *n);
-    out.extend(turns);
-    out
+    if gone > 0 {
+        tracing::info!(folders = gone, "Agents: an older Yap's backup copies deleted");
+    }
+    gone
 }
 
 /// `agents/<id>/log.jsonl`.
@@ -1582,7 +1570,7 @@ mod tests {
         // On disk: the old one's folder goes, the new one's stays.
         for j in &agents {
             insert(j.clone());
-            std::fs::create_dir_all(backup_dir(&j.id).unwrap()).unwrap();
+            std::fs::create_dir_all(dir(&j.id).unwrap().join("pictures")).unwrap();
             log_append(&j.id, &json!({ "status": "running" }));
         }
         assert_eq!(sweep(now), 1);
@@ -1872,7 +1860,7 @@ mod tests {
         confirm_bypass();
         assert!(bypass_confirmed());
         insert(agent("x1", Status::Done, 3));
-        std::fs::create_dir_all(backup_dir("x1").unwrap()).unwrap();
+        std::fs::create_dir_all(dir("x1").unwrap().join("pictures")).unwrap();
         assert!(reset() >= 1);
         assert!(list().is_empty() && !bypass_confirmed() && !root().exists());
     }

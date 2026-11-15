@@ -1,6 +1,6 @@
 // One agent per Code chat, its follow-ups as its turns (2026-11-07):
-// desktop/src-tauri/src/agents/runner.rs (`follow_up`, `undo_turn`, per-turn
-// backups), chat/tools/agents.rs (`decide`: start_agent in a Code chat carries
+// desktop/src-tauri/src/agents/runner.rs (`follow_up`, each turn's own
+// checkpoint), chat/tools/agents.rs (`decide`: start_agent in a Code chat carries
 // the chat's agent on), chat/turn/report.rs (a report when it stops working), and the tab
 // (views/chat/AgentTab.svelte + AgentTurn.svelte; core/agents.js `turnsOf`,
 // `pillsByAnswer`, `agentTabName`). As Claude Code itself is one session per
@@ -64,8 +64,9 @@
 //   docs") as rows of their own, never among the session's own steps, and
 //   the stretch's line counts the session's alone (12 Nov 2026).
 // - "Start fresh" (`fresh: true`): a second agent, its tab named apart.
-// - Undo this turn (refused while a later turn changed the same file:
-//   "Undo the later change first"), and Undo all, asked first.
+// - No Undo (16 Nov 2026, as the Claude app): the person asks Claude, or
+//   rewinds a Code chat (agents-direct.spec.js); each turn keeps Claude
+//   Code's own checkpoint, never a copy of Yap's.
 import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, openView, setConfig } from './support/fixtures.js';
@@ -77,7 +78,6 @@ import {
   turnsOf,
   titleOf,
   turnStatusWord,
-  canUndoTurn,
   pillsByAnswer,
   agentOfReport,
   turnOfReport,
@@ -557,13 +557,6 @@ test('core/agents.js: an agent’s turns from its log, their words, the pills a 
   expect(turns[3].title, 'a turn this window hasn’t read yet: its own, until it does').toBe('');
   expect(turns.map(turnStatusWord)).toEqual(['Done', 'Running', 'Queued', 'Running']);
   expect(turnStatusWord({ status: 'stopped', startedTs: 0 })).toBe('Not sent yet');
-  // Undo this turn: over, its files, not undone, backups made.
-  const over = { ...agent, status: 'done' };
-  expect(canUndoTurn(over, agent.turnList[0])).toBe(true);
-  expect(canUndoTurn(agent, agent.turnList[0]), 'not while it works').toBe(false);
-  expect(canUndoTurn(over, agent.turnList[1]), 'no files').toBe(false);
-  expect(canUndoTurn(over, { ...agent.turnList[0], undone: true })).toBe(false);
-  expect(canUndoTurn({ ...over, noBackups: true }, agent.turnList[0])).toBe(false);
   // A pill a turn, under the answer after its question; one an agent an answer.
   const messages = [{ role: 'user' }, { role: 'assistant' }, { role: 'user', kind: 'agentReport' }, { role: 'assistant' }, { role: 'user' }, { role: 'assistant' }];
   const turned = { id: 'c', conversation: 9, createdTs: 1, turnList: [{ n: 1, messageId: 'chat:9:0', status: 'done', title: 'One' }, { n: 2, messageId: 'chat:9:4', status: 'running', title: 'Two' }] };
@@ -1036,14 +1029,14 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
   expect(args[0]).not.toContain('--resume');
   expect(after(args[1], '--resume')).toBe(agent.session);
   expect(args[1]).not.toContain('--session-id');
-  // Each turn's own backups.
-  const backup = path.join(yap.dataDir, 'agents', agent.id, 'backup');
-  const manifest = (n) => JSON.parse(fs.readFileSync(path.join(backup, String(n), 'manifest.json'), 'utf8')).files.map((f) => [path.basename(f.original), f.state]);
-  expect(manifest(1)).toEqual([['notes.md', 'copied']]);
-  expect(manifest(2)).toEqual([
-    ['notes.md', 'copied'],
-    ['minimap.js', 'created'],
-  ]);
+  // Each turn's own checkpoint (Claude Code's: its session and its first message), never a copy of Yap's.
+  const turned = (await agents(yap)).find((j) => j.id === agent.id);
+  expect(turned.turnList.map((t) => t.checkpoint?.session)).toEqual([agent.session, agent.session]);
+  expect(turned.turnList.every((t) => typeof t.checkpoint?.at === 'string' && t.checkpoint.at.length > 0)).toBe(true);
+  expect(turned.turnList[0].checkpoint.at).not.toBe(turned.turnList[1].checkpoint.at);
+  expect(fs.existsSync(path.join(yap.dataDir, 'agents', agent.id, 'backup'))).toBe(false);
+  // Its Write of a new file: the turn's `created` (its report card's new files).
+  expect(turned.turnList[1].created).toEqual(['minimap.js']);
   // Two reports, one a turn.
   const messages = await messagesOf(yap, conversation, 8);
   expect(messages.map((m) => [m.role, m.kind ?? ''])).toEqual([
@@ -1088,8 +1081,9 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
   await expect(turnAt(main, 2).getByTestId('chat-agent-text')).toContainText(DONE2);
   await expect(turnAt(main, 2).getByTestId('chat-agent-files').locator('.fname')).toHaveText(['notes.md', 'minimap.js']);
   await expect(turnAt(main, 2).getByTestId('chat-agent-said')).toHaveText(['Now the minimap button.']);
-  await expect(tab(main).getByRole('button', { name: 'Undo all' })).toBeVisible();
-  await expect(turnAt(main, 2).getByTestId('chat-agent-undo-turn')).toBeVisible();
+  // No Undo (as the Claude app).
+  await expect(tab(main).getByRole('button', { name: /^Undo/ })).toHaveCount(0);
+  await expect(turnAt(main, 2).getByTestId('chat-agent-undo-turn')).toHaveCount(0);
   // The earlier one opens to its own.
   await turnAt(main, 1).getByTestId('chat-agent-turn-head').click();
   await expect(turnAt(main, 1)).toHaveAttribute('data-open', 'true');
@@ -1719,7 +1713,7 @@ test('a part handed to a helper: the helper’s steps fold behind its row, never
   await theme(yap, main, 'dark');
   await shot(main, '52-the-helpers-own-steps-dark');
   await theme(yap, main, 'light');
-  // The file it changed is still the agent's (its report, Undo).
+  // The file it changed is still the agent's (its report).
   expect((await agents(yap)).find((j) => j.id === agent.id).files).toEqual(['notes.md']);
   // Its timeline lists every step in order, the helper's own in from the edge.
   await agentTimeline(main, 1);
@@ -1766,42 +1760,3 @@ test('“start fresh”: a second agent in the workspace, its tab named apart fr
   await messagesOf(yap, conversation, 16);
 });
 
-test('Undo this turn: refused while a later turn changed the same file, then each turn back; Undo all, asked first', async ({ yap, main, fakeLlm, shot }) => {
-  const { agent } = await twoTurns(yap, main, fakeLlm);
-  await expect(tab(main)).toBeVisible();
-  await agentTimeline(main);
-  // The earlier turn first: refused, and why.
-  await turnAt(main, 1).getByTestId('chat-agent-turn-head').click();
-  await turnAt(main, 1).getByTestId('chat-agent-undo-turn').click();
-  await expect(turnAt(main, 1).getByTestId('chat-agent-turn-refused')).toHaveText('Undo the later change first: “Add a minimap button” changed notes.md too.');
-  expect(read('notes.md')).toBe(NOTES2);
-  await shot(main, '04-undo-the-later-change-first');
-  // The later turn: back to before it.
-  await turnAt(main, 2).getByTestId('chat-agent-undo-turn').click();
-  await expect(turnAt(main, 2).getByTestId('chat-agent-undone')).toHaveText('Undone: notes.md put back; minimap.js deleted (the agent made it).');
-  expect(read('notes.md')).toBe(NOTES1);
-  expect(fs.existsSync(path.join(GARDEN, 'minimap.js'))).toBe(false);
-  await expect(turnAt(main, 2).getByTestId('chat-agent-undo-turn')).toHaveCount(0);
-  // Now the earlier one goes.
-  await turnAt(main, 1).getByTestId('chat-agent-undo-turn').click();
-  await expect(turnAt(main, 1).getByTestId('chat-agent-undone')).toHaveText('Undone: notes.md put back.');
-  expect(read('notes.md')).toBe(NOTES0);
-  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id)).toMatchObject({ undone: true });
-  const undone = (await agents(yap)).find((j) => j.id === agent.id);
-  expect(undone.turnList.map((t) => t.undone)).toEqual([true, true]);
-  await expect(tab(main).getByRole('button', { name: 'Undo all' })).toHaveCount(0);
-
-  // Undo all: asked first, then back to before the first turn in one go.
-  freshFolder(GARDEN);
-  const again = await twoTurns(yap, main, fakeLlm);
-  expect(read('notes.md')).toBe(NOTES2);
-  await tab(main).getByRole('button', { name: 'Undo all' }).click();
-  const confirm = main.getByRole('alertdialog', { name: 'Undo every turn of this agent?' });
-  await expect(confirm).toBeVisible();
-  await shot(main, '05-undo-all-asked-first');
-  await confirm.getByRole('button', { name: 'Undo all' }).click();
-  await expect(main.getByTestId('chat-agent-undone-all')).toHaveText('Undone: notes.md put back; minimap.js deleted (the agent made it).');
-  expect(read('notes.md')).toBe(NOTES0);
-  expect(fs.existsSync(path.join(GARDEN, 'minimap.js'))).toBe(false);
-  await expect.poll(async () => (await agents(yap)).find((j) => j.id === again.agent.id)).toMatchObject({ undone: true });
-});

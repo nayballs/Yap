@@ -2,7 +2,7 @@
 //! thread that checks every request before anything else (from this PC,
 //! this PC's `Host`, no other site's `Origin`, a registered run, its key),
 //! then a thread per accepted request — so a permission prompt waiting for
-//! the person never holds up a read or a backup. Nothing unchecked gets a
+//! the person never holds up a read. Nothing unchecked gets a
 //! thread or has its body read.
 
 use std::collections::HashMap;
@@ -32,9 +32,6 @@ pub struct Run {
     /// says nothing about the key.
     digest: Vec<u8>,
     pub spec: RunSpec,
-    /// One backup at a time per run (Claude Code can edit files in
-    /// parallel), so the first copy of a file is the one kept.
-    pub backups: Mutex<()>,
     /// The chat turn its calls belong to (`turn.rs`), shared with its handle.
     pub turn: Arc<super::turn::Slot>,
 }
@@ -50,8 +47,6 @@ pub struct Endpoint {
     /// How long a permission prompt waits ([`super::APPROVE_WAIT`]; a test's
     /// is short).
     pub wait: Duration,
-    /// The largest file the backup hook copies ([`super::backup::MAX_BACKUP_BYTES`]).
-    pub max_backup: u64,
 }
 
 impl Drop for Endpoint {
@@ -74,11 +69,6 @@ fn digest(s: &str) -> Vec<u8> {
 impl Endpoint {
     /// Bind `127.0.0.1:0` and start accepting.
     pub fn start(reads: Arc<dyn Reads>, emit: Emit, wait: Duration) -> Result<Arc<Endpoint>, String> {
-        Self::start_with(reads, emit, wait, super::backup::MAX_BACKUP_BYTES)
-    }
-
-    /// [`Endpoint::start`] with its own backup limit (a test's is small).
-    pub fn start_with(reads: Arc<dyn Reads>, emit: Emit, wait: Duration, max_backup: u64) -> Result<Arc<Endpoint>, String> {
         let server = Server::http("127.0.0.1:0").map_err(|e| format!("Yap couldn't open its endpoint for Claude Code: {e}"))?;
         let port = server
             .server_addr()
@@ -94,7 +84,6 @@ impl Endpoint {
             emit,
             approvals: Book::default(),
             wait,
-            max_backup,
         });
         let weak = Arc::downgrade(&ep);
         std::thread::Builder::new()
@@ -134,17 +123,16 @@ impl Endpoint {
         let reads = spec.reads && tools == super::Tools::Agent;
         spec.reads = reads;
         let connectors: Vec<String> = spec.connectors.as_ref().map(|l| l.names().map(str::to_string).collect()).unwrap_or_default();
-        let has_backup = spec.backup_dir.is_some();
         let servers = super::rpc::servers_offered(&spec);
         let turn = Arc::new(super::turn::Slot::default());
-        let run = Arc::new(Run { id: id.clone(), digest: digest(&format!("Bearer {key}")), spec, backups: Mutex::new(()), turn: Arc::clone(&turn) });
+        let run = Arc::new(Run { id: id.clone(), digest: digest(&format!("Bearer {key}")), spec, turn: Arc::clone(&turn) });
         let count = {
             let mut runs = self.runs.lock().unwrap_or_else(|p| p.into_inner());
             runs.insert(id.clone(), run);
             runs.len()
         };
-        tracing::info!(run = %id, tools = ?tools, agents, eyes = eyes.any(), connectors = connectors.len(), backup = has_backup, runs = count, "Claude Code endpoint: a run registered");
-        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, agents, memory, eyes, connectors, reads, servers, cards, has_backup, turn })
+        tracing::info!(run = %id, tools = ?tools, agents, eyes = eyes.any(), connectors = connectors.len(), runs = count, "Claude Code endpoint: a run registered");
+        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, agents, memory, eyes, connectors, reads, servers, cards, turn })
     }
 
     /// The run's URLs answer 404 from now on; its prompts still waiting
@@ -184,7 +172,6 @@ impl Endpoint {
         let segs: Vec<&str> = path.trim_matches('/').split('/').collect();
         let (run, route) = match segs.as_slice() {
             ["mcp", run] => (*run, Route::Mcp),
-            ["hook", run, event] => (*run, Route::Hook(event.to_string())),
             _ => return Err((404, "Not found")),
         };
         let run = self.run(run).ok_or((404, "Not found"))?;
@@ -220,15 +207,6 @@ impl Endpoint {
                     let _ = request.respond(Response::empty(202));
                 }
             },
-            Route::Hook(event) => {
-                // Never blocks or denies the tool: `{}` whatever happened.
-                if event == "PreToolUse" {
-                    if let Ok(input) = serde_json::from_slice::<Value>(&body) {
-                        super::backup::pre_tool_use(run, &input, self.max_backup);
-                    }
-                }
-                let _ = request.respond(json(200, &serde_json::json!({})));
-            }
         }
     }
 }
@@ -236,7 +214,6 @@ impl Endpoint {
 /// What an admitted request asks for.
 enum Route {
     Mcp,
-    Hook(String),
 }
 
 fn accept(server: Arc<Server>, endpoint: Weak<Endpoint>) {

@@ -816,7 +816,7 @@ test('a message typed in a Code chat on the plan goes straight to its session, a
   await expect(tab(main)).toHaveCount(0);
   await shot(main, '02-its-next-message-its-next-turn');
 
-  // A turn's line (one that changed a file has one) opens that turn in its timeline, its Undo there — never a
+  // A turn's line (one that changed a file has one) opens that turn in its timeline — never a
   // row of the panel: the chat's own turns are no agents.
   await thread(main).getByTestId('chat-agent-pill').nth(1).click();
   await expect(tab(main)).toBeVisible();
@@ -1388,8 +1388,12 @@ test('Rewind to before the first message puts back the files Claude changed, and
   await codeChat(main);
   await send(main, 'Add a watering schedule');
   const agent = await newAgent(yap, before);
-  await ended(yap, agent.id, 40_000);
+  const finished = await ended(yap, agent.id, 40_000);
   expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe(NOTES1);
+  // Claude Code's own checkpoint before the turn (its session, its first message): what Rewind takes the files back
+  // with, through `--rewind-files` — never a copy of Yap's.
+  expect(finished.turnList[0].checkpoint).toMatchObject({ session: finished.session });
+  expect(fs.existsSync(path.join(yap.dataDir, 'agents', agent.id, 'backup'))).toBe(false);
   await thread(main).locator('.cbubble.user', { hasText: 'Add a watering schedule' }).hover();
   await actionsOf(main, 'Add a watering schedule').getByTestId('chat-rewind').click();
   const ask = main.getByRole('alertdialog', { name: 'Rewind to before this message?' });
@@ -2583,7 +2587,7 @@ test('core/agents.js: the Code chat’s own session at work is what the message 
   expect(plainReply(reply)).toBe(true);
   expect(plainReply({ ...reply, files: ['notes.md'] })).toBe(false);
   expect(plainReply({ ...reply, denials: [{ tool: 'Bash' }] })).toBe(false);
-  for (const more of [{ plan: true }, { error: 'It stopped.' }, { undone: true }, { direct: false }]) expect(plainReply({ ...reply, ...more })).toBe(false);
+  for (const more of [{ plan: true }, { error: 'It stopped.' }, { direct: false }]) expect(plainReply({ ...reply, ...more })).toBe(false);
   // A question at the end of its words ("What do you need?") is part of the reply (one saved as asking, before 14 Nov, too).
   expect(plainReply({ ...reply, asks: true })).toBe(true);
   for (const status of ['running', 'queued', 'asking', 'failed', 'stopped', 'interrupted']) expect(plainReply({ ...reply, status })).toBe(false);

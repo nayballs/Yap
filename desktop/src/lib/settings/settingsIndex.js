@@ -214,8 +214,8 @@ export const SETTINGS_INDEX = [
   { page: 'yap-code', section: 'Asking and reports', label: 'Ask before sending an agent', desc: 'When it matters (a new workspace, or after the web), always, or never', keywords: 'agents ask confirm before start send card approve', anchor: 'yap-code-ask' },
   { page: 'yap-code', section: 'Asking and reports', label: 'Read agent reports aloud', desc: 'When you asked by voice, always, or never', keywords: 'agents report read aloud speak voice spoken', anchor: 'yap-code-speak' },
   { page: 'yap-code', section: 'Asking and reports', label: AGENT_NOTICES_LABEL, desc: 'The "Claude replied" and "Agent done" cards on the Yap bar', keywords: AGENT_NOTICES_WORDS, anchor: 'yap-code-notify', toggle: 'notifyAgents' },
-  { page: 'yap-code', section: 'Asking and reports', label: 'Backups and limits', desc: 'Backups kept 7 days; one agent a workspace, 3 at once', keywords: 'agents backups undo limits at once concurrent', anchor: 'yap-code-limits' },
-  { page: 'yap-code', section: 'History', label: 'History', desc: 'Every agent: its status, folder, when and cost', keywords: 'agents history past list cost undo open', anchor: 'yap-code-history' },
+  { page: 'yap-code', section: 'Asking and reports', label: 'Limits and taking a change back', desc: 'One agent a workspace, 3 at once; ask Claude, or rewind', keywords: 'agents limits at once concurrent undo rewind take back', anchor: 'yap-code-limits' },
+  { page: 'yap-code', section: 'History', label: 'History', desc: 'Every agent: its status, folder, when and cost', keywords: 'agents history past list cost open', anchor: 'yap-code-history' },
 
   // ---- Speech-to-Text ----
   { page: 'models', section: 'Speech model', label: 'Speech model', desc: 'The model that turns your voice into text', keywords: 'speech to text transcription model parakeet whisper canary moonshine download', anchor: 'stt-model' },

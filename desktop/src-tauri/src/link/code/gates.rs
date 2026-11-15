@@ -16,8 +16,8 @@
 //! least [`SINCE_SENT`] after it was sent and [`MIN_SHOWN_MS`] after the
 //! page showed it (the phone says how long), and once.
 //!
-//! **Rate limits** per phone ([`Limits`]): 30 Code actions a minute, one
-//! Undo every 10 s, 4 pages (`agent_log`, `agent_diff`) a second.
+//! **Rate limits** per phone ([`Limits`]): 30 Code actions a minute, 4
+//! pages (`agent_log`, `agent_diff`) a second.
 //!
 //! What a phone can never do has no message at all: Bypass's one-time OK,
 //! adding, removing or capping a workspace, Settings → Yap Code, pairing,
@@ -37,8 +37,6 @@ pub const SINCE_SENT: Duration = Duration::from_millis(700);
 pub use crate::agents::remote::PHONE_MAX;
 /// Code actions a phone may take a minute.
 pub const ACTIONS_A_MINUTE: usize = 30;
-/// One Undo this often.
-pub const UNDO_EVERY: Duration = Duration::from_secs(10);
 /// Pages (`agent_log`, `agent_diff`) a second.
 pub const PAGES_A_SECOND: usize = 4;
 
@@ -237,7 +235,6 @@ impl Shown {
 #[derive(Debug, Default)]
 pub struct Limits {
     actions: VecDeque<Instant>,
-    undo: Option<Instant>,
     pages: VecDeque<Instant>,
 }
 
@@ -256,16 +253,6 @@ impl Limits {
     /// A Code action (send, stop, continue, mode, go ahead, a message).
     pub fn act(&mut self, now: Instant) -> Result<(), Refusal> {
         within(&mut self.actions, now, Duration::from_secs(60), ACTIONS_A_MINUTE)
-    }
-
-    /// An Undo: one every [`UNDO_EVERY`], and an action too.
-    pub fn undo(&mut self, now: Instant) -> Result<(), Refusal> {
-        if self.undo.is_some_and(|t| now.saturating_duration_since(t) < UNDO_EVERY) {
-            return Err(Refusal::Slow);
-        }
-        self.act(now)?;
-        self.undo = Some(now);
-        Ok(())
     }
 
     /// A page of an agent's log or a file's diff.
@@ -364,11 +351,6 @@ mod tests {
         }
         assert_eq!(l.act(t0 + Duration::from_secs(1)), Err(Refusal::Slow), "31 in a minute");
         assert_eq!(l.act(t0 + Duration::from_secs(61)), Ok(()), "a minute on");
-        // Undo: one every 10 s.
-        let mut l = Limits::default();
-        assert_eq!(l.undo(t0), Ok(()));
-        assert_eq!(l.undo(t0 + Duration::from_secs(9)), Err(Refusal::Slow));
-        assert_eq!(l.undo(t0 + UNDO_EVERY), Ok(()));
         // Pages: 4 a second.
         let mut l = Limits::default();
         for i in 0..PAGES_A_SECOND {

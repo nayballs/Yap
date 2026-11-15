@@ -382,7 +382,6 @@ Phone → PC:
 | `agent_stop {id}` / `agent_continue {id}` | Stop / Continue (`acted` back) |
 | `agent_message {id, text}` | "Tell the agent…" (4,000 characters at most): its next turn; while it works, handed to it now and read at its next step (a turn at Auto or below: the phone's words never join one above it, and wait for a turn of their own) |
 | `agent_go_ahead {id}` | a report card's Go ahead |
-| `agent_undo {id, turn?, sure: true}` | Undo this turn / Undo all, after the phone's own confirm (`sure`, else refused) |
 | `approve {id, allow, shownMs}` | Allow once / Deny (Go ahead / Not yet on a plan) on a card this phone was sent |
 | `confirm {id, yes, shownMs}` | Start / Don't on an ask-first card this phone was sent (the same fresh-tap rule) |
 | `set_mode {chat, mode}` | a Code chat's Mode: Plan, Manual, Accept edits or Auto, under its workspace's cap |
@@ -463,8 +462,8 @@ the action is one a phone may take.
   allowed from Kitchen tablet."). The page answers only from a trusted
   click, its buttons asleep for the card's first 400 ms on screen (wave 2,
   `cards.js`). The ask-first card's `confirm` keeps the same rule.
-- **Rate limits per phone** (`gates::Limits`): 30 Code actions a minute, Undo
-  once every 10 s, 4 pages (`agent_open`, `agent_log`, `agent_diff`) a second:
+- **Rate limits per phone** (`gates::Limits`): 30 Code actions a minute, 4
+  pages (`agent_open`, `agent_log`, `agent_diff`) a second:
   "Slow down a little: Yap on your PC is still doing the last one."
 - **The audit trail**: every remote action in `remote_control.json`'s last 200
   (who — the phone's name and id —, what — approved, denied, plan go ahead,
@@ -548,8 +547,8 @@ ask-first card's words: `views/chat/pageConfirm.js`, served at `core/`) and
   time (`agent_diff`, `diff.js`: marked lines, scrolled inside the code,
   Wrap, "see the rest on your PC" past 400 lines), commands (three, then
   Show N more), what wasn't allowed, its final words; its cards at the live
-  end; Stop / Continue / Go ahead / Undo this turn / Undo all (the phone's
-  own confirm sheet listing the files, then `sure: true`); "Tell the
+  end; Stop / Continue / Go ahead (no Undo since 16 Nov 2026, as the Claude
+  app: the person asks Claude to take a change back); "Tell the
   agent…" is the composer (`agent_message`; the words back in the box if the
   PC says no). It follows the live end until scrolled up (↓), merges the
   snapshot and live events by their log line, opens again on a missing
@@ -1029,7 +1028,7 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   live and said, a plan's Go ahead, the Mode up to Auto with the cap and a
   Bypass chat, the Environment), `agent-view.spec.js` (the snapshot's parts,
   live events in order, a missing number and `agent_resync`, a status
-  turning, older steps, a diff with Wrap, Stop and Continue, Undo's confirm,
+  turning, older steps, a diff with Wrap, Stop and Continue, no Undo,
   "Tell the agent…" and its refusal), `approve.spec.js` (asleep at first
   and an early tap ignored, a script's click ignored, `shownMs`,
   "Allowing…" then "Allowed", answered elsewhere, the PC's refusals, timed

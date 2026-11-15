@@ -935,8 +935,8 @@
   brief, model, effort, mode, how it pays, Claude Code's session id, status
   and times, the files it changed, the commands it ran, what it wasn't
   allowed to do, its final words, its cost so far — Claude Code's estimate —,
-  a problem, whether it was a plan or asks something, reported, undone,
-  swept, and `noBackups` when it changed files with no backups made; each
+  a problem, whether it was a plan or asks something, reported and swept
+  (`undone` and `noBackups` from an older Yap are ignored); each
   turn's to-do list, `todos`, and what it used, `usage` — its tokens, its
   context's fill against the model's window, an estimate of its cost while
   Claude Code hasn't priced it: 2026-11-08, `agents/usage.rs`, new fields of
@@ -966,16 +966,16 @@
   (`bypassConfirmed`); and `%APPDATA%/yap/agents/`, a folder per agent:
   `log.jsonl` (its `yap-agent` events: its steps, words, diffs and what its commands printed; appended line by line, at most 5,000
   lines), `pictures/` (the pictures its steps came back with, as PNGs, at
-  most 120; yap-code.md "A step's pictures") and `backup/` (the files it changed as they were before it, as
-  `0001-<name>`…, with `manifest.json`: the original paths, which were
-  created). An agent's log, pictures and backups go 7 days after it ended (its record
+  most 120; yap-code.md "A step's pictures"). No `backup/` since 16 Nov 2026
+  (an older Yap's is deleted at start): files go back through Claude Code's
+  own checkpoints (yap-code.md "Rewind's files"). An agent's log and pictures go 7 days after it ended (its record
   stays, `swept`); an agent still live when Yap starts is marked interrupted.
   `%APPDATA%/yap/workspaces.json` (`agents/workspaces.rs`) — the folders agents may
   work in: name, path, an optional cap on the mode, when added. Files of
   their own, never fields in chats.json (an older Yap drops fields it doesn't
   know). All three go with **Yap Code** in Delete some of your data (running agents
   stopped first; the files the agents changed stay) and come in Download your
-  data (the backups never do). Nothing secret.
+  data. Nothing secret.
 - **Claude Code's run files**: `%TEMP%\yap-claude\<id>-<tag>\` — a run's
   `settings.json` (its hooks), `mcp.json` (Yap's run endpoint; the run's key
   named as `${YAP_RUN_KEY}`, never written: it's only in the run's

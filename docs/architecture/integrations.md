@@ -65,7 +65,7 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   build fails with "Access is denied" (2026-10-17, Claude Code's `~/.claude.json`).
   The launcher (`dev-update.ps1`) also stops any such helper before building.
 - **`integrations/claude_live.rs`** (+ `claude_live/`: `server`, `rpc`,
-  `approve`, `backup`, `reads`, `agents`, `eyes`, `cards`, `turn`) — **the endpoint Claude Code runs talk back
+  `approve`, `reads`, `agents`, `eyes`, `cards`, `turn`) — **the endpoint Claude Code runs talk back
   to** (2026-11-07): Yap starts the person's own Claude Code for Chat on
   their Claude plan and for [Yap Code](./yap-code.md) (ai-models.md, "The Claude Code
   engine"), and those runs reach this. Below.
@@ -950,16 +950,15 @@ no Local API (the bridge can be off), and it reaches the live UI.
   so a permission prompt waiting for the person never holds up a read.
 - **A run** (`register_run(RunSpec)` → `RunHandle`): its label, its tools
   (`Tools::Chat`: read only, plus Yap Code's with `RunSpec::agents`; `Tools::Agent`:
-  `approve`), where its backups go,
+  `approve`),
   and who to ask (`Approval`: the agent's id, its conversation, typed or by
   voice). **A key per run**: 32 random bytes, compared by SHA-256, sent as
   `Authorization: Bearer`. The handle gives the run's `--mcp-config` (Yap's
   server only, `type: "http"`, its `timeout` 660,000 ms: Claude Code's limit
   per tool call, which also lifts its 5-minute idle floor for an HTTP server,
-  so a prompt can wait its 10 minutes) and its `--settings` (the backup hook,
-  for a run with a backup folder). **The key is never in a file**: both name
-  it as `Bearer ${YAP_RUN_KEY}` (the hook lists `YAP_RUN_KEY` in
-  `allowedEnvVars`, as an http hook must), and the key itself is only in
+  so a prompt can wait its 10 minutes) and its `--settings` (nothing of
+  Yap's: `{}`). **The key is never in a file**: the MCP config names
+  it as `Bearer ${YAP_RUN_KEY}`, and the key itself is only in
   memory and in the run's environment (`RunHandle::env` → `Spec::env`; the
   scrub keeps Yap's own names), which Claude Code fills them in from. Never on
   a command line or in a log. (The run's own commands inherit its
@@ -1098,28 +1097,14 @@ no Local API (the bridge can be off), and it reaches the live UI.
   `search_memory` or connectors'; an agent Chat sent out lists `approve`
   alone
   ([yap-code.md](./yap-code.md#a-code-chat-that-works-directly)).
-- **The backup hook** (`backup.rs`): before Claude Code edits or writes a
-  file, an http `PreToolUse` hook on `Edit|Write|MultiEdit|NotebookEdit`
-  (`POST /hook/<run>/PreToolUse`, 60 s `timeout`) copies it into the run's
-  backup folder once (the first copy wins), with a `manifest.json`; a file
-  that didn't exist is noted as created; one over 50 MB as too big. It always
-  answers `{}` at once, never blocking or denying a tool. `restore` (Undo the agent's changes)
-  puts them back and deletes what the run created, touching only the paths
-  the manifest names. A denied Write is still noted as created.
-  [yap-code.md](./yap-code.md#undo-and-backups). The files a command made or
-  changed (no hook runs for one) are added to the same manifest at the turn's
-  end, marked `command`, and Undo leaves one alone once it changed after the
-  turn ([yap-code.md](./yap-code.md#files-a-command-made-or-changed)).
-- **Limits**: hooks can be turned off by a managed policy
-  (`disableAllHooks`, `allowManagedHooksOnly`, `allowedHttpHookUrls`;
-  `httpHookAllowedEnvVars` can keep the key out of the header) and never run
-  under `--bare`. Then no
-  backups are made: the runner marks an agent whose edits went through with an
-  empty backup list (`noBackups`), its tab says "No backups were made, so
-  Undo can't put these files back.", and Settings → Yap Code says Undo needs
-  Claude Code's hooks ([yap-code.md](./yap-code.md#undo-and-backups)). The
-  endpoint's requests aren't in the network receipts (they never leave this
-  PC).
+- **No backup hook** (16 Nov 2026): until then an http `PreToolUse` hook on
+  Claude Code's edit tools copied each file into Yap's own backups, for an
+  Undo of Yap's. Now an agent's files go back as the Claude app's Rewind
+  takes them, through Claude Code's own file checkpoints
+  (`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING`, `--rewind-files`:
+  [yap-code.md](./yap-code.md#rewinds-files-claude-codes-checkpoints)); the
+  endpoint has no `/hook/` route. Its requests aren't in the network
+  receipts (they never leave this PC).
 - **The log** has ids, counts, tool names and outcomes, never a command, a
   file's path or contents, a prompt or a key.
 - Tested in `claude_live/tests.rs` (the listener's refusals, the MCP subset,
