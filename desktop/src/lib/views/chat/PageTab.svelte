@@ -4,8 +4,13 @@
   // the workspace, in DocPanel's own chunk.
   // - The page itself is its own webview, Rust's (its own WebView2 profile,
   //   no Yap IPC, public web pages only), laid over this tab's stage: the
-  //   stage's place goes to Rust in physical pixels whenever it moves
-  //   (`page_view_place`), and the page hides whenever anything of Yap's
+  //   stage's place goes to Rust in physical pixels in the frame it moves,
+  //   numbered so the newest wins (`page_view_place`, pagePlace.js); while
+  //   the stage moves (the split or the list's edge held, Yap's window
+  //   resized by its edge) a still of the page stands in for it there and
+  //   the live page waits under Yap's page, as a window of its own can't
+  //   keep up with the layout frame by frame (15 Nov 2026: a fast drag left
+  //   it over the thread, or a gap beside the split); and the page hides whenever anything of Yap's
   //   covers the stage (a menu, a dialog, Settings, a toast) or the tab goes
   //   — so it keeps its place (its scroll, a map's zoom) while another tab
   //   shows, and closes with its tab (chatDoc.svelte.js `closeTab`).
@@ -56,6 +61,8 @@
   import ServersMenu from './ServersMenu.svelte';
   import PageAnnotate from './PageAnnotate.svelte';
   import { addPicked } from '../../stores/pickedElements.svelte.js';
+  import { layoutMotion } from './pageMotion.svelte.js';
+  import { nextSeq, stillFits, pixelShift, edgeColour, STILL_FRESH_MS, REFRESH_MS } from './pagePlace.js';
 
   /**
    * `doc`: the panel's state (its `page`); `narrow`: no room beside the chat
@@ -169,20 +176,30 @@
       }
     }
     const dpr = window.devicePixelRatio || 1;
+    const shift = pixelShift(r, dpr);
+    if (shift.x !== standShift.x || shift.y !== standShift.y) standShift = shift;
     return { x: Math.round(r.left * dpr), y: Math.round(r.top * dpr), w: Math.round(r.width * dpr), h: Math.round(r.height * dpr) };
   }
 
   let sent = '';
   let timer = 0;
   let ready = false;
+  // 'under' while a still stands in for the page (pagePlace.js): laid out there, under Yap's own page.
+  let layer = 'top';
 
+  /**
+   * The page put where the stage is now (unless it's there already), its
+   * place numbered (the newest wins in Rust: `nextSeq`). Every frame the
+   * stage changes (a ResizeObserver; each frame of a drag), the window's
+   * resize, and a slow check besides; the answer, to wait for.
+   */
   function follow() {
     if (!ready) return;
     const b = measure();
-    const now = JSON.stringify(b);
+    const now = JSON.stringify([b, b && layer]);
     if (now === sent) return;
     sent = now;
-    invoke('page_view_place', { key, bounds: b }).catch(() => {});
+    return invoke('page_view_place', { key, bounds: b, seq: nextSeq(), layer }).catch(() => {});
   }
 
   let alive = true;
@@ -194,6 +211,201 @@
     sent = '';
     follow();
   }
+
+  // ---- a still in the page's place while the stage moves (pagePlace.js) -------------------
+
+  /** The still standing in for the page ({url, w, h, dpr, fill}: physical px), while the stage moves. */
+  let standIn = $state(null);
+  /** What rounding the stage's place to a device pixel moved the page's window by (CSS px). */
+  let standShift = $state({ x: 0, y: 0 });
+  /**
+   * One taken ready (a handle under the pointer, the window's edge pressed), with when; and the one being
+   * taken ready. Each still has one owner, who lets it go (`dropStill`): a move that starts while one's
+   * being taken ready takes it over.
+   */
+  let warm = null;
+  let warming = null;
+  // Each start or end of a move: a step of an older one finds a newer number and stops.
+  let gen = 0;
+  let moving = false;
+  /** Yap's window being resized by its edge (Rust's size-move loop: `yap-window-sizing`). */
+  let sizing = $state(false);
+
+  const frames = (n) => new Promise((done) => {
+    const step = (left) => (left <= 0 ? done() : requestAnimationFrame(() => step(left - 1)));
+    step(n);
+  });
+
+  const dropStill = (s) => s && URL.revokeObjectURL(s.url);
+
+  /** A still of the page as it's in view now (Rust's, at the screen's pixels), decoded: the caller's to let go. */
+  async function takeStill() {
+    let url = '';
+    try {
+      const dpr = window.devicePixelRatio || 1;
+      const buf = await invoke('page_view_still', { key });
+      url = URL.createObjectURL(new Blob([buf], { type: 'image/png' }));
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      // The page's background, from a column clear of its scrollbar.
+      let fill = '';
+      try {
+        const c = document.createElement('canvas');
+        c.width = 1;
+        c.height = Math.min(h, 256);
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.drawImage(img, Math.max(0, w - Math.round(24 * dpr)), 0, 1, h, 0, 0, 1, c.height);
+        fill = edgeColour(g.getImageData(0, 0, 1, c.height).data);
+      } catch {
+        /* no telling: the stage's own */
+      }
+      return { url, w, h, dpr, fill, at: performance.now() };
+    } catch {
+      if (url) URL.revokeObjectURL(url);
+      return null;
+    }
+  }
+
+  /** The still `s` in the page's place (the one before let go once it's drawn over). */
+  function showStill(s) {
+    const was = standIn;
+    standIn = s;
+    if (was && was !== s) frames(2).then(() => dropStill(was));
+  }
+
+  /** Can a still stand in for this page now (a page, loaded or loading, not being annotated)? */
+  const stillable = () => ready && alive && !blank && !failed && !still;
+
+  /** A still taken ready for a move that may come (a handle under the pointer, the window's edge pressed). */
+  function warmUp() {
+    if (!stillable() || moving || warming) return;
+    if (warm && performance.now() - warm.at < STILL_FRESH_MS / 2) return;
+    const p = takeStill();
+    warming = p;
+    p.then((s) => {
+      // (Taken over by a move: its still now.)
+      if (warming !== p) return;
+      warming = null;
+      if (!s) return;
+      if (moving || !alive) return dropStill(s);
+      dropStill(warm);
+      warm = s;
+    });
+  }
+
+  /**
+   * **The stage starts to move**: a still in the page's place (the one taken
+   * ready, if it's recent and the page's size, else one taken now — the live
+   * page follows meanwhile), drawn; then the page under Yap's own page,
+   * still laid out where the stage is every frame (so it's ready at the new
+   * size when the move ends), and a newer still of it whenever one's taken.
+   */
+  async function moveStart() {
+    if (moving) return;
+    moving = true;
+    const g = ++gen;
+    // Placed every frame of the move (in sight until a still stands in for it, under Yap's page after).
+    const everyFrame = () => {
+      if (g !== gen) return;
+      follow();
+      requestAnimationFrame(everyFrame);
+    };
+    requestAnimationFrame(everyFrame);
+    if (!stillable()) {
+      // (No still here: the page follows as it is, in sight.)
+      if (standIn) showStill(null);
+      layer = 'top';
+      return;
+    }
+    let s = stillFits(warm, measure()) ? warm : null;
+    if (s) warm = null;
+    else if (warming) {
+      // One being taken ready: the move's.
+      const p = warming;
+      warming = null;
+      s = await p;
+    } else s = await takeStill();
+    if (g !== gen || !s) return dropStill(s);
+    showStill(s);
+    await tick();
+    await frames(2);
+    if (g !== gen) return;
+    layer = 'under';
+    follow();
+    // The page under, laid out again as the stage changes: its newer stills, one after another (at most one
+    // every REFRESH_MS: the still moves with the stage every frame; only what's in it follows a little behind).
+    let shown = sent;
+    let last = 0;
+    while (g === gen) {
+      await frames(1);
+      if (sent === shown || performance.now() - last < REFRESH_MS) continue;
+      shown = sent;
+      last = performance.now();
+      const next = await takeStill();
+      if (g !== gen) return dropStill(next);
+      if (next) showStill(next);
+    }
+  }
+
+  /**
+   * **It stops**: the page, laid out under at its last place, gets a moment
+   * to draw there, comes up in sight, and the still goes once it's drawn over.
+   */
+  async function moveEnd() {
+    if (!moving) return;
+    moving = false;
+    const g = ++gen;
+    dropStill(warm);
+    warm = null;
+    if (!standIn) {
+      layer = 'top';
+      follow();
+      return;
+    }
+    follow();
+    await frames(3);
+    if (g !== gen) return;
+    layer = 'top';
+    await follow();
+    await frames(2);
+    if (g !== gen) return;
+    showStill(null);
+  }
+
+  $effect(() => {
+    const on = layoutMotion.held || sizing;
+    untrack(() => (on ? moveStart() : moveEnd()));
+  });
+  let near = untrack(() => layoutMotion.near);
+  $effect(() => {
+    if (layoutMotion.near !== near) {
+      near = layoutMotion.near;
+      untrack(warmUp);
+    }
+  });
+
+  onMount(() => {
+    // Each frame the stage changes size (the split dragged, a strip over it): placed in that frame.
+    const ro = new ResizeObserver(() => follow());
+    if (stageEl) ro.observe(stageEl);
+    let unSizing = null;
+    listen('yap-window-sizing', (e) => {
+      const phase = e.payload?.phase;
+      if (phase === 'on') warmUp();
+      else if (phase === 'sizing') sizing = true;
+      else if (phase === 'off') sizing = false;
+    }).then((u) => (alive ? (unSizing = u) : u()));
+    return () => {
+      ro.disconnect();
+      unSizing?.();
+      gen++;
+      dropStill(warm);
+      dropStill(standIn);
+    };
+  });
 
   onMount(() => {
     alive = true;
@@ -221,8 +433,8 @@
     } else {
       // Made (or found) with its place now, then followed.
       const first = measure();
-      sent = JSON.stringify(first);
-      invoke('page_view_show', { key, url: went || page.url, section: went ? null : page.section || null, bounds: first })
+      sent = JSON.stringify([first, first && layer]);
+      invoke('page_view_show', { key, url: went || page.url, section: went ? null : page.section || null, bounds: first, seq: nextSeq() })
         .then(placed)
         .catch((e) => {
           if (alive) failed = String(e);
@@ -238,7 +450,7 @@
       un?.();
       unDialog?.();
       // Out of sight, its place kept (its tab closed closes it: chatDoc.svelte.js).
-      invoke('page_view_place', { key, bounds: null }).catch(() => {});
+      invoke('page_view_place', { key, bounds: null, seq: nextSeq() }).catch(() => {});
     };
   });
 
@@ -278,7 +490,7 @@
     addrError = '';
     failed = '';
     try {
-      const url = await invoke('page_view_go', { key, typed: words, bounds: measure() });
+      const url = await invoke('page_view_go', { key, typed: words, bounds: measure(), seq: nextSeq() });
       if (!alive) return;
       doc.pageMoved(key, { went: url });
       typing = false;
@@ -588,6 +800,20 @@
   <!-- The page's own webview sits over this (Rust's); under it, what shows
        until it's there, or when it couldn't open — or a new tab's start. -->
   <div class="stage" class:blank bind:this={stageEl} role="region" aria-label={blank ? 'New tab' : `The page: ${title}`} data-testid="chat-page-stage">
+    {#if standIn}
+      <!-- The stage on the move (the split dragged, Yap's window resized): a still of the page in its place, at
+           the screen's own pixels from its top left, the page's background past its right edge (pagePlace.js). -->
+      <div class="standin" style:background={standIn.fill || null} aria-hidden="true" data-testid="chat-page-standin">
+        <img
+          src={standIn.url}
+          alt=""
+          draggable="false"
+          style:width="{standIn.w / standIn.dpr}px"
+          style:height="{standIn.h / standIn.dpr}px"
+          style:transform="translate({standShift.x}px, {standShift.y}px)"
+        />
+      </div>
+    {/if}
     {#if still}
       <PageAnnotate bind:this={annotEl} src={still} tool={tools?.tool === 'shape' ? 'shape' : tools?.tool} shape={tools?.shape} onmarks={(n) => (marks = n)} />
     {/if}
@@ -1159,6 +1385,21 @@
   /* A new tab: the pages this chat read, centred; the hint at the foot. */
   .stage.blank {
     background: var(--yap-paper);
+  }
+  /* The still standing in for the page while the stage moves: over what's under the page, never in the way. */
+  .standin {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .standin img {
+    position: absolute;
+    left: 0;
+    top: 0;
+    max-width: none;
+    user-select: none;
   }
   .newtab {
     position: absolute;

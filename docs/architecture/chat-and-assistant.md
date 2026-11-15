@@ -1178,6 +1178,89 @@ one side.
   report), `eyes/tests.rs` (listed with the web's pictures and with picture
   files alone, refused away from Chat), `gates.rs` and `fit.rs` (offered
   with show_picture, kept last); e2e `chat-share.spec.js` (below).
+- **`chat/made.rs`** (+ `made/serve.rs`) — **visuals in the answer** (15
+  Nov 2026, after the Claude app's inline widgets, "Made a visual": its
+  look and words, nothing of its code). Asked for a diagram and a tip
+  calculator, Opus could only hand back code, then tried a `data:` address
+  in Yap's browser and was refused. **`show_visual {title, code}`**
+  (`SHOW_VISUAL`, `definitions`, `DESCRIPTION`): `code` is SVG (it starts
+  with `<svg`, an XML prologue or comments may come first: `format_of`) or
+  an HTML fragment (a whole document is kept as it is); the colours it may
+  use are named (`var(--text)`, `--muted`, `--surface`, `--border`,
+  `--accent`, `--c1`…`--c6` with `-soft` fills); scripts inline, or Chart.js
+  4.4.1 and D3 7.9.0 from cdnjs; `sendPrompt(text)` sends the person's next
+  message when they click. **Who and where** (`offered`, `gates.rs`
+  `visuals`): a strong model that calls tools (`rich::strong`), with a
+  thread to show it in — Chat, or the Voice Assistant with Chat in view;
+  never across the meetings; a small context sheds it fifth
+  (`fit.rs` `Family::Visuals`, ~280 tokens) unless the question asks for one
+  (`asks_for_visual`: draw, diagram, chart, graph, plot, widget, calculator,
+  "show me how"…). **The line** (`INSTRUCTIONS`, in the stable prompt while
+  offered): "draw…", "show me how…", "make me a small calculator" → the
+  tool, never its code in the answer, a sentence or two on what it shows.
+  **A plan chat and a Code chat's own session** get it over Yap's run
+  endpoint (`claude_live/rpc.rs` `visual_tool`, `visual_call`; listed for the
+  whole session, each turn saying whether it may: `turn::Context::visuals`
+  — a question asked in Chat, typed or out loud with Chat in view
+  (`plan.rs` `run_context`), a Code chat's turn of the person's, never a
+  phone's (`agents/runner.rs`, which now opens the turn's context for that
+  alone); their prompts say when (`plan.rs` `VISUALS`, `rpc.rs`
+  `VISUALS_INSTRUCTIONS`: in a Code chat, rather than writing a file unless
+  they want it in the project); its row says "Made a visual: …"
+  (`agents/steps.rs`). **Refused** (the reason for the model, a chip): no
+  code; over 256 KB (`MAX_CODE`); a `<script src>` that isn't on the
+  allow-list (`refused_scripts`: "write the script inline, or use …"); no
+  chat to show it in; more than 8 for one question (`MAX_PER_QUESTION`).
+  **Kept with the chat, never in chats.json** (an older Yap's save would
+  drop a field it doesn't know): `chat-made/<chat>/made.json` (`Index`:
+  `created` — the conversation's `createdTs`, so a reused id's folder is
+  another chat's, never shown and gone at the next write — and a `Made`
+  each: `id` `v_` + 16 hex, `kind` "visual", `title`, `format`, `after` —
+  the question it answers, its index and time (`anchor_of`: the last
+  message from the person) —, `at`, `outside`, `bytes`) and its code as
+  `<id>.svg` / `<id>.html`; written one at a time, atomically, an unreadable
+  index never written over; deleted with the chat (`chats::delete_many` →
+  `delete_conversations`, `chats::reset` → `reset`: the libraries too), in
+  Reset app and Delete some of your data (Chats: `chat-made/`), and in
+  Download your data (`chat-made/<chat>/<id>.svg|html`). **The page hears
+  it** at once (`yap-chat-made`, `{conversation, made}`) and reads a chat's
+  with `chat_made_list {conversationId}`. **Made after outside content**
+  (`outside`: the tool loop's `Seen`; a run's web, search or connector
+  marks, or a question with web content in it): a button in it that sends
+  a message fills the box instead (below). **The frame's document**
+  (`made/serve.rs`, the `yapmade` scheme, `http://yapmade.localhost/v/<chat>/<id>`
+  in WebView2, `/`s sent as `%2F` by `convertFileSrc`): the visual in Yap's
+  page (`document`: `<div id="yap-visual">`, the bridge and base style first
+  in the head; a whole document of the model's gets them first in its own
+  head) with **its policy in the response** (`csp`): `default-src 'none'`,
+  `script-src 'unsafe-inline' <origin>/lib/`, `style-src 'unsafe-inline'`,
+  `img-src data: blob:`, `font-src data:`, `media-src data: blob:`,
+  `connect-src`, `frame-src`, `child-src`, `worker-src`, `object-src`,
+  `manifest-src` and `base-uri` `'none'`, `form-action 'none'` and **CSP's
+  own `sandbox allow-scripts`** (an opaque origin, whatever frames it); no
+  `Access-Control-Allow-Origin` (no other page reads it), `no-store`,
+  `nosniff`, `no-referrer`; anything but a visual of that chat by its id, or
+  a library of the list, is a 404. **The bridge** (`BRIDGE`, first in the
+  head): the theme's colours from the page (only `--name` keys, short
+  string values; the body hidden until they come, 400 ms at most), the
+  body's height back (a `ResizeObserver`), `window.sendPrompt` (text, ≤
+  4,000 characters) and a link's address on a click (never followed in the
+  frame); every message carries `yapVisual: 1`. **The base style**
+  (`BASE_STYLE`): a transparent page, Yap's font and text colour, buttons,
+  fields and sliders in the tokens, an SVG fitted to the width. **The
+  libraries** (`LIBS`, `lib_for`, `point_libraries`): Chart.js 4.4.1
+  (`chart.umd.min.js`) and D3 7.9.0 (`d3.min.js`) — the addresses a model
+  writes for them on cdnjs, jsDelivr, unpkg and d3js.org pointed at
+  `/lib/<file>`, which fetches the first (cdnjs) once through
+  `privacy/net.rs` ("A chart library for a visual", `VisualLibrary`) and
+  keeps it in `chat-made/lib/` only when its SHA-256 is the one pinned
+  (`verified`); a failure is a 502 and the visual's chart doesn't draw.
+  Logs: ids, kinds, counts and sizes, never a title or the code. Tests:
+  unit (`made/tests.rs`: the format, ids, kept and read back by chat, a
+  reused id, an unreadable index, the anchor, where it's offered and its
+  weight, a question asking for one, refusals, the scripts and the
+  libraries, the policy, the document, the scheme's 404s); `gates.rs`,
+  `fit.rs` (offered as the gates say); e2e `chat-visuals.spec.js` (below).
 - **`chat/activity.rs`** — **what Chat is doing now** (2026-10-31): while
   a turn runs, the thread shows one line — a small moving mark, the step
   under way and the turn's time — as the Claude Code app does:
@@ -2230,6 +2313,46 @@ deleted: "Moved or deleted"; a seeded agent's report card; the shares an
 older Yap's save dropped, put back from `chat_files.json`. Screenshots light
 and dark.
 
+**Visuals in the answer** (15 Nov 2026, `VisualFrame.svelte`, `visualBridge.js`,
+`made.svelte.js`; `chat/made.rs`): "Made a visual" in the muted line's
+grey with ⤢ and ⌄, as the Claude app has it, over a frame in a hairline
+box the column's width — **above the answer's words** (the words come
+after the call: `placeVisuals` puts each in the first answer after its
+question, `questionIndex` finding it by its time, or its place while a
+question just sent has none here; a Code chat's turn still working shows
+it under the question's work, `ChatThread`). The frame (`sandbox="allow-scripts"`,
+`referrerpolicy="no-referrer"`, `loading="lazy"`) **sizes to what it
+draws** (the bridge's height, 24–2,400 px) and **takes Yap's colours**
+(`themeVars`: `--text` from `--yap-fg`, `--surface`, `--border`,
+`--accent`…, a six-colour series per theme with `color-mix` soft fills,
+the body's font), sent when it's ready and again whenever
+`data-yap-theme` changes. A frame that navigates itself away (a script's
+`location`) is put back (its second `load`). **⤢** shows it large in a
+dialog over a scrim (Esc or a click outside closes it); **⌄** folds it
+(the frame goes, `aria-expanded`). **One listener for every frame**
+(`registerFrame`): a message counts only by the frame it came from
+(`event.source`), never by what it says; `ready` → the colours; `size` →
+the height; `prompt` → **only while the person's last click was in that
+frame** (`document.activeElement`), text only, trimmed, ≤ 4,000
+characters, one each 1.5 s — into **its own chat** as if typed
+(`chat.send({text})`), or, made after outside content or while an answer's
+being written, into the box with "From the visual" for the person to read
+and send; `link` → their browser (`open_external`, http and https only, on
+their click the same way). Anything else is ignored. **Kept**: read with
+the chat (`made.load`, merged with any heard meanwhile), heard as made
+(`yap-chat-made`); a Rewind that takes the question takes the visual off
+the thread (its question's gone). e2e `chat-visuals.spec.js`: a diagram
+drawn above the answer, sized to its drawing, in the light and then the
+dark theme's colours, folded, seen large, kept in `chat-made/` (not
+chats.json) and shown again; a probe inside the frame finds no
+`__TAURI_INTERNALS__` or `ipc`, can't read the page, storage, the network
+(the policy's own `connect-src` and `img-src` violations), a popup or the
+window's address, and what it posts pretending to be Yap or sends with no
+click does nothing (no link opened, no message); its button, clicked,
+sends "Make the tip 20%" into the chat and the model answers it; its link
+opens in the person's browser; a visual made after outside content (seeded)
+fills the box instead.
+
 **Chat looks at the screen** (2026-11-01, `chat/see_screen.rs`): asked
 "here are the speakers, can you have a look?" with the page open in another
 window, Claude Haiku 5.5 said "I can't see your screen, but you can snip any
@@ -2767,11 +2890,42 @@ of sight. What they share is said once, in the line.
   it in place too — Google's sponsored results — opened it twice; a mail
   link to their mail app), **downloads off**, **every permission denied**, DevTools only in a
   debug build. It's a child window of the main window ("the host") laid over
-  the tab's stage: the page measures the stage every 150 ms (and on resize)
-  and sends its place in physical pixels (`page_view_place`), or `null` when
+  the tab's stage: the page measures the stage in the frame it changes size
+  (a `ResizeObserver`), on the window's resize, every frame of a move, and
+  every 150 ms besides, and sends its place in physical pixels
+  (`page_view_place`), or `null` when
   something of Yap's covers it (a 3 × 3 grid of `elementFromPoint`: a menu,
   a dialog, Settings, a toast) or it's out of sight — the native window would
-  cover Yap's own UI otherwise. So the page **keeps its place** (scroll, a
+  cover Yap's own UI otherwise. **Resizing smoothly** (15 Nov 2026: a fast
+  drag of the split left the page trailing the layout, over the thread one
+  way, a gap beside the split the other, until the 150 ms check caught up):
+  every place carries a number that only rises (`pagePlace.js` `nextSeq`, the
+  view's clock) and Rust applies only the newest (`view::Latest`: two sends
+  can reach the main thread out of order, and an older one last left the page
+  out of place). A native window placed over IPC is always a frame or two
+  behind the web layout around it, so **while the stage moves** — the split or
+  the list's edge held (`pageMotion.svelte.js`, set by ChatView), Yap's
+  window resized by its edge (its size-move loop, watched by a subclass:
+  `view::SizeLoop`, `yap-window-sizing` `on` / `sizing` / `off`) — **a still
+  of the page stands in for it** in the stage: Yap's own page draws it, so it
+  moves with everything else in every frame. The still is `page_view_still`
+  (the page's `CapturePreview` PNG as bytes, ~25–30 ms), taken ready when the
+  pointer comes over a handle or the window's edge is pressed, else at the
+  press (the live page follows every frame meanwhile); it sits at the stage's
+  top left at the screen's own pixels, clipped to the stage, the page's own
+  background (`edgeColour`, read off its right edge) past it. Meanwhile the
+  live page is laid out over the stage every frame but **under Yap's page**
+  (`Layer::Under`, `HWND_BOTTOM`: drawn, never seen), and a newer still of it
+  replaces the old at most every 50 ms, so what's in the still reflows as it
+  goes. Let go, it's laid out at its last place, comes up in sight (just
+  under Tauri's resizing edges, `TAURI_DRAG_RESIZE_BORDERS`, so the window's
+  edge still resizes it where the page reaches it), and the still goes two
+  frames later. A resize in one go (maximise, restore) just follows. Each place
+  also tells WebView2 its window moved (`NotifyParentWindowPositionChanged`:
+  a list's options open where the page is). The suite (`chat-pages.spec.js`) checks it from the
+  screen's own pixels: `e2e_window_picture` (Yap's window drawn whole by
+  Windows, the page's window in it) against CDP's shot of Yap's page.
+  So the page **keeps its place** (scroll, a
   map's zoom) while another tab shows, and **closes with its tab**
   (`page_view_close`); another conversation or leaving Chat closes them all;
   at most four stay alive (the least recently shown goes; when a new tab

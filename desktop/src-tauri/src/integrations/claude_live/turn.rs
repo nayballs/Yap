@@ -98,6 +98,10 @@ pub struct Context {
     /// **A Code chat's workspace** (its own session's turns): where its dev
     /// servers are (`preview_*`, `agents/servers.rs`). `None`: none offered.
     pub workspace: Option<String>,
+    /// **`show_visual` answers this turn** (`chat/made.rs`): a question
+    /// asked in Chat (typed, or out loud with Chat in view), whose thread
+    /// shows the visual. Off: refused, "answer in words".
+    pub visuals: bool,
 }
 
 /// The turn open now.

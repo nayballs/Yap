@@ -24,6 +24,8 @@ pub(super) enum Source {
     Files,
     /// `share_files`: files shared into the conversation (`chat/shares.rs`).
     Share,
+    /// `show_visual`: a visual in the answer itself (`chat/made.rs`).
+    Made,
     /// `look_at_screen` (`chat/see_screen.rs`).
     Screen,
     /// The browser beside the chat (`chat/pages.rs`: going, reading,
@@ -62,6 +64,8 @@ impl Source {
             Source::Files
         } else if extra.share.offers(name) {
             Source::Share
+        } else if extra.visuals && crate::chat::made::NAMES.contains(&name) {
+            Source::Made
         } else if crate::chat::see_screen::offers(extra.screen, name) {
             Source::Screen
         } else if web && crate::chat::pages::offers(extra.pictures, extra.act, name) {
@@ -229,6 +233,13 @@ impl Loop<'_> {
                     live.sink.send(crate::chat::stream::Event::Share { share });
                 }
                 run.result
+            }
+            Source::Made => {
+                // A visual in the answer itself (chat/made.rs): kept with the
+                // chat, the page hears it at once. Made after outside content,
+                // a button in it fills the box rather than sending.
+                let outside = self.seen().any();
+                crate::chat::made::show_visual(self.extra.conversation, &args, outside)
             }
             Source::Screen => {
                 // The screen as it is now (chat/see_screen.rs): its pictures

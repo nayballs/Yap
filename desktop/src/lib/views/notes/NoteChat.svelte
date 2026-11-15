@@ -11,6 +11,7 @@
   // Make me sound smart's, cite the meeting's lines (a pill opens the line).
   import { invoke } from '@tauri-apps/api/core';
   import { renderMarkdown } from '../../core/markdown.js';
+  import { markdownVisuals } from '../../ui/markdownVisuals.js';
   import { nextModel, modelLine, whereItRuns } from '../../core/aiModel.js';
   import { messageItems } from '../../core/itemMenus.js';
   import { MEETING_HELPERS, meetingHelpers } from '../../core/notepadText.js';
@@ -265,7 +266,7 @@
           <!-- renderMarkdown sanitises its output; a cited line's "[2]" is a
                pill that opens it (Make me sound smart, a Skill). -->
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-          <div class="cbody" onclick={(e) => clickAnswer(e, turn)}>{@html renderMarkdown(turn.text, turn.sources?.length ? { sources: turn.sources } : {})}</div>
+          <div class="cbody" onclick={(e) => clickAnswer(e, turn)} use:markdownVisuals>{@html renderMarkdown(turn.text, turn.sources?.length ? { sources: turn.sources } : {})}</div>
         {:else}
           <p class="cbody">{turn.text}</p>
         {/if}
