@@ -453,7 +453,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.1-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8" /></svg>
             <span class="opttext">
               <span class="optname">Attach files</span>
-              <span class="optdesc">Text, code, PDF and Word files, read on this PC</span>
+              <span class="optdesc">Text, code, PDF, Word and spreadsheet files, read on this PC</span>
             </span>
           </button>
           <!-- Snip to Chat (snip.rs): this window leaves the shot. -->

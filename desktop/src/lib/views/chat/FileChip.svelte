@@ -5,6 +5,8 @@
   // Past "Keep chat files": greyed, "removed". A PDF whose scanned pages were read with OCR says so ("OCR", its tooltip
   // how many). While Rust still reads one (`reading`: a scan's OCR takes a few seconds), "Reading…".
   import { invoke } from '@tauri-apps/api/core';
+  import { getContext } from 'svelte';
+  import { SHEETS } from './sheetView.js';
   import { toast } from '../../ui/toast.svelte.js';
   import { badgeOf, fileSize, fileTitle, ocrLine } from './chatFiles.js';
 
@@ -15,9 +17,15 @@
   const badge = $derived(badgeOf(file));
   const ocr = $derived(file.reading ? '' : ocrLine(file));
   let opening = $state(false);
+  // A spreadsheet opens beside the chat (SheetTab), where Chat has the panel.
+  const sheets = getContext(SHEETS) ?? null;
 
   async function open() {
     if (file.gone || file.reading || opening) return;
+    if (file.kind === 'sheet' && sheets) {
+      sheets.open(file);
+      return;
+    }
     opening = true;
     try {
       await invoke('chat_attachment_open', { id: file.id });

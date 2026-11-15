@@ -5,6 +5,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../../ui/toast.svelte.js';
 import { copyText } from '../../core/itemMenus.js';
+import { isSheetName } from './sheetView.js';
+
+/** A Code chat's spreadsheet beside the chat (SheetTab), as Excel draws it. */
+const showSheet = (doc, conversationId, rel) => doc.showSheet({ src: { from: 'workspace', conversation: conversationId, rel }, name: String(rel).split('/').pop() });
 
 /** Open `it` (an outputs.js row) from `doc` (the panel) in chat `conversationId`. */
 export async function openOutput(it, { doc, conversationId }) {
@@ -17,7 +21,8 @@ export async function openOutput(it, { doc, conversationId }) {
     return;
   }
   if (it?.kind === 'changed') {
-    doc.showFile({ rel: it.rel, line: null });
+    if (isSheetName(it.rel)) showSheet(doc, conversationId, it.rel);
+    else doc.showFile({ rel: it.rel, line: null });
     return;
   }
   if (it?.kind === 'shared') {
@@ -29,7 +34,8 @@ export async function openOutput(it, { doc, conversationId }) {
     try {
       const [ref] = await invoke('code_files_check', { conversation: conversationId, paths: [it.item.path] });
       if (ref) {
-        doc.showFile(ref);
+        if (isSheetName(ref.rel)) showSheet(doc, conversationId, ref.rel);
+        else doc.showFile(ref);
         return;
       }
       await invoke('chat_file_open', { conversation: conversationId, path: it.item.path });

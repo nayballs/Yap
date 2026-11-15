@@ -205,8 +205,8 @@ test('files dropped on Chat wait as chips; sent, their text goes before the ques
   await expect(boxFiles(main).nth(1)).toContainText('PDF');
   await expect(boxFiles(main).nth(1)).toContainText('seed-order.pdf');
   await expect(main.getByTestId('chat-attachments').locator('.shotchip')).toHaveCount(1);
-  // The spreadsheet: said plainly, not added.
-  await expect(main.getByText("Chat can't read budget.xlsx (a spreadsheet: save it as CSV to attach it).", { exact: false })).toBeVisible();
+  // A broken spreadsheet: said plainly, not added (a whole one is read: chat-sheets.spec.js).
+  await expect(main.getByText("Yap couldn't read the cells of budget.xlsx.", { exact: false })).toBeVisible();
   await shot(main, '01-files-in-the-box');
   // (The picture is for another test: out of the box.)
   await main.getByTestId('chat-attachments').locator('.shotchip').hover();
