@@ -890,11 +890,11 @@ test('browser_find by description: the likeliest first with why — words, a rol
   expect(alike).toMatchObject({ success: true, data: { described: true } });
   expect(alike.displayText).toMatch(/^Found \d likely matches for ‘the button that adds it to the basket’ on shop\.example\.com$/);
   const lines = alike.data.matches.split('\n');
-  expect(lines[0]).toMatch(/^\[\d+\] button "Add to basket" — ‘add’, ‘basket’ in its name; under ‘Ridge Runner’$/);
+  expect(lines[0]).toMatch(/^\[\d+\] button "Add to basket" — ‘add’, ‘basket’ in its name; item 1 of 3; under ‘Ridge Runner’$/);
   expect(lines[1]).toContain('under ‘Moss Walker’');
   expect(lines[2]).toContain('under ‘Scree Racer’');
   expect(alike.note).toContain('no model');
-  expect(alike.note).toContain('The first two match equally');
+  expect(alike.note).toContain('The first two scored the same');
   // A place: the header's search box, not the help's in the footer.
   expect(first(1)).toMatch(/^\[\d+\] searchbox "Search products" — .*at the top of the page/);
   expect(first(6)).toMatch(/^\[\d+\] searchbox "Search help"/);

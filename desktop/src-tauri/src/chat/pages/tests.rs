@@ -1205,9 +1205,9 @@ async fn find_by_description_ranks_the_likeliest_first_with_why() {
     assert_eq!(r["data"]["described"], true, "{r}");
     assert!(r["displayText"].as_str().unwrap().ends_with("likely matches for ‘the button that adds it to the basket’ on shop.example.com"), "{r}");
     let lines: Vec<&str> = r["data"]["matches"].as_str().unwrap().lines().collect();
-    assert!(lines[0].contains("button \"Add to basket\" — ‘add’, ‘basket’ in its name; under ‘Ridge Runner’"), "{lines:?}");
+    assert!(lines[0].contains("button \"Add to basket\" — ‘add’, ‘basket’ in its name; item 1 of 3; under ‘Ridge Runner’"), "{lines:?}");
     assert!(lines[1].contains("under ‘Moss Walker’") && lines[2].contains("under ‘Scree Racer’"), "{lines:?}");
-    assert!(r["note"].as_str().unwrap().contains("The first two match equally"), "{r}");
+    assert!(r["note"].as_str().unwrap().contains("The first two scored the same"), "{r}");
     assert!(r["note"].as_str().unwrap().contains("no model"), "{r}");
     // Its words with the product's: that card's.
     let r = call(&mut t, FIND, find("the add to basket button for the Scree Racer"), &log).await.result;

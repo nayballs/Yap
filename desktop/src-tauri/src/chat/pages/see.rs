@@ -842,7 +842,8 @@ pub async fn find(turn: &mut crate::web::Turn, args: &Value) -> Value {
                 };
                 let mut note = "Web content. Ranked by Yap's own matching of the description (no model): its role, words, place on the page and the parts it's in — the first is the likeliest, not certain; each line says why it matched. Judge from those words, or check with browser_read and its ref (or a screenshot), before acting.".to_string();
                 if tied {
-                    note.push_str(" The first two match equally: what they're under or inside tells them apart.");
+                    // (Not reassurance: a tie is Yap not knowing — Yap Lab, 15 Nov 2026, Opus.)
+                    note.push_str(" The first two scored the same: the description didn't tell them apart, so check which is meant (what they're under or inside may say) before acting.");
                 }
                 return json!({ "success": true, "data": { "tab": t.tab, "matches": lines.join("\n"), "count": lines.len(), "more": false, "described": true }, "note": note, "displayText": display });
             }
