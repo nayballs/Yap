@@ -102,7 +102,7 @@ old or **not signed in, it says so and stops** — the lab never signs in.
 `start` on the plan, then `stop`: is Claude Code on this PC and signed in, as Yap sees
 it? Asks the model nothing.
 
-### `ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry] [--edit] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
+### `ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry] [--edit] [--style <name>] [--incognito] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
 
 Puts a question to Chat and waits until the turn ends (answered, stopped or failed),
 **or a card waits for the person**, or `--timeout` seconds pass.
@@ -119,6 +119,10 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   person drops them: each read by the test Yap and waiting as a chip in the box, sent
   with the question. Paths on this PC: made-up files of your own, or the scratch
   workspace's.
+- `--style <name>` (15 Nov 2026): the chat's style picked from Style under the message
+  box first, by its name in the menu (`Concise`, one of the person's own…; `chat/styles.rs`);
+  `--incognito`: the new chat's ghost turned on first (`chat/incognito.rs`). A feature
+  script's `ask` step takes `style` and `incognito` too.
 - `--while`: typed and sent in the chat shown **while a turn still goes**, as the person
   would mid-answer (14 Nov 2026, the message box's queue), with no turn of the lab's
   own: returns at once; the queued bubble, its ✓✓ and the answers show in the thread

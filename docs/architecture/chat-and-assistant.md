@@ -1914,6 +1914,14 @@ one side.
   ⋯ → Export… as a Markdown file and its pictures beside it, never uploaded
   ([below](#export-a-chat-2026-11-15)).
 
+- **`chat/incognito.rs`** — **Incognito chats** (15 Nov 2026): a new chat's
+  ghost; kept in memory only, never listed, searched, remembered or used by
+  memory, gone when left ([below](#incognito-chats-2026-11-15)).
+- **`chat/styles.rs`** — **Styles** (15 Nov 2026): how a chat's answers are
+  written (Normal, Concise, Explanatory, Formal, your own), picked from the
+  composer's Style chip, a block in the system prompt
+  ([below](#styles-2026-11-15)).
+
 ## Questions about selected text (2026-10-31)
 
 Wispr Flow's Command Mode ("Wispr Lens": "select text and ask Flow") by
@@ -5439,6 +5447,59 @@ The toast says where, and how many pictures went in which folder.
   `chat-export.spec.js` (the menu, then the file and its folder);
   `right-click.spec.js` (the row's menu).
 
+## Incognito chats (2026-11-15)
+
+The Claude app's incognito chat, from Anthropic's help pages: a chat that
+isn't saved to the history and that memory neither uses nor learns from.
+
+- **Starting one**: a new chat on Chat's side (never a Code chat) has a
+  ghost at the thread's top right (`ChatView.svelte`, `chat-incognito`,
+  `aria-pressed`). On, the empty thread says what it means ("It isn't
+  saved to your chats, and memory isn't used or updated. It's gone when you
+  leave it.") and a ring goes round the thread (`--yap-fg-80`); its first
+  question goes with `incognito: true` (`chat_send`), and the conversation
+  the turn makes is one (`incognito::with_new` → `turn_conversation` →
+  `chats::create_incognito`). A question asked out loud with that new chat
+  in view starts it incognito too (`chat_view_state`'s `incognito`,
+  `assistant.rs` `NEW_INCOGNITO`; never a phone's). It can't be made a
+  kept chat later, and a new chat starts kept again (`newChat`).
+- **Never saved** (`chats.rs`): `Conversation::incognito`, never read from
+  a file (`skip_deserializing`); the store's save writes the others only
+  (`kept`), and so does the shared files' copy. It's never in `list`,
+  `list_archived`, `with_all` (search by meaning, the phone, Download your
+  data…), `stamp`, `search` (past chats by words) or `latest` (the Voice
+  Assistant's chat to carry on). Its pictures stay while it's open
+  (`image_ids` includes it, so the sweep keeps them).
+- **Memory unused and never learned from**: no memory's "You" or passages,
+  no past chats (`prompt::build`'s `no_memory`), no `remember` / `forget` /
+  `search_chats` (`run.rs`; on the plan, `RunSpec::with_memory(false)`), no
+  "Remember that…" for a model without tools (`turn::remembered`), and
+  `memory::learn::after_turn` / `learn_from_chat` skip it, keeping nothing
+  of it (not even how far it was read: a later chat may take its id).
+  About you applies whole: it's a setting, not something learned.
+- **On your Claude plan** (`plan.rs`): its session runs with
+  `--no-session-persistence` (`Spec::persist`), is kept in memory while Yap
+  runs (`sessions::Kept::unsaved`, never written to `claude_sessions.json`)
+  and is never resumed: a process that ended starts a new session seeded
+  with the chat so far.
+- **The thread** says so above its messages ("Incognito chat · not saved,
+  not remembered · gone when you leave it", `chat-incognito-line`) and keeps
+  its ring; the list shows no row for it.
+- **Gone when left** (`chatState.svelte.js`): the page ends each incognito
+  chat it holds once it's neither shown nor answering
+  (`chat_incognito_end` → `chats::end_incognito`: the conversation and its
+  screenshots and pictures deleted, its Claude plan session, Code-chat and
+  connectors' entries forgotten, as a deleted chat's), and Yap ends them all
+  as it quits (`shutdown_cleanup` → `end_all_incognito`). After a crash its
+  pictures are swept a day later (no chat names them). Its documents are
+  still notes in Notes (the person asked for them), and its tokens still
+  count in the AI usage numbers.
+- Tests: `cargo test chat::incognito`, `chat::chats`,
+  `chat::turn::plan::tests::an_incognito…`; `chat-incognito.spec.js` (the
+  ghost, the ring and the band in light and dark, nothing saved, no memory
+  in the request or learned, ended on New chat; on the plan,
+  `--no-session-persistence` and nothing in claude_sessions.json).
+
 ## Cards in the thread: a question, the next-step box, chapters (2026-11-15)
 
 Three of the Claude app's cards for Chat's own model (`chat/cards.rs`), each a
@@ -5532,3 +5593,45 @@ now on the same form.
   kept; several sent together; Let Yap decide; chapters and the contents; the
   box's button; asked out loud and answered "the second one"), and
   `agents-direct.spec.js` for a Code chat's question on the shared form.
+
+## Styles (2026-11-15)
+
+The Claude app's styles, from Anthropic's help pages: how answers are
+written, picked per chat. Chat's side only (a Code chat's answers are
+Claude Code's own).
+
+- **Picking one** (`StyleChip.svelte`, under the message box beside the
+  model): the chip names the chat's style; its menu has Yap's four —
+  Normal, Concise ("Shorter and more direct"), Explanatory ("For learning
+  something new") and Formal ("Clear and polished") — then the person's own,
+  the one in use ticked, and "Create & edit styles…". A pick is kept for the
+  chat shown (`chat_style_set`) and is the last one picked: a new chat
+  starts with it (`chat_style_of(null)`), as the Claude app's selection
+  stays; the conversation the first question makes takes it
+  (`turn_conversation` → `styles::adopt_new`, never a Code chat).
+- **In the prompt** (`styles::prompt_block`, `prompt::build` → `Prompt::end`):
+  one block in the system prompt just before About you — "How to write in
+  this chat (the user picked the "Concise" style): … This shapes how you
+  write only — tone, length and layout — never what's true, what you do, or
+  the rules above." — stable from turn to turn, so a model re-uses its
+  cache. The small web pipeline's prompt ends with it too (`small.rs`), and
+  so does your Claude plan's session prompt (`plan.rs` `system_prompt`: a
+  new style restarts the warm session). A question asked out loud into the
+  chat has it (the same build). Normal adds nothing. The fixed part a
+  question must fit beside counts it (`fit::Parts::texts`).
+- **Your own** (`StylesDialog.svelte`, its own chunk): "Create a style",
+  then "Describe it" (a sentence or two) or "From your writing" (a pasted
+  sample, at most 6,000 characters read); "Write the style" asks Chat's own
+  model (`chat_style_write`, `WRITE_PROMPT`: JSON `{name, instructions}`,
+  2–5 sentences on tone, length, vocabulary and layout, never the sample's
+  topic, names or facts) and fills Name and How to write, which the person
+  edits before Save style. With no model set up, a description is the
+  instructions as it is. The sample is never kept or logged. Use, Edit and
+  Delete… (asked first; its chats go back to Normal) on each of yours.
+- **Kept** in `chat_styles.json` ([config-and-data.md](./config-and-data.md)),
+  never chats.json: an older Yap's save can't lose a pick. A deleted chat's
+  pick goes with it (`chat_delete`, `chat_delete_many`, Delete some of your
+  data); Download your data has the file.
+- Tests: `cargo test chat::styles`; `chat-styles.spec.js` (the menu, the
+  block in the request, kept per chat and for a new one; one written from a
+  description, edited, used and deleted; light and dark).

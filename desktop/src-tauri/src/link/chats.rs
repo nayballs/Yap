@@ -110,6 +110,7 @@ mod tests {
             closed_tabs: Vec::new(),
             branches: Vec::new(),
             forks: Vec::new(),
+            incognito: false,
         }
     }
 

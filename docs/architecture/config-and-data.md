@@ -764,6 +764,9 @@
   word for word (`notes::seed_missing_builtins`: no field renamed or
   removed).
 - Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chat/chats.rs`),
+  never an **incognito chat** (2026-11-15, `chat/incognito.rs`: kept in
+  memory only — the save leaves it out, a read never makes one — and its
+  pictures in `chat-images/` deleted when it ends or Yap quits),
   and since 2026-10-25 meetings' Ask threads: conversations with `note`
   (the note's id; Chat leaves them out, deleted with the note) whose
   answers may be `plain` (`chat/note_chats.rs`). An older Yap's save drops
@@ -881,7 +884,9 @@
   session a conversation moved on from, as soon as it's replaced), only
   where Claude Code files Yap's own `claude\chat\` folder — never another
   project's (an agent's sessions are the person's own, in their folders).
-  One-shot calls run with `--no-session-persistence`, so they leave none.
+  One-shot calls run with `--no-session-persistence`, so they leave none,
+  and so does an incognito chat's session (2026-11-15): kept in memory
+  while Yap runs (`Kept::unsaved`), never in `claude_sessions.json`.
 - Your Claude plan's working folders: `<data>/claude/` — two empty folders
   the plan's runs work in, `claude\chat\` (Chat turns) and `claude\ask\`
   (one-shot calls), so no project's settings, CLAUDE.md or MCP servers are
@@ -1055,6 +1060,18 @@
   (counts only). Sent only inside a rewrite or a rewording transform, to the
   model that call uses (never with AI cleanup). Reset app keeps it (like the dictionary); Download your data
   has it (`writing_samples.json`).
+- Answer styles: `%APPDATA%/yap/chat_styles.json` (2026-11-15,
+  `chat/styles.rs`, Chat's Style chip and "Create & edit styles…") —
+  `{styles: [{id, name, instructions, from, createdMs}], chats: {"<conversation
+  id>": "<style id>"}, last}`: the person's own styles (at most 30; a name
+  at most 40 characters, instructions at most 1,200; `from` "description"
+  or "sample", never the sample itself), each chat's pick (Normal: none)
+  and the last one picked (a new chat starts with it). A file of its own,
+  never config.json or chats.json, so an older Yap never reads or writes it;
+  fields a newer Yap adds are kept. A deleted chat's pick goes with it (and
+  Delete some of your data → Chats, Reset app: every pick; the styles stay,
+  as settings do); a deleted style's chats go back to Normal. Download your
+  data has it (`chats/chat_styles.json`). Never logged (counts only).
 - Language nudges: `%APPDATA%/yap/language_nudges.json` — when Yap last
   offered to add a language to My languages, and per language your "Not now"
   count and "Don't ask about it" (`dictation/languages/nudge.rs`). Codes only.
