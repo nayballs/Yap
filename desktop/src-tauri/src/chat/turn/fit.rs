@@ -91,6 +91,8 @@ pub(super) enum Family {
 ///
 /// 0. the cards in the thread (15 Nov 2026: a question, the next-step box,
 ///    chapters), ~700 — a small model asks and wraps up in words as well;
+///    and they go whenever what they take from the history is over a tenth
+///    of what's left, however much that is ([`cards_crowd`]);
 /// 1. acting, ~580 tokens (the on-device Qwen) — a small model acts on pages
 ///    least well, and only a typed question about an open page needs it;
 /// 2. seeing, ~400 (a model that reads images), and every picture it looks
@@ -261,6 +263,22 @@ pub(super) fn keeps(question: &str, previous: Option<&str>, code: bool, workspac
     keep
 }
 
+/// **The cards in the thread crowd the conversation** (15 Nov 2026): with
+/// them the history's room is `with`, without them `without`, and what they
+/// take from it is more than a tenth of what's left. They're a nicety (a
+/// model asks and wraps up in words as well), the history is what a
+/// follow-up is understood by: on a small context they took it. A spoken
+/// follow-up in a summarised chat on an 8K model went with no earlier message
+/// at all, the cards' ~700 tokens half of what was left (`chat-long.spec.js`).
+/// Where the history is capped before the context runs out (the Voice
+/// Assistant's 6,000 on any model with room, `budget::ASSISTANT_MOST`) they
+/// take nothing from it, and stay — as they do on Claude, GPT-5 and 16K and up.
+/// Pure.
+pub(super) fn cards_crowd(with: u64, without: u64) -> bool {
+    let lost = without.saturating_sub(with);
+    lost > 0 && lost.saturating_mul(10) > with
+}
+
 /// **The room a turn's requests have** for a fixed part of so many tokens
 /// (`budget::budget`, as the turn's check and history use it).
 #[derive(Debug, Clone, Copy)]
@@ -411,12 +429,21 @@ pub(super) async fn as_is(g: Gates, parts: &Parts<'_>, counter: &crate::chat::bu
 pub(super) async fn fit(g: Gates, parts: &Parts<'_>, counter: &crate::chat::budget::Counter, room: Room, question: u64, keep: impl FnOnce() -> Shed) -> Fitted {
     let whole = as_is(g, parts, counter).await;
     let want = room.least().max(question);
-    if !g.tools || room.history(whole.fixed()) >= want {
+    // The cards in the thread go first whenever they'd crowd the conversation
+    // ([`cards_crowd`]), even with the least room still there.
+    let crowd = g.tools && g.cards.any() && {
+        let cost = parts.estimate(&g).saturating_sub(parts.estimate(&Family::Cards.off(g)));
+        cards_crowd(room.history(whole.fixed()), room.history(whole.fixed().saturating_sub(cost)))
+    };
+    if !g.tools || (!crowd && room.history(whole.fixed()) >= want) {
         return whole;
     }
     let keep = keep();
     let costs = costs(g, keep, |g| parts.estimate(g));
     let mut shed = choose(&costs, whole.fixed(), want, |fixed| room.history(fixed));
+    if crowd {
+        shed = shed.with(Family::Cards);
+    }
     let mut fitted = whole;
     while !shed.is_empty() {
         let gates = shed.apply(g);
@@ -533,6 +560,44 @@ mod tests {
             let after = text[i + name.len()..].chars().next();
             !before.is_some_and(|c| c.is_alphanumeric() || c == '_') && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
         })
+    }
+
+    #[test]
+    fn the_cards_go_whenever_theyd_crowd_the_history() {
+        // What they take from the history: more than a tenth of what's left.
+        assert!(cards_crowd(1_372, 2_072));
+        assert!(!cards_crowd(7_544, 8_244));
+        // A capped history they take nothing from (the Voice Assistant's 6,000).
+        assert!(!cards_crowd(6_000, 6_000));
+        assert!(cards_crowd(0, 700));
+        assert!(!cards_crowd(100, 100));
+        // An 8K model with room for a question, the cards on: they go (and only
+        // the families the room needed besides), so the history keeps their room.
+        let profile = crate::ai::about_you::Profile::default();
+        let persona = persona();
+        let counter = Counter::estimate_only();
+        let cards = Gates { cards: crate::chat::cards::Cards::for_turn(true, false, None, true, false), agents: false, ..small_model() };
+        let hi = estimate("hi") + crate::chat::budget::MESSAGE_OVERHEAD;
+        let small = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), context: 8192 };
+        let at_8k = room(8_192);
+        assert!(run(as_is(cards, &small, &counter)).gates.cards.any());
+        let fitted = run(fit(cards, &small, &counter, at_8k, hi, || keeps("hi", None, false, &[])));
+        assert!(fitted.shed.has(Family::Cards), "{:?}", fitted.shed.names());
+        assert!(!fitted.gates.cards.any());
+        let after = seen(&fitted.gates, &small);
+        for gone in ["ask_user", "suggest_next_step", "mark_chapter"] {
+            assert!(!after.names.iter().any(|n| n == gone) && !names(&after.prompt, gone), "{gone}");
+        }
+        // A model with room keeps them, and everything else, as before.
+        let big = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), context: 200_000 };
+        let fitted = run(fit(cards, &big, &counter, room(200_000), hi, || keeps("hi", None, false, &[])));
+        assert!(fitted.shed.is_empty(), "{:?}", fitted.shed.names());
+        assert!(fitted.gates.cards.any());
+        // A spoken question on a 32K model: its history is capped first, so the cards cost it nothing and stay.
+        let mid = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), context: 32_768 };
+        let spoken = Room { context: 32_768, known: true, kind: Kind::Assistant, tools: true, cap: None };
+        let fitted = run(fit(cards, &mid, &counter, spoken, hi, || keeps("hi", None, false, &[])));
+        assert!(fitted.gates.cards.any(), "{:?}", fitted.shed.names());
     }
 
     #[test]

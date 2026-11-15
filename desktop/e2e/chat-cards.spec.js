@@ -19,6 +19,11 @@ const test = base.extend({
   fakeLlm: [
     async ({}, use) => {
       const fake = await startFakeLlm();
+      // A model with room for the cards: on a small context (the 8K a server that doesn't say is taken for) they go
+      // whenever what they'd take from the history is over a tenth of what's left (chat/turn/fit.rs `cards_crowd`,
+      // 15 Nov 2026).
+      // The fake says so as Ollama's `/api/ps` does (model_catalog.rs `server_contexts`).
+      fake.serveOllama({ loaded: { 'fake-chat': 32768 } });
       await use(fake);
       await fake.close();
     },
