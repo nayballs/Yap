@@ -404,6 +404,7 @@ pub fn run() {
             snip::chat_image_save,
             snip::chat_models_read_images,
             snip::attach::chat_image_paste,
+            chat::pictures::markdown::markdown_picture,
             snip::attach::chat_image_drop,
             chat::attachments::chat_files_add,
             chat::attachments::chat_attachment_remove,

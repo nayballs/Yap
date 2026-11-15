@@ -11,6 +11,7 @@
   import { tick } from 'svelte';
   import { toast } from '../ui/toast.svelte.js';
   import { renderMarkdown } from '../core/markdown.js';
+  import { markdownVisuals } from '../ui/markdownVisuals.js';
   import { briefTeaser } from '../core/brief.js';
   import { withTaskMark, newSinceSummary, newSinceLine } from '../core/notepadText.js';
   import { taskToggled, setTask } from '../core/noteEdits.js';
@@ -181,7 +182,7 @@
       <SummaryFind bind:this={find} bind:open={findOpen} root={() => renderedEl} text={note.enhancedContent} look="paper" />
       <!-- renderMarkdown passes no raw HTML and sanitises its output (core/markdown.js);
            its tasks tick in place (notes/tasks.rs). -->
-      <div class="rendered" bind:this={renderedEl} onchange={onTaskChange}>{@html renderMarkdown(note.enhancedContent, { tickable: true })}</div>
+      <div class="rendered" bind:this={renderedEl} onchange={onTaskChange} use:markdownVisuals>{@html renderMarkdown(note.enhancedContent, { tickable: true })}</div>
       <SummaryRating {note} origin={LABEL} look="paper" changing={() => changing('summary')} />
     {/if}
   {:else if !writing && job?.state !== 'needsAi'}
