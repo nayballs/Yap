@@ -43,11 +43,42 @@ export function statusTone(status) {
 }
 
 /**
- * **Undo agent is offered**: it's over, it changed files, and their backups
- * are there — not undone already, not swept (7 days on), and made at all
- * (`noBackups`: Claude Code's hooks didn't run, so nothing was backed up).
+ * **The files Undo can do something with** (15 Nov 2026): Claude Code's own
+ * edits, backed up first (unless `noBackups`: its hooks didn't run), and the
+ * files its commands made (Undo deletes them) or changed with a copy kept
+ * (`byCommand`: agents/changes.rs). A file a command changed with no copy
+ * from before isn't one.
  */
-export const canUndo = (agent) => !!agent && !isLive(agent.status) && (agent.files?.length ?? 0) > 0 && !agent.undone && !agent.swept && !agent.noBackups;
+export function undoableFiles(files, byCommand, noBackups) {
+  const cmd = new Map((byCommand || []).map((c) => [c.file, c]));
+  return (files || []).filter((f) => {
+    const c = cmd.get(f);
+    return c ? !!(c.new || c.kept) : !noBackups;
+  });
+}
+
+/** The files a turn's commands changed that Undo can't put back (Yap had no copy of them from before). */
+export const unbackedFiles = (turns) => [...new Set((turns || []).flatMap((t) => (t?.byCommand || []).filter((c) => !c.new && !c.kept).map((c) => c.file)))];
+
+/** "Undo can't put back data.csv: a command changed it, and Yap had no copy of it from before." ('' for none). */
+export function unbackedLine(files) {
+  const list = files || [];
+  if (!list.length) return '';
+  const shown = list.length > 4 ? `${list.slice(0, 3).join(', ')} and ${list.length - 3} more` : list.join(', ');
+  const one = list.length === 1;
+  return `Undo can't put back ${shown}: ${one ? 'a command changed it' : 'commands changed them'}, and Yap had no copy of ${one ? 'it' : 'them'} from before.`;
+}
+
+/**
+ * **Undo agent is offered**: it's over, it changed files Undo can put back
+ * or delete (`undoableFiles`), not undone already, not swept (7 days on).
+ */
+export function canUndo(agent) {
+  if (!agent || isLive(agent.status) || agent.undone || agent.swept) return false;
+  const turns = agent.turnList || [];
+  if (turns.length) return turns.some((t) => !t.undone && undoableFiles(t.files, t.byCommand, agent.noBackups).length > 0);
+  return undoableFiles(agent.files, [], agent.noBackups).length > 0;
+}
 
 /** The agent's tab when it changed files with no backups made. */
 export const NO_BACKUPS = "No backups were made, so Undo can't put these files back.";
@@ -812,7 +843,7 @@ export function turnStatusWord(t) {
 }
 
 /** **Undo this turn** is offered: the agent is over, the turn changed files, and their backups are there (as `canUndo`). */
-export const canUndoTurn = (agent, turn) => !!agent && !!turn && !isLive(agent.status) && (turn.files?.length ?? 0) > 0 && !turn.undone && !agent.swept && !agent.noBackups;
+export const canUndoTurn = (agent, turn) => !!agent && !!turn && !isLive(agent.status) && !turn.undone && !agent.swept && undoableFiles(turn.files, turn.byCommand, agent.noBackups).length > 0;
 
 /** The answer after message `q`: the first assistant message before the person's next (a report marker skipped), or -1. */
 function answerAfter(messages, q) {

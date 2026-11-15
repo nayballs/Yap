@@ -5,25 +5,38 @@
   // in red and added in green with a few unchanged around them, a new file's
   // first lines ("New file · 12 lines"), "Rewritten" for a file it wrote
   // whole that was there before, "…N more lines" past the caps. A file with
-  // no diff in the log (an older agent's, one swept) is its name alone.
+  // no diff in the log (an older agent's, one swept) is its name alone. A
+  // file one of its commands made or changed (`byCommand`, agents/changes.rs:
+  // a script, npm, a formatter) says so — "New", "By a command", and "No
+  // backup" when Undo can't put it back.
   import { diffTotals, diffTitle, diffLine, moreLines } from '../../core/agents.js';
 
-  /** `files`: the agent's files, as said; `diffs`: file → its diffs (`diffsOf`). */
-  let { files = [], diffs = new Map() } = $props();
+  /** `files`: the agent's files, as said; `diffs`: file → its diffs (`diffsOf`); `byCommand`: its commands' files (`{file, new, kept}`). */
+  let { files = [], diffs = new Map(), byCommand = [] } = $props();
+  const commandOf = $derived(new Map((byCommand || []).map((c) => [c.file, c])));
 
   let open = $state({});
 </script>
+
+{#snippet byCommandTags(c)}
+  {#if c}
+    <span class="tag by" title={c.new ? 'A command made it: Undo deletes it' : c.kept ? 'A command changed it: Undo puts back the copy from Git' : "A command changed it, and Yap had no copy from before: Undo can't put it back"}>By a command</span>
+    {#if !c.new && !c.kept}<span class="tag lost" data-testid="chat-agent-file-unbacked">No backup</span>{/if}
+  {/if}
+{/snippet}
 
 <ul class="files">
   {#each files as f (f)}
     {@const ds = diffs.get(f) || []}
     {@const t = diffTotals(ds)}
-    <li class="file" data-testid="chat-agent-file" data-file={f}>
+    {@const c = commandOf.get(f)}
+    <li class="file" data-testid="chat-agent-file" data-file={f} data-by-command={c ? (c.new ? 'new' : c.kept ? 'kept' : 'unbacked') : null}>
       {#if ds.length}
         <button type="button" class="frow" aria-expanded={!!open[f]} onclick={() => (open = { ...open, [f]: !open[f] })} title={open[f] ? 'Hide the changes' : 'Show the changes'}>
           <svg class="chev" class:down={open[f]} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
           <code class="fname">{f}</code>
-          {#if t.made === 'new'}<span class="tag">New</span>{/if}
+          {#if t.made === 'new' || c?.new}<span class="tag">New</span>{/if}
+          {@render byCommandTags(c)}
           <span class="counts" aria-label={`${t.added} added, ${t.removed} removed`}>
             {#if t.added}<span class="plus">+{t.added}</span>{/if}
             {#if t.removed}<span class="minus">−{t.removed}</span>{/if}
@@ -54,7 +67,11 @@
           </div>
         {/if}
       {:else}
-        <div class="frow still"><code class="fname">{f}</code></div>
+        <div class="frow still">
+          <code class="fname">{f}</code>
+          {#if c?.new}<span class="tag">New</span>{/if}
+          {@render byCommandTags(c)}
+        </div>
       {/if}
     </li>
   {/each}
@@ -127,6 +144,15 @@
     color: var(--yap-success-text);
     font-size: 11px;
     font-weight: 600;
+  }
+  .tag.by {
+    background: color-mix(in srgb, var(--yap-paper-text-2) 12%, transparent);
+    color: var(--yap-paper-text-2);
+    font-weight: 500;
+  }
+  .tag.lost {
+    background: color-mix(in srgb, var(--yap-warning) 16%, transparent);
+    color: var(--yap-paper-text);
   }
   .counts {
     margin-left: auto;

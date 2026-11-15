@@ -762,7 +762,7 @@ fn undo_refuses_what_a_tampered_manifest_points_at() {
     let victim = root.join("victim.txt");
     std::fs::write(&victim, "keep me").unwrap();
     std::fs::write(root.join("secret.txt"), "not a backup").unwrap();
-    let entry = |original: PathBuf, state: State, backup: &str| Entry { original, state, backup: backup.into(), bytes: 1, tool: "Edit".into(), ts: 0, note: String::new() };
+    let entry = |original: PathBuf, state: State, backup: &str| Entry { original, state, backup: backup.into(), bytes: 1, tool: "Edit".into(), ts: 0, note: String::new(), command: false, was: None, after: None };
     let m = Manifest {
         version: 1,
         files: vec![

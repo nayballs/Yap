@@ -82,6 +82,22 @@ const ROUNDS = [
   result(ANSWER),
   { _wait_user: true },
 ];
+/** A command's files (15 Nov 2026, agents/changes.rs): a script it runs writes costs.csv and tidies docs/lab.md — no
+ * edit tool, so no backup hook — and it answers. */
+const COSTS = 'item,cost\nseeds,4.50\ncompost,12.00\n';
+const LAB_TIDIED = LAB.replace('The beds', 'All the beds');
+const COSTS_SAID = 'Done: costs.csv has the costs.';
+const MAKES_COSTS = [
+  { _wait_user: true },
+  init(),
+  said('c1', [{ type: 'tool_use', id: 'toolu_make', name: 'Bash', input: { command: 'node make-costs.js', description: 'Make the costs sheet' } }]),
+  { _write_file: { path: 'costs.csv', text: COSTS } },
+  { _write_file: { path: 'docs\\lab.md', text: LAB_TIDIED } },
+  toolResult('toolu_make', 'Wrote costs.csv and tidied docs/lab.md'),
+  said('c2', [{ type: 'text', text: COSTS_SAID }], 'end_turn'),
+  result(COSTS_SAID),
+  { _wait_user: true },
+];
 /** A plain chat's answer: the same words (no workspace, so nothing is a link or runs). */
 const PLAIN = [{ _wait_user: true }, init(), said('p1', [{ type: 'text', text: ANSWER }], 'end_turn'), result(ANSWER), { _wait_user: true }];
 
@@ -457,6 +473,76 @@ test('the summary after the Claude app: context by category from /context, the b
   await yap.invoke('e2e_gh_script', { script: null });
 });
 
+test('a file a command made is in Outputs and opens as a sheet; Files changed says which a command changed with no backup; Undo deletes the new one and leaves the other', async ({ yap, main, shot }) => {
+  test.setTimeout(120_000);
+  await script(yap, MAKES_COSTS, 'makes-costs');
+  const before = (await agents(yap)).length;
+  await openView(main, 'Chat');
+  if (await panel(main).count()) await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+  await newCodeChat(main, 'garden-planner');
+  await send(main, 'Make costs.csv with the seed and compost costs.');
+  await expect.poll(async () => (await agents(yap)).length, { timeout: 20_000 }).toBe(before + 1);
+  const id = (await agents(yap))[0].id;
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === id)?.status, { timeout: 30_000 }).toBe('done');
+  await expect(answer(main)).toContainText(COSTS_SAID);
+  // Found by comparing the workspace before and after the turn: the new file and the one the command changed, each said
+  // as it is (no edit tool ran, so nothing went through the backup hook).
+  const agent = (await agents(yap)).find((j) => j.id === id);
+  expect(agent.turnList[0].files).toEqual(['costs.csv', 'docs\\lab.md']);
+  expect(agent.turnList[0].byCommand).toEqual([
+    { file: 'costs.csv', new: true, kept: false },
+    { file: 'docs\\lab.md', new: false, kept: false },
+  ]);
+  expect(agent.noBackups).toBe(false);
+  // The report never claims a backup that isn't there.
+  const marker = (await yap.invoke('chat_get', { id: agent.conversation })).messages.find((m) => m.kind === 'agentReport');
+  expect(marker.text).toContain('Files its commands made: costs.csv (new: Undo deletes them).');
+  expect(marker.text).toContain("Files its commands changed with no backup: docs\\lab.md (Undo can't put them back).");
+  expect(marker.text).not.toContain('backed up first');
+
+  // Outputs: the workbook a command made ("New") and the file it changed; the new one opens as a sheet.
+  await main.getByTestId('chat-summary-button').click();
+  const outputs = main.getByTestId('chat-summary').getByTestId('chat-summary-outputs').getByTestId('chat-output');
+  await expect(outputs).toHaveCount(2);
+  await expect(outputs.nth(0)).toContainText('costs.csv');
+  await expect(outputs.nth(0).locator('.olabel')).toHaveText('New');
+  await expect(outputs.nth(1)).toContainText('lab.md');
+  await expect(outputs.nth(1).locator('.olabel')).toHaveText('Changed');
+  await shot(main, '10-a-commands-file-in-outputs');
+  await outputs.nth(0).click();
+  await expect(main.getByTestId('chat-sheet')).toHaveAttribute('data-name', 'costs.csv');
+  await expect(main.getByTestId('chat-sheet')).toContainText('compost');
+  await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+
+  // Its turn's Files changed: "New · By a command", and "By a command · No backup" with the line that says why.
+  await thread(main).getByTestId('chat-agent-pill').first().click();
+  const tab = main.getByTestId('chat-agent');
+  await expect(tab).toBeVisible();
+  const files = tab.getByTestId('chat-agent-file');
+  await expect(files).toHaveCount(2);
+  await expect(tab.locator('[data-testid="chat-agent-file"][data-file="costs.csv"]')).toHaveAttribute('data-by-command', 'new');
+  await expect(tab.locator('[data-testid="chat-agent-file"][data-file="costs.csv"] .tag')).toHaveText(['New', 'By a command']);
+  await expect(tab.locator('[data-testid="chat-agent-file"][data-file="docs\\\\lab.md"]')).toHaveAttribute('data-by-command', 'unbacked');
+  await expect(tab.getByTestId('chat-agent-file-unbacked')).toHaveText('No backup');
+  await expect(tab.getByTestId('chat-agent-command-unbacked')).toHaveText("Undo can't put back docs\\lab.md: a command changed it, and Yap had no copy of it from before.");
+  await shot(main, '11-files-changed-by-a-command');
+  await theme(yap, main, 'dark');
+  await shot(main, '11-files-changed-by-a-command-dark');
+  await theme(yap, main, 'light');
+
+  // Undo: asked first, saying what it can't put back; the new file deleted, the changed one left as the command left it.
+  await tab.getByRole('button', { name: "Undo the agent's changes" }).click();
+  const confirm = main.getByRole('alertdialog', { name: "Undo the agent's changes?" });
+  await expect(confirm).toContainText("Undo can't put back docs\\lab.md");
+  await expect(confirm).not.toContainText('Yap kept their backups for this.');
+  await confirm.getByRole('button', { name: "Undo the agent's changes" }).click();
+  await expect(main.getByTestId('chat-agent-undone')).toHaveText('Undone: costs.csv deleted (the agent made it); lab.md left as it is (a command changed it, and Yap had no copy of it from before).');
+  expect(fs.existsSync(path.join(GARDEN, 'costs.csv'))).toBe(false);
+  expect(fs.readFileSync(path.join(GARDEN, 'docs', 'lab.md'), 'utf8')).toBe(LAB_TIDIED);
+  await shot(main, '12-undo-what-a-command-made');
+  await tab.getByRole('button', { name: 'Close the panel' }).first().click();
+});
+
 test('a Chat (non-Code) chat: the same answer has no file links and no ▶, and no summary button', async ({ yap, main }) => {
   await script(yap, PLAIN, 'plain');
   await openView(main, 'Chat');
@@ -502,6 +588,12 @@ test('ui/fileLinks.js, ui/codeRun.js and outputs.js: what may be a path, which b
   ]);
   expect(items[0].rel).toBe('src/a.js');
   expect(items[3].picture).toBe(true);
+  // A file a command made says "New" and is marked; one it changed stays "Changed" (agents/changes.rs).
+  const byCommand = outputItems({ agents: [{ id: 'c', turnList: [{ n: 1, endedTs: 40, files: ['costs.xlsx', 'data\\beds.csv'], byCommand: [{ file: 'costs.xlsx', new: true, kept: false }, { file: 'data\\beds.csv', new: false, kept: false }] }] }] });
+  expect(byCommand.map((i) => [i.name, i.label, !!i.command])).toEqual([
+    ['costs.xlsx', 'New', true],
+    ['beds.csv', 'Changed', true],
+  ]);
   // contextBreakdown.js: the context's numbers as the Claude app writes them, the rows in its order.
   expect([628, 4324, 32164, 156408, 934836, 1_000_000].map(fmtTokens)).toEqual(['628', '4.3k', '32.2k', '156k', '935k', '1M']);
   expect(fmtShare(129046, 1_000_000)).toBe('12.9%');

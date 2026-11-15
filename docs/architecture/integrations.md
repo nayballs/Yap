@@ -1106,7 +1106,10 @@ no Local API (the bridge can be off), and it reaches the live UI.
   answers `{}` at once, never blocking or denying a tool. `restore` (Undo the agent's changes)
   puts them back and deletes what the run created, touching only the paths
   the manifest names. A denied Write is still noted as created.
-  [yap-code.md](./yap-code.md#undo-and-backups).
+  [yap-code.md](./yap-code.md#undo-and-backups). The files a command made or
+  changed (no hook runs for one) are added to the same manifest at the turn's
+  end, marked `command`, and Undo leaves one alone once it changed after the
+  turn ([yap-code.md](./yap-code.md#files-a-command-made-or-changed)).
 - **Limits**: hooks can be turned off by a managed policy
   (`disableAllHooks`, `allowManagedHooksOnly`, `allowedHttpHookUrls`;
   `httpHookAllowedEnvVars` can keep the key out of the header) and never run

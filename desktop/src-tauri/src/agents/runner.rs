@@ -70,7 +70,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -1234,6 +1234,11 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     // Its turns kept from now on (an agent from before them: one, its brief).
     let Some(agent) = store::update(id, Agent::keep_turns) else { return (Status::Failed, 0) };
     let n = agent.turn_list.last().map_or(1, |t| t.n);
+    // **The workspace as the turn found it** (`changes.rs`), read while
+    // Claude Code's status is checked: what its commands make or change is
+    // found against it at the end.
+    let scanned = PathBuf::from(&agent.path);
+    let scan = tauri::async_runtime::spawn_blocking(move || super::changes::before(&scanned));
     let cfg = crate::config::load();
     let Some(program) = cli::find() else {
         return failed_early(id, n, "Claude Code isn't installed on this PC.".into(), None);
@@ -1334,6 +1339,16 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     if read_only {
         tracing::info!(id, turn = n, "Agents: a read-only turn (its editing tools off)");
     }
+    // (Read before Claude Code starts: none of its commands can have run yet.)
+    let before = match scan.await {
+        Ok(Ok(b)) => Some(b),
+        Ok(Err(why)) => {
+            let (words, entries) = why.said();
+            tracing::info!(id, turn = n, why = words, entries, "Agents: what this turn's commands change won't be checked");
+            None
+        }
+        Err(_) => None,
+    };
     let (session, mut rx) = match Session::start_with(&program, spec) {
         Ok(s) => s,
         Err(e) => return failed_early(id, n, e, None),
@@ -1471,6 +1486,11 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     }
     // Unregistered: a permission card still waiting is a no.
     drop(run);
+    // **What its commands made or changed** (`changes.rs`): into its backups and its files, before its end is said.
+    let windows = follow.command_windows(SystemTime::now());
+    let (dir, at, edited) = (follow.backup.clone(), follow.folder.clone(), follow.edited_files.iter().cloned().collect::<Vec<_>>());
+    let made = tauri::async_runtime::spawn_blocking(move || super::changes::settle(before.as_ref(), &windows, &dir, &at, &edited)).await.unwrap_or_default();
+    follow.note_command_files(made);
     let ended = follow.finish();
     // A branch Claude Code never started (it refused the point, or the flag): the next turn starts afresh, the
     // conversation kept so far as text, and the turn says so.
@@ -1561,6 +1581,15 @@ struct Follow {
     saying_told: Option<Instant>,
     /// The commands' calls not back yet, by id (their output is said).
     commands: HashSet<String>,
+    /// **When each `Bash` / `PowerShell` call began**, not back yet (and
+    /// whether it runs in the background: then to the turn's end), and the
+    /// runs of those back: what changed in the workspace meanwhile is the
+    /// commands' (`changes.rs`).
+    command_started: HashMap<String, (SystemTime, bool)>,
+    command_runs: Vec<super::changes::Window>,
+    /// The files Claude Code's own edit tools named this turn (as `files`
+    /// says them): theirs, never a command's, its hooks on or off.
+    edited_files: HashSet<String>,
     /// Characters of output kept this turn (`output::TURN_MAX`).
     output_used: usize,
     /// What the turn has used (`usage.rs`).
@@ -1678,12 +1707,50 @@ impl Follow {
             saying: String::new(),
             saying_told: None,
             commands: HashSet::new(),
+            command_started: HashMap::new(),
+            command_runs: Vec::new(),
+            edited_files: HashSet::new(),
             output_used: 0,
             meter: super::usage::Meter::new(before, &agent.model, window),
             marks: None,
             web_calls: HashMap::new(),
             found: Vec::new(),
         }
+    }
+
+    /// **The commands' runs this turn**, each still going (not back, or in
+    /// the background) ended at `end`.
+    fn command_windows(&self, end: SystemTime) -> Vec<super::changes::Window> {
+        let mut all = self.command_runs.clone();
+        all.extend(self.command_started.values().map(|(began, _)| (*began, end)));
+        all
+    }
+
+    /// **What its commands made or changed** (`changes::settle`): in the
+    /// turn's `files` (Outputs, the summary, the file view) and its
+    /// `by_command` (Files changed, the report, Undo's words).
+    fn note_command_files(&self, made: Vec<store::CommandFile>) {
+        let n = self.n;
+        let known = store::get(&self.id).and_then(|j| j.turn_list.iter().find(|t| t.n == n).map(|t| t.by_command.clone())).unwrap_or_default();
+        if made.is_empty() && known.is_empty() {
+            return;
+        }
+        tracing::info!(id = %self.id, turn = n, files = made.len(), new = made.iter().filter(|c| c.new).count(), kept = made.iter().filter(|c| c.kept).count(), "Agents: files its commands made or changed");
+        store::update(&self.id, |j| {
+            for c in &made {
+                if !j.files.contains(&c.file) {
+                    j.files.push(c.file.clone());
+                }
+            }
+            if let Some(t) = j.turn_mut(n) {
+                for c in &made {
+                    if !t.files.contains(&c.file) {
+                        t.files.push(c.file.clone());
+                    }
+                }
+                t.by_command = made.clone();
+            }
+        });
     }
 
     /// **Claude Code began a call** (its stream's `content_block_start`):
@@ -1747,6 +1814,11 @@ impl Follow {
         if backed_up_tool(name) {
             self.edits.insert(id.to_string());
         }
+        // A command begins: what changes in the workspace while it runs is its (a helper's too).
+        if matches!(name, "Bash" | "PowerShell") && !id.is_empty() {
+            let background = input.get("run_in_background").and_then(serde_json::Value::as_bool) == Some(true);
+            self.command_started.insert(id.to_string(), (SystemTime::now(), background));
+        }
         // Its own web reads, with a browser turn: what they find may open beside the chat.
         if self.marks.is_some() && self.under.is_none() {
             match name {
@@ -1807,6 +1879,9 @@ impl Follow {
         }) else {
             return;
         };
+        if let (Some(file), true) = (&seen.file, backed_up_tool(name)) {
+            self.edited_files.insert(file.clone());
+        }
         if let (Some(file), "Edit" | "MultiEdit" | "Write") = (&seen.file, name) {
             self.changes.insert(id.to_string(), Change { tool: name.to_string(), input: input.clone(), file: file.clone(), known });
         }
@@ -1847,6 +1922,11 @@ impl Follow {
     fn on_tool_result(&mut self, id: &str, is_error: bool, text: &str, result: Option<&serde_json::Value>) {
         if !is_error && self.edits.contains(id) {
             self.edited = true;
+        }
+        // A command's run ended (one in the background goes on to the turn's end).
+        if let Some((began, false)) = self.command_started.get(id).copied() {
+            self.command_started.remove(id);
+            self.command_runs.push((began, SystemTime::now()));
         }
         self.open.remove(id);
         if let Some(change) = self.changes.remove(id).filter(|_| !is_error) {
@@ -2125,9 +2205,10 @@ impl Follow {
         let stopping = with_state(|s| s.live.get(&self.id).is_some_and(|l| l.stopping.is_some()));
         let text = if r.text.trim().is_empty() { self.last_text.clone() } else { r.text.trim().to_string() };
         let outcome = outcome_of(r, stopping, self.problem.as_ref());
-        let manifest: Vec<String> = claude_live::backup::read_manifest(&self.backup)
-            .map(|m| m.files.iter().map(|e| steps::shown_path(&e.original.to_string_lossy(), &self.folder)).collect())
-            .unwrap_or_default();
+        let read = claude_live::backup::read_manifest(&self.backup).ok();
+        let manifest: Vec<String> = read.as_ref().map(|m| m.files.iter().map(|e| steps::shown_path(&e.original.to_string_lossy(), &self.folder)).collect()).unwrap_or_default();
+        // (Its hook's own entries: a command's files, noted at a turn's end, aren't the hook running.)
+        let hooked = read.as_ref().map_or(0, |m| m.files.iter().filter(|e| !e.command).count());
         // (A plan sent back with comments isn't a denial: `revised_plan`.)
         let before: Vec<store::PlanBefore> = store::get(&self.id).and_then(|j| j.turn_list.iter().find(|t| t.n == self.n).map(|t| t.plans_before.clone())).unwrap_or_default();
         let denials: Vec<Denial> = r
@@ -2148,7 +2229,7 @@ impl Follow {
         let said = self.meter.said() || r.usage.input_tokens + r.usage.output_tokens > 0;
         let usage = self.meter.at_result(r);
         let usage = said.then_some(usage);
-        let unbacked = no_backups(self.edited, manifest.len());
+        let unbacked = no_backups(self.edited, hooked);
         if unbacked {
             tracing::info!(id = %self.id, "Agents: files changed with no backups (Claude Code's hooks didn't run)");
         }
@@ -3668,7 +3749,7 @@ mod tests {
                 }
                 None => (B::Created, String::new()),
             };
-            m.files.push(Entry { original: path.to_path_buf(), state, backup, bytes: 0, tool: "Edit".into(), ts: 0, note: String::new() });
+            m.files.push(Entry { original: path.to_path_buf(), state, backup, bytes: 0, tool: "Edit".into(), ts: 0, note: String::new(), command: false, was: None, after: None });
         }
         std::fs::write(dir.join(MANIFEST), serde_json::to_vec(&m).unwrap()).unwrap();
     }

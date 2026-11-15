@@ -11,7 +11,9 @@
 //   `documents`), newest first; opens beside the chat.
 // - `changed`: a file the chat's work changed (its agents' turns' `files`,
 //   relative to the workspace: agents/store.rs), newest first, each once;
-//   opens in the file view beside the chat.
+//   opens in the file view beside the chat (a spreadsheet in the sheet
+//   view). One its commands made (a script's workbook: the turn's
+//   `byCommand`, agents/changes.rs) says "New", and `command` marks it.
 // - `shared`: a file shared into the conversation (`share_files`,
 //   chat/shares.rs: an answer's `files`), newest first; a picture opens in
 //   the picture tab, a file in the workspace in the file view, any other as
@@ -27,6 +29,15 @@ export function splitPath(p) {
     .split(/[\\/]/)
     .filter(Boolean);
   return { name: parts.pop() || String(p || ''), folder: parts.join('/') };
+}
+
+const fileKey = (f) => String(f).replace(/\\/g, '/').toLowerCase();
+
+/** The files the chat's agents' commands made or changed (`byCommand`), by key: the latest turn's word on each. Pure. */
+function commandFiles(agents) {
+  const out = new Map();
+  for (const a of agents || []) for (const t of [...(a?.turnList || [])].sort((x, y) => (Number(x.n) || 0) - (Number(y.n) || 0))) for (const c of t.byCommand || []) if (c?.file) out.set(fileKey(c.file), c);
+  return out;
 }
 
 /** The files the chat's `agents` changed, newest first, each once (its newest turn's). Pure. */
@@ -73,9 +84,11 @@ export function outputItems({ agents = [], messages = [], made = [] } = {}) {
       out.push({ key: `doc:${d.id}`, kind: 'doc', name: d.title || 'Untitled document', detail: '', label: 'Document', id: d.id });
     }
   }
+  const byCommand = commandFiles(agents);
   for (const f of changedFiles(agents)) {
     const { name, folder } = splitPath(f);
-    out.push({ key: `changed:${f}`, kind: 'changed', name, detail: folder, label: 'Changed', rel: String(f).replace(/\\/g, '/') });
+    const c = byCommand.get(fileKey(f));
+    out.push({ key: `changed:${f}`, kind: 'changed', name, detail: folder, label: c?.new ? 'New' : 'Changed', rel: String(f).replace(/\\/g, '/'), ...(c ? { command: true } : {}) });
   }
   const seen = new Set();
   for (const m of [...(messages || [])].reverse()) {

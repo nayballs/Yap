@@ -26,6 +26,15 @@
 //! folder) and reads only plain file names inside the backup folder; any
 //! other is refused and said in the [`RestoreReport`].
 //!
+//! **Files a command made or changed** (15 Nov 2026, `agents/changes.rs`):
+//! the turn's end adds them to the same manifest, marked `command`, each with
+//! its `after` stamp (its size and time at the turn's end). A file a command
+//! made is `Created`; one it changed that was clean in Git is `Copied` from
+//! Git's own copy; any other is `Failed` with its note (no copy from before),
+//! which an older Yap's Undo skips as it should. **Undo leaves a file alone
+//! that changed after the turn** (its stamp isn't the latest entry's
+//! `after`): the person's own later work is never deleted or written over.
+//!
 //! The log has counts and states, never a path.
 
 use std::path::{Component, Path, PathBuf};
@@ -57,6 +66,33 @@ pub enum State {
     Failed,
 }
 
+/// **A file's size and time**, to tell whether it changed: the original's
+/// when it was copied (`Entry::was`), and a command's file at its turn's end
+/// (`Entry::after`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Stamp {
+    pub bytes: u64,
+    /// Its last change, in milliseconds since 1970 (0: not known).
+    pub modified_ms: u64,
+}
+
+impl Stamp {
+    pub fn of(meta: &std::fs::Metadata) -> Stamp {
+        let modified_ms = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64);
+        Stamp { bytes: meta.len(), modified_ms }
+    }
+
+    /// The file at `path` now (`None`: not a file there).
+    pub fn now(path: &Path) -> Option<Stamp> {
+        std::fs::metadata(path).ok().filter(|m| m.is_file()).map(|m| Stamp::of(&m))
+    }
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// One file in the manifest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,6 +115,17 @@ pub struct Entry {
     /// Why it wasn't copied (`TooBig`, `Failed`).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub note: String,
+    /// **A command made or changed it** (found at the turn's end:
+    /// `agents/changes.rs`), not one of Claude Code's edit tools.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub command: bool,
+    /// The original's size and time when it was copied (the hook's copies).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub was: Option<Stamp>,
+    /// A command's file as its turn left it: Undo leaves it alone once it
+    /// isn't so any more.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<Stamp>,
 }
 
 /// **`manifest.json`**.
@@ -126,7 +173,7 @@ pub struct RestoreReport {
 
 /// `p` with `.` and `..` worked out, if it's absolute and `..` never goes
 /// above its root.
-fn normal(p: &Path) -> Option<PathBuf> {
+pub(crate) fn normal(p: &Path) -> Option<PathBuf> {
     let mut out = PathBuf::new();
     for c in p.components() {
         match c {
@@ -168,7 +215,7 @@ fn inside(p: &Path, dir: &Path) -> bool {
 }
 
 /// `p` relative to `folder` when it's in it ("src/app.ts" for the card).
-pub(super) fn relative_to(p: &Path, folder: &Path) -> Option<String> {
+pub(crate) fn relative_to(p: &Path, folder: &Path) -> Option<String> {
     let (p, folder) = (normal(p)?, normal(folder)?);
     if !key(&p).starts_with(key(&folder)) {
         return None;
@@ -179,7 +226,7 @@ pub(super) fn relative_to(p: &Path, folder: &Path) -> Option<String> {
 
 /// A backup's name: one plain file name, nothing that could reach outside
 /// the backup folder (no separators, no drive, no stream).
-fn plain_name(name: &str) -> bool {
+pub(crate) fn plain_name(name: &str) -> bool {
     let mut parts = Path::new(name).components();
     matches!((parts.next(), parts.next()), (Some(Component::Normal(n)), None) if n == name)
         && !name.contains([':', '/', '\\', '\0'])
@@ -187,7 +234,7 @@ fn plain_name(name: &str) -> bool {
 }
 
 /// `0001-app.ts`: the entry's number and the file's name, made safe.
-fn backup_name(n: usize, original: &Path) -> String {
+pub(crate) fn backup_name(n: usize, original: &Path) -> String {
     let name = original.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
     let safe: String = name
         .chars()
@@ -209,14 +256,14 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest, String> {
     }
 }
 
-fn write_manifest(dir: &Path, m: &Manifest) -> std::io::Result<()> {
+pub(crate) fn write_manifest(dir: &Path, m: &Manifest) -> std::io::Result<()> {
     let tmp = dir.join(format!("{MANIFEST}.tmp"));
     let body = serde_json::to_vec_pretty(m).map_err(std::io::Error::other)?;
     std::fs::write(&tmp, body)?;
     std::fs::rename(&tmp, dir.join(MANIFEST))
 }
 
-fn now_secs() -> u64 {
+pub(crate) fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -237,7 +284,7 @@ pub(super) fn pre_tool_use(run: &Run, input: &Value, max: u64) {
 /// **Back up the file a `PreToolUse` input names**, the first time: what
 /// was noted, or `None` (not an edit, no path, already noted, the backup
 /// folder itself, or a manifest that couldn't be read).
-pub(super) fn record(dir: &Path, folder: Option<&Path>, input: &Value, max: u64) -> Option<State> {
+pub(crate) fn record(dir: &Path, folder: Option<&Path>, input: &Value, max: u64) -> Option<State> {
     let tool = input.get("tool_name").and_then(Value::as_str).unwrap_or("");
     if !EDITING.contains(&tool) {
         return None;
@@ -272,7 +319,7 @@ pub(super) fn record(dir: &Path, folder: Option<&Path>, input: &Value, max: u64)
     if manifest.files.iter().any(|e| key(&e.original) == key(&path)) {
         return None;
     }
-    let mut entry = Entry { original: path.clone(), state: State::Created, backup: String::new(), bytes: 0, tool: tool.to_string(), ts: now_secs(), note: String::new() };
+    let mut entry = Entry { original: path.clone(), state: State::Created, backup: String::new(), bytes: 0, tool: tool.to_string(), ts: now_secs(), note: String::new(), command: false, was: None, after: None };
     match std::fs::metadata(&path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => {
@@ -293,6 +340,7 @@ pub(super) fn record(dir: &Path, folder: Option<&Path>, input: &Value, max: u64)
                     entry.state = State::Copied;
                     entry.backup = name;
                     entry.bytes = meta.len();
+                    entry.was = Some(Stamp::of(&meta));
                 }
                 Err(e) => {
                     entry.state = State::Failed;
@@ -345,11 +393,20 @@ pub fn restore_all(dirs: &[PathBuf]) -> RestoreReport {
             }
         }
     }
+    // Each file's latest entry: a command's file as its turn left it is its
+    // guard (one changed since is the person's own work, left alone).
+    let mut latest: std::collections::HashMap<PathBuf, Option<Stamp>> = std::collections::HashMap::new();
+    for (_, manifest) in &manifests {
+        for e in &manifest.files {
+            latest.insert(key(&e.original), e.after);
+        }
+    }
     let mut seen = std::collections::HashSet::new();
     for (dir, manifest) in &manifests {
         for e in &manifest.files {
             if seen.insert(key(&e.original)) {
-                put_back(dir, e, &mut report);
+                let guard = latest.get(&key(&e.original)).copied().flatten();
+                put_back(dir, e, guard, &mut report);
             }
         }
     }
@@ -364,7 +421,12 @@ pub fn restore_all(dirs: &[PathBuf]) -> RestoreReport {
     report
 }
 
-fn put_back(dir: &Path, e: &Entry, report: &mut RestoreReport) {
+/// The reason Undo gives for a command's file it had no copy of.
+pub const NO_COPY: &str = "a command changed it, and Yap had no copy of it from before";
+/// The reason Undo gives for a command's file that changed after its turn.
+pub const CHANGED_SINCE: &str = "it changed after the turn, so it was left as it is";
+
+fn put_back(dir: &Path, e: &Entry, guard: Option<Stamp>, report: &mut RestoreReport) {
     let skip = |reason: &str| Skipped { path: e.original.clone(), reason: reason.to_string() };
     if !is_plain(&e.original) {
         report.refused.push(skip("not a plain absolute path"));
@@ -373,6 +435,13 @@ fn put_back(dir: &Path, e: &Entry, report: &mut RestoreReport) {
     if inside(&e.original, dir) {
         report.refused.push(skip("inside the backup folder"));
         return;
+    }
+    // A command's file that isn't as its turn left it: the person's own work since.
+    if let Some(g) = guard {
+        if matches!(e.state, State::Copied | State::Created) && Stamp::now(&e.original).is_some_and(|now| now != g) {
+            report.skipped.push(skip(CHANGED_SINCE));
+            return;
+        }
     }
     match e.state {
         State::Copied => {
@@ -408,6 +477,7 @@ fn put_back(dir: &Path, e: &Entry, report: &mut RestoreReport) {
             },
         },
         State::TooBig => report.skipped.push(skip("too big to back up, so it can't be put back")),
+        State::Failed if e.command => report.skipped.push(skip(NO_COPY)),
         State::Failed => report.skipped.push(skip("it couldn't be backed up, so it can't be put back")),
     }
 }

@@ -66,6 +66,10 @@ import {
   messageIndex,
   pillsByAnswer,
   canUndo,
+  canUndoTurn,
+  undoableFiles,
+  unbackedFiles,
+  unbackedLine,
   NO_BACKUPS,
   agentOfReport,
   reportTitle,
@@ -416,6 +420,19 @@ test('core/agents.js: status, cost by how it is paid, time, steps, pills, proble
   expect(canUndo({ ...changed, swept: true })).toBe(false);
   expect(canUndo({ ...changed, noBackups: true })).toBe(false);
   expect(canUndo(null)).toBe(false);
+  // A command's files (agents/changes.rs): one it made can be deleted, one it changed with a copy put back — one
+  // with no copy from before can't, so a turn with only that offers no Undo, and says why.
+  const turn = (byCommand) => ({ status: 'done', files: byCommand.map((c) => c.file), turnList: [{ n: 1, files: byCommand.map((c) => c.file), byCommand }] });
+  expect(canUndo(turn([{ file: 'costs.xlsx', new: true, kept: false }]))).toBe(true);
+  expect(canUndo(turn([{ file: 'package-lock.json', new: false, kept: true }]))).toBe(true);
+  const lost = turn([{ file: 'data.csv', new: false, kept: false }]);
+  expect(canUndo(lost)).toBe(false);
+  expect(canUndoTurn(lost, lost.turnList[0])).toBe(false);
+  expect(canUndo({ ...turn([{ file: 'costs.xlsx', new: true, kept: false }]), noBackups: true }), "its hooks didn't run, but a command's new file can still go").toBe(true);
+  expect(undoableFiles(['notes.md', 'data.csv'], [{ file: 'data.csv', new: false, kept: false }], false)).toEqual(['notes.md']);
+  expect(unbackedLine(unbackedFiles(lost.turnList))).toBe("Undo can't put back data.csv: a command changed it, and Yap had no copy of it from before.");
+  expect(unbackedLine(['a.csv', 'b.csv'])).toBe("Undo can't put back a.csv, b.csv: commands changed them, and Yap had no copy of them from before.");
+  expect(unbackedLine([])).toBe('');
   expect(NO_BACKUPS).toBe("No backups were made, so Undo can't put these files back.");
 
   // Plan and key, told apart.

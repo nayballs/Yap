@@ -51,6 +51,8 @@
     modelLabel,
     canUndo as undoable,
     canUndoTurn,
+    unbackedFiles,
+    unbackedLine,
     shownStepPicture,
   } from '../../core/agents.js';
   import { EFFORT_LABELS } from '../../core/effort.js';
@@ -389,8 +391,23 @@
     const parts = [];
     if (r.restored?.length) parts.push(`${r.restored.map(shortPath).join(', ')} put back`);
     if (r.deleted?.length) parts.push(`${r.deleted.map(shortPath).join(', ')} deleted (the agent made ${r.deleted.length === 1 ? 'it' : 'them'})`);
+    // What it couldn't put back, and why (a command's file with no copy, one changed since).
+    const left = (r.skipped || []).filter((s) => s.reason && s.reason !== 'already gone');
+    if (left.length) parts.push(`${left.map((s) => shortPath(s.path)).join(', ')} left as ${left.length === 1 ? 'it is' : 'they are'} (${[...new Set(left.map((s) => s.reason))].join('; ')})`);
     return `Undone: ${parts.join('; ')}.`;
   };
+  // Files its commands changed with no copy from before: the confirm says so (never "Yap kept their backups" for them).
+  const unbackedNow = $derived(unbackedFiles((shown?.turnList || []).filter((t) => !t.undone)));
+  const undoBody = $derived.by(() => {
+    const lost = unbackedLine(unbackedNow);
+    if (lost) {
+      const when = many ? 'before its first turn' : 'before it';
+      return `The files it changed that Yap backed up go back to how they were ${when}, and the files it made are deleted. ${lost}`;
+    }
+    return many
+      ? 'Every file it changed, in every turn, goes back to how it was before its first turn, and the files it made are deleted. Yap kept their backups for this.'
+      : 'Every file it changed goes back to how it was before it, and the files it made are deleted. Yap kept their backups for this.';
+  });
   const effortWord = (e) => EFFORT_LABELS[e] || e || '';
   /** A turn's header line after its title: its status, how long, its cost. */
   const turnFacts = (t) => {
@@ -574,9 +591,7 @@
 <ConfirmDialog
   bind:open={confirmUndo}
   title={many ? 'Undo every turn of this agent?' : "Undo the agent's changes?"}
-  body={many
-    ? 'Every file it changed, in every turn, goes back to how it was before its first turn, and the files it made are deleted. Yap kept their backups for this.'
-    : 'Every file it changed goes back to how it was before it, and the files it made are deleted. Yap kept their backups for this.'}
+  body={undoBody}
   confirmLabel={many ? 'Undo all' : "Undo the agent's changes"}
   busyLabel="Undoing…"
   busy={busy === 'undo'}
