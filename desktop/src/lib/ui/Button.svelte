@@ -6,11 +6,13 @@
     title = '',
     type = 'button',
     onclick,
+    // Its accessible name when the words on it aren't enough ("Run now" in a list of them).
+    ariaLabel = '',
     children,
   } = $props();
 </script>
 
-<button class="btn {variant} {size}" {disabled} {title} {type} {onclick}>
+<button class="btn {variant} {size}" {disabled} {title} {type} {onclick} aria-label={ariaLabel || undefined}>
   {@render children?.()}
 </button>
 

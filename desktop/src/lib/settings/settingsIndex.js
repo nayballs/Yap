@@ -189,6 +189,9 @@ export const SETTINGS_INDEX = [
   { page: 'memory', section: 'Import, export and clear', label: 'Clear all memory', desc: 'Forget everything Yap remembers', keywords: 'memory clear delete forget erase reset wipe', anchor: 'memory-clear' },
 
   // Skills (SkillsPage.svelte, chat/skills.rs)
+  { page: 'skills', section: 'Routines', label: 'Routines', desc: 'Skills that run by themselves: on a schedule, after a meeting or before one', keywords: 'routine routines schedule scheduled automatic automation recurring daily weekly every morning after meeting before meeting run by itself cron timer', anchor: 'routines' },
+  { page: 'skills', section: 'Routines', label: 'New routine', desc: 'A Skill, when it runs and where its answer goes', keywords: 'routine new add create schedule automatic recurring', anchor: 'routines-add' },
+  { page: 'skills', section: 'Routines', label: 'Recent runs', desc: "Each routine's runs: its chat, and why one failed or was skipped", keywords: 'routine runs history log failed skipped missed run now', anchor: 'routines-runs', fallback: 'routines' },
   { page: 'skills', section: 'Your Skills', label: 'Your Skills', desc: 'Saved instructions you run with /name', keywords: 'skills slash commands saved prompts instructions custom my own templates', anchor: 'skills-yours' },
   { page: 'skills', section: 'Your Skills', label: 'New Skill', desc: 'A name, a /command and what it should do', keywords: 'skills create new add slash command prompt template', anchor: 'skills-add' },
   { page: 'skills', section: "Yap's Skills", label: "Yap's Skills", desc: '/prep, /standup, /todos and more: open one, or save a copy', keywords: 'skills slash commands saved prompts instructions decisions follow-up email todos stand-up standup prep summary', anchor: 'skills-builtin' },

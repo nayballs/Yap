@@ -200,6 +200,10 @@ pub fn rule(kind: &str) -> Rule {
         // window in front: a notice, held over a dictation, gone if unseen a
         // minute (its chat has the report).
         "agentDone" => info,
+        // "Routine ran: /standup" (chat/routines/run.rs): a quiet notice —
+        // never over a dictation or a meeting, waiting up to ten minutes for
+        // them, then gone (its chat and the runs list have it).
+        "routine" => Rule { hold_meeting: true, max_wait_ms: Some(10 * MIN), ..info },
         // A running agent asks to take a step (`agents/approve_card.rs`), with no
         // Yap window in front: a question that waits for its answer (Chat's
         // thread has it too), never over a dictation.

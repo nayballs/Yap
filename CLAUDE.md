@@ -177,6 +177,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `chat/budget.rs` / `chat/compact.rs` — long chats sized to the model's real context.
 - `chat/note_chats.rs` — a meeting's Ask thread, kept with its note.
 - `chat/skills.rs` — Skills: saved instructions run with `/name`.
+- `chat/routines.rs` (+ `routines/schedule.rs`, `routines/run.rs`) — Routines: Skills that run by themselves (a schedule, after a meeting, before one) while Yap runs, one at a time, never over a dictation or a meeting, 20 a day; `routines.json`, never chats.json.
 - `chat/tools.rs` (+ `tools/`) / `chat/note_text.rs` — the tool loop. After outside content (web, screen, a connector) apps, the clipboard and memory stay locked.
 - `chat/activity.rs` / `chat/stream.rs` — what Chat is doing now; streamed answers, ■ Stop.
 - `chat/commands.rs` / `chat/turn.rs` (+ `turn/`, `turn/fit.rs`) — the Chat view's commands; one chat turn's steps, in order.
@@ -341,7 +342,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `settings/ConnectionsView.svelte`, `settings/ReportProblem.svelte`, `settings/YourData.svelte` — network receipts, Report a problem, your data ([privacy-receipts.md](./docs/architecture/privacy-receipts.md)).
 - `settings/` — Settings, always mounted in the modal: `Settings.svelte` the shell, a `*Page.svelte` per page, `configSync.svelte.js` the config copy, `hotkeyFallback.svelte.js` the in-page keys; `core/providers.js`. Every part: [frontend-settings.md](./docs/architecture/frontend-settings.md#the-module-map-split-2026-10-24).
 - `settings/MemorySection.svelte` + `stores/memory.svelte.js` — Settings → Assistant → Memory ([memory.md](./docs/architecture/memory.md)).
-- `settings/SkillsPage.svelte` + `stores/skills.svelte.js` + `core/skills.js` + `components/SkillMenu.svelte` — Settings → Skills and the "/" menu ([skills](./docs/architecture/chat-and-assistant.md#skills-and-one-tap-prompts-2026-10-29)).
+- `settings/SkillsPage.svelte` + `stores/skills.svelte.js` + `core/skills.js` + `components/SkillMenu.svelte` — Settings → Skills and the "/" menu ([skills](./docs/architecture/chat-and-assistant.md#skills-and-one-tap-prompts-2026-10-29)); `settings/RoutinesSection.svelte` + `stores/routines.svelte.js` + `core/routines.js` its Routines ([routines](./docs/architecture/chat-and-assistant.md#routines-skills-that-run-by-themselves-2026-11-15)).
 - `settings/YapCodePage.svelte` + `settings/ClaudeCodeStatus.svelte` — Settings → Assistant → Yap Code ([yap-code.md](./docs/architecture/yap-code.md)).
 - `settings/AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
 - `settings/connectors/` — Settings → Connectors (preview, off by default): `ConnectorsPage`, `connectors.svelte.js` ([integrations.md](./docs/architecture/integrations.md#settings--connectors-wave-5-2026-11-08)).
@@ -480,7 +481,7 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`); what each holds:
 [config-and-data.md](./docs/architecture/config-and-data.md). `config.json`,
 `models/` (`diarization/`, `tts/`, `search/`), `llm/` (`vision/`, `engine/`, `engine.json`),
 `history.json`, `notes.json`, `tasks.json`, `note-versions/`, `note_pins.json`, `skills.json`,
-`meeting_folders.json`, `chats.json` (+ `chat_branches.json`), `calendar.json`, `chatgpt.json`, `updates.json`,
+`meeting_folders.json`, `routines.json`, `chats.json` (+ `chat_branches.json`), `calendar.json`, `chatgpt.json`, `updates.json`,
 `model_catalog.json`, `groq_usage.json`, `ai_usage.json`, `dictation_stats.json`,
 `dictionary_usage.json`, `hints.json`, `onboarding.json`, `mic_tips.json`,
 `word_suggestions.json`, `snippet_suggestions.json`, `language_nudges.json`, `notices.json`,

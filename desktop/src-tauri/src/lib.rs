@@ -708,6 +708,12 @@ pub fn run() {
             chat::skills::skill_save,
             chat::skills::skill_delete,
             chat::skills::skill_show,
+            chat::routines::routines_list,
+            chat::routines::routine_save,
+            chat::routines::routine_delete,
+            chat::routines::routine_set_on,
+            chat::routines::routine_run_now,
+            chat::routines::routine_open,
             chat::note_chats::note_chat,
             chat::note_chats::note_chat_open,
             chat::note_chats::note_chat_add,
@@ -1665,6 +1671,10 @@ pub fn run() {
             // them, and their titles and attendees for meeting notes (talks
             // to Google or the person's iCal link only; calendar.rs).
             calendar::init(&handle);
+
+            // Routines: Skills that run by themselves, on a schedule, after a
+            // meeting or before one, while Yap runs (chat/routines.rs).
+            chat::routines::init(&handle);
 
             // Meeting search: every meeting and note read by the search
             // model in the background, when it's on (search.rs).

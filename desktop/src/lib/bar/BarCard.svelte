@@ -67,6 +67,8 @@
     // An agent done, or a running agent asking to take a step (agents/):
     // the feature's name, as the other chips name theirs.
     agent: FEATURE_NAME,
+    // A routine ran by itself (chat/routines.rs).
+    routine: 'Routine',
   };
   const answer = $derived(card.style === 'answer');
   const chip = $derived(card.chip ?? CHIPS[card.icon] ?? null);
@@ -114,6 +116,9 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 20 11-11" /><path d="m13 7 4 4" /><path d="M17 3v3M15.5 4.5h3M20 9v2M19 10h2M9 3v2M8 4h2" /></svg>
       {:else if card.icon === 'agent'}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+      {:else if card.icon === 'routine'}
+        <!-- A clock coming round: a Skill that runs by itself. -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v4h-4" /><path d="M12 8v4l2.5 1.5" /></svg>
       {:else if card.icon === 'assistant'}
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
       {/if}

@@ -22,6 +22,7 @@ export const FEATURE_LABELS = {
   brief: 'Meeting briefs',
   search: 'Search by meaning',
   voice: 'Spoken replies',
+  routines: 'Routines',
   other: 'Other',
 };
 

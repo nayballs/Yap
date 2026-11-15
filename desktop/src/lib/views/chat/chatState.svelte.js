@@ -1929,6 +1929,17 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   }
 
   /** Its answer is in (`yap-agent-report`): the next waiting message goes now, a turn of its own. */
+  /**
+   * **A routine ran** (`yap-routine-ran`, chat/routines.rs): its chat may be
+   * new, or back from the archive — the list reads itself again, and the
+   * conversation shown, when it's that one, reads its answer in.
+   */
+  function routineRan(p) {
+    if (!alive) return;
+    refreshList();
+    if (p?.conversationId != null && p.conversationId === activeId) reloadActive();
+  }
+
   function agentReported(p) {
     const conv = p?.conversation ?? p?.conversationId;
     if (conv == null || !releaseAfter.has(conv)) return;
@@ -2528,6 +2539,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get forks() { return forks; },
     agentEvent,
     agentReported,
+    routineRan,
     spokenWhileWorking,
     get doc() { return doc; },
     get connectors() { return connectors; },

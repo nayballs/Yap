@@ -11,7 +11,8 @@
   // Open one of Yap's to read its instructions; Save a copy makes it yours
   // to change. A Skill switched off still runs when its whole command is
   // typed. Saved in skills.json at once (not Settings' auto-saved config);
-  // every window's "/" menu follows (`yap-skills-changed`).
+  // every window's "/" menu follows (`yap-skills-changed`). Above them,
+  // Routines: Skills that run by themselves (RoutinesSection.svelte).
   import { tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import Group from '../ui/Group.svelte';
@@ -21,6 +22,7 @@
   import Segmented from '../ui/Segmented.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import RoutinesSection from './RoutinesSection.svelte';
   import { toast } from '../ui/toast.svelte.js';
   import { showSaveError } from '../notices/saveErrors.js';
   import { skills, initSkills, refreshSkills, setShown } from '../stores/skills.svelte.js';
@@ -46,6 +48,13 @@
   let saving = $state(false);
   let deleting = $state(null);
   let confirmOpen = $state(false);
+  // A Skill to make a routine for (its "Make a routine"): RoutinesSection takes it.
+  let routineFor = $state(null);
+
+  function makeRoutine(s) {
+    reading = null;
+    routineFor = s;
+  }
 
   const problem = $derived.by(() => {
     if (!draft) return '';
@@ -156,6 +165,8 @@
   </p>
 </div>
 
+<RoutinesSection bind:wanted={routineFor} />
+
 <!-- A Skill's "Show in the / menu" switch. -->
 {#snippet menuSwitch(s)}
   <span class="sw" title="Show in the / menu">
@@ -179,8 +190,11 @@
         <p class="where">{whereItRuns(s.runsOn)}{writesDocument(s) ? ' In Chat, it writes its answer as a document beside the chat.' : ''}</p>
         <p class="instr" aria-label={`Instructions of /${s.command}`}>{s.instructions}</p>
         <div class="dfoot">
-          <span class="dnote">Make it your own and change what it does.</span>
-          <Button variant="secondary" size="sm" onclick={() => openForm(s, true)}>Save a copy</Button>
+          <span class="dnote">Make it your own and change what it does, or have it run by itself.</span>
+          <span class="dbtns">
+            <Button variant="ghost" size="sm" onclick={() => makeRoutine(s)} ariaLabel={`Make a routine of /${s.command}`}>Make a routine</Button>
+            <Button variant="secondary" size="sm" onclick={() => openForm(s, true)}>Save a copy</Button>
+          </span>
         </div>
       </div>
     {/if}
@@ -199,6 +213,7 @@
             <span class="line clip">{s.description || s.instructions}</span>
           </div>
           <div class="rhs">
+            <Button variant="ghost" size="sm" onclick={() => makeRoutine(s)} ariaLabel={`Make a routine of /${s.command}`}>Routine</Button>
             <Button variant="ghost" size="sm" onclick={() => openForm(s)}>Edit</Button>
             <button class="tool del" title="Delete" aria-label={`Delete /${s.command}`} onclick={() => askDelete(s)}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" /></svg>
@@ -387,6 +402,10 @@
   .dnote {
     font-size: 12px;
     color: var(--yap-muted);
+  }
+  .dbtns {
+    display: inline-flex;
+    gap: 6px;
   }
   .tool {
     display: inline-flex;

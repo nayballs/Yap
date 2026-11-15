@@ -654,6 +654,28 @@
   Reset app keeps it, switches and all (setup, like folders and actions:
   `privacy/reset.rs` STAYS); Download your data includes it (`skills.json`
   in the zip).
+- Routines: `%APPDATA%/yap/routines.json` (2026-11-15, `chat/routines.rs`,
+  through `saving.rs` as "your routines"; a file that doesn't read is set
+  aside) — Skills that run by themselves: `{routines: [{id ("r<ms>"), skill
+  (a Skill's id), words, trigger: {kind: "schedule", days: "daily" |
+  "weekdays" | "weekly", weekday (0 = Monday), time ("09:00")} | {kind:
+  "meetingEnd", folder, outside} | {kind: "beforeEvent", minutes}, on, to:
+  "chat" | "note", chat (its own chat's id, 0 none yet), handled (a
+  schedule's last time run or skipped, unix seconds), events ([{key, start}]:
+  the calendar meetings a "before" one ran for, a day kept), createdMs,
+  updatedMs}], runs: [{id, routine, command, name, cause: "schedule" |
+  "missed" | "now" | "meeting" | "event", slot, queued, started, ended,
+  state: "waiting" | "running" | "done" | "failed" | "skipped", why, chat,
+  note, thread, about}]}` — ≤ 20 routines, the newest 50 runs. **A new file
+  an older Yap never opens**: nothing of a routine is in a store an older
+  Yap rewrites; its chat is an ordinary conversation in chats.json, marked
+  in Chat's list from here (`chats_list`'s `routine`), and a deleted chat
+  leaves its routine (`routines::chats_deleted`: a later conversation may
+  get the id). Runs left waiting or running when Yap closed read as failed
+  at the next start. Reset app keeps the routines (setup, like Skills:
+  STAYS) and Delete some of your data → Chats takes their chats' ids
+  (`reset_chats`: each makes a new one at its next run); Download your data
+  includes it when there are any (`routines.json` in the zip).
 - Note versions: `%APPDATA%/yap/note-versions/<note id>.json` — each note's
   version history (2026-10-29, `notes/versions.rs`): `{note, created, next,
   versions: [{n, field: "notes" | "summary", kind, label?, from?, turn?,
@@ -1170,7 +1192,7 @@
   taken under it, written after, `saving::Ordered`: one write at a time,
   never an older snapshot over a newer one); meeting audio's own `.json`
   files go through a `Saver` of their own (`Saver::write_each`: a store in
-  several files, unsaved while any failed); `tasks.json` and `skills.json` have one; the
+  several files, unsaved while any failed); `tasks.json`, `skills.json` and `routines.json` have one; the
   summary an action writes (`note_enhance`, the action plan at a meeting's
   end) and `calendar_add_link` / `calendar_disconnect` check their save and
   return the failure (the page treats the change as made, with Try again;
@@ -1447,7 +1469,7 @@ app deletes those of the stores it clears, like the set-aside copies.
 
 **What each store does** (all through `saving.rs`):
 
-- notes.json, chats.json, memory.json, tasks.json, skills.json,
+- notes.json, chats.json, memory.json, tasks.json, skills.json, routines.json,
   meeting_folders.json, note_pins.json, writing_samples.json, history.json
   (kept in time order), dictation_stats.json (each count the larger),
   dictionary_usage.json, word_suggestions.json, snippet_suggestions.json,

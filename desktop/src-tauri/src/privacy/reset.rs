@@ -179,7 +179,7 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: "Chats",
         says: "Every chat, archived ones too, with its screenshots and the files attached to it. Documents Chat wrote stay in Notes",
-        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "(chat_branches.json)", "chat-images/", "chat-files/", "chat-made/", "claude_sessions.json", "connector_chats.json", "(chat_styles.json)", "(projects.json)", "(memory.json)", "(search-index/)"],
+        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "(chat_branches.json)", "chat-images/", "chat-files/", "chat-made/", "claude_sessions.json", "connector_chats.json", "(chat_styles.json)", "(projects.json)", "(routines.json)", "(memory.json)", "(search-index/)"],
         stores: &["chats", "claudeSessions", "memory"],
     },
     About {
@@ -293,10 +293,10 @@ pub const STAYS: &[Part] = &[
     // Skills and meeting folder rules are setup, like folders and actions: they stay.
     Part {
         id: "settings",
-        label: "Your settings, dictionary, snippets and transforms, your Skills, answer styles, projects and meeting folder rules",
+        label: "Your settings, dictionary, snippets and transforms, your Skills and routines, answer styles, projects and meeting folder rules",
         // (chat_styles.json, projects.json: the person's styles and projects
         // stay, a project's files too; each chat's pick and place go with it.)
-        files: &["config.json", "dictionary_usage.json", "skills.json", "chat_styles.json", "projects.json", "projects/", "meeting_folders.json"],
+        files: &["config.json", "dictionary_usage.json", "skills.json", "routines.json", "chat_styles.json", "projects.json", "projects/", "meeting_folders.json"],
     },
     // Connectors (preview) are settings too: the list, each tool's setting,
     // their tool lists (a cache) and their programs' folders stay; their
@@ -475,6 +475,12 @@ impl Choice {
         Cut::of(false, self.has(Kind::Chats))
     }
 
+    /// routines.json: each routine's own chat, and its runs' chats
+    /// (chat/routines.rs) — the routines themselves stay, as Skills do.
+    pub fn routines(&self) -> Cut {
+        Cut::of(false, self.has(Kind::Chats))
+    }
+
     /// memory.json: what's remembered, or what the passes read of chats and
     /// meetings that went.
     pub fn memory(&self) -> Cut {
@@ -578,6 +584,7 @@ const STORES: &[(&str, Rule)] = &[
     ("connector_chats.json", Choice::connector_chats),
     ("chat_styles.json", Choice::chat_styles),
     ("projects.json", Choice::chat_projects),
+    ("routines.json", Choice::routines),
     ("memory.json", Choice::memory),
     ("search-index/", Choice::search_index),
     ("calendar.json", Choice::briefs),
@@ -988,6 +995,13 @@ fn clear_stores(c: &Choice, done: &mut Done) -> Gone {
     } else {
         crate::chat::projects::chats_deleted(&gone.chats);
     }
+    // Their routines (chat/routines.rs): a routine whose chat went makes
+    // another at its next run (the routines stay).
+    if c.routines() == Cut::Part {
+        crate::chat::routines::reset_chats();
+    } else {
+        crate::chat::routines::chats_deleted(&gone.chats);
+    }
     // Memory: all of it (Undo's copies too), or what it read of what went.
     match c.memory() {
         Cut::Whole => done.memory = crate::memory::reset(),
@@ -1307,7 +1321,7 @@ mod tests {
     fn reset_app_is_every_kind_and_every_store_goes_whole() {
         let every = Choice::every();
         for (f, cut) in STORES {
-            let want = if matches!(*f, "calendar.json" | "snippet_suggestions.json" | "remote_control.json" | "connectors.json" | "chat_styles.json" | "projects.json") { Cut::Part } else { Cut::Whole };
+            let want = if matches!(*f, "calendar.json" | "snippet_suggestions.json" | "remote_control.json" | "connectors.json" | "chat_styles.json" | "projects.json" | "routines.json") { Cut::Part } else { Cut::Whole };
             assert_eq!(cut(&every), want, "{f}");
         }
         for f in every.touches() {

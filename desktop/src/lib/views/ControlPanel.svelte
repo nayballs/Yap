@@ -365,6 +365,14 @@
       chatRequest.pending = { assistant: p };
       activeView = 'chat';
     }).then((u) => uns.push(u));
+    // A routine's answer kept with a meeting's note (chat/routines.rs), its
+    // Open: Notes comes up on the note.
+    listen('yap-open-note', (e) => {
+      const id = e.payload?.id;
+      if (id == null) return;
+      settingsOpen = false;
+      openNoteAt({ id });
+    }).then((u) => uns.push(u));
     // A snip landed (Snip to Chat, snip.rs): Chat comes up with it in the
     // message box (ChatView takes it from there; while it's open it gets
     // the event itself). Rust has brought the window up.
