@@ -657,11 +657,16 @@ fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chat::c
                 text.to_string()
             };
             // A new chat asked incognito (chat/incognito.rs): in memory only.
-            if crate::chat::incognito::new_chat() {
+            let conv = if crate::chat::incognito::new_chat() {
                 crate::chat::chats::create_incognito(&title)
             } else {
                 crate::chat::chats::create(&title)
+            };
+            // Its style: the one its new chat had (chat/styles.rs); never a Code chat's.
+            if crate::agents::code_chat::new_chat_folder().is_none() {
+                crate::chat::styles::adopt_new(conv.id);
             }
+            conv
         }
     }
 }

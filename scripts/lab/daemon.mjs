@@ -517,7 +517,7 @@ async function dropFiles(files) {
   await chips.nth(before + paths.length - 1).waitFor({ state: 'visible', timeout: 60_000 });
 }
 
-async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask' }) {
+async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false }) {
   if (!text?.trim()) throw new Error('Nothing to ask');
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
   readRecord();
@@ -528,6 +528,13 @@ async function startTurn({ text, spoken = false, chat = 'new', autoCards = null,
   const t = new Turn({ question: text, spoken, since, askedAt, autoCards, report, shots, themes });
   turn = t;
   try {
+    // The chat's style from Style under the box (chat/styles.rs), as the person picks it.
+    if (style) await pickStyle(style);
+    // A new chat made incognito with its ghost (chat/incognito.rs).
+    if (incognito) {
+      const ghost = main().getByTestId('chat-incognito');
+      if ((await ghost.getAttribute('aria-pressed', { timeout: 10_000 })) !== 'true') await ghost.click({ timeout: 10_000 });
+    }
     if (how === 'retry' || how === 'edit') {
       await branchTurn(how, text);
     } else if (spoken) {
@@ -565,6 +572,19 @@ async function branchTurn(how, text) {
   await col.getByTestId('chat-edit-message').last().click({ timeout: 10_000 });
   await col.getByTestId('chat-edit-input').fill(text, { timeout: 10_000 });
   await col.getByTestId('chat-edit-save').click({ timeout: 10_000 });
+}
+
+/** Style under the message box (chat/styles.rs): the one named `name` (any case), as the person picks it. */
+async function pickStyle(name) {
+  const m = main();
+  await m.getByTestId('chat-style-chip').click({ timeout: 10_000 });
+  const wanted = String(name).trim().toLowerCase();
+  const items = m.getByRole('menu').first().getByRole('menuitemradio');
+  const names = (await items.allTextContents()).map((t) => t.trim().toLowerCase());
+  const at = names.indexOf(wanted);
+  if (at < 0) throw new Error(`No style called "${name}" (there are: ${names.join(', ')})`);
+  const item = items.nth(at);
+  await item.click({ timeout: 10_000 });
 }
 
 // ---------------------------------------------------------------- cards
@@ -1058,7 +1078,7 @@ const COMMANDS = {
     const attach = Array.isArray(a.attach) ? a.attach : a.attach ? String(a.attach).split(',').filter(Boolean) : null;
     const how = a.retry ? 'retry' : a.edit ? 'edit' : 'ask';
     const text = how === 'retry' ? String(a.text ?? '').trim() || 'Retry' : a.text;
-    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, ...shotsFor(a) });
+    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
   wait: async (a) => {

@@ -269,10 +269,18 @@ impl Prompt {
     /// question from the screen (the Voice Assistant's look at the window in
     /// front, `assistant/screen.rs`): what the picture or its text is, or
     /// why there's none.
-    fn end(&mut self, about: &str, memory_you: &str, profile: &crate::ai::about_you::Profile) {
+    fn end(&mut self, about: &str, memory_you: &str, profile: &crate::ai::about_you::Profile, style: &str) {
         // Where an older stretch's summary goes (`compact.rs`), when the history
         // needs one: before the prompt's end, which small models heed most.
         self.summary_at = self.system.len();
+        // How this chat's answers are written (chat/styles.rs), just before
+        // About you: stable from turn to turn, as the prompt's end is.
+        if !style.is_empty() {
+            self.system.push_str("
+
+");
+            self.system.push_str(style);
+        }
         // Last in the system prompt, where small models heed it: what the
         // context block is and About you without its clock — or, the context
         // staying in the system prompt, the whole block with it.
@@ -425,6 +433,9 @@ pub(super) struct Built {
     /// A Code chat's workspace (`Opened::code`): no memory in this turn, and
     /// on the Claude plan its session runs there (`plan.rs`).
     pub(super) code: Option<crate::agents::workspaces::Folder>,
+    /// This chat's style (chat/styles.rs): its block, "" for Normal (and a
+    /// Code chat). The plan's and the small web pipeline's prompts end with it too.
+    pub(super) style: String,
     /// An incognito chat (chat/incognito.rs): no memory in this turn, its
     /// tools neither, and on the Claude plan a session Claude Code never saves.
     pub(super) incognito: bool,
@@ -512,7 +523,9 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     let first = first_step(&t.text, &g, here, outline_first, t.about_selection.is_some(), tabs_open);
     let across = prompt.across_meetings(t, &doc_turn).await;
     let (small_calendar, calendar_chip) = prompt.library(t, &chat_docs, memory_here, past_chats, calendar_zone, code, no_memory);
-    prompt.end(&about, &memory_you, &profile);
+    // How this chat's answers are written (chat/styles.rs): never a Code chat's.
+    let style = if code { String::new() } else { crate::chat::styles::prompt_block(Some(conv.id)).unwrap_or_default() };
+    prompt.end(&about, &memory_you, &profile, &style);
     let spoken = t.by_voice && (t.scope == Some("assistant") || t.cfg.speak_replies);
     prompt.how_to_answer(t, spoken, &chat_docs, selection, sizing.context_size);
     let deep_reach = prompt.research(t, sizing, writes_doc, outline_first);
@@ -539,6 +552,7 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
         memory_you,
         profile,
         code: opened.code.clone(),
+        style,
         incognito: opened.conv.incognito,
         calendar_zone,
     }

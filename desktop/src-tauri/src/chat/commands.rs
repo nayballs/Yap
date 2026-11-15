@@ -28,8 +28,10 @@ pub fn chat_delete(id: u64) -> Result<(), String> {
     crate::apps::moved_on(Some(id));
     crate::ai::claude_plan::sessions::forget(id);
     crate::agents::code_chat::chat_deleted(id);
-    // Its own connectors' switches (the + menu's Connectors ▸) go with it.
+    // Its own connectors' switches (the + menu's Connectors ▸) go with it,
+    // and its style (chat/styles.rs).
     crate::integrations::connectors::chats::chat_deleted(id);
+    crate::chat::styles::chats_deleted(&[id]);
     Ok(crate::chat::chats::saved()?)
 }
 
@@ -39,6 +41,7 @@ pub fn chat_delete(id: u64) -> Result<(), String> {
 pub fn chat_delete_many(ids: Vec<u64>) -> Result<usize, String> {
     let gone = crate::chat::chats::delete_many(&ids);
     crate::integrations::connectors::chats::chats_deleted(&ids);
+    crate::chat::styles::chats_deleted(&ids);
     for id in ids {
         crate::apps::moved_on(Some(id));
         crate::ai::claude_plan::sessions::forget(id);
