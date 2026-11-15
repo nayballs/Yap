@@ -396,6 +396,19 @@ workspace, word for word, and no model of Chat's is asked.
   - **Never queued**: a message with a screenshot, a picked element, a
     quoted passage or a Skill (it goes as before), a plain chat's, or a
     phone's.
+  - **Asked out loud too** (2026-11-15, the maintainer: "it's just
+    text"): the Voice Assistant's question asked with the Code chat in
+    view while its Claude works (`queue_state` not `idle`) went into the
+    turn at once, past the queue. Now `assistant::to_chat_queue` hands it
+    to the page instead (`yap-chat-spoken`, `chatState`'s
+    `spokenWhileWorking`), which sends it as a typed message goes:
+    Queued while Claude writes, at once while a call is out, as ever once
+    it's done. It's marked spoken (the mic on its bubble; its answer read
+    aloud under "Read agent reports aloud"), and so is a dictated message
+    that waits. Only its words alone: with screenshots waiting, a quote, a
+    selection or a Skill it goes as before; from another app or a phone,
+    as before. Another chat shown by the time it lands, or a send still
+    going: it waits in its own chat's queue.
 - **Rewind and Fork from here** (2026-11-14, `agents/rewind.rs`), the
   rest of the Claude Code app's message actions: under the person's
   message in a Code chat (on hover, or its right-click menu) are Copy,
@@ -642,7 +655,8 @@ workspace, word for word, and no model of Chat's is asked.
   the chat (the panel on it, the answer keeping it), looking at the screen
   (fake monitors: the shots with the message and to Claude Code), ■ Stop
   and Esc, the switch off; the queue: a message while Claude writes waits
-  as Queued and is its own turn with its own answer, a message while a
+  as Queued and is its own turn with its own answer (asked out loud too:
+  the same queue, its answer read aloud), a message while a
   call is out goes at once and ticks ✓✓, Cancel and edit, Send now (its
   answer only what came after it read it), a message queued in a chat
   left for another going once that chat is shown again, by a click or the

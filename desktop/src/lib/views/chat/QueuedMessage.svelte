@@ -5,7 +5,8 @@
   // edit (Cancel and edit); Copy copies its words.
   import { toast } from '../../ui/toast.svelte.js';
 
-  /** `q`: the waiting message ({ qid, text, at }); `oncancel(qid)`, `onsend(qid)`. */
+  /** `q`: the waiting message ({ qid, text, voice, at }: `voice`, asked out loud or dictated — the mic as on a sent
+   * one); `oncancel(qid)`, `onsend(qid)`. */
   let { q, oncancel, onsend } = $props();
 
   async function copy() {
@@ -19,7 +20,8 @@
 </script>
 
 <div class="queued" data-testid="chat-queued" data-qid={q.qid}>
-  <div class="qbubble">{q.text}</div>
+  <!-- prettier-ignore -->
+  <div class="qbubble">{#if q.voice}<span class="viavoice" title="Asked by voice" aria-label="Asked by voice" data-testid="chat-queued-voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg></span>{/if}{q.text}</div>
   <div class="qfoot">
     <span class="qstate" title="Claude reads it at its next step, or as its next message once this answer is in">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>
@@ -53,6 +55,17 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     opacity: 0.85;
+  }
+  /* Asked by voice: the mic a sent message shows (ChatMessage's). */
+  .viavoice {
+    display: inline-flex;
+    vertical-align: -1px;
+    margin-right: 5px;
+    color: var(--yap-primary);
+  }
+  .viavoice svg {
+    width: 11px;
+    height: 11px;
   }
   .qfoot {
     display: flex;

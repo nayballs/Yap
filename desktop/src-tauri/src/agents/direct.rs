@@ -39,6 +39,8 @@
 //!   of them as a spoken answer is (`chat/turn/report.rs`). (For half a
 //!   day Yap said "On it." first — to a "just testing", too.)
 //!   A phone's turn runs at most at Auto, as ever ([`send`]'s `phone`).
+//!   One asked out loud while its Claude works goes through Chat's queue,
+//!   as a typed one does (15 Nov 2026, `assistant::to_chat_queue`).
 //!   Before, both were handed over by Chat's model so that the spoken
 //!   answer stayed short.
 //! - **With its screenshots** (12 Nov 2026): the ones the person put in the
