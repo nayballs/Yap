@@ -32,6 +32,7 @@
   import { appLabel } from '../../core/appNames.js';
   import SourcesRow from './SourcesRow.svelte';
   import ChatSteps from './ChatSteps.svelte';
+  import BranchSwitch from './BranchSwitch.svelte';
 
   /**
    * `m`: the message; `last`: the thread's last; `sources`: what its
@@ -51,14 +52,23 @@
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
   const codeFiles = getContext(CODE_FILES) ?? null;
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null, branch = null, retry = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false } = $props();
   // `visuals`: what the answer made to be seen, not read (chat/made.rs: "Made a visual", above its words;
   // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends.
+  // **Retry, Edit and ‹ ›** (15 Nov 2026, the Claude app's; chat/chats/branches.rs): `branch` — `{ fork, why, onbranch }`,
+  // this message's versions (‹ 2/3 ›; `why` it can't switch now) —; `retry` — `{ why, onretry }`, under an answer —;
+  // `actions.onedit` (and `actions.edit`, why not now) under the person's message; `editing` — `{ text }` — it's open in
+  // place (MessageEdit, its own chunk): `onedited(words)` Save and send, `oneditcancel()`.
   // **Under the person's message in a Code chat** (14 Nov 2026, the Claude Code app's: Copy, Rewind, Fork from here;
   // `actions`: `{ rewind, fork }` — why each can't run now, '' when it can —, `onrewind`, `onfork`; agents/rewind.rs).
   const act = (why, run) => () => {
     if (!why) run?.();
   };
+  // (What else goes again with an edit: its screenshots.)
+  const editNote = $derived.by(() => {
+    const n = (m.images || []).filter((i) => !i.gone).length;
+    return !n ? '' : n === 1 ? 'Its screenshot goes again' : 'Its screenshots go again';
+  });
   // A message sent from the queue (chatState's `ticks`): ✓ sent, ✓✓ once Claude read it, and when.
   const readAt = $derived(tick?.readAt ? new Date(tick.readAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
 
@@ -74,6 +84,9 @@
   const offers = $derived(m.role === 'assistant' ? (m.offers?.length ? m.offers : m.liveOffers || []) : []);
   // The files it shared into the conversation (chat/shares.rs): the same.
   const shared = $derived(m.role === 'assistant' ? (m.files?.length ? m.files : m.liveFiles || []) : []);
+  // Its cards that ask: a question of the model's own (above the answer, where it asked) and the rest (under it).
+  const asked = $derived(m.role === 'assistant' ? (m.confirms || []).filter((c) => c.act === 'question') : []);
+  const acts = $derived(m.role === 'assistant' ? (m.confirms || []).filter((c) => c.act !== 'question') : []);
 
   // A question whose screenshot went as its text (snip/ocr.rs): its own
   // words, and the text read from the picture, folded under them.
@@ -126,6 +139,13 @@
     <p class="thoughtline" data-testid="chat-thought">{thoughtLabel(m.thinking?.ms)}</p>
   {/if}
 {/if}
+{#if m.role === 'assistant' && asked.length}
+  <!-- Chat's model asked the person (ask_user, chat/cards/ask.rs): its card where it asked, above the answer that
+       follows from it — answered, the question and the choice stay here (its own chunk). -->
+  {#await import('./PageConfirm.svelte') then { default: PageConfirm }}
+    <PageConfirm confirms={asked} />
+  {/await}
+{/if}
 {#if m.role === 'assistant' && visuals?.length}
   <!-- The visuals it made (show_visual), above its words: each a sandboxed frame of its own. -->
   {#await import('./VisualFrame.svelte') then { default: VisualFrame }}
@@ -134,7 +154,12 @@
     {/each}
   {/await}
 {/if}
-{#if m.role === 'assistant' && m.streaming && !m.text}
+{#if m.role === 'user' && editing}
+  <!-- Edit: open in place with its words (its own small chunk). -->
+  {#await import('./MessageEdit.svelte') then { default: MessageEdit }}
+    <MessageEdit text={editing.text} note={editNote} onsave={onedited} oncancel={oneditcancel} />
+  {/await}
+{:else if m.role === 'assistant' && m.streaming && !m.text}
   <!-- Before the first words (tools run, a dictation waited out): no bubble
        yet, the thread's line says what's under way. Its thinking as it
        comes (Think), folded. -->
@@ -246,12 +271,32 @@
   {/if}
 </div>
 {/if}
-{#if m.role === 'user' && actions}
-  <!-- Shown on hovering the message (or the row, or its focus): Copy, Rewind (unavailable while Claude works), Fork from here. -->
-  <div class="uacts" data-testid="chat-message-actions">
+{#if m.role === 'user' && !editing && (actions || branch)}
+  <!-- Shown on hovering the message (or the row, or its focus): Copy, Edit, and in a Code chat Rewind (unavailable
+       while Claude works) and Fork from here. Its versions' ‹ 1/2 › always. -->
+  <div class="uacts" class:forked={!!branch} data-testid="chat-message-actions">
+    {#if branch}
+      <BranchSwitch fork={branch.fork} why={branch.why} onbranch={branch.onbranch} />
+    {/if}
+    {#if actions}
     <button type="button" class="uact" onclick={() => copyText(picks.text)} aria-label="Copy" title="Copy">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
     </button>
+    {#if actions.onedit}
+      <button
+        type="button"
+        class="uact"
+        class:off={!!actions.edit}
+        aria-disabled={actions.edit ? 'true' : undefined}
+        onclick={act(actions.edit, actions.onedit)}
+        aria-label={actions.edit ? `Edit (${actions.edit.toLowerCase()})` : 'Edit'}
+        title={actions.edit ? `Edit (${actions.edit.toLowerCase()})` : 'Edit: change it and send again'}
+        data-testid="chat-edit-message"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+      </button>
+    {/if}
+    {#if actions.onrewind}
     <button
       type="button"
       class="uact"
@@ -276,6 +321,8 @@
     >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7" /><path d="M12 12v5" /></svg>
     </button>
+    {/if}
+    {/if}
   </div>
 {/if}
 {#if shared.length}
@@ -289,11 +336,11 @@
   <!-- What its tools did, folded under it (chat/activity.rs). -->
   <ChatSteps tools={m.tools} {m} {onview} />
 {/if}
-{#if m.role === 'assistant' && m.confirms?.length}
+{#if m.role === 'assistant' && acts.length}
   <!-- Yap asks before a click that buys, pays, books… on a page beside the
        chat (chat/pages/act/confirm.rs): Allow once / Don't (its own chunk). -->
   {#await import('./PageConfirm.svelte') then { default: PageConfirm }}
-    <PageConfirm confirms={m.confirms} />
+    <PageConfirm confirms={acts} />
   {/await}
 {/if}
 {#if m.role === 'user' && tick}
@@ -354,6 +401,10 @@
 {/if}
 {#if m.role === 'assistant' && !m.streaming}
   <div class="msgfoot">
+    {#if branch}
+      <!-- Its versions (Retry): ‹ 2/2 ›. -->
+      <BranchSwitch fork={branch.fork} why={branch.why} onbranch={branch.onbranch} />
+    {/if}
     {#if m.id}
       <button
         class="readbtn"
@@ -375,6 +426,21 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
       </button>
     {/if}
+    {#if retry && m.id}
+      <!-- Retry, beside Copy (the Claude app's ↻): its question answered again, this answer kept as a version. -->
+      <button
+        type="button"
+        class="readbtn retrybtn"
+        class:off={!!retry.why}
+        aria-disabled={retry.why ? 'true' : undefined}
+        aria-label={retry.why ? `Retry (${retry.why.toLowerCase()})` : 'Retry'}
+        title={retry.why ? `Retry (${retry.why.toLowerCase()})` : 'Retry: answer it again (this answer is kept)'}
+        data-testid="chat-retry"
+        onclick={act(retry.why, retry.onretry)}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" /><path d="M3 21v-5h5" /></svg>
+      </button>
+    {/if}
     {#if reading}
       <span class="speaking" role="status">
         <span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -388,6 +454,13 @@
       <span class="byline stopped" title="You stopped this answer while it was being written">· Stopped</span>
     {/if}
   </div>
+{/if}
+{#if m.role === 'assistant' && m.nextStep?.recap && last && !m.streaming}
+  <!-- The next-step box (suggest_next_step): under the chat's latest answer only, its buttons sending the
+       person's answer (its own chunk). -->
+  {#await import('./NextStepBox.svelte') then { default: NextStepBox }}
+    <NextStepBox next={m.nextStep} onpick={onnext} {busy} />
+  {/await}
 {/if}
 
 <style>
@@ -469,6 +542,21 @@
   .uacts:focus-within {
     opacity: 1;
   }
+  /* A message with versions: its ‹ 1/2 › always there, the buttons on hover as ever. */
+  .uacts.forked {
+    opacity: 1;
+    align-items: center;
+  }
+  .uacts.forked .uact {
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+  .cbubble.user:hover + .uacts.forked .uact,
+  .uacts.forked:hover .uact,
+  .uacts.forked:focus-within .uact {
+    opacity: 1;
+  }
+
   .uact {
     display: inline-flex;
     align-items: center;
@@ -726,9 +814,17 @@
     width: 10px;
     height: 10px;
   }
-  .copybtn svg {
+  .copybtn svg,
+  .retrybtn svg {
     width: 12px;
     height: 12px;
+  }
+  .retrybtn.off,
+  .retrybtn.off:hover {
+    opacity: 0.45;
+    cursor: default;
+    color: var(--yap-muted);
+    border-color: var(--yap-border-subtle);
   }
   .speaking {
     display: inline-flex;

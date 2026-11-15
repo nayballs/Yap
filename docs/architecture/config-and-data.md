@@ -751,6 +751,9 @@
   word for word (`notes::seed_missing_builtins`: no field renamed or
   removed).
 - Chats: `%APPDATA%/yap/chats.json` — AI Chat conversations (`chat/chats.rs`),
+  never an **incognito chat** (2026-11-15, `chat/incognito.rs`: kept in
+  memory only — the save leaves it out, a read never makes one — and its
+  pictures in `chat-images/` deleted when it ends or Yap quits),
   and since 2026-10-25 meetings' Ask threads: conversations with `note`
   (the note's id; Chat leaves them out, deleted with the note) whose
   answers may be `plain` (`chat/note_chats.rs`). An older Yap's save drops
@@ -803,6 +806,18 @@
   Rewritten with chats.json, it goes with the chats in Delete some of your
   data and Reset app. Its picture a sweep took (an older Yap's, which
   doesn't know them) shows as its file's card.
+- **A conversation's other versions** (2026-11-15, Retry and Edit:
+  `chat/chats/branches.rs`, [chat-and-assistant.md](./chat-and-assistant.md#retry-edit-and-versions-2026-11-15))
+  keep `branches` on the conversation — `[{at, shown, ts?, others: [{n,
+  messages, forks?, summary?}]}]`, the forks along the branch shown, which is
+  `messages` — written only when there are some. **New field**: an older
+  Yap reads and keeps the branch shown, and its save drops `branches`; so
+  every save of chats.json also writes them to
+  `%APPDATA%/yap/chat_branches.json` (`{version, conversations: [{id,
+  forks}]}`, removed when there are none), which no older Yap touches; the
+  next start puts back each fork that still fits a conversation with none
+  (its shown branch's first message there at its time). It goes with the
+  chats in Delete some of your data and Reset app.
 - What a chat made (15 Nov 2026, `chat/made.rs`): `%APPDATA%/yap/chat-made/` —
   a folder per conversation (`<chat id>/`) with its `made.json` (`{version,
   created, items: [{id, kind, title, format, after: {index, ts}, at,
@@ -854,7 +869,9 @@
   session a conversation moved on from, as soon as it's replaced), only
   where Claude Code files Yap's own `claude\chat\` folder — never another
   project's (an agent's sessions are the person's own, in their folders).
-  One-shot calls run with `--no-session-persistence`, so they leave none.
+  One-shot calls run with `--no-session-persistence`, so they leave none,
+  and so does an incognito chat's session (2026-11-15): kept in memory
+  while Yap runs (`Kept::unsaved`), never in `claude_sessions.json`.
 - Your Claude plan's working folders: `<data>/claude/` — two empty folders
   the plan's runs work in, `claude\chat\` (Chat turns) and `claude\ask\`
   (one-shot calls), so no project's settings, CLAUDE.md or MCP servers are

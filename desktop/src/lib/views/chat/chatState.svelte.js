@@ -21,7 +21,7 @@ import { openExternalLink } from '../../core/externalLinks.js';
 import { signInClaudePlan } from '../../stores/claudePlan.svelte.js';
 import { streamCall, liveAnswer, applyEvent, streamingHeight, STOPPED, SUPERSEDED } from '../../core/streaming.js';
 import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from '../../stores/speech.svelte.js';
-import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused, pastedImage, keepPasted } from './chatImages.js';
+import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused, pastedImage, keepPasted, splitScreenText } from './chatImages.js';
 // (`pickedElements`, not `picked`: that's the conversations picked in the list, below.)
 import { picked as pickedElements, takePicked } from '../../stores/pickedElements.svelte.js';
 import { waitingShots, followWaitingShots, removeWaiting, clearWaiting, followPixelRatio } from './chatShots.svelte.js';
@@ -94,6 +94,9 @@ class Answer {
     // What it showed so far, for its bubble when its conversation opens again:
     // the ask-first cards, the documents, pictures, pages and buttons, the screen it looked at.
     this.confirms = null;
+    // The next-step box it ended with and the chapter it started (chat/cards.rs): kept with its answer.
+    this.nextStep = null;
+    this.chapter = null;
     this.docs = [];
     this.pictures = [];
     // The shots the model took of a page (its steps' thumbnails: chat/pages/see.rs).
@@ -244,7 +247,38 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     dropTurn(rec);
     rec.conv = conv;
     setTurn(rec);
+    // A new chat asked incognito: its conversation is one.
+    if (rec.ghost) markGhost(conv);
   }
+
+  // ---- Incognito (chat/incognito.rs, 15 Nov 2026; the Claude app's ghost) ----
+  // A new chat's ghost (`ghostNew`) makes its first question start an
+  // incognito chat: kept in memory only, never listed or remembered. The
+  // ones this view holds (`ghostIds`) end when left — another chat opened, a
+  // new one — or, left while their answer was still coming, once it's in.
+  let ghostNew = $state(false);
+  let ghostIds = $state([]);
+  /** The chat shown is (or, a new one, will be) incognito. */
+  const incognito = $derived(activeId == null ? ghostNew : ghostIds.includes(activeId));
+  function markGhost(id) {
+    if (id != null && !ghostIds.includes(id)) ghostIds = [...ghostIds, id];
+  }
+  /** The ghost on a new chat, on or off (never on a Code chat's new chat). */
+  function setGhost(on) {
+    if (activeId != null) return;
+    ghostNew = !!on;
+    reportView();
+  }
+  // Each incognito chat not shown and not answering any more: ended (it goes).
+  $effect(() => {
+    const shown = activeId;
+    const left = ghostIds.filter((id) => id !== shown && !turns[String(id)]);
+    if (!left.length) return;
+    untrack(() => {
+      ghostIds = ghostIds.filter((id) => !left.includes(id));
+      for (const id of left) invoke('chat_incognito_end', { id }).catch(() => {});
+    });
+  });
   /** `rec`'s conversation is the one open (a new chat's: the new chat it was asked in). */
   const isShown = (rec) => (rec.conv != null ? activeId === rec.conv : activeId == null && rec.view === viewSeq);
   /** **The open conversation's answer being written**, if any: the only one the thread and the composer show. */
@@ -402,6 +436,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // The open conversation's summary of its older messages ({ text, upto,
   // model }): a divider over the messages after it, "Show summary".
   let summary = $state(null);
+  // Its versions (Retry, Edit: chat/chats/branches.rs): `{at, shown, count}` each message that has some (chat_get's `forks`).
+  let forks = $state([]);
+  // The person's message open to edit in place: `{id, text}` (MessageEdit), or null.
+  let editing = $state(null);
   // The summary shown read-only (Show summary).
   let showingSummary = $state(false);
   // The last send's "too long" (Rust's plain sentence), until the next send.
@@ -501,6 +539,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (rec.spoken) b.spoken = true;
     else b.turn = rec.turn;
     if (rec.confirms?.length) b.confirms = rec.confirms;
+    if (rec.nextStep) b.nextStep = rec.nextStep;
+    if (rec.chapter) b.chapter = rec.chapter;
     if (rec.docs.length) b.liveDocs = rec.docs;
     if (rec.pictures.length) b.livePictures = rec.pictures;
     if (rec.shots.length) b.liveShots = rec.shots;
@@ -529,6 +569,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       m.waiting = l.waiting;
       m.liveThinking = l.thinking;
       if (rec.confirms) m.confirms = rec.confirms;
+      if (rec.nextStep) m.nextStep = rec.nextStep;
+      if (rec.chapter) m.chapter = rec.chapter;
       if (rec.shots.length) m.liveShots = rec.shots;
       if (rec.shares.length) m.liveFiles = rec.shares;
     }
@@ -754,9 +796,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // pills reopen the panel, its tabs with it — less the ones closed in it).
       doc.reset(conv.closedTabs);
       quote = null;
+      if (conv.incognito) markGhost(id);
       activeId = id;
       scope = conv.scope || null;
       summary = conv.summary ?? null;
+      forks = conv.forks || [];
+      editing = null;
       showingSummary = false;
       tooLong = '';
       // (Answering still: its question and the answer so far, where they were.)
@@ -818,6 +863,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (activeId === id) {
         messages = withLive(id, conv.messages);
         summary = conv.summary ?? null;
+        forks = conv.forks || [];
       }
     } catch {
       /* it stays as it was */
@@ -896,6 +942,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     viewSeq += 1;
     messages = [];
     summary = null;
+    forks = [];
+    editing = null;
     showingSummary = false;
     tooLong = '';
     if (opts?.keepInput !== true) input = '';
@@ -903,6 +951,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     byVoice = false;
     scope = null;
     choseNew = true;
+    // A new chat starts kept, its ghost off (the Claude app's).
+    ghostNew = false;
     // A new chat has every connector on.
     connectors.resetNew();
     reportView();
@@ -937,6 +987,16 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
    * its question, sent at once as its Skill. On an empty chat it's asked
    * across the meetings from then on.
    */
+  /**
+   * **A next-step box's button** (chat/cards/next_step.rs): its words sent as
+   * the person's next message, as if typed (the box goes once anything follows it).
+   */
+  function sendNextStep(button) {
+    const text = String(button?.reply || button?.label || '').trim();
+    if (!text || sending) return;
+    send({ text });
+  }
+
   function runPrompt(skill) {
     if (sending || !skill?.question) return;
     if (!messages.length) scope = 'meetings';
@@ -973,6 +1033,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       conversationId: activeId,
       newChat: activeId == null && choseNew,
       codeFolder: activeId == null ? (pendingFolder?.() ?? null) : null,
+      // Its ghost on: a question asked out loud there starts it incognito.
+      incognito: activeId == null && ghostNew && !(pendingFolder?.() ?? null),
     }).catch(() => {});
   }
   $effect(() => {
@@ -1031,6 +1093,17 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (shown) doc.setAsking(ev);
       const have = rec.confirms || [];
       rec.confirms = have.some((c) => c.id === ev.id) ? have.map((c) => (c.id === ev.id ? ev : c)) : [...have, ev];
+      paint(rec);
+      return true;
+    }
+    // **The next-step box and a chapter** (chat/cards.rs): kept with the answer, drawn as it's written.
+    if (ev?.kind === 'nextStep' && ev.next) {
+      rec.nextStep = ev.next;
+      paint(rec);
+      return true;
+    }
+    if (ev?.kind === 'chapter' && ev.chapter) {
+      rec.chapter = ev.chapter;
       paint(rec);
       return true;
     }
@@ -1173,10 +1246,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         // (its tabs closed before stay closed; a new chat it became keeps what it shows).
         if (activeId != null) doc.reset(conv.closedTabs);
         else doc.takeClosed(conv.closedTabs);
+        // (A question asked out loud into a new chat with its ghost on: incognito.)
+        if (conv.incognito) markGhost(id);
         activeId = id;
         scope = conv.scope || null;
       }
       summary = conv.summary ?? null;
+      forks = conv.forks || [];
       // Its answer is saved already: a quick one's "answered" came while this
       // view was still opening for the question (ControlPanel brought Chat up
       // on "asked", before this view listened), and it'd say "Thinking" for
@@ -1477,6 +1553,69 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     else waitingOpen.add(conv);
   }
 
+  // ---- Retry, Edit and ‹ › (15 Nov 2026, chat/chats/branches.rs; the Claude app's message actions) ----
+
+  /** The ‹ k/n › of the message at index `i`, or null. */
+  const forkOf = (i) => forks.find((f) => f.at === i) ?? null;
+
+  /**
+   * **Retry** the answer `m` (Chat's: the Claude app's ↻): its question answered again, the old answer and what
+   * followed kept as a version, ‹ 2/2 › on the new one. (A Code chat's is an edit with the same words: `saveEdit`.)
+   */
+  function retryAt(m) {
+    const index = indexOf(m?.id);
+    if (activeId == null || sending || !Number.isInteger(index)) return false;
+    const q = messages[index - 1];
+    if (q?.role !== 'user' || q.kind) return false;
+    editing = null;
+    send({ text: q.text?.trim() || DEFAULT_PROMPT, retry: index, voice: !!q.voice });
+    return true;
+  }
+
+  /** The person's message `m`'s own words (no screenshot text, no picked elements' blocks). */
+  const wordsOf = (m) => splitScreenText(splitElements(m?.text || '').text).question ?? '';
+  /** **Edit** the person's message `m`: open in place with its own words. */
+  function startEdit(m) {
+    if (!m?.id || m.role !== 'user') return;
+    editing = { id: m.id, text: wordsOf(m) };
+  }
+  function cancelEdit() {
+    editing = null;
+  }
+
+  /**
+   * **Save and send** the edited message `m` as `text`: a new version of the conversation from there (‹ 1/2 › on the
+   * message), its screenshots and the passage it was about going again. `code`: a Code chat's — a Rewind to before it
+   * first (`files`: the files Claude changed since go back too). False when it didn't go.
+   */
+  function saveEdit(m, text, { files = false, code = false } = {}) {
+    const index = indexOf(m?.id);
+    const words = String(text ?? '').trim();
+    if (activeId == null || sending || !Number.isInteger(index) || !words) return false;
+    editing = null;
+    send({ text: words, edit: index, from: m, elements: splitElements(m.text || '').elements, editFiles: !!files, code: !!code });
+    return true;
+  }
+
+  /** **‹ ›**: the message at `at` shows its version `place`, what was shown from there kept as a version. */
+  async function switchBranch(at, place) {
+    const id = activeId;
+    if (id == null || sending) return;
+    try {
+      const conv = await invoke('chat_branch', { id, at, place });
+      if (activeId !== id) return;
+      stopReading();
+      editing = null;
+      messages = withLive(id, conv.messages);
+      summary = conv.summary ?? null;
+      forks = conv.forks || [];
+      contextStamp += 1;
+      refreshList();
+    } catch (e) {
+      toast({ title: "Couldn't show that version", description: String(e?.message ?? e), variant: 'destructive' });
+    }
+  }
+
   // ---- Rewind and Fork from here (14 Nov 2026, agents/rewind.rs; the Claude Code app's message actions) ----
 
   /** A message's index in the chat shown ("chat:<conversation>:<index>"). */
@@ -1639,6 +1778,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   const earlyReads = new Set();
 
   async function send(opts) {
+    // **Retry** (`retry`: the answer's index, its question answered again) or **Edit** (`edit`: the person's message's
+    // index, `from` that message; the new words in its place): a new version of the conversation from there
+    // (chat/chats/branches.rs). Never from the box, nor queued.
+    const retry = Number.isInteger(opts?.retry) ? opts.retry : null;
+    const edit = Number.isInteger(opts?.edit) ? opts.edit : null;
+    const branching = retry != null || edit != null;
     const asText = opts?.asText === true;
     // With a screenshot waiting, an empty box asks "What's this?".
     const fromBox = opts?.text == null;
@@ -1660,7 +1805,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // waits for nothing then). With nothing going on it's sent as Enter sends it.
     const later = fromBox && opts?.later === true;
     // (Asked out loud, `spokenWhileWorking`: its words alone, never the box's screenshots, elements or passage.)
-    const queueable = fromBox ? !shots.length && !elements.length && !quote : opts?.spoken === true;
+    // (A retry or an edit is never queued.)
+    const queueable = branching ? false : fromBox ? !shots.length && !elements.length && !quote : opts?.spoken === true;
     const gated = queueGate();
     if (queueable && text && activeId != null && (!sending || later) && (gated || later) && !skills.parse(text)?.skill) {
       // Rust says (agents/runner.rs `queue_state`): writing its answer — it waits; a tool call out — it goes now,
@@ -1722,8 +1868,26 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const turn = ++sendSeq;
     // (Words from a page beside the chat: quoted as a selection, its site named.)
     const sentQuote = about ? (about.page ? { noteId: 0, text: about.text, app: about.page.site || about.page.title || '' } : { noteId: about.noteId, text: about.text }) : null;
-    const question = { role: 'user', text, voice, id: null, turn, images: shots, quote: sentQuote, elements: sentElements };
-    messages = [...messages, question];
+    let question;
+    if (retry != null) {
+      // Its question stays as saved, the turn's now; the answer and what followed set aside.
+      question = { ...messages[retry - 1], turn };
+      messages = [...messages.slice(0, retry - 1), question];
+    } else {
+      // (An edit: its screenshots, its passage and its picked elements go again, as the message had them.)
+      const from = edit != null ? opts.from : null;
+      question = {
+        role: 'user',
+        text,
+        voice,
+        id: null,
+        turn,
+        images: from ? (from.images || []).filter((i) => !i.gone) : shots,
+        quote: from ? (from.quote ?? null) : sentQuote,
+        elements: from ? opts.elements || [] : sentElements,
+      };
+      messages = edit != null ? [...messages.slice(0, edit), question] : [...messages, question];
+    }
     // **The answer, in its own conversation** (`Answer`): a new chat's is
     // that new chat's until its question makes the conversation. Another
     // conversation opened while it's written (a click in the list, New
@@ -1731,7 +1895,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // written — shown again, where it is, when its conversation opens; it
     // lands there.
     const rec = new Answer({ conv: activeId, turn, view: viewSeq, question });
+    if (retry != null) rec.askedId = question.id ?? null;
+    // A new chat's ghost on (never a Code chat's): its conversation is incognito.
+    rec.ghost = activeId == null && ghostNew && !(newChatFolder?.() ?? null);
     setTurn(rec);
+    // (Read again as it ends when it didn't answer: Rust put the chat back as it was.)
+    let reloadAfter = false;
     scrollThread();
     // The conversation it went to, for the status dots: an ask-first card
     // waiting there is "needs you", even once Chat is left.
@@ -1772,7 +1941,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       rec.took(ev);
       paint(rec);
     };
-    const call = streamCall(
+    const call = retry != null
+      ? streamCall('chat_retry', { conversationId: activeId, index: retry }, onEvent)
+      : streamCall(
       'chat_send',
       {
         conversationId: activeId,
@@ -1792,6 +1963,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         codeFolder: activeId == null ? (newChatFolder?.() ?? null) : null,
         // A new chat's connectors switched off in its + menu (connectors/chats.rs).
         connectorsOff: activeId == null ? connectors.newChatOff() : null,
+        // An edit (chat/commands.rs `edit`): the message it replaces, its picked elements again.
+        ...(edit != null ? { edit, editFiles: opts.editFiles === true, elements: opts.elements?.length ? opts.elements : null } : {}),
+        // A new chat asked incognito (chat/incognito.rs).
+        incognito: rec.ghost || null,
       },
       onEvent
     );
@@ -1877,11 +2052,16 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         offers: res.offers ?? rec.offers,
         // The questions it asked before acting on a page (their cards, answered).
         confirms: (ai >= 0 ? messages[ai].confirms : null) || rec.confirms || null,
+        // The next-step box it ended with, the chapter it started (chat/cards.rs).
+        nextStep: rec.nextStep,
+        chapter: rec.chapter,
         revisedFrom: streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
       // The question as saved: with its screenshots' text when it went as text.
       const saved = asText && res.question ? { text: res.question, images: shots.map((s) => ({ ...s, asText: true })) } : {};
       messages = [...messages.slice(0, qi), { ...asked, ...saved, id: res.userMessageId ?? null }, answer];
+      // Its versions now (a retry's or an edit's ‹ ›).
+      if (Array.isArray(res.forks)) forks = res.forks;
       refreshList();
       followThread();
       contextStamp += 1;
@@ -1893,6 +2073,24 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (!alive) return;
       // Its conversation shown now (another one: its messages and its box stay as they are).
       const shown = isShown(rec);
+      // A retry or an edit that never answered: Rust put the chat back as it was (read again as it ends). A Code
+      // chat's edit has rewound: its words go back in the box, as any send's.
+      if (branching && !(edit != null && opts.code)) {
+        if (shown) reloadAfter = true;
+        if (!String(e).includes(SUPERSEDED) && !String(e).includes(STOPPED)) {
+          // (An edit's words: back in its box, open in place.)
+          if (shown && edit != null) editing = { id: chatId(activeId, edit), text };
+          const why = aiError(e);
+          toast({
+            title: retry != null ? "Couldn't try again" : "Couldn't send",
+            description: why.text,
+            ...(why.known ? { variant: 'default', kind: 'error', chip: 'Error', icon: 'alert' } : { variant: 'destructive' }),
+          });
+        }
+        refreshList();
+        contextStamp += 1;
+        return;
+      }
       if (String(e).includes(SUPERSEDED)) {
         // A newer question in this conversation replaced it (asked out
         // loud, or dictated here and sent): no answer was saved, its bubble
@@ -1976,6 +2174,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // (No card of its waits any more.)
       turnOver(cardsIn);
       dropTurn(rec);
+      if (alive && reloadAfter && isShown(rec)) reloadActive();
       if (alive && sendWhenFree === rec) {
         sendWhenFree = null;
         send();
@@ -2099,6 +2298,15 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     sendQueuedNow,
     rewindAt,
     forkAt,
+    forkOf,
+    retryAt,
+    wordsOf,
+    startEdit,
+    cancelEdit,
+    saveEdit,
+    switchBranch,
+    get editing() { return editing; },
+    get forks() { return forks; },
     agentEvent,
     agentReported,
     spokenWhileWorking,
@@ -2107,6 +2315,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get conversations() { return conversations; },
     set conversations(v) { conversations = v; },
     get activeId() { return activeId; },
+    /** The chat shown is incognito (a new one: its ghost is on). */
+    get incognito() { return incognito; },
+    setGhost,
     get messages() { return messages; },
     get input() { return input; },
     set input(v) { input = v; },
@@ -2213,6 +2424,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     skillKey,
     pickSkill,
     runPrompt,
+    sendNextStep,
     openSource,
     reportView,
     followAssistantStream,

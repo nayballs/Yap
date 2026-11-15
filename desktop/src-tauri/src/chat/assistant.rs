@@ -584,6 +584,9 @@ static VIEW: Mutex<Viewing> = Mutex::new(Viewing::Closed);
 /// spoken question's new conversation is a Code chat there
 /// ([`new_code_chat`]).
 static NEW_CODE_CHAT: Mutex<Option<String>> = Mutex::new(None);
+/// The new chat Chat shows (no question yet) has its ghost on
+/// (chat/incognito.rs): a question asked out loud there starts it incognito.
+static NEW_INCOGNITO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Never held while emitting, touching windows or another module's lock.
 fn lock() -> MutexGuard<'static, State> {
@@ -979,6 +982,15 @@ fn spoken_ok_answer(app: &AppHandle, now: u64, conversation: Option<u64>, questi
     let meeting = crate::chat::tools::connectors::in_meeting();
     let Some((said, w)) = spoken_ok::take(conversation, question, &langs, meeting) else { return false };
     match said {
+        // A question of Chat's own model (chat/cards/ask.rs): these words are its answer.
+        spoken_ok::Spoken::Words => {
+            let took = crate::chat::cards::ask::answer_said(w.card, question);
+            tracing::info!(question = w.card, took, "Voice Assistant: a question card answered out loud");
+            if !took {
+                return false;
+            }
+            crate::bar::dismiss_card(app, spoken_ok::CARD);
+        }
         spoken_ok::Spoken::Yes | spoken_ok::Spoken::No => {
             let yes = said == spoken_ok::Spoken::Yes;
             // Allow once (never Always allow by voice), whatever the card.
@@ -1163,6 +1175,7 @@ impl Streamed {
             generation,
             since: std::sync::Arc::clone(&self.since),
             owner: self.owner,
+            questions: card.question.as_ref().map(|q| q.questions.clone()).unwrap_or_default(),
         });
         tracing::info!(question = card.id, act = %card.act, spoken = asking.spoken, "Voice Assistant: a call asks first; said, and on the bar");
         if self.may_speak() {
@@ -1317,6 +1330,22 @@ impl Drop for Streamed {
 /// The bar card's Allow once / Don't ([`spoken_ok::bar_card`]): the
 /// question's answer, as the thread's card gives it (✕ only hides it).
 fn ask_first_action(app: &AppHandle, action: &str) {
+    // A question card's (chat/cards/ask.rs): an option, Answer in Chat, Let Yap decide.
+    if let Some(a) = crate::chat::cards::ask::bar_action(action) {
+        if let crate::chat::cards::ask::BarAction::Open(_) = a {
+            open_chat(app);
+            return;
+        }
+        let id = match a {
+            crate::chat::cards::ask::BarAction::Pick(id, _) | crate::chat::cards::ask::BarAction::Decide(id) | crate::chat::cards::ask::BarAction::Open(id) => id,
+        };
+        let questions = spoken_ok::questions_of(id);
+        crate::chat::cards::ask::bar_answer(a, questions.as_deref());
+        if spoken_ok::answered(id) {
+            crate::bar::dismiss_card(app, spoken_ok::CARD);
+        }
+        return;
+    }
     let Some((id, allow)) = spoken_ok::action_of(action) else { return };
     crate::chat::pages::act::confirm::chat_page_confirm(id, allow);
     if spoken_ok::answered(id) {
@@ -1427,6 +1456,9 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
         Asker::Phone(p) => p.new_code_folder().filter(|_| conversation_id.is_none()),
         Asker::Shortcut(_) => new_code_chat(pc, conversation_id, code_chat_shown()),
     };
+    // A new chat on screen with its ghost on (chat/incognito.rs): the new
+    // conversation is incognito. Never a phone's, nor a Code chat.
+    let ghost = matches!(asker, Asker::Shortcut(_)) && conversation_id.is_none() && code_folder.is_none() && NEW_INCOGNITO.load(std::sync::atomic::Ordering::SeqCst);
     // "Open Teams" needs no model, nor a "yes" to Yap's "Did you mean …?":
     // Yap opens it and says so (apps.rs). Never a question about a selection
     // or a Skill.
@@ -1675,6 +1707,9 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let turn = WINDOW_LOOK.scope(window_look, turn);
     // A new code chat's: the conversation it makes is a Code chat in its workspace.
     let turn = crate::agents::code_chat::with_new(code_folder, turn);
+    // (Boxed: the turn's future grows with each layer, and its thread's
+    // stack is small — unboxed, this one overflowed it.)
+    let turn = Box::pin(crate::chat::incognito::with_new(ghost, turn));
     // Its AI calls and searches are the Voice Assistant's in the network
     // receipts (net.rs), though they run Chat's code — and say so when the
     // window in front or a selection went with them, or the question came
@@ -2180,7 +2215,9 @@ pub fn on_tts_state(app: &AppHandle, speaking: bool, message_id: Option<&str>) {
 /// a new code chat, its workspace picked (a name or path): a spoken
 /// question's new conversation is a Code chat there ([`new_code_chat`]).
 #[tauri::command]
-pub fn chat_view_state(open: bool, conversation_id: Option<u64>, new_chat: Option<bool>, code_folder: Option<String>) {
+pub fn chat_view_state(open: bool, conversation_id: Option<u64>, new_chat: Option<bool>, code_folder: Option<String>, incognito: Option<bool>) {
+    let shows_new = open && conversation_id.is_none() && new_chat.unwrap_or(false);
+    NEW_INCOGNITO.store(shows_new && incognito.unwrap_or(false), std::sync::atomic::Ordering::SeqCst);
     *VIEW.lock().unwrap_or_else(|p| p.into_inner()) = match (open, conversation_id) {
         (false, _) => Viewing::Closed,
         (true, Some(id)) => Viewing::Conversation(id),

@@ -101,6 +101,10 @@ struct Store {
     /// The last style picked: a new chat starts with it.
     #[serde(skip_serializing_if = "String::is_empty")]
     last: String,
+    /// An incognito chat's style (chat/incognito.rs): kept while it lasts,
+    /// never written.
+    #[serde(skip)]
+    unsaved: BTreeMap<String, String>,
     /// Fields a newer Yap wrote, kept as they were.
     #[serde(flatten)]
     other: Map<String, Value>,
@@ -132,7 +136,10 @@ impl Store {
     fn of(&self, conv: Option<u64>) -> String {
         match conv {
             None => self.for_new(),
-            Some(id) => self.chats.get(&id.to_string()).filter(|s| self.exists(s)).cloned().unwrap_or_else(|| NORMAL.to_string()),
+            Some(id) => {
+                let key = id.to_string();
+                self.unsaved.get(&key).or_else(|| self.chats.get(&key)).filter(|s| self.exists(s)).cloned().unwrap_or_else(|| NORMAL.to_string())
+            }
         }
     }
 }
@@ -214,9 +221,17 @@ pub fn prompt_block(conv: Option<u64>) -> Option<String> {
 /// **A new chat was made** (`turn_conversation`): it takes the style its
 /// new chat had (the last one picked). Not a Code chat.
 pub fn adopt_new(conv: u64) {
+    let unsaved = crate::chat::chats::is_incognito(conv);
     with_store(|s| {
         let id = s.for_new();
         let key = conv.to_string();
+        // An incognito chat's: in memory only.
+        if unsaved {
+            if id != NORMAL {
+                s.unsaved.insert(key, id);
+            }
+            return;
+        }
         let had = s.chats.remove(&key).is_some();
         if id != NORMAL {
             s.chats.insert(key, id);
@@ -234,6 +249,7 @@ pub fn chats_deleted(ids: &[u64]) {
         let before = s.chats.len();
         for id in ids {
             s.chats.remove(&id.to_string());
+            s.unsaved.remove(&id.to_string());
         }
         if s.chats.len() != before {
             write(s);
@@ -326,12 +342,20 @@ pub fn chat_style_of(conversation: Option<u64>) -> String {
 pub fn chat_style_set(conversation: Option<u64>, style: String) -> Result<String, String> {
     let style = style.trim().to_string();
     let picked = style.clone();
+    let unsaved = conversation.is_some_and(crate::chat::chats::is_incognito);
     with_store(move |s| {
         let style = picked;
         if !s.exists(&style) {
             return Err("That style isn't there any more.".to_string());
         }
-        if let Some(id) = conversation {
+        // An incognito chat's pick: in memory only (its chat is).
+        if let (true, Some(id)) = (unsaved, conversation) {
+            if style == NORMAL {
+                s.unsaved.remove(&id.to_string());
+            } else {
+                s.unsaved.insert(id.to_string(), style.clone());
+            }
+        } else if let Some(id) = conversation {
             if style == NORMAL {
                 s.chats.remove(&id.to_string());
             } else {
@@ -527,6 +551,20 @@ mod tests {
         assert!(req.contains("<sample>"));
         assert_eq!(req.chars().filter(|c| *c == 'z').count(), SAMPLE_MAX);
         assert!(write_request("Warm and brief", "").starts_with("The style the user wants: Warm and brief"));
+    }
+
+    #[test]
+    fn an_incognito_chats_style_is_never_written() {
+        let ghost = crate::chat::chats::create_incognito("A private question");
+        chat_style_set(None, "formal".into()).unwrap();
+        adopt_new(ghost.id);
+        assert_eq!(chat_style_of(Some(ghost.id)), "formal");
+        chat_style_set(Some(ghost.id), "concise".into()).unwrap();
+        assert_eq!(chat_style_of(Some(ghost.id)), "concise");
+        let file = with_store(|s| serde_json::to_string(s).unwrap());
+        assert!(!file.contains(&format!("\"{}\"", ghost.id)), "{file}");
+        chats_deleted(&[ghost.id]);
+        assert_eq!(chat_style_of(Some(ghost.id)), NORMAL);
     }
 
     #[test]

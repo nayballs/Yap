@@ -5,11 +5,13 @@
 pub mod activity;
 pub mod assistant;
 pub mod budget;
+pub mod cards;
 pub mod chats;
 pub mod commands;
 pub mod compact;
 pub mod documents;
 pub mod export;
+pub mod incognito;
 pub mod made;
 pub mod note_chats;
 pub mod note_text;

@@ -69,6 +69,11 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
             all.extend(agents.iter().cloned());
         }
     }
+    // The cards in the thread (chat/cards.rs): a question, the next-step
+    // box, chapters, as the turn's gates offer them.
+    if let Some(all) = tools.as_array_mut() {
+        all.extend(extra.cards.definitions());
+    }
     // The connectors' (tools/connectors.rs): last, in the connectors' order —
     // each as it is, deferred behind Anthropic's tool search, or
     // `find_tools` / `use_tool` past the budget.

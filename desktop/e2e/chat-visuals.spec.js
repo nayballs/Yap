@@ -322,3 +322,26 @@ test('made after outside content: its button puts the message in the box to read
   await shot(main, '05-outside-fills-the-box');
   await box(main).fill('');
 });
+
+// Retry (15 Nov 2026, chat/chats/branches.rs): a visual hangs off its question, which a retry keeps — so the
+// answer shown shows only what its own turn made (the fork's `since`, made.svelte.js `placeVisuals`).
+test('a retried answer shows only the visuals its own turn made; ‹ back, the first answer’s are there again', async ({ main, fakeLlm }) => {
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'show_visual', args: { title: 'Steps', code: DIAGRAM } }] },
+    { content: 'The steps, drawn.' },
+  ]);
+  await ask(main, 'Draw the steps of a dictation');
+  await expect(visuals(main)).toHaveCount(1, { timeout: 20_000 });
+  await expect(main.getByText('The steps, drawn.')).toBeVisible();
+  // (A second on: the retried answer's turn starts after the first answer was saved, as a person's click does.)
+  await main.waitForTimeout(1_100);
+  fakeLlm.scriptChat([{ content: 'In words: press, speak, press again.' }]);
+  await main.locator('.cbubble.assistant').last().hover();
+  await main.getByTestId('chat-retry').last().click();
+  await expect(main.getByText('In words: press, speak, press again.')).toBeVisible({ timeout: 20_000 });
+  await expect(main.getByTestId('chat-branch-count')).toHaveText('2/2');
+  await expect(visuals(main)).toHaveCount(0);
+  await main.getByTestId('chat-branch-prev').click();
+  await expect(main.getByText('The steps, drawn.')).toBeVisible();
+  await expect(visuals(main)).toHaveCount(1);
+});

@@ -65,7 +65,7 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   build fails with "Access is denied" (2026-10-17, Claude Code's `~/.claude.json`).
   The launcher (`dev-update.ps1`) also stops any such helper before building.
 - **`integrations/claude_live.rs`** (+ `claude_live/`: `server`, `rpc`,
-  `approve`, `backup`, `reads`, `agents`, `eyes`, `turn`) — **the endpoint Claude Code runs talk back
+  `approve`, `backup`, `reads`, `agents`, `eyes`, `cards`, `turn`) — **the endpoint Claude Code runs talk back
   to** (2026-11-07): Yap starts the person's own Claude Code for Chat on
   their Claude plan and for [Yap Code](./yap-code.md) (ai-models.md, "The Claude Code
   engine"), and those runs reach this. Below.
@@ -987,6 +987,19 @@ no Local API (the bridge can be off), and it reaches the live UI.
   after the same safety rule and the evaluation's intercept. The list is read
   once per session, so a session made without them is started again to get
   them. [yap-code.md](./yap-code.md#from-a-plan-chat).
+- **The cards in the thread from a plan chat** (`cards.rs`, 15 Nov 2026):
+  for a Chat run registered with `RunSpec::cards` (`with_cards`: what any of
+  its turns could use, `plan.rs` `session_cards`; never an agent's run),
+  `ask_user`, `suggest_next_step` and `mark_chapter`, listed with the tool
+  loop's own schemas, in `--allowedTools` and named in the prompt with
+  Claude Code's names (`plan.rs` `cards_lines`). Each call runs the tool
+  loop's own code (`chat/cards.rs` `execute`) for the turn it belongs to,
+  what it shows through the turn's stream: a question's card waits there
+  (and, asked out loud, is said and on the bar) and its answer is the call's
+  result; the box and a chapter go at once. A turn may use what its own
+  gates say (`turn::Context::cards`: never a question from a phone, the box
+  with Chat in view); a Code chat's own session in Bypass permissions is
+  asked nothing. [chat-and-assistant.md](./chat-and-assistant.md#cards-in-the-thread-a-question-the-next-step-box-chapters-2026-11-15).
 - **The screen and the pages from a plan chat** (`eyes.rs`, 2026-11-07; the
   one browser toolset since 8 Nov 2026): for a Chat run registered with
   `RunSpec::eyes` (`with_eyes`: the screen look's gate, the pages' and

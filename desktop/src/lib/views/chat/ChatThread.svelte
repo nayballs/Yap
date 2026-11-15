@@ -32,15 +32,21 @@
   // Code chat each turn's to-do card under its pill (AgentTodoCard), and a
   // running agent's permission prompts for this chat — each in a small chunk.
   import { agents, agentById } from '../../stores/agents.svelte.js';
-  import { pillsByAnswer, pillsByQuestion, answeredAfter, directLine, plainReport, agentOfReport, reportFolder, messageTurn } from '../../core/agents.js';
+  import { pillsByAnswer, pillsByQuestion, answeredAfter, directLine, plainReport, agentOfReport, reportFolder, messageTurn, notesAfter } from '../../core/agents.js';
+  import { threadViewOf } from './threadView.svelte.js';
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { chatStatus } from '../../stores/chatStatus.svelte.js';
   import QueuedMessage from './QueuedMessage.svelte';
+  // A long chat's chapters (chat/cards/chapters.rs): a divider above the question each starts at, and the
+  // floating contents (ChatChapters, its own chunk) to jump between them.
+  import { chaptersOf } from './chapters.js';
   // What the chat made (chat/made.rs): its visuals, each in the answer to its question.
   import { made, followMade, placeVisuals } from './made.svelte.js';
   import { toast } from '../../ui/toast.svelte.js';
 
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
+  const chapters = $derived(chaptersOf(chat.messages));
+  const chapterAt = $derived(new Map(chapters.map((c) => [c.at, c])));
   // **Visuals** (chat/made.rs, 15 Nov 2026): read with the chat, heard as they're made; each shows in the
   // answer to its question (above its words), or under the question's work while there's no answer yet.
   followMade();
@@ -48,7 +54,7 @@
     const id = chat.activeId;
     if (id != null) untrack(() => made.load(id));
   });
-  const placed = $derived(placeVisuals(chat.messages, made.of(chat.activeId)));
+  const placed = $derived(placeVisuals(chat.messages, made.of(chat.activeId), chat.forks));
   /**
    * **A visual's button sent a message** (`sendPrompt`, visualBridge.js: the person's click, text only):
    * into this chat as if typed — or, made after outside content (a page, the screen, a connector) or while
@@ -84,6 +90,20 @@
   };
   /** A pill's turn has a to-do list (its card under the pill, AgentTodoCard). */
   const hasTodos = (p) => ((p.turnList || []).find((t) => t.n === (p.turn ?? 1)) ?? (p.turnList?.length ? null : p))?.todos?.length > 0;
+  // **A direct turn in order with the person's messages** (15 Nov 2026, as Claude Code's app lays a turn out): a
+  // message they sent while it worked shows where Claude read it, and the work after it under it (AgentWork's parts).
+  /** Each direct turn's messages it may have read (`notesAfter`), by the index of the message that asked. */
+  const turnNotes = $derived(new Map([...directPills.keys()].map((i) => [i, notesAfter(chat.messages, i, (k) => directPills.has(k))])));
+  /** A message it may have read → the turns whose next part may go under it. */
+  const partsUnder = $derived.by(() => {
+    const out = new Map();
+    for (const [i, notes] of turnNotes) for (const id of notes) out.set(id, [...(out.get(id) || []), ...directPills.get(i).map((p) => ({ p, i, notes }))]);
+    return out;
+  });
+  /** How Claude's work shows in this chat (its ⋯ → Transcript view). */
+  const view = $derived(threadViewOf(chat.activeId));
+  /** A step's picture, large: paged across its turn's (‹ 2 of 4 ›). */
+  const openPaged = (list, at) => (chat.viewing = { ...list[at], list, at });
 
   // The one-tap prompts (chat/skills.rs: the first three of Prepare for my
   // next meeting — with a calendar —, Write my stand-up, List my open
@@ -191,10 +211,13 @@
   function messageMenu(e, m) {
     const reading = !!m.id && chat.speakingId === m.id;
     const items = messageItems(m, { read: m.role === 'assistant' && m.id ? () => chat.readAloud(m) : null, reading });
-    // A Code chat's own message: Rewind and Fork from here too (as under it).
+    // The person's message: Edit, and in a Code chat Rewind and Fork from here too (as under it); an answer: Retry.
     const a = actionsFor(m);
-    if (a) {
-      items.push({ separator: true });
+    const r = m.role === 'assistant' ? retryOf(m, chat.messages.indexOf(m)) : null;
+    if (a?.onedit || a?.onrewind || r) items.push({ separator: true });
+    if (a?.onedit) items.push({ label: a.edit ? `Edit (${a.edit.toLowerCase()})` : 'Edit', icon: 'pencil', disabled: !!a.edit, onselect: a.onedit });
+    if (r) items.push({ label: r.why ? `Retry (${r.why.toLowerCase()})` : 'Retry', icon: 'sync', disabled: !!r.why, onselect: r.onretry });
+    if (a?.onrewind) {
       items.push({ label: a.rewind ? `Rewind (${a.rewind.toLowerCase()})` : 'Rewind', icon: 'undo', disabled: !!a.rewind, onselect: a.onrewind });
       items.push({ label: a.fork ? `Fork from here (${a.fork.toLowerCase()})` : 'Fork from here', icon: 'split', disabled: !!a.fork, onselect: a.onfork });
     }
@@ -206,33 +229,99 @@
   // asked first, the files Claude changed since put back as they were unless unticked) and Fork from here (a new chat
   // with the conversation up to its answer).
   function actionsFor(m) {
-    if (!code?.current || m?.role !== 'user' || !m.id) return null;
+    if (m?.role !== 'user' || !m.id || m.kind || chat.activeId == null) return null;
+    // Chat: Copy and Edit (a new version from there, ‹ 1/2 › on it).
+    if (!code?.current) return { edit: busyWhy, onedit: () => chat.startEdit(m) };
     const t = messageTurn(agents.list, chat.activeId, m.id);
     if (!t) return null;
-    return { rewind: t.rewind, fork: t.fork, onrewind: () => askRewind(m, t.files), onfork: () => chat.forkAt(m) };
+    // A Code chat's Edit is a Rewind with new words (agents/rewind.rs): when it can rewind.
+    return { rewind: t.rewind, fork: t.fork, onrewind: () => askRewind(m, t.files), onfork: () => chat.forkAt(m), edit: t.rewind || busyWhy, onedit: () => chat.startEdit(m) };
   }
+
+  // **Retry, Edit and ‹ ›** (15 Nov 2026, the Claude app's message actions; chat/chats/branches.rs): ↻ under an
+  // answer asks its question again, the pencil under the person's message opens it in place to change; either keeps
+  // what was there as a version, ‹ 1/2 › to switch. Not while an answer is being written. In a Code chat both are
+  // Claude Code's own Rewind (asked first, as Rewind is), then the message sent again: no versions kept there.
+  const busyWhy = $derived(chat.sending || chat.answeringHere ? 'Unavailable while an answer is being written' : '');
+  /** ↻ under answer `m` (index `i`), or null where there's none. */
+  function retryOf(m, i) {
+    if (m?.role !== 'assistant' || !m.id || m.kind || m.streaming || i < 1) return null;
+    if (code?.current) {
+      const qi = chat.messages.findLastIndex((x, k) => k < i && x.role === 'user' && !x.kind);
+      const q = chat.messages[qi];
+      const t = q?.id ? messageTurn(agents.list, chat.activeId, q.id) : null;
+      if (!t) return null;
+      return { why: t.rewind || busyWhy, onretry: () => askCodeSend(q, null, t.files) };
+    }
+    const q = chat.messages[i - 1];
+    if (q?.role !== 'user' || q.kind || !q.id) return null;
+    return { why: busyWhy, onretry: () => chat.retryAt(m) };
+  }
+  /** The ‹ k/n › of the message at `i`, or null. */
+  function branchOf(i) {
+    const fork = chat.forkOf(i);
+    return fork ? { fork, why: busyWhy, onbranch: (place) => chat.switchBranch(i, place) } : null;
+  }
+  /** Save and send an edited message: in a Code chat, asked first as a Rewind is. */
+  function saveEdited(m, words) {
+    if (!code?.current) {
+      chat.saveEdit(m, words);
+      return;
+    }
+    const t = messageTurn(agents.list, chat.activeId, m.id);
+    if (!t || t.rewind) return;
+    askCodeSend(m, words, t.files);
+  }
+
   let rewindOpen = $state(false);
   let rewindAsk = $state(null);
   let rewindFiles = $state(true);
   let rewindBusy = $state(false);
   function askRewind(m, files) {
-    rewindAsk = { m, files };
+    rewindAsk = { m, files, mode: 'rewind' };
+    rewindFiles = true;
+    rewindOpen = true;
+  }
+  /** A Code chat's Retry (`words` null: the message as it was) or Edit: back to before `m`, then sent — asked first. */
+  function askCodeSend(m, words, files) {
+    rewindAsk = { m, files, mode: words == null ? 'retry' : 'edit', words };
     rewindFiles = true;
     rewindOpen = true;
   }
   async function doRewind() {
     if (!rewindAsk) return;
+    const { m, files, mode, words } = rewindAsk;
+    if (mode !== 'rewind') {
+      rewindOpen = false;
+      chat.saveEdit(m, words ?? chat.wordsOf(m), { files: files > 0 && rewindFiles, code: true });
+      return;
+    }
     rewindBusy = true;
-    const ok = await chat.rewindAt(rewindAsk.m, rewindAsk.files > 0 && rewindFiles);
+    const ok = await chat.rewindAt(m, files > 0 && rewindFiles);
     rewindBusy = false;
     rewindOpen = false;
     if (ok) chat.inputEl?.focus({ preventScroll: true });
   }
+  // (Its words: what the dialog says for each.)
+  const rewindText = $derived(
+    rewindAsk?.mode === 'retry'
+      ? { title: 'Retry from this message?', body: "Everything after it goes, as with Rewind, and Claude won't see it again. Then the message is sent again.", confirm: 'Retry', busy: 'Retrying…' }
+      : rewindAsk?.mode === 'edit'
+        ? { title: 'Send the edited message?', body: "This message and everything after it go, as with Rewind, and Claude won't see them again. Your new words are sent in its place.", confirm: 'Send', busy: 'Sending…' }
+        : { title: 'Rewind to before this message?', body: "This message and everything after it go, and Claude won't see them again. Its words go back in the message box.", confirm: 'Rewind', busy: 'Rewinding…' }
+  );
 </script>
 
 {#if chat.messages.length === 0 && (code?.current || code?.onCode)}
   <!-- An empty Code chat: the Code side's own greeting. -->
   <CodeEmpty {chat} {code} {onopensettings} />
+{:else if chat.messages.length === 0 && chat.incognito}
+  <!-- A new chat with its ghost on (chat/incognito.rs): what that means. -->
+  <div class="empty" data-testid="chat-incognito-empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11a7 7 0 0 1 14 0v9l-2.33-1.5L14.33 20 12 18.5 9.67 20l-2.34-1.5z" /><circle cx="9.5" cy="11" r="1" fill="currentColor" stroke="none" /><circle cx="14.5" cy="11" r="1" fill="currentColor" stroke="none" /></svg>
+    <p class="across">Incognito chat</p>
+    <p class="asknote">It isn't saved to your chats, and memory isn't used or updated. It's gone when you leave it.</p>
+  </div>
 {:else if chat.messages.length === 0}
   <div class="empty">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8M8 13h5" /></svg>
@@ -274,6 +363,13 @@
     </p>
   </div>
 {:else}
+  {#if chat.incognito}
+    <!-- An incognito chat says so over its thread (chat/incognito.rs). -->
+    <p class="scopeline ghostline" data-testid="chat-incognito-line" style:--thread-gutter="{chat.threadGutter}px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11a7 7 0 0 1 14 0v9l-2.33-1.5L14.33 20 12 18.5 9.67 20l-2.34-1.5z" /></svg>
+      Incognito chat · not saved, not remembered · gone when you leave it
+    </p>
+  {/if}
   {#if chat.scope === 'meetings'}
     <!-- This conversation asks across the meetings, follow-ups too. -->
     <p class="scopeline" data-testid="chat-across-meetings" style:--thread-gutter="{chat.threadGutter}px">
@@ -294,6 +390,15 @@
               <span class="rule"></span>
               <span class="stext">{SUMMARY_DIVIDER} ·</span>
               <button type="button" class="showsum" bind:this={summaryBtn} onclick={() => (chat.showingSummary = true)}>Show summary</button>
+              <span class="rule"></span>
+            </div>
+          {/if}
+          {#if chapterAt.has(i)}
+            <!-- A new chapter starts at this question (mark_chapter): its title, as a divider. -->
+            {@const c = chapterAt.get(i)}
+            <div class="chapterdiv" role="separator" aria-label={`Chapter: ${c.title}`} title={c.summary || undefined} data-testid="chat-chapter">
+              <span class="rule"></span>
+              <span class="ctitle">{c.title}</span>
               <span class="rule"></span>
             </div>
           {/if}
@@ -323,8 +428,15 @@
               conversation={chat.activeId}
               onshared={openShared}
               actions={m.role === 'user' ? actionsFor(m) : null}
+              onnext={(b) => chat.sendNextStep(b)}
+              busy={chat.sending}
               visuals={placed.get(i)?.inAnswer ? placed.get(i).visuals : null}
               onvisualprompt={(text, v) => sendFromVisual(text, v, chat.activeId)}
+              branch={m.id && !m.streaming ? branchOf(i) : null}
+              retry={m.role === 'assistant' ? retryOf(m, i) : null}
+              editing={m.role === 'user' && chat.editing?.id === m.id ? chat.editing : null}
+              onedited={(words) => saveEdited(m, words)}
+              oneditcancel={() => chat.cancelEdit()}
             />
           {/if}
           {#if directPills.get(i)?.length}
@@ -337,14 +449,20 @@
                 <AgentPills agents={lines} onopen={openAgent} quiet />
               {/await}
             {/if}
-            {#each directPills.get(i).filter(hasTodos) as p (`${p.id}:${p.turn ?? 1}`)}
-              {#await import('./AgentTodoCard.svelte') then { default: AgentTodoCard }}
-                <AgentTodoCard agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} />
-              {/await}
-            {/each}
+            <!-- (Its to-do list is AgentWork's: at its top, or as it stood above a message it read.) -->
             {#each directPills.get(i) as p (`work:${p.id}:${p.turn ?? 1}`)}
               {#await import('./AgentWork.svelte') then { default: AgentWork }}
-                <AgentWork agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} onview={openShared} answered={answeredAfter(chat.messages, i, (k) => directPills.has(k))} />
+                <AgentWork
+                  agent={p}
+                  turn={p.turn ?? 1}
+                  line={agents.steps[p.id] || ''}
+                  onview={openShared}
+                  onpaged={openPaged}
+                  answered={answeredAfter(chat.messages, i, (k) => directPills.has(k))}
+                  notes={turnNotes.get(i) || []}
+                  {view}
+                  cards
+                />
               {/await}
               <!-- Its cards before acting on a page (an action that would buy, send or sign in): Allow once / Don't. -->
               {#if chat.agentConfirms[`${p.id}:${p.turn ?? 1}`]?.length}
@@ -352,6 +470,25 @@
                   <PageConfirm confirms={chat.agentConfirms[`${p.id}:${p.turn ?? 1}`]} />
                 {/await}
               {/if}
+            {/each}
+          {/if}
+          {#if m.role === 'user' && m.id && partsUnder.get(m.id)?.length}
+            <!-- Sent while a turn worked: what Claude did after reading it, under it (nothing until it's read). -->
+            {#each partsUnder.get(m.id) as o (`work:${o.p.id}:${o.p.turn ?? 1}:${m.id}`)}
+              {#await import('./AgentWork.svelte') then { default: AgentWork }}
+                <AgentWork
+                  agent={o.p}
+                  turn={o.p.turn ?? 1}
+                  line={agents.steps[o.p.id] || ''}
+                  onview={openShared}
+                  onpaged={openPaged}
+                  answered={answeredAfter(chat.messages, o.i, (k) => directPills.has(k))}
+                  notes={o.notes}
+                  after={m.id}
+                  {view}
+                  cards
+                />
+              {/await}
             {/each}
           {/if}
           {#if agentPills.get(i)?.length}
@@ -401,6 +538,12 @@
         {/each}
       </div>
     </div>
+    {#if chapters.length}
+      <!-- The chat's contents: its chapters, to jump between (its own chunk). -->
+      {#await import('./ChatChapters.svelte') then { default: ChatChapters }}
+        <ChatChapters {chapters} thread={chat.threadEl} />
+      {/await}
+    {/if}
     {#if !pinned}
       <!-- Scrolled up: back to the newest, following it again. -->
       <button
@@ -429,10 +572,10 @@
 
 <ConfirmDialog
   bind:open={rewindOpen}
-  title="Rewind to before this message?"
-  body="This message and everything after it go, and Claude won't see them again. Its words go back in the message box."
-  confirmLabel="Rewind"
-  busyLabel="Rewinding…"
+  title={rewindText.title}
+  body={rewindText.body}
+  confirmLabel={rewindText.confirm}
+  busyLabel={rewindText.busy}
   busy={rewindBusy}
   onconfirm={doRewind}
 >
@@ -459,6 +602,29 @@
     margin-top: 2px;
   }
   /* Where the summary takes over: a thin rule, quiet words, Show summary. */
+  /* A chapter's divider (mark_chapter): its title between two rules, a touch stronger than the summary's. */
+  .chapterdiv {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 14px 0 4px;
+    color: var(--yap-fg);
+    font-size: 12px;
+    font-weight: 600;
+    scroll-margin-top: 40px;
+  }
+  .chapterdiv .rule {
+    flex: 1 1 16px;
+    height: 1px;
+    background: var(--yap-border-subtle);
+  }
+  .chapterdiv .ctitle {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .summarised {
     display: flex;
     align-items: center;
@@ -583,6 +749,12 @@
     width: 12px;
     height: 12px;
     color: var(--yap-primary);
+  }
+  .ghostline {
+    color: var(--yap-fg-80);
+  }
+  .ghostline svg {
+    color: var(--yap-fg);
   }
   .asknote kbd {
     padding: 1px 6px;

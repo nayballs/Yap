@@ -102,7 +102,7 @@ old or **not signed in, it says so and stops** — the lab never signs in.
 `start` on the plan, then `stop`: is Claude Code on this PC and signed in, as Yap sees
 it? Asks the model nothing.
 
-### `ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>] [--style <name>] [--incognito] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
+### `ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>] [--retry] [--edit] [--style <name>] [--incognito] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
 
 Puts a question to Chat and waits until the turn ends (answered, stopped or failed),
 **or a card waits for the person**, or `--timeout` seconds pass.
@@ -123,6 +123,12 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   would mid-answer (14 Nov 2026, the message box's queue), with no turn of the lab's
   own: returns at once; the queued bubble, its ✓✓ and the answers show in the thread
   (`probe`, `shot`, `wait --agents`).
+- `--retry`: ↻ **Retry** under the chat's last answer instead (15 Nov 2026, the Claude
+  app's message actions: chat/chats/branches.rs), in the chat shown — its question
+  answered again, the old answer kept as a version (‹ 2/2 ›; `probe --css
+  '[data-testid="chat-branch-count"]'`). No words needed. `--edit`: **Edit** the
+  person's last message to `<text>` — the pencil, the words in place, Save and send —
+  a new version from there. Both are turns of the lab's own, waited on as `ask` is.
 - `--cards allow|deny`: answer every card this turn asks at once (otherwise `ask`
   returns `status: "waiting"` and you `answer` it).
 - `shots`: the turn's screenshots ([Screenshots](#screenshots)) — after it ends, and
@@ -197,6 +203,17 @@ connector's tool; `always` is a connector's Always allow), `approve:<n>` (an age
 permission prompt), `plan:<agent id>` (an agent's plan: `allow` is Go ahead, `deny`
 stops it). A card unanswered for 2 minutes is a no (Yap's own rule), so answer
 promptly.
+
+**A question of Chat's own model** (`ask_user`, 15 Nov 2026: `confirm:<n>` with
+`kind: "question"`, its `questions` and their options listed in `cards`, and once
+answered `picked` and `said`): `answer confirm:<n> pick "Plain text"` picks an option
+(several questions: `"Plain text|Short"`, in order; several picks on one: `"Route,Budget"`;
+words that aren't an option are the person's own), `allow` each question's first
+option, `deny` Let Yap decide. A single question with one answer is clicked on its card
+in the thread, as the person would; the rest go through `chat_question_answer`. It
+waits 10 minutes. Out loud: `answer confirm:<n> said "the second one"` (the Voice
+Assistant's next question in that chat: whatever is said next there is its answer),
+or the same as `ask "the second one" --spoken --chat same` while the card waits.
 
 ```json
 {"ok":true,"answered":{"id":"approve:1","how":"allow","wasWaiting":true},"agents":[{"id":"1a1bad23b2f261d619b","folder":"lab-sandbox","status":"done","conversation":1,"mode":"auto","plan":false,"text":"Done. I changed Draft to Final in notes.md and the tests pass.","files":["notes.md"],"commands":["npm test"],"denials":[],"error":null,"cost":0.041}],"pending":[],"reports":[{"conversation":1,"report":"The agent in lab-sandbox: it's done.\n…","answer":"OK"}]}

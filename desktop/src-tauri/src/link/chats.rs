@@ -108,6 +108,9 @@ mod tests {
             archived_ts: 0,
             summary: None,
             closed_tabs: Vec::new(),
+            branches: Vec::new(),
+            forks: Vec::new(),
+            incognito: false,
         }
     }
 

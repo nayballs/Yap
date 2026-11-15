@@ -76,8 +76,9 @@ pub(super) async fn with_tools(
     // (snip/turn.rs).
     crate::snip::turn::with_history_images(&mut messages, earlier, &ep.provider, &ep.model, &ep.base_url).await;
     // A Code chat (agents/code_chat.rs): none of memory's tools, nor past
-    // chats' (Yap's memory is personal; the project keeps its own).
-    let memory = built.code.is_none();
+    // chats' (Yap's memory is personal; the project keeps its own) — nor an
+    // incognito chat (chat/incognito.rs: memory unused and never learned).
+    let memory = built.code.is_none() && !built.incognito;
     // Connectors' tools (tools/connectors.rs): as the gates and the budget
     // measured them, from the store and the cache (a turn never waits for a
     // server to offer them).

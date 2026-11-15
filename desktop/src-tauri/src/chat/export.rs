@@ -284,7 +284,7 @@ mod tests {
     }
 
     fn conv(messages: Vec<ChatMessage>) -> Conversation {
-        Conversation { id: 7, title: "Trip plan".into(), created_ts: 1, updated_ts: 1, messages, scope: String::new(), note: None, archived_ts: 0, summary: None, closed_tabs: Vec::new() }
+        Conversation { id: 7, title: "Trip plan".into(), created_ts: 1, updated_ts: 1, messages, scope: String::new(), note: None, archived_ts: 0, summary: None, closed_tabs: Vec::new(), branches: Vec::new(), forks: Vec::new(), incognito: false }
     }
 
     fn user(text: &str) -> ChatMessage {

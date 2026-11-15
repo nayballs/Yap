@@ -14,6 +14,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+// Retry and Edit's other versions of a conversation (‹ 1/2 ›).
+pub mod branches;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
@@ -121,6 +124,17 @@ pub struct ChatMessage {
     /// older Yap's save drops them (the answer stays).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub confirms: Vec<crate::chat::pages::act::confirm::Card>,
+    /// **The next-step box an answer ended with** (`suggest_next_step`,
+    /// `chat/cards/next_step.rs`): its recap, question and buttons — shown
+    /// under the conversation's latest answer only. An older Yap's save drops
+    /// it (the answer stays).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_step: Option<crate::chat::cards::next_step::NextStep>,
+    /// **The chapter an answer's turn started** (`mark_chapter`,
+    /// `chat/cards/chapters.rs`): the divider above its question and an entry
+    /// in the chat's contents. An older Yap's save drops it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chapter: Option<crate::chat::cards::chapters::Chapter>,
     /// A message that isn't the person's nor the model's: `"agentReport"`, an
     /// agent's report Yap put in the chat (`chat/turn/report.rs`), shown as an
     /// agent's card; the model reads it as the agent's ([`ChatMessage::sent_text`]).
@@ -249,7 +263,7 @@ pub fn add_question_images(id: u64, images: &[ChatImage]) {
 /// (the screenshots sweep keeps
 /// these for their time; anything else goes after a day).
 pub fn image_ids() -> std::collections::HashSet<String> {
-    with_store(|s| s.conversations.iter().flat_map(|c| c.messages.iter()).flat_map(ChatMessage::image_ids).collect())
+    with_store(|s| s.conversations.iter().flat_map(Conversation::every_message).flat_map(ChatMessage::image_ids).collect())
 }
 
 impl ChatMessage {
@@ -379,6 +393,31 @@ pub struct Conversation {
     /// tabs come back once.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub closed_tabs: Vec<String>,
+    /// **An incognito chat** (15 Nov 2026, the Claude app's ghost): kept in
+    /// memory only, never in chats.json ([`Store`]'s save leaves it out, and
+    /// a file read never sets it), never listed, searched, indexed, learned
+    /// from or continued by the Voice Assistant, and gone when the person
+    /// leaves it ([`end_incognito`]) or Yap quits. The page's copy says so.
+    #[serde(default, skip_deserializing, skip_serializing_if = "std::ops::Not::not")]
+    pub incognito: bool,
+    /// **Its other versions** (15 Nov 2026, Retry and Edit: `branches.rs`):
+    /// where they part from the branch shown, which is `messages`. An older
+    /// Yap's save drops it; the copy in `chat_branches.json` puts back what
+    /// still fits at the next start (`branches::restore_from_disk`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub branches: Vec<branches::Fork>,
+    /// The page's ‹ k/n › (`chat_get`, [`for_page`]): set on the copy a page
+    /// gets, never stored (the page gets no other branch itself).
+    #[serde(default, skip_serializing_if = "Vec::is_empty", skip_deserializing)]
+    pub forks: Vec<branches::ForkView>,
+}
+
+impl Conversation {
+    /// Every message it keeps: the branch shown, then the others'
+    /// (`branches`) — their screenshots are kept for them, and go with them.
+    pub fn every_message(&self) -> impl Iterator<Item = &ChatMessage> + '_ {
+        self.messages.iter().chain(branches::other_messages(&self.branches))
+    }
 }
 
 /// The most tabs a conversation keeps closed ([`Conversation::closed_tabs`]): the newest.
@@ -417,8 +456,15 @@ impl Conversation {
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Store {
-    #[serde(default)]
+    /// Every conversation, incognito ones too; the file gets the others
+    /// only ([`kept`]).
+    #[serde(default, serialize_with = "kept")]
     conversations: Vec<Conversation>,
+}
+
+/// The conversations a save writes: never an incognito one.
+fn kept<S: serde::Serializer>(all: &[Conversation], s: S) -> Result<S::Ok, S::Error> {
+    s.collect_seq(all.iter().filter(|c| !c.incognito))
 }
 
 #[cfg(not(test))]
@@ -445,6 +491,11 @@ fn load_from_disk() -> Store {
     let mut store: Store = SAVER.load(&chats_path());
     // The shares an older Yap's save dropped (chat/shares.rs), put back.
     crate::chat::shares::restore_from_disk(&mut store.conversations);
+    // …and the branches (chats/branches.rs); a retry Yap closed during, put right.
+    branches::restore_from_disk(&mut store.conversations);
+    for c in store.conversations.iter_mut() {
+        branches::heal(c);
+    }
     store
 }
 
@@ -473,8 +524,16 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     if SAVER.write_json(&chats_path(), store, false).is_ok() {
-        // The shares' copy for an older Yap's save (chat/shares.rs).
-        crate::chat::shares::mirror_to_disk(&store.conversations);
+        // The shares' and the branches' copies for an older Yap's save
+        // (chat/shares.rs, chats/branches.rs): never an incognito chat's.
+        if store.conversations.iter().any(|c| c.incognito) {
+            let kept: Vec<Conversation> = store.conversations.iter().filter(|c| !c.incognito).cloned().collect();
+            crate::chat::shares::mirror_to_disk(&kept);
+            branches::mirror_to_disk(&kept);
+        } else {
+            crate::chat::shares::mirror_to_disk(&store.conversations);
+            branches::mirror_to_disk(&store.conversations);
+        }
     }
     // Search by meaning reads what changed, in the background.
     crate::search::changed();
@@ -489,6 +548,7 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     let store = guard.get_or_insert_with(load_from_disk);
     if SAVER.any_unread() && SAVER.refresh(&chats_path(), store) {
         crate::chat::shares::restore_from_disk(&mut store.conversations);
+        branches::restore_from_disk(&mut store.conversations);
         save_to_disk(store);
     }
     f(store)
@@ -507,6 +567,12 @@ fn save_to_disk(_store: &Store) {}
 #[cfg(test)]
 fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     TEST_STORE.with(|s| f(&mut s.borrow_mut()))
+}
+
+/// chats.json as a save would write it now (tests: never an incognito chat).
+#[cfg(test)]
+pub fn saved_json() -> String {
+    with_store(|s| serde_json::to_string(s).unwrap_or_default())
 }
 
 /// A model evaluation: each scenario starts with no conversations (its
@@ -560,7 +626,7 @@ pub fn rename(id: u64, title: &str) -> Result<String, String> {
 pub fn list() -> Value {
     with_store(|s| {
         let mut sorted: Vec<&Conversation> =
-            s.conversations.iter().filter(|c| c.note.is_none() && c.archived_ts == 0).collect();
+            s.conversations.iter().filter(|c| c.note.is_none() && c.archived_ts == 0 && !c.incognito).collect();
         sorted.sort_by_key(|c| std::cmp::Reverse(c.updated_ts));
         let items: Vec<Value> = sorted
             .into_iter()
@@ -591,7 +657,7 @@ fn last_answer_and_question(messages: &[ChatMessage]) -> (i64, i64) {
 /// `{ id, title, updatedTs, archivedTs, messageCount }`.
 pub fn list_archived() -> Value {
     with_store(|s| {
-        let mut sorted: Vec<&Conversation> = s.conversations.iter().filter(|c| c.note.is_none() && c.archived_ts > 0).collect();
+        let mut sorted: Vec<&Conversation> = s.conversations.iter().filter(|c| c.note.is_none() && c.archived_ts > 0 && !c.incognito).collect();
         sorted.sort_by_key(|c| (std::cmp::Reverse(c.archived_ts), std::cmp::Reverse(c.id)));
         json!(sorted
             .into_iter()
@@ -652,8 +718,18 @@ pub fn set_archived(ids: &[u64], on: bool) -> usize {
 
 /// Every conversation (archived ones too), read in place under the store's
 /// lock (search). `f` mustn't touch the chats store.
+///
+/// Never an incognito chat: search by meaning, the phone, Download your
+/// data and every other reader of them all see only the chats that are kept.
 pub fn with_all<R>(f: impl FnOnce(&[Conversation]) -> R) -> R {
-    with_store(|s| f(&s.conversations))
+    with_store(|s| {
+        if s.conversations.iter().any(|c| c.incognito) {
+            let kept: Vec<Conversation> = s.conversations.iter().filter(|c| !c.incognito).cloned().collect();
+            f(&kept)
+        } else {
+            f(&s.conversations)
+        }
+    })
 }
 
 /// A cheap fingerprint of every conversation (ids, titles' and messages'
@@ -662,8 +738,10 @@ pub fn stamp() -> u64 {
     use std::hash::{Hash, Hasher};
     with_store(|s| {
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        for c in &s.conversations {
+        for c in s.conversations.iter().filter(|c| !c.incognito) {
+            // (Each message's time too: another branch shown has as many.)
             (c.id, c.title.len(), c.messages.len(), c.updated_ts).hash(&mut h);
+            c.messages.iter().for_each(|m| m.ts.hash(&mut h));
         }
         h.finish()
     })
@@ -680,22 +758,78 @@ pub fn latest() -> Option<(u64, u64)> {
     with_store(|s| {
         s.conversations
             .iter()
-            .filter(|c| c.note.is_none() && c.archived_ts == 0)
+            .filter(|c| c.note.is_none() && c.archived_ts == 0 && !c.incognito)
             .max_by_key(|c| (c.updated_ts, c.id))
             .map(|c| (c.id, c.updated_ts))
     })
 }
 
 pub fn create(title: &str) -> Conversation {
-    create_with(title, None)
+    create_with(title, None, false)
 }
+
+/// **A new incognito chat** ([`Conversation::incognito`]): in memory only.
+pub fn create_incognito(title: &str) -> Conversation {
+    create_with(title, None, true)
+}
+
+/// The incognito chats Yap holds now (their ids).
+pub fn incognito_ids() -> Vec<u64> {
+    with_store(|s| s.conversations.iter().filter(|c| c.incognito).map(|c| c.id).collect())
+}
+
+/// Whether conversation `id` is an incognito chat (one Yap holds now).
+pub fn is_incognito(id: u64) -> bool {
+    with_store(|s| s.conversations.iter().any(|c| c.id == id && c.incognito))
+}
+
+/// **An incognito chat left** (another chat opened, a new one, Chat's
+/// "End"): it goes, its screenshots and pictures with it, and the Claude
+/// plan's session it had. `false` when `id` wasn't one (nothing happens to
+/// a kept chat).
+pub fn end_incognito(id: u64) -> bool {
+    if !is_incognito(id) {
+        return false;
+    }
+    delete_many(&[id]);
+    forget_incognito(id);
+    tracing::info!("Chat: an incognito chat ended");
+    true
+}
+
+/// **Yap quitting**: every incognito chat's pictures go now (their words
+/// were only ever in memory). How many chats there were.
+pub fn end_all_incognito() -> usize {
+    let ids = incognito_ids();
+    for id in &ids {
+        end_incognito(*id);
+    }
+    ids.len()
+}
+
+/// What an incognito chat left beside the chat store: its Claude plan
+/// session (never saved by Claude Code: `--no-session-persistence`), its
+/// per-chat switches. A later chat may take its id once it's gone, and must
+/// find nothing of it.
+#[cfg(not(test))]
+fn forget_incognito(id: u64) {
+    // (As a deleted chat's: `commands::chat_delete`.)
+    crate::apps::moved_on(Some(id));
+    crate::ai::claude_plan::sessions::forget(id);
+    crate::agents::code_chat::chat_deleted(id);
+    crate::integrations::connectors::chats::chat_deleted(id);
+    crate::chat::styles::chats_deleted(&[id]);
+}
+
+#[cfg(test)]
+fn forget_incognito(_id: u64) {}
 
 /// A new Ask thread of note `note` (`note_chats.rs`).
 pub fn create_for_note(note: u64, title: &str) -> Conversation {
-    create_with(title, Some(note))
+    create_with(title, Some(note), false)
 }
 
-fn create_with(title: &str, note: Option<u64>) -> Conversation {
+fn create_with(title: &str, note: Option<u64>, incognito: bool) -> Conversation {
     with_store(|s| {
         let id = SAVER.next_id(s.conversations.iter().map(|c| c.id).max().unwrap_or(0));
         let now = now_secs();
@@ -710,6 +844,9 @@ fn create_with(title: &str, note: Option<u64>) -> Conversation {
             archived_ts: 0,
             summary: None,
             closed_tabs: Vec::new(),
+            branches: Vec::new(),
+            forks: Vec::new(),
+            incognito,
         };
         s.conversations.push(conv.clone());
         save_to_disk(s);
@@ -901,6 +1038,23 @@ pub fn set_confirms(id: u64, index: usize, confirms: &[crate::chat::pages::act::
     });
 }
 
+/// **Keep the next-step box and the chapter a turn made** with its answer
+/// (`chat/cards.rs`, as the turn's watcher saw them last): conversation
+/// `id`'s message `index`, when it's an answer.
+pub fn set_cards(id: u64, index: usize, next_step: Option<&crate::chat::cards::next_step::NextStep>, chapter: Option<&crate::chat::cards::chapters::Chapter>) {
+    if next_step.is_none() && chapter.is_none() {
+        return;
+    }
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "assistant" {
+            m.next_step = next_step.cloned();
+            m.chapter = chapter.cloned();
+            save_to_disk(s);
+        }
+    });
+}
+
 /// The "Search in your browser" an answer offers, as saved (the page's
 /// answer to `chat_send` carries it).
 pub fn browser_search_of(id: u64, index: usize) -> Option<crate::web::BrowserSearch> {
@@ -951,19 +1105,131 @@ pub fn scope_of(id: u64) -> String {
 
 /// Keep `summary` as conversation `id`'s (`compact.rs`) — only while the
 /// one it extends is still there (`from`: the old one's `upto`, 0 for none)
-/// and the messages it covers are: another pass, or an older Yap's save,
-/// may have changed it meanwhile. Returns whether it was kept.
-pub fn set_summary(id: u64, from: usize, summary: ChatSummary) -> bool {
+/// and the messages it covers are, as the pass read them (`read`:
+/// [`print_of`] its `messages[..upto]`): another pass, another branch shown
+/// (Retry, Edit, ‹ ›), or an older Yap's save, may have changed it meanwhile.
+/// Returns whether it was kept.
+pub fn set_summary(id: u64, from: usize, summary: ChatSummary, read: u64) -> bool {
     with_store(|s| {
         let Some(c) = s.conversations.iter_mut().find(|c| c.id == id) else { return false };
         let had = c.usable_summary().map(|x| x.upto).unwrap_or(0);
-        if had != from || summary.upto > c.messages.len() || summary.upto <= had {
+        if had != from || summary.upto > c.messages.len() || summary.upto <= had || print_of(&c.messages[..summary.upto]) != read {
             return false;
         }
         c.summary = Some(summary);
         save_to_disk(s);
         true
     })
+}
+
+/// **A fingerprint of `messages`** (their times, who, how long): did they
+/// change between reading and writing (a summary, [`set_summary`]). Pure.
+pub fn print_of(messages: &[ChatMessage]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for m in messages {
+        (m.ts, m.role.as_str(), m.text.len()).hash(&mut h);
+    }
+    h.finish()
+}
+
+// ---- Retry and Edit: branches (chats/branches.rs) -----------------------------------------------
+
+/// **A branch begun** ([`begin_retry`], [`begin_edit`]): where it parts, the
+/// branch set aside, and the message asked.
+#[derive(Debug, Clone)]
+pub struct Begun {
+    /// Where the branches part: the answer retried, or the message edited.
+    pub at: usize,
+    /// The branch set aside: back to it when the new one never answers
+    /// ([`end_branch`]).
+    pub back_to: u32,
+    /// The question answered again (Retry), or the message the new words
+    /// replace (Edit): its screenshots and quote go again.
+    pub question: ChatMessage,
+    /// Its index (the question's stays in place for a Retry).
+    pub question_at: usize,
+}
+
+/// **Retry** conversation `id`'s answer `index` (the Claude app's): it and
+/// everything after it set aside, kept as a branch, so the person's question
+/// just before it is answered again — the new answer a branch of its own.
+pub fn begin_retry(id: u64, index: usize) -> Result<Begun, String> {
+    with_store(|s| {
+        let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
+        let m = conv.messages.get(index).ok_or("That answer isn't there any more.")?;
+        if m.role != "assistant" || !m.kind.is_empty() {
+            return Err("Only an answer can be tried again.".to_string());
+        }
+        let question = index
+            .checked_sub(1)
+            .and_then(|i| conv.messages.get(i))
+            .filter(|q| q.role == "user" && q.kind.is_empty())
+            .cloned()
+            .ok_or("That answer has no question of yours just before it to ask again.")?;
+        let back_to = branches::branch_off(conv, index)?;
+        save_to_disk(s);
+        Ok(Begun { at: index, back_to, question, question_at: index - 1 })
+    })
+}
+
+/// **Edit** conversation `id`'s message `index`, the person's own: it and
+/// everything after it set aside, kept as a branch, so the new words go in
+/// its place — a branch of their own.
+pub fn begin_edit(id: u64, index: usize) -> Result<Begun, String> {
+    with_store(|s| {
+        let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
+        let question = conv.messages.get(index).filter(|m| m.role == "user" && m.kind.is_empty()).cloned().ok_or("That message isn't there any more.")?;
+        let back_to = branches::branch_off(conv, index)?;
+        save_to_disk(s);
+        Ok(Begun { at: index, back_to, question, question_at: index })
+    })
+}
+
+/// **A branch's turn over** ([`begin_retry`], [`begin_edit`]): `kept` and
+/// something there from `at` on — the new branch stays, shown; else back to
+/// the one set aside (`back_to`), what the new one had dropped with its
+/// screenshots. Whether it was kept.
+pub fn end_branch(id: u64, at: usize, back_to: u32, kept: bool) -> bool {
+    let (keep, images) = with_store(|s| {
+        let Some(conv) = s.conversations.iter_mut().find(|c| c.id == id) else { return (false, Vec::new()) };
+        if kept && conv.messages.len() > at {
+            branches::settle(conv, at);
+            save_to_disk(s);
+            return (true, Vec::new());
+        }
+        let dropped = branches::undo(conv, at, back_to);
+        let gone: Vec<String> = dropped.iter().flat_map(ChatMessage::image_ids).collect();
+        save_to_disk(s);
+        (false, unshown(s, gone))
+    });
+    if !keep {
+        crate::search::removed();
+    }
+    if !images.is_empty() {
+        crate::snip::images::delete(&images);
+    }
+    keep
+}
+
+/// **‹ › on a message**: conversation `id`'s fork at `at` shows its branch
+/// in place `place` (1…, as ‹ › counts them). The conversation as a page
+/// gets it.
+pub fn switch_branch(id: u64, at: usize, place: u32) -> Result<Conversation, String> {
+    let (conv, changed) = with_store(|s| {
+        let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
+        let changed = branches::switch(conv, at, place)?;
+        let conv = conv.clone();
+        if changed {
+            save_to_disk(s);
+        }
+        Ok::<_, String>((conv, changed))
+    })?;
+    // (Search by meaning lets go of the branch set aside: it's no longer what the chat says.)
+    if changed {
+        crate::search::removed();
+    }
+    Ok(for_page(conv))
 }
 
 /// Add a message; `tools` = an answer's tool chips (empty for the user's),
@@ -1034,6 +1300,8 @@ pub fn append_message(
             quote: None,
             browser_search: None,
             confirms: Vec::new(),
+            next_step: None,
+            chapter: None,
             kind: String::new(),
         });
         conv.updated_ts = now_secs();
@@ -1091,7 +1359,7 @@ pub fn delete_many(ids: &[u64]) -> usize {
             .conversations
             .iter()
             .filter(|c| ids.contains(&c.id))
-            .flat_map(|c| c.messages.iter().flat_map(ChatMessage::image_ids))
+            .flat_map(|c| c.every_message().flat_map(ChatMessage::image_ids))
             .collect();
         let before = s.conversations.len();
         s.conversations.retain(|c| !ids.contains(&c.id));
@@ -1123,7 +1391,7 @@ fn unshown(s: &Store, images: Vec<String>) -> Vec<String> {
     if images.is_empty() {
         return images;
     }
-    let shown: std::collections::HashSet<String> = s.conversations.iter().flat_map(|c| c.messages.iter()).flat_map(ChatMessage::image_ids).collect();
+    let shown: std::collections::HashSet<String> = s.conversations.iter().flat_map(Conversation::every_message).flat_map(ChatMessage::image_ids).collect();
     images.into_iter().filter(|i| !shown.contains(i)).collect()
 }
 
@@ -1132,12 +1400,17 @@ fn unshown(s: &Store, images: Vec<String>) -> Vec<String> {
 /// which goes with everything after it (their screenshots too, unless
 /// another chat still shows them). Returns that message, its words for the
 /// box.
-pub fn rewind(id: u64, at: usize) -> Result<ChatMessage, String> {
+/// `keep_shots`: the message's own screenshots stay (a Code chat's Edit sends
+/// them again with the new words: `chat_send`'s `edit`). The branches past
+/// `at` go too (`branches::cut_at`).
+pub fn rewind(id: u64, at: usize, keep_shots: bool) -> Result<ChatMessage, String> {
     let (message, images) = with_store(|s| {
         let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
         let m = conv.messages.get(at).filter(|m| m.role == "user" && m.kind.is_empty()).cloned().ok_or("That message isn't there any more.")?;
-        let gone: Vec<String> = conv.messages[at..].iter().flat_map(ChatMessage::image_ids).collect();
+        let mut gone: Vec<String> = conv.messages[at..].iter().skip(usize::from(keep_shots)).flat_map(ChatMessage::image_ids).collect();
         conv.messages.truncate(at);
+        let cut = branches::cut_at(conv, at);
+        gone.extend(cut.iter().flat_map(ChatMessage::image_ids));
         // Its summary only while it covers what's left.
         if conv.summary.as_ref().is_some_and(|sum| sum.upto > at || sum.after > at) {
             conv.summary = None;
@@ -1164,6 +1437,8 @@ pub fn fork(id: u64, upto: usize, title: &str) -> Result<Conversation, String> {
         let from = s.conversations.iter().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
         let messages: Vec<ChatMessage> = from.messages[..upto.min(from.messages.len())].iter().filter(|m| m.kind.is_empty()).cloned().collect();
         let scope = from.scope.clone();
+        // (A fork of an incognito chat is one too.)
+        let incognito = from.incognito;
         let new_id = SAVER.next_id(s.conversations.iter().map(|c| c.id).max().unwrap_or(0));
         let now = now_secs();
         let conv = Conversation {
@@ -1177,6 +1452,9 @@ pub fn fork(id: u64, upto: usize, title: &str) -> Result<Conversation, String> {
             archived_ts: 0,
             summary: None,
             closed_tabs: Vec::new(),
+            branches: Vec::new(),
+            forks: Vec::new(),
+            incognito,
         };
         s.conversations.push(conv.clone());
         save_to_disk(s);
@@ -1188,6 +1466,9 @@ pub fn fork(id: u64, upto: usize, title: &str) -> Result<Conversation, String> {
 /// (kept past "Keep chat screenshots") says so (`gone`), and each shared
 /// file whether it's still there and what Open does (`shares::for_page`).
 pub fn for_page(mut conv: Conversation) -> Conversation {
+    // Its ‹ k/n ›, never the other branches themselves (Retry and Edit, chats/branches.rs).
+    conv.forks = branches::views(&conv);
+    conv.branches.clear();
     for m in conv.messages.iter_mut() {
         for img in m.images.iter_mut() {
             img.gone = !crate::snip::images::exists(&img.id);
@@ -1260,7 +1541,7 @@ pub fn search(query: &str, exclude: Option<u64>, limit: usize) -> Vec<Found> {
         let mut scored: Vec<(usize, &Conversation, Vec<&ChatMessage>)> = s
             .conversations
             .iter()
-            .filter(|c| Some(c.id) != exclude && c.note.is_none())
+            .filter(|c| Some(c.id) != exclude && c.note.is_none() && !c.incognito)
             .filter_map(|c| {
                 let title = c.title.to_lowercase();
                 let in_title = words.iter().filter(|w| title.contains(w.as_str())).count();
@@ -1712,7 +1993,7 @@ mod tests {
         let kept = closed_keys(&many);
         assert_eq!((kept.len(), kept[0].as_str(), kept.last().map(String::as_str)), (CLOSED_TABS_MAX, "pic:p5", Some("pic:p204")));
         // Saved with the conversation, under its own name; an older file has none.
-        let conv = Conversation { id: 4, title: "Garden".into(), created_ts: 1, updated_ts: 1, messages: Vec::new(), scope: String::new(), note: None, archived_ts: 0, summary: None, closed_tabs: vec![k("doc:7")] };
+        let conv = Conversation { id: 4, title: "Garden".into(), created_ts: 1, updated_ts: 1, messages: Vec::new(), scope: String::new(), note: None, archived_ts: 0, summary: None, closed_tabs: vec![k("doc:7")], branches: Vec::new(), forks: Vec::new(), incognito: false };
         let saved = serde_json::to_value(&conv).unwrap();
         assert_eq!(saved["closedTabs"], json!(["doc:7"]));
         let older: Conversation = serde_json::from_value(json!({ "id": 4, "title": "Garden", "createdTs": 1, "updatedTs": 1 })).unwrap();
@@ -1886,6 +2167,8 @@ mod tests {
             quote: None,
             browser_search: None,
             confirms: vec![],
+            next_step: None,
+            chapter: None,
             kind: String::new(),
         };
         let messages = vec![
@@ -2152,20 +2435,80 @@ mod tests {
         assert_eq!(f.messages.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["Add a watering schedule", "Done: notes.md has it."]);
         assert_eq!(get(c.id).unwrap().messages.len(), 5);
         // Rewind to before the second question: it and its answer go, its words come back.
-        let back = rewind(c.id, 3).unwrap();
+        let back = rewind(c.id, 3, false).unwrap();
         assert_eq!(back.text, "Now a minimap button");
         assert_eq!(get(c.id).unwrap().messages.len(), 3);
         // Only the person's own message is a place to rewind to (never an answer, nor a report line).
-        assert!(rewind(c.id, 1).is_err());
-        assert!(rewind(c.id, 2).is_err());
-        assert!(rewind(c.id, 9).is_err());
-        assert!(rewind(999, 0).is_err());
+        assert!(rewind(c.id, 1, false).is_err());
+        assert!(rewind(c.id, 2, false).is_err());
+        assert!(rewind(c.id, 9, false).is_err());
+        assert!(rewind(999, 0, false).is_err());
         // Deleting the original leaves the fork's screenshot: another chat still shows it.
         let gone = with_store(|s| unshown(s, vec!["img_1111111111111111".into(), "img_9999999999999999".into()]));
         assert_eq!(gone, ["img_9999999999999999"]);
         delete(c.id);
         assert_eq!(get(f.id).unwrap().messages[0].images[0].id, "img_1111111111111111");
         assert!(image_ids().contains("img_1111111111111111"));
+    }
+
+    /// Retry and Edit (15 Nov 2026, `chats/branches.rs`): the branch shown is
+    /// `messages`, the others kept with their screenshots; a retry that never
+    /// answered puts the old answer back; ‹ › switches; a page gets the ‹ ›
+    /// only; an older Yap reads the branch shown.
+    #[test]
+    fn a_retry_and_an_edit_keep_every_version_and_the_branch_shown_is_the_conversation() {
+        let shot = |id: &str| ChatImage { id: id.into(), ..Default::default() };
+        let c = create("Trip");
+        append_question(c.id, "Pack list?", false, &[shot("img_3333333333333333")]).unwrap();
+        append(c.id, "assistant", "Socks.", &[], None, false).unwrap();
+        append(c.id, "user", "More?", &[], None, false).unwrap();
+        append(c.id, "assistant", "A hat.", &[], None, false).unwrap();
+        // Retry the first answer: it and what followed set aside; the question stays, answered again.
+        let b = begin_retry(c.id, 1).unwrap();
+        assert_eq!((b.at, b.back_to, b.question_at, b.question.text.as_str()), (1, 1, 0, "Pack list?"));
+        assert_eq!(get(c.id).unwrap().messages.len(), 1);
+        append(c.id, "assistant", "Boots.", &[], None, false).unwrap();
+        assert!(end_branch(c.id, b.at, b.back_to, true));
+        let page = for_page(get(c.id).unwrap());
+        assert_eq!(page.forks.iter().map(|f| (f.at, f.shown, f.count)).collect::<Vec<_>>(), [(1, 2, 2)]);
+        assert!(page.branches.is_empty(), "a page gets the ‹ › only");
+        // A retry that never answered: back to the answer it replaced, nothing lost.
+        let again = begin_retry(c.id, 1).unwrap();
+        assert!(!end_branch(c.id, again.at, again.back_to, true));
+        assert_eq!(get(c.id).unwrap().messages.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["Pack list?", "Boots."]);
+        // ‹ 1/2 ›: the first answer and its follow-up again.
+        let shown = switch_branch(c.id, 1, 1).unwrap();
+        assert_eq!(shown.messages.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["Pack list?", "Socks.", "More?", "A hat."]);
+        assert_eq!(shown.forks.iter().map(|f| (f.at, f.shown, f.count)).collect::<Vec<_>>(), [(1, 1, 2)]);
+        // Edit the first question: everything set aside; an error before its answer puts it all back.
+        let e = begin_edit(c.id, 0).unwrap();
+        assert_eq!((e.at, e.question.images.len()), (0, 1));
+        append_question(c.id, "Pack list for the beach?", false, &[shot("img_3333333333333333")]).unwrap();
+        assert!(!end_branch(c.id, e.at, e.back_to, false));
+        assert_eq!(get(c.id).unwrap().messages.len(), 4);
+        assert!(image_ids().contains("img_3333333333333333"), "the question's screenshot is still shown");
+        // Edited and answered: ‹ 2/2 › on the question; the other versions' screenshots stay kept.
+        let e = begin_edit(c.id, 0).unwrap();
+        append_question(c.id, "Pack list for the beach?", false, &[]).unwrap();
+        append(c.id, "assistant", "Sun cream.", &[], None, false).unwrap();
+        assert!(end_branch(c.id, e.at, e.back_to, true));
+        let conv = get(c.id).unwrap();
+        assert_eq!(branches::views(&conv).iter().map(|f| (f.at, f.shown, f.count)).collect::<Vec<_>>(), [(0, 2, 2)]);
+        assert!(image_ids().contains("img_3333333333333333"), "kept for the version set aside");
+        // An older Yap reads the branch shown (and drops the rest when it saves).
+        let mut v = serde_json::to_value(&conv).unwrap();
+        assert!(v.get("forks").is_none(), "never stored");
+        v.as_object_mut().unwrap().remove("branches");
+        let old: Conversation = serde_json::from_value(v).unwrap();
+        assert_eq!(old.messages.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["Pack list for the beach?", "Sun cream."]);
+        // Only an answer after the person's own question can be retried; only their message edited.
+        assert!(begin_retry(c.id, 0).is_err());
+        assert!(begin_edit(c.id, 1).is_err());
+        // A Rewind cuts the versions after it, and deleting the chat lets their screenshots go.
+        switch_branch(c.id, 0, 1).unwrap();
+        rewind(c.id, 0, false).unwrap();
+        assert!(get(c.id).unwrap().branches.is_empty());
+        assert!(!image_ids().contains("img_3333333333333333"));
     }
 
     #[test]

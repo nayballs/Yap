@@ -74,6 +74,9 @@ pub(crate) fn shutdown_cleanup() {
     // Your Claude plan's warm spares (claude_plan/spare.rs): ended now (the
     // kill-on-close job would anyway).
     ai::claude_plan::spare::end_all("Yap quits");
+    // Incognito chats (chat/incognito.rs): their pictures go with them (their
+    // words were only ever in memory).
+    chat::chats::end_all_incognito();
     // Yap Link: no more phones (link.rs).
     link::stop();
     // Connectors' programs and links (integrations/connectors.rs): stopped,
@@ -329,6 +332,7 @@ pub fn run() {
             chat::pages::pick::page_annotated,
             chat::pages::act::confirm::chat_page_confirm,
             chat::pages::act::confirm::chat_connector_confirm,
+            chat::cards::ask::chat_question_answer,
             dictation::commands::cancel_recording,
             shell::autostart::set_autostart,
             shell::commands::is_portable,
@@ -483,6 +487,9 @@ pub fn run() {
             chat::commands::chats_list,
             chat::commands::chat_get,
             chat::export::chat_export,
+            chat::incognito::chat_incognito_end,
+            #[cfg(debug_assertions)]
+            chat::incognito::e2e_chat_incognito_ids,
             chat::styles::chat_styles,
             chat::styles::chat_style_of,
             chat::styles::chat_style_set,
@@ -492,6 +499,8 @@ pub fn run() {
             chat::commands::chat_delete,
             chat::commands::chat_delete_many,
             chat::commands::chat_rename,
+            chat::commands::chat_retry,
+            chat::commands::chat_branch,
             chat::commands::chat_tabs_closed,
             chat::commands::chats_archived,
             chat::commands::chat_archive,

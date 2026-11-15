@@ -25,7 +25,7 @@
 //!   Claude Code's problems (signed out, at the plan's limit, paying
 //!   another way: that one is stopped at once) and the result — each sent
 //!   as the app event **`yap-agent`** (`{id, status, folder, conversation?,
-//!   step?, file?, command?, about?, said?, todos?, now?, diff?, text?,
+//!   step?, file?, command?, about?, said?, thought?, todos?, now?, diff?, text?,
 //!   cost?, problem?, ts}`) and kept in the agent's `log.jsonl` for its tab.
 //! - **Asking**: a permission card waiting for the person (the endpoint's
 //!   `pending()`): the agent is `asking` until it's answered.
@@ -98,6 +98,9 @@ pub const EVENT: &str = "yap-agent";
 pub const SAYING_EVENT: &str = "yap-agent-saying";
 /// At most this often ([`SAYING_EVENT`]).
 const SAYING_EVERY: Duration = Duration::from_millis(70);
+/// A thought's most characters in its log ([`AgentEvent::thought`]): past
+/// them, cut at a character's edge with "…".
+const THOUGHT_CHARS: usize = 12_000;
 /// The most agents at once.
 pub const MAX: usize = 3;
 /// What every brief ends with: the report is ready to say.
@@ -154,6 +157,13 @@ pub struct AgentEvent {
     /// tab's steps each).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub said: Option<String>,
+    /// **Its thinking** (15 Nov 2026): a thinking block of its own message,
+    /// as Claude Code's stream hands it over (a helper's never), at most
+    /// [`THOUGHT_CHARS`]. Shown only in a Code chat's Thinking and Verbose
+    /// views, as Claude Code's app shows it in its transcript; never to a
+    /// phone, never in Yap's log.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought: Option<String>,
     /// Its to-do list, as its latest `TodoWrite` left it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub todos: Option<Vec<steps::Todo>>,
@@ -1065,6 +1075,14 @@ fn pay_for(agent: &Agent, cfg: &crate::config::YapConfig, status: &cli::Status) 
     Ok(Pay::Plan)
 }
 
+/// **Claude Code's to-do list, on in every run** (15 Nov 2026): since
+/// 2.1.268 newer models (Opus 5.5, Sonnet 5.5…) get no task-tracking tool
+/// unless the session opts in (Claude Code's tools reference, "Task tool
+/// availability"), so a Code chat's to-do card never showed on them. On, and
+/// as `TodoWrite` — the list Yap reads (`steps.rs`) — rather than the four
+/// Task tools.
+pub const TODO_ENV: [(&str, &str); 2] = [("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1"), ("CLAUDE_CODE_ENABLE_TASKS", "0")];
+
 /// **An agent's Claude Code run**: in its folder, the person's own setup (no
 /// `--strict-mcp-config`, no `--setting-sources`, Claude Code's own tools)
 /// with Yap's endpoint added (the run's `mcp_config`, the backup hook's
@@ -1086,6 +1104,8 @@ pub fn agent_spec(
 ) -> Spec {
     let mut spec = Spec::new(folder, pay);
     spec.env = env;
+    // Its to-do list on every model, as TodoWrite (the thread's to-do card, the plan from before a message).
+    spec.env.extend(TODO_ENV.iter().map(|(k, v)| (k.to_string(), v.to_string())));
     spec.model = Some(agent.model.clone()).filter(|m| !m.trim().is_empty());
     spec.effort = Effort::parse(&agent.effort);
     spec.permission_mode = mode.permission();
@@ -1169,6 +1189,8 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         // a plan Code chat's session always could; an agent Chat sent out
         // doesn't (Chat's model reads for its brief).
         reads: direct,
+        // (Chat's cards in the thread are a Chat run's; Claude Code asks with its own AskUserQuestion.)
+        cards: Default::default(),
     }) {
         Ok(r) => r,
         Err(e) => return failed_early(id, n, format!("Couldn't start the agent: {e}"), None),
@@ -1860,6 +1882,12 @@ impl Follow {
                 for block in &a.blocks {
                     match block {
                         Block::ToolUse { id, name, input } => self.on_tool(id, name, input),
+                        // Its thinking (a helper's isn't its own): a line the thread's Thinking view shows.
+                        Block::Thinking(t) if a.parent_tool_use_id.is_none() && !t.trim().is_empty() => {
+                            if let Some(agent) = store::get(&self.id) {
+                                emit(&AgentEvent { thought: Some(thought_of(t)), ..self.event(&agent) });
+                            }
+                        }
                         // What it says between its calls: a line of its own
                         // (a helper's words, under a Task, aren't).
                         Block::Text(t) if !t.trim().is_empty() => {
@@ -2227,6 +2255,16 @@ fn turn_words(said: &[String], split_at: Option<usize>) -> String {
     match split_at {
         Some(k) if k < said.len() => said[k..].join("\n\n"),
         _ => said.join("\n\n"),
+    }
+}
+
+/// **A thought as its log keeps it**: trimmed, at most [`THOUGHT_CHARS`]
+/// characters (cut at a character's edge, with "…"). Pure.
+fn thought_of(text: &str) -> String {
+    let t = text.trim();
+    match t.char_indices().nth(THOUGHT_CHARS) {
+        Some((cut, _)) => format!("{}…", t[..cut].trim_end()),
+        None => t.to_string(),
     }
 }
 
@@ -3044,6 +3082,20 @@ mod tests {
     }
 
     #[test]
+    fn a_thought_is_kept_trimmed_and_capped_at_a_characters_edge() {
+        assert_eq!(thought_of("  They want a greeting.\n"), "They want a greeting.");
+        let long = "é".repeat(THOUGHT_CHARS + 5);
+        let kept = thought_of(&long);
+        assert!(kept.ends_with('…'));
+        assert_eq!(kept.chars().count(), THOUGHT_CHARS + 1);
+        // Its event says it alone, never as words said.
+        let ev = AgentEvent { id: "ab12".into(), thought: Some("Check the notes first.".into()), ..Default::default() };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["thought"], "Check the notes first.");
+        assert!(v.get("said").is_none() && v.get("step").is_none() && v.get("text").is_none());
+    }
+
+    #[test]
     fn a_results_outcome() {
         assert_eq!(outcome_of(&result(false, "completed"), false, None), Status::Done);
         assert_eq!(outcome_of(&result(true, "api_error"), false, None), Status::Failed);
@@ -3081,8 +3133,10 @@ mod tests {
             assert!(!a.iter().any(|x| x == never), "{never} in {a:?}");
         }
         assert_eq!((spec.mcp_config, spec.settings), (Some(mcp.clone()), Some(hooks.clone())));
-        // The run key in its environment, which its files name.
-        assert_eq!(spec.env, key);
+        // The run key in its environment, which its files name; its to-do list on, as TodoWrite.
+        assert_eq!(spec.env[..1], key[..]);
+        assert_eq!(&spec.env[1..], &[("CLAUDE_CODE_ENABLE_TODO_TOOLS".to_string(), "1".to_string()), ("CLAUDE_CODE_ENABLE_TASKS".to_string(), "0".to_string())]);
+        assert!(session::environment(Vec::new(), &Pay::Plan, &spec.env).is_ok(), "a run may set them");
         // A later turn resumes it, at the mode it runs at then.
         let spec = agent_spec(&agent, &folder, Pay::Plan, Mode::Auto, false, Conversation::Resume("prev".into()), mcp.clone(), hooks.clone(), key.clone());
         let a = session::args(&spec, &files);

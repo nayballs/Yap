@@ -626,6 +626,7 @@
   <section
     class="thread"
     class:withbtn={!room.listShown}
+    class:incognito={chat.incognito}
     inert={cover || undefined}
     onpointerdown={room.listFloats ? () => layout.dismissFloating() : undefined}
   >
@@ -643,6 +644,22 @@
         data-testid="chat-list-show"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9 4v16" /></svg>
+      </button>
+    {/if}
+    {#if chat.activeId == null && !chat.messages.length && !code?.current && !code?.onCode}
+      <!-- Incognito (chat/incognito.rs): a new chat's ghost, at the thread's
+           top right as the Claude app has it. -->
+      <button
+        type="button"
+        class="ghostbtn"
+        class:on={chat.incognito}
+        aria-pressed={chat.incognito}
+        aria-label="Incognito chat"
+        title={chat.incognito ? 'Incognito chat: on' : "Incognito chat: not saved, and memory isn't used"}
+        data-testid="chat-incognito"
+        onclick={() => chat.setGhost(!chat.incognito)}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11a7 7 0 0 1 14 0v9l-2.33-1.5L14.33 20 12 18.5 9.67 20l-2.34-1.5z" /><circle cx="9.5" cy="11" r="1" fill="currentColor" stroke="none" /><circle cx="14.5" cy="11" r="1" fill="currentColor" stroke="none" /></svg>
       </button>
     {/if}
     <ChatThread {chat} {code} {onopensettings} />
@@ -877,6 +894,45 @@
   }
   .thread.withbtn > :global(:not(.composer):not(.showchats):not(.threadbox):not(.scopeline)) {
     margin-left: 26px;
+  }
+  /* An incognito chat (chat/incognito.rs): a ring round the whole thread,
+     as the Claude app's border. */
+  .thread.incognito {
+    box-shadow: inset 0 0 0 2px var(--yap-fg-80);
+    border-radius: var(--yap-r-lg);
+  }
+  /* A new chat's ghost, at the thread's top right. */
+  .ghostbtn {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    border-radius: var(--yap-r);
+    background: none;
+    color: var(--yap-muted);
+    cursor: pointer;
+  }
+  .ghostbtn svg {
+    width: 18px;
+    height: 18px;
+  }
+  .ghostbtn:hover {
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+  }
+  .ghostbtn.on {
+    background: var(--yap-fg);
+    color: var(--yap-bg);
+  }
+  .ghostbtn:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 2px;
   }
   /* The list's button where the list was: as in its head, the same place. */
   .showchats {

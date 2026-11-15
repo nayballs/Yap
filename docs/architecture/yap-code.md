@@ -678,7 +678,10 @@ workspace, word for word, and no model of Chat's is asked.
   own fork at the end of the turn before; to before the first message, the
   file put back and a new session; Fork from here: a new Code chat up to
   that answer, its first turn a fork of the original session, the original
-  untouched). The e2e base config has
+  untouched; a long turn in order — its words between its lines, a
+  message sent meanwhile where Claude read it, the plan from before it, a
+  step's picture paged across the turn's, the transcript view's Thinking
+  and Verbose from the chat's ⋯, its thinking in its log). The e2e base config has
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 
@@ -1756,7 +1759,11 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   7 done". Live while the turn works (`stores/agents.svelte.js` keeps each
   turn's `todos` from `yap-agent`); once it ends it stays as its record,
   folded to "7 to-dos · all done" ("5 done", "none done yet") with ▸ to
-  open. No list, no card; a plain chat's thread is as it was.
+  open. No list, no card; a plain chat's thread is as it was. In a Code
+  chat that works directly it's drawn by its work (`AgentWork`), and once
+  the person writes mid-turn the list as it stood stays above their
+  message as **"Plan from before your last message"**
+  ([The thread in order](#the-thread-in-order)).
 - **Whose work shows where** (2026-11-12, the maintainer, on a chat whose
   model had sent an agent: "if you send out an agent I don't think I see the
   work the agent does in the main chat window, only if you yourself do
@@ -1841,8 +1848,11 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   - The log: `stores/agentLogs.svelte.js` reads a shown agent's once
     (`agent_get`, as its tab does) and keeps it in step with `yap-agent`.
     The agents store still keeps no log.
-  - A note handed to the agent mid-work has no turn of its own, so the
-    stream stays under the answer that sent the turn, above the note.
+  - **In order with the person's own messages** (2026-11-15, after the
+    Claude app's Code tab: [The thread in order](#the-thread-in-order)): a
+    message sent while it worked has no turn of its own, and shows where
+    Claude read it, with the work after it under it. Before, the whole turn
+    stayed under the message that asked, above the note, growing there.
 - **No boxes in a Code chat's thread** (2026-11-11, the maintainer: "we
   don't need all this open stuff in the chat, you don't do that in Claude
   Code"). There the pill and the report card are quiet lines of the thread
@@ -1877,6 +1887,11 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   the same card, "The agent has a question", each question with its short
   header, its options as buttons with their descriptions, **Something
   else…** for the person's own words, and **Let it decide**.
+  - **The form is Chat's own question card's** (15 Nov 2026,
+    `views/chat/QuestionForm.svelte`, the questions' type
+    `chat/cards/ask.rs` `Question`): the same look and answers in a Code
+    chat and in Chat ([chat-and-assistant.md](./chat-and-assistant.md#cards-in-the-thread-a-question-the-next-step-box-chapters-2026-11-15)),
+    an option's `preview` beside the options too.
   - **One question with one answer** is answered by the click on its
     option. **Several questions, or one where several options may be
     picked**: each answered, then **Send** (`core/agentNow.js`
@@ -1940,6 +1955,72 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   once per window by ControlPanel); `core/agents.js` (the words they share:
   status, cost lines, lengths of time, steps from a log, the pills, problems,
   the Mode's keys; pure); `core/money.js` `dollars`.
+
+## The thread in order
+
+2026-11-15, from the Claude app's Code tab side by side with a Code chat
+(the maintainer's catalogue of the gaps, B3, B4, B6, B8, F3). Its words
+already came between its folded lines (`workOf`'s `said` items: "Ran a
+command, read features.md ›", a sentence, "Edited …, 1 failed +3 −2 ›");
+what didn't was the person.
+
+- **A message sent mid-turn is where Claude read it** (`core/agents.js`
+  `turnParts`, `notesAfter`; `ChatThread` `partsUnder`). The runner logs a
+  note's `read` (the message's id, with "Read your note") when Claude Code
+  echoes it back, so a turn's events split there: one `AgentWork` a part,
+  the first under the message that asked, each next under the message read
+  there (its `notes` and `after`). Only the last part has the lead, the
+  words being written and the final words; its answer follows it. A
+  message sent and not read yet shows under the work, which grows above it
+  until Claude takes it in (a moment, at its tool call's end); one it never
+  read is the next turn's, as ever.
+- **The plan from before your last message** (AgentTodoCard's `list` and
+  `before`): the list at the top of the part that's last, live, as the
+  Claude app keeps the plan under the latest message; a part followed by a
+  message it read keeps the list as it stood at its end (`todosIn` that
+  part's events) just above that message, "Plan from before your last
+  message" (an older one "…your message"), never ticked on after; the live
+  one goes on under the message once Claude writes it again. Both open
+  while the turn works and fold once it's over, as the card ever did.
+  - **The list is on in every run** (`runner::TODO_ENV`): Yap Lab on Opus
+    5.5 found its session had no to-do tool at all ("TodoWrite isn't among
+    my tools"). Claude Code's tools reference says why: since 2.1.268 the
+    task-tracking tools are on by default only on Opus 4.7, Sonnet 4.6,
+    Haiku 4.5 and earlier, and a session opts in with
+    `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`; `CLAUDE_CODE_ENABLE_TASKS=0` makes
+    them `TodoWrite`, the list Yap reads, rather than the four Task tools.
+    Every agent run sets both (`cli::RUN_SETS_ENV`: the only `CLAUDE…`
+    names a run may set, never kept from Yap's own environment). Anthropic
+    notes the tool's definition and reminders take some context; the plan
+    card is worth it, as the Claude app's Code tab shows one too.
+- **The transcript view** (`views/chat/threadView.svelte.js`): the chat's
+  ⋯ in the list → **Transcript view** → Normal (the default: each stretch
+  one folded line), **Thinking** (its thinking too, each between the
+  stretches it came between, quiet and italic under "Thinking") or
+  **Verbose** (that, and every stretch and every row with something to show
+  open: a diff, a command and its output, a picture; folding one keeps it
+  folded). Kept per chat in the window's storage (a convenience, not the
+  chat's data); Code chats only; the Agent panel's rows stay Normal.
+  - **Its thinking** comes from Claude Code's own stream: a `thinking`
+    block of the session's own message (a helper's never) is a `thought`
+    line of the agent's log (`runner.rs`, at most 12,000 characters), like
+    its `said` — never in Yap's log, **never to a phone**
+    (`link/code/view.rs` blanks it as it does a command's output).
+  - **On Opus 5.5 there's none to show yet** (checked 15 Nov 2026 on
+    Claude Code 2.1.296): a headless run's stream has its thinking blocks
+    with their text empty, even with `showThinkingSummaries` set (Claude
+    Code's settings reference scopes it to interactive sessions: unset,
+    "the Anthropic API redacts thinking blocks"). An empty block is no
+    thought, so there the Thinking view is the Normal one; whatever text a
+    block carries (another model or version) shows. Verbose opens every
+    step either way.
+  - `workOf(…, { thinking })`: a thought is an item only when the view asks
+    for it, and then it splits the stretch round it; in Normal it's no item
+    and splits nothing.
+- **Pictures, paged** ([A step's pictures](#a-steps-pictures)).
+- **Not done**: a card asking before acting on a page stays under the
+  message that asked (not the latest part); the Agent panel's rows have no
+  view of their own.
 
 ## An opened stretch: a row a step
 
@@ -2109,9 +2190,14 @@ picture of it, do we have that in Yap now too?").
   exactly its device pixels (the first three, then "+N"); on its step in
   the Agent tab's timeline too. The line opened, the row of the step that
   came back with it has it small at its end, and that row opened shows it
-  larger (at most 280 × 180). A click
-  opens it: the panel's picture tab while the panel is open, else the
-  viewer, captioned with its step ("Read beds.png") and the workspace.
+  larger (at most 280 × 180). A click in a Code chat's thread opens the
+  viewer, **paged across the whole turn's pictures** (2026-11-15, as the
+  Claude app's Code tab: ‹ 2 of 4 › at its foot, ← and → too, the step's
+  name — "Read beds.png" — in its top corner, Esc or a click to close;
+  `ShotViewer`'s `list`, AgentWork's `onpaged` over `core/agents.js`
+  `turnPictures`, a helper's pictures after the row that sent it); in the
+  Agent panel's row, the panel's picture tab, captioned with its step and
+  the workspace.
   Right-click: Open, Copy image, Save image as…. One that is gone isn't
   drawn.
 - **Served** by the `yapsnip` scheme as a chat screenshot is, by two ids and
@@ -2621,7 +2707,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 
 | Event | Payload |
 |---|---|
-| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, call?, under?, helper?, picture?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `helper` ("back", "failed") with the `call` of a hand-over whose helper has come back (an event of its own, no step); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `read` the id of a message Claude Code has just read (with its "Read your note" step: the queue's ✓✓); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished; 2026-11-14: `rewound` a Rewind): the pages read it again |
+| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, thought?, todos?, now?, diff?, call?, under?, helper?, picture?, read?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `helper` ("back", "failed") with the `call` of a hand-over whose helper has come back (an event of its own, no step); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `read` the id of a message Claude Code has just read (with its "Read your note" step: the queue's ✓✓); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `thought` its thinking, a thinking block of its own message (2026-11-15; never to a phone); `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished; 2026-11-14: `rewound` a Rewind): the pages read it again |
 | `yap-agent-saying` | `{id, turn, text}` — the message agent `id`'s turn is writing now, all of it so far: many times a second, to the page only (never logged, never to a phone); let go when a `yap-agent` event has its `said`, its `text`, a `step`, or a status that's over |
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |

@@ -250,6 +250,10 @@ one side.
   (`chat:<id>:<index>`) count only the person's own (kind empty); search by
   meaning's passages say the report is the agent's ("Agent", never "You"). An
   older Yap drops `kind` on its save.
+- **`chat/chats/branches.rs`** — **Retry and Edit's versions** (2026-11-15, ‹ 1/2 ›):
+  the branch shown is `messages`; `Conversation.branches` the forks along it,
+  each with its other branches; copied to `chat_branches.json` for an older
+  Yap's save. [Below](#retry-edit-and-versions-2026-11-15).
 - **`chat/note_chats.rs`** — **a meeting's Ask thread, kept** (Wispr Flow's
   "New chat" / "Past chats"; the private roadmap's R15): what was asked about
   a meeting in the notepad's Ask sheet or its note's "Ask anything…" bar
@@ -1178,6 +1182,12 @@ one side.
   report), `eyes/tests.rs` (listed with the web's pictures and with picture
   files alone, refused away from Chat), `gates.rs` and `fit.rs` (offered
   with show_picture, kept last); e2e `chat-share.spec.js` (below).
+- **`chat/cards.rs`** (+ `cards/`: `ask.rs`, `next_step.rs`, `chapters.rs`) —
+  **the cards Chat's model puts in the thread** (15 Nov 2026, three of the
+  Claude app's): a question to the person (`ask_user`), the next-step box at
+  the end of a turn (`suggest_next_step`), chapters in a long chat
+  (`mark_chapter`). The gate (`Cards::for_turn`), the tools, running a call;
+  [below](#cards-in-the-thread-a-question-the-next-step-box-chapters-2026-11-15).
 - **`chat/made.rs`** (+ `made/serve.rs`) — **visuals in the answer** (15
   Nov 2026, after the Claude app's inline widgets, "Made a visual": its
   look and words, nothing of its code). Asked for a diagram and a tip
@@ -1866,6 +1876,9 @@ one side.
   ⋯ → Export… as a Markdown file and its pictures beside it, never uploaded
   ([below](#export-a-chat-2026-11-15)).
 
+- **`chat/incognito.rs`** — **Incognito chats** (15 Nov 2026): a new chat's
+  ghost; kept in memory only, never listed, searched, remembered or used by
+  memory, gone when left ([below](#incognito-chats-2026-11-15)).
 - **`chat/styles.rs`** — **Styles** (15 Nov 2026): how a chat's answers are
   written (Normal, Concise, Explanatory, Formal, your own), picked from the
   composer's Style chip, a block in the system prompt
@@ -5114,6 +5127,119 @@ rules pure in `core/chatStatus.js`, kept live for the whole main window by
   light and dark), `cargo test chat::stream` (the list of conversations
   answering) and `chat::chats` (`answerAt` / `askedAt`).
 
+## Retry, Edit and versions (2026-11-15)
+
+The Claude app's everyday message actions, as its Chat tab has them: **Retry**
+(↻) under an answer asks its question again and keeps both answers, ‹ 1/2 ›
+on the answer; **Edit** (the pencil) on the person's message opens it in
+place with its words, and **Save and send** asks the new words in its place
+as a new version from there, the old one reachable through ‹ 1/2 › on that
+message. As many versions as are made (at most 50 at one message:
+`branches::MAX_BRANCHES`), each with everything that followed it.
+
+**The model: one shown branch, the others set aside** (`chat/chats/branches.rs`,
+pure but for its copy on disk). The branch shown *is* the conversation's
+`messages`, as ever. A `Fork` along it says where versions part (`at`: the
+answer retried, or the message edited — `messages[..at]` are all of theirs
+alike), which one is shown (`shown`, its number in the order they were made),
+the shown one's first message's time (`ts`) and the other `Branch`es: each
+its messages from the fork on, its own forks further on, and the summary of
+a long chat written while it was shown when that covers past the fork
+(`compact.rs`: it goes with its branch, as a Rewind drops it). Retry is
+`branch_off` at the answer (what's shown from there set aside; the turn
+answers the question again); Edit is `branch_off` at the message (the new
+words are appended in its place); ‹ › is `switch` (the shown branch set
+aside, the chosen one put in). `undo` goes back to the branch set aside when
+the new one never answered; `heal`, at load, puts right a fork Yap closed
+during (the old answer back) or one an older Yap cut under; `cut_at` drops the
+forks after a Code chat's Rewind. A page gets the ‹ k/n › only
+(`Conversation.forks`, set on `chat_get`'s copy, never stored), never the
+other branches.
+
+**Everything follows the branch shown**, because everything reads `messages`:
+the history a model gets (`history_messages`), a long chat's summary
+(`compact.rs`: kept only over the messages it read — `set_summary`'s
+`print_of` check — so a summary of another branch written meanwhile is
+thrown away), memory learning (`memory::read_again_from`: what a pass read
+past the fork is read again, it says something else now), search by meaning
+(its index sees the change: `chats::stamp` hashes each message's time; the
+branch set aside's passages let go, `search::removed`), past-chats search,
+the phone's view (`link/chats.rs`), a chat exported as Markdown
+(`chat/export.rs`), the context ring and Chat's status dots.
+Only the screenshot sweep and deleting look further: a version not shown
+keeps its screenshots (`Conversation::every_message`: `image_ids`,
+`delete_many`, `unshown`), and they go with it.
+
+**An older Yap on the same data** (the nightly and the dev build share
+`%APPDATA%\yap`): it reads and keeps the branch shown — it's `messages` — and
+drops `branches` when it saves. So every chats.json save also writes the
+forks to **`chat_branches.json`** (`branches::mirror_to_disk`, only when they
+changed; removed when there are none), a file an older Yap never touches,
+and the next start puts them back (`restore_from_disk`) on every
+conversation that has none, keeping each fork that still fits: its shown
+branch's first message still there at its time (or none yet, mid-retry).
+Messages the older Yap added after the fork are kept; a fork its own Rewind
+cut under is lost for good — the branch shown is then all there is, as
+before. Unit-tested (`branches::tests::an_older_yaps_save_loses_no_branch_that_still_fits`)
+and in the app (`chat-branches.spec.js`).
+
+**Retry** (`chat_retry {conversationId, index, onStream, turnId}`, streamed as
+`chat_send` is, the same reply plus `forks`): `chats::begin_retry` sets the
+answer and what followed aside (only an answer just after the person's own
+question), then the turn runs **asked again** (`turn::again`, a task-local:
+the question is never saved a second time — `save_question`, Yap's own
+answers in `fast.rs` too — and the history before it is the conversation's
+up to it, `turn_conversation`). The question goes as it was: its words with
+the passage it was about (`sent_text`), its screenshots still on this PC
+(their text instead when it went as text), as dictated (spoken answers
+follow "When to speak"), and the Skill it ran. `end_branch` keeps the new
+answer (stopped part-way too), or — no answer at all (an error, ■ before any
+of it) — puts the old one back; the page says "Couldn't try again".
+
+**Edit** (`chat_send`'s `edit: index`): `chats::begin_edit` sets the message
+and what followed aside, and the new words are asked as any question, with
+the message's screenshots (their sources kept: an element's picture stays
+its chip's), the passage it was about (a document's as its selection, other
+text as selected text, treated as web content) and its picked elements'
+blocks. An error before any answer puts it all back, and the editor opens
+again with the new words; stopped, or replaced by a newer question, it
+stays as any question does.
+
+**Not while an answer is being written** in that chat (`stream::is_answering`;
+the page greys the buttons with "Unavailable while an answer is being
+written").
+
+**In a Code chat** there's no second mechanism: Edit and Retry are Claude
+Code's own **Rewind** ([yap-code.md](./yap-code.md), `agents/rewind.rs`),
+asked first as a Rewind is ("Send the edited message?" / "Retry from this
+message?", with "Also put back the files Claude changed since" when it
+did), then the message sent — the new words, or the same ones — as the
+session's next turn, forked at the end of the turn before it. Its
+screenshots stay to go again (`chats::rewind`'s `keep_shots`,
+`rewind_for_edit`). No versions are kept there: what came after is gone from
+the chat and from Claude's session, as with Rewind. Retry sits under the
+answer of a turn the person's message started; both are unavailable while
+Claude works, as Rewind is.
+
+**The page** (`views/chat/`): `BranchSwitch.svelte` (‹ k/n ›: under an answer
+in its foot before ↻, or at the start of the person's message's actions row,
+always shown while the buttons fade in on hover), `MessageEdit.svelte` (in
+place of the bubble, its own chunk: Enter sends, Shift+Enter a new line, Esc
+cancels; "Its screenshots go again" when it has some), `chatState`'s
+`retryAt`, `startEdit` / `saveEdit` / `cancelEdit`, `switchBranch` and
+`forks` (read with every load of the conversation), `send`'s `retry` /
+`edit`; ChatThread's `retryOf` / `branchOf` / `actionsFor` and the right-click
+menu's Edit and Retry.
+
+Tests: `cargo test chats::branches` (the model: retry, edit, nested versions,
+undo, the summary, Rewind's cut, heal, the copy for an older Yap's save, the
+cap), `chats::tests::a_retry_and_an_edit_keep_every_version…` (the store),
+`turn::again_tests` (asked again, never saved twice), `compact::tests` (a
+summary over messages that changed is dropped); `chat-branches.spec.js`
+(Retry, Edit, switching, the history sent, a retry with no answer, after a
+restart and after an older Yap's save) and `agents-direct.spec.js` (a Code
+chat's Edit and Retry through Rewind).
+
 ## Export a chat (2026-11-15)
 
 The Claude app's Share, made local (Yap keeps chats on this PC, so there's
@@ -5148,6 +5274,153 @@ The toast says where, and how many pictures went in which folder.
 - The log says counts only. Tests: `cargo test chat::export`;
   `chat-export.spec.js` (the menu, then the file and its folder);
   `right-click.spec.js` (the row's menu).
+
+## Incognito chats (2026-11-15)
+
+The Claude app's incognito chat, from Anthropic's help pages: a chat that
+isn't saved to the history and that memory neither uses nor learns from.
+
+- **Starting one**: a new chat on Chat's side (never a Code chat) has a
+  ghost at the thread's top right (`ChatView.svelte`, `chat-incognito`,
+  `aria-pressed`). On, the empty thread says what it means ("It isn't
+  saved to your chats, and memory isn't used or updated. It's gone when you
+  leave it.") and a ring goes round the thread (`--yap-fg-80`); its first
+  question goes with `incognito: true` (`chat_send`), and the conversation
+  the turn makes is one (`incognito::with_new` → `turn_conversation` →
+  `chats::create_incognito`). A question asked out loud with that new chat
+  in view starts it incognito too (`chat_view_state`'s `incognito`,
+  `assistant.rs` `NEW_INCOGNITO`; never a phone's). It can't be made a
+  kept chat later, and a new chat starts kept again (`newChat`).
+- **Never saved** (`chats.rs`): `Conversation::incognito`, never read from
+  a file (`skip_deserializing`); the store's save writes the others only
+  (`kept`), and so does the shared files' copy. It's never in `list`,
+  `list_archived`, `with_all` (search by meaning, the phone, Download your
+  data…), `stamp`, `search` (past chats by words) or `latest` (the Voice
+  Assistant's chat to carry on). Its pictures stay while it's open
+  (`image_ids` includes it, so the sweep keeps them).
+- **Memory unused and never learned from**: no memory's "You" or passages,
+  no past chats (`prompt::build`'s `no_memory`), no `remember` / `forget` /
+  `search_chats` (`run.rs`; on the plan, `RunSpec::with_memory(false)`), no
+  "Remember that…" for a model without tools (`turn::remembered`), and
+  `memory::learn::after_turn` / `learn_from_chat` skip it, keeping nothing
+  of it (not even how far it was read: a later chat may take its id).
+  About you applies whole: it's a setting, not something learned.
+- **On your Claude plan** (`plan.rs`): its session runs with
+  `--no-session-persistence` (`Spec::persist`), is kept in memory while Yap
+  runs (`sessions::Kept::unsaved`, never written to `claude_sessions.json`)
+  and is never resumed: a process that ended starts a new session seeded
+  with the chat so far.
+- **The thread** says so above its messages ("Incognito chat · not saved,
+  not remembered · gone when you leave it", `chat-incognito-line`) and keeps
+  its ring; the list shows no row for it.
+- **Gone when left** (`chatState.svelte.js`): the page ends each incognito
+  chat it holds once it's neither shown nor answering
+  (`chat_incognito_end` → `chats::end_incognito`: the conversation and its
+  screenshots and pictures deleted, its Claude plan session, Code-chat and
+  connectors' entries forgotten, as a deleted chat's), and Yap ends them all
+  as it quits (`shutdown_cleanup` → `end_all_incognito`). After a crash its
+  pictures are swept a day later (no chat names them). Its documents are
+  still notes in Notes (the person asked for them), and its tokens still
+  count in the AI usage numbers.
+- Tests: `cargo test chat::incognito`, `chat::chats`,
+  `chat::turn::plan::tests::an_incognito…`; `chat-incognito.spec.js` (the
+  ghost, the ring and the band in light and dark, nothing saved, no memory
+  in the request or learned, ended on New chat; on the plan,
+  `--no-session-persistence` and nothing in claude_sessions.json).
+
+## Cards in the thread: a question, the next-step box, chapters (2026-11-15)
+
+Three of the Claude app's cards for Chat's own model (`chat/cards.rs`), each a
+tool the model calls when it has a reason to, never something shown every
+turn. Chat and Code chats alike, wherever Chat's model answers: the tool loop
+(`tools/agent/offer.rs`, `dispatch.rs` `Source::Cards`) and a plan chat's
+Claude Code over Yap's run endpoint (`integrations/claude_live/cards.rs`), the
+same code. A Code chat that works directly is Claude Code's own session:
+its questions are Claude Code's `AskUserQuestion` ([yap-code.md](./yap-code.md#the-agent-tab)),
+now on the same form.
+
+- **Where** (`Cards::for_turn`, the turn's `Gates::cards`): a model that calls
+  tools, in Chat or the Voice Assistant, never across the meetings. A
+  question needs someone to answer it: never a phone's question (its page
+  shows no cards; `cards::from_phone`, the turn's network receipts), and a
+  Code chat's turn in Bypass permissions asks nothing (left to the model). The
+  next-step box needs Chat in view (its buttons are in the thread). A chapter
+  goes anywhere in a chat. A plan session lists what any of its turns could
+  use (`plan.rs` `session_cards`), each turn using what its own gates say
+  (`turn::Context::cards`). A small context sheds them first (`fit.rs`
+  `Family::Cards`). The prompt's lines say when (`Cards::instructions`).
+- **A question** (`cards/ask.rs`, `ask_user`; Claude Code's own
+  `AskUserQuestion` shape): one to four questions (`questions_of`: each with
+  its text and a header, two to four options with a label and a description,
+  an option's `preview` in markdown, `multiSelect`), the recommended option
+  first. Its card goes through the cards that ask first
+  (`pages/act/confirm.rs`, act "question", `Card::question` =
+  `QuestionCard {questions, answers, said, voice}`), so it shows on the
+  answer being written, a ■ Stop drops it, and the answer keeps it
+  (`ChatMessage::confirms`). The turn waits for the answer, at most
+  `ask::WAIT` (10 minutes, a Code chat's question's own wait).
+  - **On screen** (`ChatQuestion.svelte` in `PageConfirm`'s chunk, the form
+    `QuestionForm.svelte` shared with a Code chat's `AgentApprove`): "A
+    question for you", each question with its header chip, its options as
+    buttons with their descriptions, the preview of the one pointed at or
+    focused (else the one picked, else the first) beside them (under them on
+    a narrow card), **Something else…** for the person's own words, **Let Yap
+    decide**. One question with one answer: the click on an option answers
+    it; several, or several picks: **Send** (`core/agentNow.js`
+    `questionAnswers`). Once answered **the question and the choice stay in
+    the thread**, quiet, as the Claude app keeps them: each question in bold,
+    what was picked under it, "You said: …" for a spoken answer, or "Left to
+    Yap to decide".
+  - **Answered** (`chat_question_answer {id, answers}`, `answers` null: Let
+    Yap decide): `confirm::Reply::Picked` → each question's text → a label,
+    several joined with ", ", or the person's own words (`answers_for`, only
+    the card's own questions). The model reads `{answers}` (and `said`), or —
+    left to it, or nobody answering in time — "make the most sensible choice
+    yourself… say what you chose" (`ask::CHOOSE`).
+  - **Asked out loud** (the Voice Assistant, `assistant/spoken_ok.rs`): Yap
+    says the first question and its options ("Which format should the trip
+    notes use: Markdown or Plain text? Say one, or pick on the card.",
+    `ask::spoken_line`) and the bar shows it (`ask::bar_card`: one question
+    of two options, the two as its buttons; otherwise its options listed and
+    **Answer in Chat**; **Let Yap decide** under them). Not a yes or no:
+    **whatever the person says next in that conversation**, within the
+    question's wait, is its answer (`spoken_ok::Spoken::Words`,
+    `ask::answer_said`) — matched to an option where it names one
+    (`ask::heard`: a label's words without a note in brackets — "camping
+    stove" for "Camping stove (Recommended)" —, the label said as one word, a
+    label of three words or more with one left out when only one option fits
+    — "gas stove" for "Gas camping stove", Opus's own options in Lab —, or
+    its place — "the second one", "option three", "the last" — for a single question;
+    "you decide", "either" leave it to the model) and the words themselves
+    always given (`said`). Never during a meeting (the assistant is off then).
+- **The next-step box** (`cards/next_step.rs`, `suggest_next_step`): a one or
+  two sentence recap and, when there's something to decide, one question and
+  one or two buttons (`{label, reply?}`, the model's pick first, drawn as
+  the primary). `Event::NextStep`, kept with the answer
+  (`ChatMessage::next_step`, `chats::set_cards`); shown under the
+  conversation's **latest** answer only (`NextStepBox.svelte`), once it's
+  written. A click sends the button's words (its `reply`, else its label) as
+  the person's next message (`chatState.sendNextStep`), as if typed; the box
+  goes once anything follows. No chip of its own.
+- **Chapters** (`cards/chapters.rs`, `mark_chapter`): a short title (and a
+  line on what it covers) where the talk or the work moves on.
+  `Event::Chapter`, kept with the answer (`ChatMessage::chapter`); refused on
+  a chat's first question (its start is the first chapter already); one a
+  turn. The thread draws a divider with the title above the question that
+  started it (`views/chat/chapters.js` `chaptersOf`), and while the chat has
+  any, **the contents** float at its top right (`ChatChapters.svelte`): the
+  chapter being read, opening to Start and each title, a click scrolling to
+  its divider. No chip of its own.
+- An older Yap's save drops `next_step`, `chapter` and a card's `question`
+  (the answer stays). The log has ids, counts and outcomes, never a question,
+  an option, an answer or a title.
+- Tests: `cargo test chat::cards` (the gate, the questions read, answers and
+  spoken replies matched, the bar card, the box, chapters), `spoken_ok` (a
+  question's card takes the next words), `claude_live::cards`; e2e
+  `chat-cards.spec.js` (a question with its preview answered by a click and
+  kept; several sent together; Let Yap decide; chapters and the contents; the
+  box's button; asked out loud and answered "the second one"), and
+  `agents-direct.spec.js` for a Code chat's question on the shared form.
 
 ## Styles (2026-11-15)
 

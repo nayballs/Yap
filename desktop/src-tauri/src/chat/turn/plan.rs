@@ -422,7 +422,7 @@ impl map::Out for ToChat<'_> {
 /// tools the session lists, `eyes`; and the agent tools, while offered), the
 /// context's note, About you, memory's "You" (none in a Code chat:
 /// `prompt.rs` left it out, and About you's note).
-fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude_live::eyes::Eyes, connectors: bool) -> String {
+fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude_live::eyes::Eyes, connectors: bool, cards: crate::chat::cards::Cards) -> String {
     let mut s = t.ep.persona.trim().to_string();
     s.push_str("\n\n");
     match &built.code {
@@ -444,6 +444,11 @@ fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude
         s.push(' ');
         s.push_str(&agents_lines());
     }
+    // The cards in Yap's thread (chat/cards.rs): a question, the next-step box, chapters.
+    if cards.any() {
+        s.push(' ');
+        s.push_str(&cards_lines(cards));
+    }
     // How this chat's answers are written (chat/styles.rs), as Chat's own prompt has it.
     if !built.style.is_empty() {
         s.push_str("\n\n");
@@ -459,6 +464,24 @@ fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude
     if !built.memory_you.is_empty() {
         s.push_str("\n\n");
         s.push_str(&built.memory_you);
+    }
+    s
+}
+
+/// **The cards a plan chat's session lists** (`chat/cards.rs`): what any of
+/// its turns could use — Chat's, wherever this one was asked, so the
+/// session's list stays the same from a typed question to a spoken one or a
+/// phone's; each turn uses what its own gates say (`run_context`).
+fn session_cards(t: &Asked<'_>) -> crate::chat::cards::Cards {
+    crate::chat::cards::Cards::for_turn(t.gates.tools, t.meetings, None, true, false)
+}
+
+/// The tool loop's lines for the cards, with Claude Code's names
+/// (`mcp__yap__ask_user`…). Pure.
+fn cards_lines(cards: crate::chat::cards::Cards) -> String {
+    let mut s = cards.instructions();
+    for n in crate::chat::cards::NAMES {
+        s = s.replace(n, &format!("mcp__yap__{n}"));
     }
     s
 }
@@ -521,6 +544,8 @@ fn run_context(
         unattended: false,
         // Nor a workspace: no dev servers (a Code chat's own session has them, `agents/runner.rs`).
         workspace: None,
+        // The cards in the thread, as this turn's gates have them (never a phone's question).
+        cards: t.gates.cards,
         // Visuals in the thread (chat/made.rs): asked in Chat, typed or out loud with Chat in view.
         visuals: !t.meetings && (t.scope.is_none() || (t.scope == Some("assistant") && crate::chat::assistant::asked_in_chat())),
     }
@@ -551,11 +576,15 @@ fn run_context(
 ///   runs one of their own commands. A change only ever goes through
 ///   `start_agent`, with all its rules.
 #[allow(clippy::too_many_arguments)]
-fn spec(model: &str, effort: Option<Effort>, system: &str, web: bool, code: Option<&std::path::Path>, conversation: Conversation, run: &crate::integrations::claude_live::RunHandle) -> Result<Spec, String> {
+fn spec(model: &str, effort: Option<Effort>, system: &str, web: bool, code: Option<&std::path::Path>, conversation: Conversation, run: &crate::integrations::claude_live::RunHandle, incognito: bool) -> Result<Spec, String> {
     let mut spec = match code {
         Some(dir) => Spec::new(dir, Pay::Plan),
         None => Spec::new(oneshot::folder("chat")?, Pay::Plan),
     };
+    // An incognito chat (chat/incognito.rs): Claude Code saves nothing of it
+    // (its warm process holds the conversation; one started again is seeded
+    // with the chat so far, as a session that can't be resumed is).
+    spec.persist = !incognito;
     spec.model = Some(model.to_string()).filter(|m| !m.trim().is_empty());
     spec.effort = effort;
     spec.permission_mode = PermissionMode::DontAsk;
@@ -597,20 +626,23 @@ fn start(
     agents: bool,
     eyes: crate::integrations::claude_live::eyes::Eyes,
     connectors: Option<crate::integrations::claude_live::connectors::Listed>,
+    cards: crate::chat::cards::Cards,
     code: Option<&std::path::Path>,
     print: u64,
     resume: Option<&str>,
     // What the session's running total goes on from (`Warm::total`).
     total_before: Option<f64>,
+    // An incognito chat: no memory's tools, and nothing saved.
+    incognito: bool,
 ) -> Result<(Arc<sessions::Warm>, bool), String> {
     use crate::integrations::claude_live::{register_run, RunSpec, Tools};
-    let run = register_run(RunSpec::new("Chat", Tools::Chat).with_agents(agents).with_memory(code.is_none()).with_eyes(eyes).with_connectors(connectors))?;
+    let run = register_run(RunSpec::new("Chat", Tools::Chat).with_agents(agents).with_memory(code.is_none() && !incognito).with_eyes(eyes).with_connectors(connectors).with_cards(cards))?;
     let conversation = match resume {
         Some(id) => Conversation::Resume(id.to_string()),
         None => Conversation::fresh(),
     };
     let resumed = resume.is_some();
-    let (session, rx) = Session::start(spec(model, effort, system, web, code, conversation, &run)?)?;
+    let (session, rx) = Session::start(spec(model, effort, system, web, code, conversation, &run, incognito)?)?;
     let warm = Arc::new(sessions::Warm::new(session, rx, conv, model.to_string(), effort, print, Some(run)));
     warm.set_total(total_before);
     sessions::keep(warm.clone());
@@ -755,7 +787,9 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
     // The person's connectors (claude_live/connectors.rs): listed for the
     // session, this turn's own for its calls.
     let connectors = plan_connectors(t, built.code.is_some(), conv.id);
-    let system = system_prompt(t, built, eyes, connectors.is_some());
+    // The cards in the thread (claude_live/cards.rs): listed for the session.
+    let cards = session_cards(t);
+    let system = system_prompt(t, built, eyes, connectors.is_some(), cards);
     let web = t.gates.web_on;
     let agents = t.gates.agents;
     // A Code chat's session runs in its workspace (`spec`): that folder
@@ -796,7 +830,8 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
             None => {
                 let kept = sessions::get(conv.id, conv.created_ts);
                 let resume = match sessions::start(kept.as_ref(), conv.messages.len(), &cwd) {
-                    sessions::Start::Resume { id, .. } if !no_resume => Some(id),
+                    // (An incognito chat's was never saved: a new one, seeded.)
+                    sessions::Start::Resume { id, .. } if !no_resume && !built.incognito => Some(id),
                     _ => None,
                 };
                 // A new session starts from nothing; a resumed one goes on
@@ -806,7 +841,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
                     (Some(_), None) => None,
                     (None, _) => Some(0.0),
                 };
-                start(conv.id, &model, effort, &system, web, agents, eyes, connectors.clone(), workspace.as_deref(), print, resume.as_deref(), total_before)?
+                start(conv.id, &model, effort, &system, web, agents, eyes, connectors.clone(), cards, workspace.as_deref(), print, resume.as_deref(), total_before, built.incognito)?
             }
         };
         // One turn at a time on it: a turn still answering (stopped, or
@@ -851,7 +886,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         let session_id = w.session.session_id();
         let keep = |seen: usize| {
             let total_micros = w.total().map_or(0, |t| (t * 1_000_000.0).round() as u64);
-            sessions::put(conv.id, sessions::Kept { session: session_id.clone(), created: conv.created_ts, seen, model: model.clone(), ts: 0, cwd: cwd.clone(), total_micros });
+            sessions::put(conv.id, sessions::Kept { session: session_id.clone(), created: conv.created_ts, seen, model: model.clone(), ts: 0, cwd: cwd.clone(), total_micros, unsaved: built.incognito });
         };
         let result = match ended {
             Ended::Done(r) => r,
@@ -1055,12 +1090,28 @@ mod tests {
     }
 
     #[test]
+    fn an_incognito_chats_session_is_never_saved_by_claude_code_nor_offered_memory() {
+        use crate::integrations::claude_live::{register_run, RunSpec, Tools};
+        let run = register_run(RunSpec::new("Chat", Tools::Chat).with_memory(false)).unwrap();
+        let dir = std::path::Path::new(r"D:\Projects\garden-planner");
+        let kept = spec("claude-haiku-5-5", None, "Yap's words.", false, Some(dir), Conversation::fresh(), &run, false).unwrap();
+        let ghost = spec("claude-haiku-5-5", None, "Yap's words.", false, Some(dir), Conversation::fresh(), &run, true).unwrap();
+        assert!(kept.persist && !ghost.persist, "--no-session-persistence for an incognito chat only");
+        // Kept while Yap runs, never in claude_sessions.json.
+        sessions::put(41, sessions::Kept { session: "s-41".into(), created: 1, seen: 2, unsaved: true, ..Default::default() });
+        sessions::put(42, sessions::Kept { session: "s-42".into(), created: 1, seen: 2, ..Default::default() });
+        assert_eq!(sessions::get(41, 1).map(|k| k.session), Some("s-41".into()));
+        let file = sessions::all().to_string();
+        assert!(file.contains("s-42") && !file.contains("s-41"), "{file}");
+    }
+
+    #[test]
     fn a_code_chats_session_runs_in_its_workspace_read_only_with_the_persons_own_settings() {
         use crate::ai::claude_code::session::{args, Files};
         use crate::integrations::claude_live::{register_run, RunSpec, Tools};
         let run = register_run(RunSpec::new("Chat", Tools::Chat).with_agents(true).with_memory(false)).unwrap();
         let workspace = std::path::Path::new(r"D:\Projects\garden-planner");
-        let s = spec("claude-haiku-5-5", None, "Yap's words.", true, Some(workspace), Conversation::fresh(), &run).unwrap();
+        let s = spec("claude-haiku-5-5", None, "Yap's words.", true, Some(workspace), Conversation::fresh(), &run, false).unwrap();
         // In the workspace, on the plan, never asking.
         assert_eq!(s.cwd, workspace);
         assert_eq!(s.pay, Pay::Plan);
@@ -1099,7 +1150,7 @@ mod tests {
         assert!(a.iter().any(|x| x == "--strict-mcp-config") && a.iter().any(|x| x == "--disable-slash-commands"));
         assert!(!a.iter().any(|x| x == "--system-prompt-file"));
         // The web off: the reads alone.
-        let off = spec("claude-haiku-5-5", None, "Yap's words.", false, Some(workspace), Conversation::fresh(), &run).unwrap();
+        let off = spec("claude-haiku-5-5", None, "Yap's words.", false, Some(workspace), Conversation::fresh(), &run, false).unwrap();
         assert_eq!(off.tools.unwrap(), ["Read", "Grep", "Glob"]);
         // Its words: this workspace's code, read to answer, a change an agent's.
         let with_agents = code_instructions("garden-planner", true);
