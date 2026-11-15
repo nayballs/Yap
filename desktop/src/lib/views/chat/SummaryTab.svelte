@@ -48,7 +48,7 @@
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import OutputsList from './OutputsList.svelte';
   import { outputMenuItems, outputPath, outputRefs } from './outputsOpen.js';
-  import { contextView, fmtTokens, PR_STATE, PR_CHECKS, prsNote } from './contextBreakdown.js';
+  import { contextView, fmtTokens, CATEGORY_TIPS, PR_STATE, PR_CHECKS, prsNote } from './contextBreakdown.js';
   import { REMOTE_ASK, remoteStatus, remoteOn, toggleRemote, remoteOnEverywhere } from './remoteControl.js';
 
   /** `doc`: the panel's state; `conversationId`: the Code chat (null: a new one); `workspace`: its folder's path; `messages`: its thread. */
@@ -196,6 +196,26 @@
   });
 
   const ctxView = $derived(breakdown ? contextView(breakdown) : null);
+
+  // **Context folds** as the Claude app's does: "Context ›", its share and a small bar; opened, the breakdown. Folded
+  // at first; opened or folded, it stays so (this window's own storage: a view's look, nothing of the person's).
+  const CTX_OPEN_KEY = 'yap.summary.contextOpen';
+  let ctxOpen = $state(readCtxOpen());
+  function readCtxOpen() {
+    try {
+      return localStorage.getItem(CTX_OPEN_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }
+  function setCtxOpen(open) {
+    ctxOpen = open;
+    try {
+      localStorage.setItem(CTX_OPEN_KEY, open ? '1' : '0');
+    } catch {
+      /* the view still folds; it just won't be remembered */
+    }
+  }
 
   // (And the pages it keeps, the documents it wrote: chat/made/pages.rs, chat/documents.rs.)
   const outputs = $derived(outputItems({ agents: chatAgents, messages, made: made.of(conversationId) }));
@@ -351,37 +371,58 @@
     {/if}
 
     <section class="sec" data-testid="chat-summary-context">
-      <h3 class="sh">Context</h3>
       {#if ctxView}
-        <!-- Claude Code's own /context for this chat's session (agents/context.rs), drawn as the Claude app draws it. -->
-        <p class="ctxhead" data-testid="chat-summary-context-head">{ctxView.label}</p>
-        <div class="ctxbar multi" role="img" aria-label={`${ctxView.pct}% of the context used`}>
-          {#each ctxView.segments as g (g.key)}
-            <span class="seg" data-colour={g.colour} style:width={`${g.width}%`} style:background={`var(--yap-ctx-${g.colour})`}></span>
-          {/each}
-        </div>
-        <ul class="cats">
-          {#each ctxView.rows as r (r.key)}
-            <li class="cat" data-testid="chat-summary-context-cat" data-name={r.name}>
-              <span class="cdot" class:hollow={r.kind === 'free'} style:background={r.kind === 'free' ? undefined : `var(--yap-ctx-${r.colour})`} aria-hidden="true"></span>
-              <span class="cn">{r.name}</span>
-              <span class="ct">{fmtTokens(r.tokens)}</span>
-              <span class="cp">{r.share}</span>
-            </li>
-          {/each}
-        </ul>
-        {#if ctxView.deferred.length}
-          <ul class="cats deferred">
-            {#each ctxView.deferred as r (r.key)}
-              <li class="cat" data-testid="chat-summary-context-deferred" data-name={r.name} title="Loaded only when it's looked for: not in the context until then">
-                <span class="cdot hollow" aria-hidden="true"></span>
-                <span class="cn">{r.name}</span>
-                <span class="ct">{fmtTokens(r.tokens)}</span>
-                <span class="cp"></span>
-              </li>
+        <!-- Claude Code's own /context for this chat's session (agents/context.rs), drawn as the Claude app draws it:
+             folded, "Context ›" with its share and a small bar; opened, the breakdown. -->
+        <h3 class="sh shfold">
+          <button type="button" class="ctxtoggle" aria-expanded={ctxOpen} aria-controls="summary-context-body" data-testid="chat-summary-context-toggle" onclick={() => setCtxOpen(!ctxOpen)}>
+            <span>Context</span>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+            {#if !ctxOpen}
+              <span class="ctxmini" data-testid="chat-summary-context-mini">
+                <span class="ctxpct">{ctxView.pct}%</span>
+                <span class="ctxpill" aria-hidden="true"><span style:width={`${Math.max(4, ctxView.pct)}%`} class:high={ctxView.pct >= 80}></span></span>
+              </span>
+            {/if}
+          </button>
+        </h3>
+        {#if ctxOpen}
+          <div id="summary-context-body" class="ctxbody">
+            <p class="ctxhead" data-testid="chat-summary-context-head">
+              <span class="ctxused">{ctxView.pct}% used</span>
+              <span class="ctxof">{fmtTokens(ctxView.used)} / {fmtTokens(ctxView.window)}</span>
+            </p>
+            <div class="ctxbar multi" role="img" aria-label={`${ctxView.pct}% of the context used`}>
+              {#each ctxView.segments as g (g.key)}
+                <span class="seg" data-colour={g.colour} style:width={`${g.width}%`} style:background={`var(--yap-ctx-${g.colour})`}></span>
+              {/each}
+            </div>
+            {#each [ctxView.rows.filter((r) => r.kind !== 'buffer' && r.kind !== 'free'), ctxView.rows.filter((r) => r.kind === 'buffer' || r.kind === 'free')] as group, gi (gi)}
+              {#if group.length}
+                <ul class="cats">
+                  {#each group as r (r.key)}
+                    <li class="cat" data-testid="chat-summary-context-cat" data-name={r.name}>
+                      <span class="cdot" style:background={`var(--yap-ctx-${r.colour})`} aria-hidden="true"></span>
+                      <span class="cn"><span class:tipped={!!CATEGORY_TIPS[r.name]} title={CATEGORY_TIPS[r.name] || undefined}>{r.name}</span></span>
+                      <span class="ct">{fmtTokens(r.tokens)}</span>
+                      <span class="cp">{r.share}</span>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
             {/each}
-          </ul>
-        {/if}
+            {#if ctxView.deferred.length}
+              <ul class="cats deferred">
+                {#each ctxView.deferred as r (r.key)}
+                  <li class="cat" data-testid="chat-summary-context-deferred" data-name={r.name} title="Loaded only when it's looked for: not in the context until then">
+                    <span class="cdot" style:background="var(--yap-ctx-buffer)" aria-hidden="true"></span>
+                    <span class="cn">{r.name}</span>
+                    <span class="ct">{fmtTokens(r.tokens)}</span>
+                    <span class="cp">—</span>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
         {#each ctxView.lists as l (l.key)}
           <details class="clist" data-testid="chat-summary-context-list" data-list={l.key}>
             <summary>
@@ -400,12 +441,21 @@
             </ul>
           </details>
         {/each}
+          </div>
+        {/if}
       {:else if context}
-        <div class="ctx" title={`${context.about ? 'About ' : ''}${context.pct}% of the context used`}>
-          <span class="ctxbar" aria-hidden="true"><span style:width={`${context.pct}%`} class:high={context.pct >= 80}></span></span>
-          <span class="ctxpct">{context.about ? '≈ ' : ''}{context.pct}%</span>
-        </div>
+        <!-- No breakdown (a plain number): the folded header's look, with nothing to open. -->
+        <h3 class="sh shfold">
+          <span class="ctxtoggle still" title={`${context.about ? 'About ' : ''}${context.pct}% of the context used`}>
+            <span>Context</span>
+            <span class="ctxmini">
+              <span class="ctxpct">{context.about ? '≈ ' : ''}{context.pct}%</span>
+              <span class="ctxpill" aria-hidden="true"><span style:width={`${Math.max(4, context.pct)}%`} class:high={context.pct >= 80}></span></span>
+            </span>
+          </span>
+        </h3>
       {:else}
+        <h3 class="sh">Context</h3>
         <p class="snote">Nothing used yet.</p>
       {/if}
     </section>
@@ -613,10 +663,71 @@
     margin: 2px 0;
     color: var(--yap-paper-muted);
   }
-  .ctx {
+  /* Context's header: "Context ›" with its share and a small bar while folded, "Context ⌄" open (the Claude app's). */
+  .sh.shfold {
+    margin: 0;
+  }
+  .ctxtoggle {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 4px;
+    width: calc(100% + 8px);
+    margin: -3px -4px;
+    padding: 3px 4px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .ctxtoggle:hover {
+    background: var(--yap-paper-s2);
+  }
+  .ctxtoggle.still {
+    cursor: default;
+  }
+  .ctxtoggle.still:hover {
+    background: none;
+  }
+  .ctxtoggle:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  .ctxtoggle[aria-expanded='true'] .chev {
+    transform: rotate(90deg);
+  }
+  .ctxmini {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    font-weight: 400;
+  }
+  .ctxmini .ctxpct {
+    color: var(--yap-paper-muted);
+    font-size: 11.5px;
+  }
+  .ctxpill {
+    display: inline-block;
+    width: 26px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--yap-paper-s2);
+    overflow: hidden;
+  }
+  .ctxpill span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--yap-ctx-messages);
+  }
+  .ctxpill span.high {
+    background: var(--yap-warning);
+  }
+  .ctxbody {
+    margin-top: 10px;
   }
   .ctxbar {
     flex: 1 1 auto;
@@ -629,10 +740,6 @@
     display: block;
     height: 100%;
     border-radius: inherit;
-    background: var(--yap-code);
-  }
-  .ctxbar span.high {
-    background: var(--yap-warning);
   }
   .ctxpct {
     flex: 0 0 auto;
@@ -864,9 +971,20 @@
 
   /* Context, broken down: the header, a bar by category, the rows, the lists. */
   .ctxhead {
-    margin: 0 0 7px;
-    color: var(--yap-paper-text-2);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0 0 8px;
     font-variant-numeric: tabular-nums;
+  }
+  .ctxused {
+    color: var(--yap-paper-ink);
+    font-weight: 600;
+  }
+  .ctxof {
+    color: var(--yap-paper-muted);
+    font-size: 11.5px;
   }
   .ctxbar.multi {
     display: flex;
@@ -886,10 +1004,9 @@
     padding: 0;
     list-style: none;
   }
-  .cats.deferred {
-    margin-top: 4px;
-    padding-top: 4px;
-    border-top: 1px dashed var(--yap-paper-rule);
+  /* The groups apart, as the Claude app sets them: what's in use, the buffer and free space, the deferred. */
+  .cats + .cats {
+    margin-top: 10px;
   }
   .cat,
   .clist summary,
@@ -901,14 +1018,21 @@
   }
   .cdot {
     flex: 0 0 auto;
-    width: 8px;
-    height: 8px;
+    width: 9px;
+    height: 9px;
     border-radius: 2px;
   }
-  .cdot.hollow {
-    box-sizing: border-box;
-    border: 1px solid var(--yap-paper-muted);
-    background: none;
+  /* A category with more behind it: its name dotted, what it is on hover. */
+  .tipped {
+    text-decoration: underline dotted;
+    text-decoration-color: var(--yap-paper-muted);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: help;
+  }
+  /* (Room under a name for its dots: the column clips what overflows.) */
+  .cat .cn {
+    padding: 2px 0 3px;
   }
   .cn {
     flex: 1 1 auto;
@@ -930,11 +1054,16 @@
   .ct {
     min-width: 40px;
   }
+  /* Its share brighter than its tokens, as the Claude app sets them; a deferred one's dash quiet. */
   .cp {
     min-width: 42px;
+    color: var(--yap-paper-ink);
+    font-weight: 600;
   }
-  .deferred .cn {
+  .deferred .cn,
+  .deferred .cp {
     color: var(--yap-paper-muted);
+    font-weight: 400;
   }
   .clist {
     margin-top: 2px;
