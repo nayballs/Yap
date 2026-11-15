@@ -269,17 +269,17 @@ impl Prompt {
     /// question from the screen (the Voice Assistant's look at the window in
     /// front, `assistant/screen.rs`): what the picture or its text is, or
     /// why there's none.
-    fn end(&mut self, about: &str, memory_you: &str, profile: &crate::ai::about_you::Profile, style: &str) {
+    fn end(&mut self, about: &str, memory_you: &str, profile: &crate::ai::about_you::Profile, chat_blocks: &str) {
         // Where an older stretch's summary goes (`compact.rs`), when the history
         // needs one: before the prompt's end, which small models heed most.
         self.summary_at = self.system.len();
         // How this chat's answers are written (chat/styles.rs), just before
         // About you: stable from turn to turn, as the prompt's end is.
-        if !style.is_empty() {
+        if !chat_blocks.is_empty() {
             self.system.push_str("
 
 ");
-            self.system.push_str(style);
+            self.system.push_str(chat_blocks);
         }
         // Last in the system prompt, where small models heed it: what the
         // context block is and About you without its clock — or, the context
@@ -433,14 +433,26 @@ pub(super) struct Built {
     /// A Code chat's workspace (`Opened::code`): no memory in this turn, and
     /// on the Claude plan its session runs there (`plan.rs`).
     pub(super) code: Option<crate::agents::workspaces::Folder>,
-    /// This chat's style (chat/styles.rs): its block, "" for Normal (and a
-    /// Code chat). The plan's and the small web pipeline's prompts end with it too.
-    pub(super) style: String,
+    /// This chat's own blocks ([`chat_blocks`]): its project (chat/projects.rs)
+    /// and its style (chat/styles.rs), "" for none (and a Code chat). The
+    /// plan's and the small web pipeline's prompts end with them too.
+    pub(super) chat_blocks: String,
     /// An incognito chat (chat/incognito.rs): no memory in this turn, its
     /// tools neither, and on the Claude plan a session Claude Code never saves.
     pub(super) incognito: bool,
     /// The person's time zone, for the calendar tool.
     pub(super) calendar_zone: crate::chat::tools::calendar::Zone,
+}
+
+/// **A chat's own blocks** for a model of `context` tokens: its project's
+/// (chat/projects.rs; never an `incognito` chat's), then its style's
+/// (chat/styles.rs), as the system prompt carries them and the fixed part
+/// counts them (`fit.rs`). `conv` `None`: the new chat being made.
+pub(super) fn chat_blocks(conv: Option<u64>, context: u64, incognito: bool) -> String {
+    let project = if incognito { None } else { crate::chat::projects::prompt_block(conv, context) };
+    [project, crate::chat::styles::prompt_block(conv)].into_iter().flatten().collect::<Vec<_>>().join("
+
+")
 }
 
 /// **About you as a turn tells it**: whole in a plain chat; in a Code chat
@@ -524,8 +536,11 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     let across = prompt.across_meetings(t, &doc_turn).await;
     let (small_calendar, calendar_chip) = prompt.library(t, &chat_docs, memory_here, past_chats, calendar_zone, code, no_memory);
     // How this chat's answers are written (chat/styles.rs): never a Code chat's.
-    let style = if code { String::new() } else { crate::chat::styles::prompt_block(Some(conv.id)).unwrap_or_default() };
-    prompt.end(&about, &memory_you, &profile, &style);
+    // **This chat's own blocks** (never a Code chat's): its project's name,
+    // instructions and files (chat/projects.rs; not an incognito chat's,
+    // which is in none), then how its answers are written (chat/styles.rs).
+    let chat_blocks = if code { String::new() } else { chat_blocks(Some(conv.id), sizing.context_size, opened.conv.incognito) };
+    prompt.end(&about, &memory_you, &profile, &chat_blocks);
     let spoken = t.by_voice && (t.scope == Some("assistant") || t.cfg.speak_replies);
     prompt.how_to_answer(t, spoken, &chat_docs, selection, sizing.context_size);
     let deep_reach = prompt.research(t, sizing, writes_doc, outline_first);
@@ -552,7 +567,7 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
         memory_you,
         profile,
         code: opened.code.clone(),
-        style,
+        chat_blocks,
         incognito: opened.conv.incognito,
         calendar_zone,
     }

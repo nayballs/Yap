@@ -665,6 +665,8 @@ fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chat::c
             // Its style: the one its new chat had (chat/styles.rs); never a Code chat's.
             if crate::agents::code_chat::new_chat_folder().is_none() {
                 crate::chat::styles::adopt_new(conv.id);
+                // …and the project its page started it in (chat/projects.rs), if any.
+                crate::chat::projects::adopt_new(conv.id);
             }
             conv
         }
@@ -755,7 +757,7 @@ async fn fixed_parts(cfg: &YapConfig, ep: &Endpoint, conversation: Option<u64>, 
     gates.files = gates.files_gate(ep, None, false, true, code);
     let profile = crate::ai::about_you::profile(cfg);
     let connectors = gates.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, None, context, conversation)).flatten();
-    let parts = fit::Parts { persona: &ep.persona, profile: &profile, now: crate::ai::eval::now(), code, connectors: connectors.as_ref(), conversation };
+    let parts = fit::Parts { persona: &ep.persona, profile: &profile, now: crate::ai::eval::now(), code, connectors: connectors.as_ref(), conversation, context };
     let room = fit::Room { context, known, kind: crate::chat::budget::Kind::Chat, tools: gates.tools, cap };
     let keep = || fit::keeps("", None, code, &[]);
     let fixed = fit::fit(gates, &parts, counter, room, 0, keep).await.fixed();

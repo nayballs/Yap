@@ -32,6 +32,7 @@ pub fn chat_delete(id: u64) -> Result<(), String> {
     // and its style (chat/styles.rs).
     crate::integrations::connectors::chats::chat_deleted(id);
     crate::chat::styles::chats_deleted(&[id]);
+    crate::chat::projects::chats_deleted(&[id]);
     Ok(crate::chat::chats::saved()?)
 }
 
@@ -42,6 +43,7 @@ pub fn chat_delete_many(ids: Vec<u64>) -> Result<usize, String> {
     let gone = crate::chat::chats::delete_many(&ids);
     crate::integrations::connectors::chats::chats_deleted(&ids);
     crate::chat::styles::chats_deleted(&ids);
+    crate::chat::projects::chats_deleted(&ids);
     for id in ids {
         crate::apps::moved_on(Some(id));
         crate::ai::claude_plan::sessions::forget(id);
@@ -161,6 +163,10 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// `incognito`: a new chat's ghost was on (chat/incognito.rs): the
 /// conversation it makes is kept in memory only. Ignored for an existing
 /// conversation (it is one or it isn't, from its start).
+///
+/// `project`: a new chat started from a project's page (chat/projects.rs):
+/// the conversation it makes is in that project. Ignored for an existing one
+/// (its ⋯ moves it: `chat_project_set`).
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -184,6 +190,7 @@ pub async fn chat_send(
     edit: Option<usize>,
     edit_files: Option<bool>,
     incognito: Option<bool>,
+    project: Option<String>,
 ) -> Result<serde_json::Value, String> {
     // The files attached in the box (chat/attachments.rs): each still there.
     let files = crate::chat::attachments::taken(&files.unwrap_or_default())?;
@@ -251,6 +258,10 @@ pub async fn chat_send(
     // A new chat asked incognito (never a Code chat: its folder wins).
     let ghost = conversation_id.is_none() && code_folder_none && incognito.unwrap_or(false);
     let send = Box::pin(crate::chat::incognito::with_new(ghost, send));
+    // A new chat started in a project (its page's New chat: chat/projects.rs);
+    // never an incognito or a Code chat.
+    let in_project = project.filter(|p| conversation_id.is_none() && code_folder_none && !ghost && !p.trim().is_empty());
+    let send = Box::pin(crate::chat::projects::with_new(in_project, send));
     // Chat's own turn: Think pressed (the model on this PC), or a cloud
     // model at its effort (`ai/effort.rs`): what it thought comes back.
     let (out, thought) = crate::chat::think::scoped(think.unwrap_or(false), send).await;
