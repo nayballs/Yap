@@ -128,6 +128,7 @@
   import { layoutMotion } from './pageMotion.svelte.js';
   import { chatBrowser } from '../../stores/chatBrowser.svelte.js';
   import { chatSummary } from '../../stores/chatSummary.svelte.js';
+  import { chatOutputs } from '../../stores/chatOutputs.svelte.js';
   import { CODE_FILES } from '../../ui/fileLinks.js';
   import { runCommand } from './codeRuns.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
@@ -254,6 +255,24 @@
   onDestroy(() => {
     chatSummary.shown = false;
     chatSummary.open = false;
+  });
+
+  // **Outputs** (the title bar's button while a chat is open, beside Summary): the chat's
+  // Outputs tab, or the panel closed while it shows.
+  let outputsPresses = untrack(() => chatOutputs.presses);
+  $effect(() => {
+    const n = chatOutputs.presses;
+    if (n === outputsPresses) return;
+    outputsPresses = n;
+    untrack(() => doc.toggleOutputs());
+  });
+  $effect(() => {
+    chatOutputs.shown = chat.activeId != null;
+    chatOutputs.open = doc.open && doc.showing === 'outputs';
+  });
+  onDestroy(() => {
+    chatOutputs.shown = false;
+    chatOutputs.open = false;
   });
 
   // **Chat's layout** (chatLayout.svelte.js, the rules chatRoom.js's): the

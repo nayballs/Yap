@@ -432,6 +432,15 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     open = true;
   }
 
+  /** **The chat's Outputs** from the title bar's button: shown, or (showing) the panel closed, as the browser button does. */
+  function toggleOutputs() {
+    if (open && showing === 'outputs') {
+      close();
+      return;
+    }
+    showOutputs();
+  }
+
   /**
    * **A Code chat's file** (`{rel, line}`: a link in an answer or a row,
    * agents/files.rs): its File tab, scrolled to the line and marked. One tab
@@ -823,6 +832,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     toggleSummary,
     showKept,
     showOutputs,
+    toggleOutputs,
     showTab,
     setActing,
     stopUsing,

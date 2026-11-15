@@ -2431,16 +2431,21 @@ row each — its icon, its name, what it is ("Page · 2 versions",
 (`outputsOpen.js` `openOutput`, the summary's too: a page or a document
 beside the chat, a changed file in the file view, a picture in its tab, a
 shared file in the file view when it's in the workspace, else in its app);
-nothing yet says what will show there. Opened by the panel's row (the layers
-button beside +, whatever shows) and the conversation's ⋯ → **Outputs**
-(the chat opened first). e2e `chat-kept-pages.spec.js`: "a tip calculator I
+nothing yet says what will show there. Opened by the title bar's **Outputs**
+button (the layers icon, beside a Code chat's Summary and the browser, while
+a chat is open: `stores/chatOutputs.svelte.js`, ChatView's `toggleOutputs`;
+pressed while Outputs shows, and pressing it then closes the panel, as those
+two do; until 15 Nov it sat in the panel's row beside +, gone with the row)
+and the conversation's ⋯ → **Outputs** (the chat opened first). e2e `chat-kept-pages.spec.js`: "a tip calculator I
 can keep" saved, beside the chat at once in the sandboxed frame (an opaque
 origin; its slider works), a card "Saved"; a change makes version 2 — its
 own card, the panel on the newest, ‹ › between them, the first card on
 version 1; light and dark; kept in `chat-made/` with both versions' files;
-Outputs (the panel's button) lists it as "Page · 2 versions" and opens it;
+Outputs (the title bar's button) lists it as "Page · 2 versions" and opens it;
 shown again when the chat opens again; a seeded chat's ⋯ → Outputs lists its
-page, its document and its shared file; an id not this chat's is refused.
+page, its document and its shared file, the title bar's button pressed then,
+closing the panel and opening Outputs again, and no copy of it or of Summary
+in the panel's row; an id not this chat's is refused.
 
 **Chat looks at the screen** (2026-11-01, `chat/see_screen.rs`): asked
 "here are the speakers, can you have a look?" with the page open in another
@@ -3034,9 +3039,12 @@ of sight. What they share is said once, in the line.
   browser" uses —, never another scheme ("file:", "javascript:"…: said
   under the bar), and `load_url` still holds it to public web pages; the
   view keeps the address as its own, so the tab shown again opens there),
-  and its buttons — since 14 Nov 2026 in the panel's tab row after its +, as
-  the Claude Code app has them: a Code chat's Dev servers, Open in
-  <browser>, expand, ✕ (**Save a shot**, `page_view_shot`, kept with the
+  and its buttons — since 14 Nov 2026 in the panel's tab row, together at its
+  right end, as the Claude Code app has them: a Code chat's Dev servers, Open
+  in <browser>, expand, ✕ (since 15 Nov the row has nothing else after its +:
+  the chat's own views, Outputs and a Code chat's Summary, are the title
+  bar's buttons, so the page's buttons no longer sat stranded mid-row between
+  two pushed right) (**Save a shot**, `page_view_shot`, kept with the
   answer as a picture tab, left the bar the same day: Claude never used it,
   and annotating puts a picture in the message instead); no footer under it
   since the same day (its "From <site> · Open in <browser>" and the

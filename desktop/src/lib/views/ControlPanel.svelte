@@ -44,6 +44,7 @@
   import { chatRequest } from '../stores/chatRequest.svelte.js';
   import { chatBrowser } from '../stores/chatBrowser.svelte.js';
   import { chatSummary } from '../stores/chatSummary.svelte.js';
+  import { chatOutputs } from '../stores/chatOutputs.svelte.js';
   import { menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
   import { noteAccountPicture } from '../core/connections.js';
   import { prefetchHome } from './home/homeData.js';
@@ -414,6 +415,20 @@
       <span class="brandname" data-tauri-drag-region>Yap</span>
     </div>
     <div class="winbtns">
+      {#if activeView === 'chat' && chatOutputs.shown}
+        <!-- The chat's Outputs beside the chat (views/chat/OutputsTab.svelte): the pages it kept, documents it wrote and files it shared. -->
+        <button
+          class="winbtn browser"
+          class:open={chatOutputs.open}
+          aria-label="Outputs"
+          aria-pressed={chatOutputs.open}
+          data-tip="Outputs"
+          data-testid="chat-outputs-button"
+          onclick={() => chatOutputs.presses++}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5z" /><path d="M3 13l9 5 9-5" /></svg>
+        </button>
+      {/if}
       {#if activeView === 'chat' && chatSummary.shown}
         <!-- A Code chat's summary beside the chat (views/chat/SummaryTab.svelte), as the Claude app's Code tab has it. -->
         <button

@@ -273,9 +273,11 @@ test('the summary: the workspace, its branch and worktree, context, connectors, 
   await shot(main, '06-the-summary');
   await outputs.first().click();
   await expect(main.getByTestId('chat-file')).toHaveAttribute('data-rel', 'src/convert.js');
-  // With two tabs, the row: its list button shows it again; the title bar's closes the panel while it shows.
+  // With two tabs: the title bar's button shows it again (the row has no copy of it), and closes the panel while it shows.
   await expect(panel(main).getByTestId('chat-panel-tab')).toHaveText(['Summary', 'convert.js']);
-  await panel(main).getByTestId('chat-panel-summary').click();
+  await expect(panel(main).getByTestId('chat-panel-summary')).toHaveCount(0);
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await button.click();
   await expect(summary).toBeVisible();
   await button.click();
   await expect(panel(main)).toHaveCount(0);

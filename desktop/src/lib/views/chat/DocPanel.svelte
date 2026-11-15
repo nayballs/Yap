@@ -708,30 +708,10 @@
     <button type="button" class="tabnew" onclick={() => doc.newPage()} aria-label="New tab" title="New tab (Ctrl+T)" data-testid="chat-panel-new-tab">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
     </button>
-    {#if doc.showing !== 'outputs'}
-      <!-- The chat's Outputs: every page it kept, document it wrote and file it shared (OutputsTab). -->
-      <button type="button" class="tabnew" onclick={() => doc.showOutputs()} aria-label="Outputs" title="Outputs: what this chat made" data-testid="chat-panel-outputs">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5z" /><path d="M3 13l9 5 9-5" /></svg>
-      </button>
-    {/if}
     {#if rowActions && doc.showing === 'page'}
-      <!-- The page's own buttons (PageTab.svelte's `actions`), at the row's right, as Claude Code's app has them. -->
+      <!-- The page's own buttons (PageTab.svelte's `actions`), together at the row's right, as Claude Code's app has them.
+           (The chat's own views, Outputs and a Code chat's Summary, are the title bar's buttons: ControlPanel.) -->
       <div class="rowactions" data-testid="chat-page-actions">{@render rowActions()}</div>
-    {/if}
-    {#if workspace}
-      <!-- A Code chat's summary (SummaryTab.svelte), as the Claude app's right column (with one tab, no row: the title bar's button). -->
-      <button
-        type="button"
-        class="tabnew tabsummary"
-        class:on={doc.showing === 'summary'}
-        onclick={() => doc.toggleSummary()}
-        aria-label="Summary"
-        aria-pressed={doc.showing === 'summary'}
-        title="Summary: environment, context, outputs, background tasks"
-        data-testid="chat-panel-summary"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" /></svg>
-      </button>
     {/if}
     </div>
   {/if}
@@ -978,7 +958,7 @@
     overflow-y: hidden;
     scrollbar-width: none;
   }
-  /* The row's +: a new page tab. */
+  /* The page's buttons, together at the row's right end. */
   .rowactions {
     flex: 0 0 auto;
     display: flex;
@@ -987,6 +967,7 @@
     margin-left: auto;
     padding: 0 6px 0 4px;
   }
+  /* The row's +: a new page tab. */
   .tabnew {
     flex: 0 0 auto;
     display: inline-flex;
@@ -1013,14 +994,6 @@
   .tabnew svg {
     width: 14px;
     height: 14px;
-  }
-  /* The summary's button: at the row's right end. */
-  .tabsummary {
-    margin-left: auto;
-  }
-  .tabsummary.on {
-    background: var(--yap-paper-s2);
-    color: var(--yap-code);
   }
   .doctabs:focus {
     outline: none;
