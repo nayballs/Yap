@@ -3120,7 +3120,14 @@ of sight. What they share is said once, in the line.
   goes. Let go, it's laid out at its last place, comes up in sight (just
   under Tauri's resizing edges, `TAURI_DRAG_RESIZE_BORDERS`, so the window's
   edge still resizes it where the page reaches it), and the still goes two
-  frames later. A resize in one go (maximise, restore) just follows. Each place
+  frames later. A resize in one go (maximise, restore) just follows. **A menu
+  of Yap's open over the page** stands a still in for it the same way (15 Nov
+  2026, the maintainer's screenshot: the page tab's Dev servers menu dropped
+  behind the page, which as a window of its own covered it, and the nine points
+  `measure` looks at to hide the page for something on top missed it): the
+  Dev servers menu counts itself while open (`pageMotion.svelte.js`
+  `pageCover`, `coverPage`; the pointer over its button takes a still ready),
+  and so does any right-click menu (`contextMenu.open`). Each place
   also tells WebView2 its window moved (`NotifyParentWindowPositionChanged`:
   a list's options open where the page is). The suite (`chat-pages.spec.js`) checks it from the
   screen's own pixels: `e2e_window_picture` (Yap's window drawn whole by
