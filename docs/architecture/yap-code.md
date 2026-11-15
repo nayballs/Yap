@@ -1933,6 +1933,17 @@ what didn't was the person.
   message" (an older one "…your message"), never ticked on after; the live
   one goes on under the message once Claude writes it again. Both open
   while the turn works and fold once it's over, as the card ever did.
+  - **The list is on in every run** (`runner::TODO_ENV`): Yap Lab on Opus
+    5.5 found its session had no to-do tool at all ("TodoWrite isn't among
+    my tools"). Claude Code's tools reference says why: since 2.1.268 the
+    task-tracking tools are on by default only on Opus 4.7, Sonnet 4.6,
+    Haiku 4.5 and earlier, and a session opts in with
+    `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`; `CLAUDE_CODE_ENABLE_TASKS=0` makes
+    them `TodoWrite`, the list Yap reads, rather than the four Task tools.
+    Every agent run sets both (`cli::RUN_SETS_ENV`: the only `CLAUDE…`
+    names a run may set, never kept from Yap's own environment). Anthropic
+    notes the tool's definition and reminders take some context; the plan
+    card is worth it, as the Claude app's Code tab shows one too.
 - **The transcript view** (`views/chat/threadView.svelte.js`): the chat's
   ⋯ in the list → **Transcript view** → Normal (the default: each stretch
   one folded line), **Thinking** (its thinking too, each between the
@@ -1945,9 +1956,15 @@ what didn't was the person.
     block of the session's own message (a helper's never) is a `thought`
     line of the agent's log (`runner.rs`, at most 12,000 characters), like
     its `said` — never in Yap's log, **never to a phone**
-    (`link/code/view.rs` blanks it as it does a command's output). Claude
-    Code hands over what the model's thinking shows (on recent models a
-    summary); a turn with none has none.
+    (`link/code/view.rs` blanks it as it does a command's output).
+  - **On Opus 5.5 there's none to show yet** (checked 15 Nov 2026 on
+    Claude Code 2.1.296): a headless run's stream has its thinking blocks
+    with their text empty, even with `showThinkingSummaries` set (Claude
+    Code's settings reference scopes it to interactive sessions: unset,
+    "the Anthropic API redacts thinking blocks"). An empty block is no
+    thought, so there the Thinking view is the Normal one; whatever text a
+    block carries (another model or version) shows. Verbose opens every
+    step either way.
   - `workOf(…, { thinking })`: a thought is an item only when the view asks
     for it, and then it splits the stretch round it; in Normal it's no item
     and splits nothing.

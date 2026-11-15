@@ -1075,6 +1075,14 @@ fn pay_for(agent: &Agent, cfg: &crate::config::YapConfig, status: &cli::Status) 
     Ok(Pay::Plan)
 }
 
+/// **Claude Code's to-do list, on in every run** (15 Nov 2026): since
+/// 2.1.268 newer models (Opus 5.5, Sonnet 5.5…) get no task-tracking tool
+/// unless the session opts in (Claude Code's tools reference, "Task tool
+/// availability"), so a Code chat's to-do card never showed on them. On, and
+/// as `TodoWrite` — the list Yap reads (`steps.rs`) — rather than the four
+/// Task tools.
+pub const TODO_ENV: [(&str, &str); 2] = [("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1"), ("CLAUDE_CODE_ENABLE_TASKS", "0")];
+
 /// **An agent's Claude Code run**: in its folder, the person's own setup (no
 /// `--strict-mcp-config`, no `--setting-sources`, Claude Code's own tools)
 /// with Yap's endpoint added (the run's `mcp_config`, the backup hook's
@@ -1096,6 +1104,8 @@ pub fn agent_spec(
 ) -> Spec {
     let mut spec = Spec::new(folder, pay);
     spec.env = env;
+    // Its to-do list on every model, as TodoWrite (the thread's to-do card, the plan from before a message).
+    spec.env.extend(TODO_ENV.iter().map(|(k, v)| (k.to_string(), v.to_string())));
     spec.model = Some(agent.model.clone()).filter(|m| !m.trim().is_empty());
     spec.effort = Effort::parse(&agent.effort);
     spec.permission_mode = mode.permission();
@@ -3119,8 +3129,10 @@ mod tests {
             assert!(!a.iter().any(|x| x == never), "{never} in {a:?}");
         }
         assert_eq!((spec.mcp_config, spec.settings), (Some(mcp.clone()), Some(hooks.clone())));
-        // The run key in its environment, which its files name.
-        assert_eq!(spec.env, key);
+        // The run key in its environment, which its files name; its to-do list on, as TodoWrite.
+        assert_eq!(spec.env[..1], key[..]);
+        assert_eq!(&spec.env[1..], &[("CLAUDE_CODE_ENABLE_TODO_TOOLS".to_string(), "1".to_string()), ("CLAUDE_CODE_ENABLE_TASKS".to_string(), "0".to_string())]);
+        assert!(session::environment(Vec::new(), &Pay::Plan, &spec.env).is_ok(), "a run may set them");
         // A later turn resumes it, at the mode it runs at then.
         let spec = agent_spec(&agent, &folder, Pay::Plan, Mode::Auto, false, Conversation::Resume("prev".into()), mcp.clone(), hooks.clone(), key.clone());
         let a = session::args(&spec, &files);
