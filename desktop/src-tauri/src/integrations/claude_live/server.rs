@@ -123,8 +123,10 @@ impl Endpoint {
                 spec.eyes = super::eyes::Eyes::default();
             }
             spec.connectors = None;
+            spec.cards = crate::chat::cards::Cards::default();
         }
         let eyes = spec.eyes;
+        let cards = spec.cards;
         // Yap's own data read by an agent's run: its session's only (a Chat run reads it anyway).
         let reads = spec.reads && tools == super::Tools::Agent;
         spec.reads = reads;
@@ -139,7 +141,7 @@ impl Endpoint {
             runs.len()
         };
         tracing::info!(run = %id, tools = ?tools, agents, eyes = eyes.any(), connectors = connectors.len(), backup = has_backup, runs = count, "Claude Code endpoint: a run registered");
-        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, agents, memory, eyes, connectors, reads, servers, has_backup, turn })
+        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, agents, memory, eyes, connectors, reads, servers, cards, has_backup, turn })
     }
 
     /// The run's URLs answer 404 from now on; its prompts still waiting

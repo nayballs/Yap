@@ -54,7 +54,7 @@
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
   const codeFiles = getContext(CODE_FILES) ?? null;
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null, branch = null, retry = null, editing = null, onedited = null, oneditcancel = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null, branch = null, retry = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false } = $props();
   // `visuals`: what the answer made to be seen, not read (chat/made.rs: "Made a visual", above its words;
   // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends.
   // **Retry, Edit and ‹ ›** (15 Nov 2026, the Claude app's; chat/chats/branches.rs): `branch` — `{ fork, why, onbranch }`,
@@ -86,6 +86,9 @@
   const offers = $derived(m.role === 'assistant' ? (m.offers?.length ? m.offers : m.liveOffers || []) : []);
   // The files it shared into the conversation (chat/shares.rs): the same.
   const shared = $derived(m.role === 'assistant' ? (m.files?.length ? m.files : m.liveFiles || []) : []);
+  // Its cards that ask: a question of the model's own (above the answer, where it asked) and the rest (under it).
+  const asked = $derived(m.role === 'assistant' ? (m.confirms || []).filter((c) => c.act === 'question') : []);
+  const acts = $derived(m.role === 'assistant' ? (m.confirms || []).filter((c) => c.act !== 'question') : []);
 
   // A question whose screenshot went as its text (snip/ocr.rs): its own
   // words, and the text read from the picture, folded under them.
@@ -137,6 +140,13 @@
   {:else}
     <p class="thoughtline" data-testid="chat-thought">{thoughtLabel(m.thinking?.ms)}</p>
   {/if}
+{/if}
+{#if m.role === 'assistant' && asked.length}
+  <!-- Chat's model asked the person (ask_user, chat/cards/ask.rs): its card where it asked, above the answer that
+       follows from it — answered, the question and the choice stay here (its own chunk). -->
+  {#await import('./PageConfirm.svelte') then { default: PageConfirm }}
+    <PageConfirm confirms={asked} />
+  {/await}
 {/if}
 {#if m.role === 'assistant' && visuals?.length}
   <!-- The visuals it made (show_visual), above its words: each a sandboxed frame of its own. -->
@@ -336,11 +346,11 @@
   <!-- What its tools did, folded under it (chat/activity.rs). -->
   <ChatSteps tools={m.tools} {m} {onview} />
 {/if}
-{#if m.role === 'assistant' && m.confirms?.length}
+{#if m.role === 'assistant' && acts.length}
   <!-- Yap asks before a click that buys, pays, books… on a page beside the
        chat (chat/pages/act/confirm.rs): Allow once / Don't (its own chunk). -->
   {#await import('./PageConfirm.svelte') then { default: PageConfirm }}
-    <PageConfirm confirms={m.confirms} />
+    <PageConfirm confirms={acts} />
   {/await}
 {/if}
 {#if m.role === 'user' && tick}
@@ -454,6 +464,13 @@
       <span class="byline stopped" title="You stopped this answer while it was being written">· Stopped</span>
     {/if}
   </div>
+{/if}
+{#if m.role === 'assistant' && m.nextStep?.recap && last && !m.streaming}
+  <!-- The next-step box (suggest_next_step): under the chat's latest answer only, its buttons sending the
+       person's answer (its own chunk). -->
+  {#await import('./NextStepBox.svelte') then { default: NextStepBox }}
+    <NextStepBox next={m.nextStep} onpick={onnext} {busy} />
+  {/await}
 {/if}
 
 <style>

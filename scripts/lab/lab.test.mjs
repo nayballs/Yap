@@ -144,6 +144,14 @@ describe('a turn’s record', () => {
       ['approve:3', 'approve', 'asking', 'allow|deny'],
       ['plan:a2', 'plan', 'asking', 'allow|deny'],
     ]);
+    // Chat's own model's question (chat/cards/ask.rs): its questions and options; answered, what was picked.
+    const q = { question: 'Which format?', header: 'Format', options: [{ label: 'Markdown', description: '' }, { label: 'Plain text', description: '' }], multiSelect: false };
+    const asking = cardsOf([{ seq: 1, ts: 1, kind: 'stream', event: { kind: 'confirm', id: 4, act: 'question', label: 'Format', does: 'question', state: 'asking', question: { questions: [q], voice: true } } }]);
+    assert.deepEqual(asking.map((c) => [c.id, c.kind, c.state, c.answers.join('|')]), [['confirm:4', 'question', 'asking', 'allow|deny|pick']]);
+    assert.deepEqual(asking[0].questions, [{ question: 'Which format?', header: 'Format', multiSelect: false, options: ['Markdown', 'Plain text'] }]);
+    assert.equal(asking[0].voice, true);
+    const answered = cardsOf([{ seq: 1, ts: 1, kind: 'stream', event: { kind: 'confirm', id: 4, act: 'question', state: 'answered', question: { questions: [q], answers: { 'Which format?': 'Plain text' }, said: 'the second one' } } }]);
+    assert.deepEqual([answered[0].picked, answered[0].said], [{ 'Which format?': 'Plain text' }, 'the second one']);
     // A plan set aside ("Plan not used") waits on nobody.
     assert.deepEqual(cardsOf([], { agents: [{ id: 'a3', folder: 'lab-sandbox', status: 'done', plan: true, planAllowed: false, planUnused: true }] }), []);
   });

@@ -6,6 +6,7 @@ pub mod activity;
 pub mod assistant;
 pub mod attachments;
 pub mod budget;
+pub mod cards;
 pub mod chats;
 pub mod commands;
 pub mod compact;

@@ -94,6 +94,11 @@ pub(super) struct Gates {
     /// path — the web's pictures' gate, or the picture files' —: off only in
     /// a turn fitted to a small context without the files' family (`fit.rs`).
     pub share_tools: bool,
+    /// **The cards in the thread** (chat/cards.rs, 15 Nov 2026): `ask_user`,
+    /// `suggest_next_step`, `mark_chapter` — with tools, in Chat or the Voice
+    /// Assistant, never across the meetings; a question never a phone's, the
+    /// next-step box with Chat in view (`Cards::for_turn`).
+    pub cards: crate::chat::cards::Cards,
     /// **`show_visual`** (chat/made.rs): a strong model with a thread to
     /// show it in — Chat, or the Voice Assistant with Chat in view; never
     /// across the meetings (`made::offered`). Off only in a turn fitted to a
@@ -112,6 +117,8 @@ struct Here<'a> {
     calendar: &'a dyn Fn() -> bool,
     connectors: &'a dyn Fn() -> bool,
     window: &'a dyn Fn() -> bool,
+    /// The question came from a paired phone (`cards::from_phone`).
+    phone: &'a dyn Fn() -> bool,
 }
 
 impl Gates {
@@ -125,6 +132,7 @@ impl Gates {
             calendar: &crate::calendar::connected,
             connectors: &|| crate::chat::tools::connectors::offers_any(cfg, scope),
             window: &crate::chat::assistant::may_look_at_window,
+            phone: &crate::chat::cards::from_phone,
         };
         Gates::for_turn_on(cfg, ep, scope, meetings, chat_in_view, &here)
     }
@@ -161,8 +169,9 @@ impl Gates {
         let evaluated = tools && provider != crate::ai::claude_plan::PROVIDER && crate::ai::eval::connectors_forced();
         let connectors = !meetings && (evaluated || crate::chat::tools::connectors::may(provider, strong)) && (here.connectors)();
         let (apps, past_chats, picture_tools) = (cfg.open_apps, cfg.memory_search_chats, true);
+        let cards = crate::chat::cards::Cards::for_turn(tools, meetings, scope, chat_in_view, (here.phone)());
         let visuals = crate::chat::made::offered(tools, strong, scope, meetings, chat_in_view);
-        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, screen_takes, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true, visuals };
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, screen_takes, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true, cards, visuals };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();
         }
@@ -234,6 +243,7 @@ impl Gates {
             files: self.files,
             file_pictures: None,
             share: crate::chat::shares::Offer::of(self.pictures, self.files, self.share_tools && self.tools),
+            cards: self.cards,
             visuals: self.visuals && self.tools,
         }
     }
@@ -426,7 +436,7 @@ mod tests {
     /// What a turn reads of this PC: Yap Code, a calendar, connectors, and
     /// the window in front (the Voice Assistant's shortcut from another app).
     fn here<'a>(yap_code: &'a dyn Fn() -> bool, window: &'a dyn Fn() -> bool) -> Here<'a> {
-        Here { yap_code, calendar: &|| false, connectors: &|| false, window }
+        Here { yap_code, calendar: &|| false, connectors: &|| false, window, phone: &|| false }
     }
 
     fn keyed(provider: &str, model: &str, base: &str) -> Endpoint {
@@ -530,7 +540,7 @@ mod tests {
                     // (The cloud's switch with the screen's: a cloud model's window look too.)
                     let cfg = YapConfig { web_search: on(0), web_search_native: on(1), open_apps: on(2), memory_search_chats: on(3), assistant_screen: on(4), assistant_screen_cloud: on(4), ..Default::default() };
                     let (yap_code, calendar, connectors) = (on(5), on(6), on(7));
-                    let here = Here { yap_code: &|| yap_code, calendar: &|| calendar, connectors: &|| connectors, window: &|| window };
+                    let here = Here { yap_code: &|| yap_code, calendar: &|| calendar, connectors: &|| connectors, window: &|| window, phone: &|| false };
                     let unfiled = Gates::for_turn_on(&cfg, &ep, scope, meetings, in_view, &here);
                     // Picture files without the web, wanted (a Code chat, a
                     // picture file named) or not.

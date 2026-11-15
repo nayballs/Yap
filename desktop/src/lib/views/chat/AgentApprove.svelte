@@ -26,7 +26,7 @@
   // refused at once and Claude chose for itself. Never under Bypass
   // permissions, where nothing asks.
   import { agents, answerApproval, replyToQuestion } from '../../stores/agents.svelte.js';
-  import { questionAnswers, questionsAnswered } from '../../core/agentNow.js';
+  import QuestionForm from './QuestionForm.svelte';
   import { renderMarkdown } from '../../core/markdown.js';
   import { longSaid } from '../../core/agents.js';
 
@@ -51,8 +51,6 @@
 
   /** Claude Code's own question for the person (approve.rs `ASK`). */
   const isQuestion = (a) => a?.tool === 'AskUserQuestion' && a.questions?.length > 0;
-  /** One question with one answer: a click on its option answers it. */
-  const quick = (a) => a.questions.length === 1 && !a.questions[0].multiSelect;
   // What's picked so far: card id → question index → {labels, other, own} — kept in the store
   // (`agents.questionPicks`), so a card drawn again mid-answer still has it.
   const picks = $derived(agents.questionPicks);
@@ -65,21 +63,6 @@
     sending = { ...sending, [a.id]: true };
     await replyToQuestion(a.id, answers);
     sending = { ...sending, [a.id]: false };
-  }
-  /** An option clicked: the answer itself for a quick card; picked (or put back) otherwise. */
-  function choose(a, i, q, label) {
-    if (quick(a)) return send(a, { [q.question]: label });
-    const now = pickOf(a, i).labels;
-    const labels = q.multiSelect ? (now.includes(label) ? now.filter((l) => l !== label) : [...now, label]) : [label];
-    setPick(a, i, { labels, ...(q.multiSelect ? {} : { other: '', own: false }) });
-  }
-  const sendAll = (a) => send(a, questionAnswers(a.questions, picks[a.id]));
-  /** Enter in a question's own-words box: the answer, for a quick card. */
-  function ownKey(e, a) {
-    if (e.key === 'Enter' && !e.shiftKey && quick(a)) {
-      e.preventDefault();
-      sendAll(a);
-    }
   }
 </script>
 
@@ -98,45 +81,18 @@
         <p class="aq">
           <strong>The agent has a question</strong> · <button type="button" class="alink" onclick={() => onopen?.(a.run)}>{a.label || 'your folder'}</button>
         </p>
-        {#each a.questions as q, i (i)}
-          {@const p = pickOf(a, i)}
-          <fieldset class="qset" data-testid="chat-agent-question" disabled={!!sending[a.id]}>
-            <legend class="qtext">{#if q.header}<span class="qhead">{q.header}</span>{/if}{q.question}</legend>
-            {#if q.multiSelect}<p class="qhint">Pick any that fit.</p>{/if}
-            <div class="qopts">
-              {#each q.options as o (o.label)}
-                <!-- (One answer: their own words take the pick's place.) -->
-                {@const on = p.labels.includes(o.label) && (q.multiSelect || !p.other?.trim())}
-                <button type="button" class="qopt" class:on aria-pressed={quick(a) ? undefined : on} data-testid="chat-agent-question-option" onclick={() => choose(a, i, q, o.label)}>
-                  <span class="qlabel">{o.label}</span>
-                  {#if o.description}<span class="qdesc">{o.description}</span>{/if}
-                </button>
-              {/each}
-              {#if p.own}
-                <!-- Their own words: what they meant, whatever is picked. -->
-                <input
-                  class="qown"
-                  type="text"
-                  aria-label="Your own answer"
-                  placeholder="Your own answer"
-                  maxlength="2000"
-                  value={p.other}
-                  oninput={(e) => setPick(a, i, { other: e.currentTarget.value })}
-                  onkeydown={(e) => ownKey(e, a)}
-                />
-              {:else}
-                <button type="button" class="qopt qelse" onclick={() => setPick(a, i, { own: true })}>Something else…</button>
-              {/if}
-            </div>
-          </fieldset>
-        {/each}
         <p class="awhy">Its own question, not a permission: answer it, or let it choose for itself and say what it chose.</p>
-        <div class="abtns">
-          {#if !quick(a) || pickOf(a, 0).own}
-            <button type="button" class="aallow" disabled={!!sending[a.id] || !questionsAnswered(a.questions, picks[a.id])} onclick={() => sendAll(a)}>Send</button>
-          {/if}
-          <button type="button" class="adeny" disabled={!!sending[a.id]} onclick={() => answerApproval(a.id, false)}>Let it decide</button>
-        </div>
+        <!-- The questions, as Chat's own question card has them (QuestionForm). -->
+        <QuestionForm
+          questions={a.questions}
+          picks={picks[a.id] || {}}
+          onpick={(i, next) => setPick(a, i, next)}
+          onsend={(answers) => send(a, answers)}
+          ondecide={() => answerApproval(a.id, false)}
+          busy={!!sending[a.id]}
+          decideLabel="Let it decide"
+          testid="chat-agent-question"
+        />
       </div>
     </div>
   {:else if isPlan(a)}
@@ -231,95 +187,6 @@
   }
   .ask .aicon {
     color: var(--yap-primary);
-  }
-  .qset {
-    min-width: 0;
-    margin: 9px 0 0;
-    padding: 0;
-    border: none;
-  }
-  .qtext {
-    padding: 0;
-    font-weight: 600;
-    overflow-wrap: anywhere;
-  }
-  .qhead {
-    display: inline-block;
-    margin-right: 7px;
-    padding: 0 7px;
-    border-radius: 999px;
-    background: var(--yap-paper-s2);
-    color: var(--yap-paper-muted);
-    font-size: 11px;
-    font-weight: 600;
-    line-height: 18px;
-    vertical-align: 1px;
-  }
-  .qhint {
-    margin: 2px 0 0;
-    color: var(--yap-paper-muted);
-    font-size: 12px;
-  }
-  .qopts {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    margin-top: 6px;
-  }
-  .qopt {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-width: 0;
-    padding: 6px 10px;
-    border: 1px solid var(--yap-paper-rule);
-    border-radius: 8px;
-    background: var(--yap-paper);
-    color: var(--yap-paper-ink);
-    font: inherit;
-    font-size: 12.5px;
-    text-align: left;
-    cursor: pointer;
-  }
-  .qopt:hover:not(:disabled) {
-    background: var(--yap-paper-s2);
-  }
-  .qopt.on {
-    border-color: var(--yap-primary-line);
-    background: color-mix(in srgb, var(--yap-primary) 10%, var(--yap-paper));
-  }
-  .qopt:focus-visible,
-  .qown:focus-visible {
-    outline: 2px solid var(--yap-focus-ring);
-    outline-offset: 1px;
-  }
-  .qopt:disabled {
-    cursor: default;
-    opacity: 0.6;
-  }
-  .qlabel {
-    font-weight: 600;
-    overflow-wrap: anywhere;
-  }
-  .qdesc {
-    color: var(--yap-paper-muted);
-    font-size: 12px;
-    overflow-wrap: anywhere;
-  }
-  .qelse {
-    color: var(--yap-paper-muted);
-  }
-  .qown {
-    box-sizing: border-box;
-    width: 100%;
-    height: 32px;
-    padding: 0 10px;
-    border: 1px solid var(--yap-paper-rule);
-    border-radius: 8px;
-    background: var(--yap-paper);
-    color: var(--yap-paper-ink);
-    font: inherit;
-    font-size: 12.5px;
   }
   .abtns button:disabled {
     cursor: default;

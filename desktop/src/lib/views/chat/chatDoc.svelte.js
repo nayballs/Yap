@@ -454,6 +454,8 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
    * it go.
    */
   function setAsking(card) {
+    // (A question of Chat's own model is the thread's alone: chat/cards/ask.rs.)
+    if (card?.act === 'question') return;
     if (card?.state === 'asking') {
       asking = card;
       if (open && card.key && !(showing === 'page' && tabKeyOf(page) === card.key)) showTab(card.key);

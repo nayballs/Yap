@@ -34,6 +34,12 @@
 //! answered by a spoken yes or no (`chat_page_confirm`: Allow once, never
 //! Always allow).
 //!
+//! **A question of Chat's own model** (act "question", 15 Nov 2026,
+//! `chat/cards/ask.rs`): `ask_user`'s card — its questions and options
+//! ([`Card::question`]) — waits here too, for the options picked
+//! ([`Reply::Picked`]) or the words said ([`Reply::Said`]), and is kept
+//! with the answer, answered.
+//!
 //! The log has the question's id and the answer, never the button's words,
 //! the typed text or the page.
 
@@ -50,14 +56,19 @@ pub const WAIT: Duration = Duration::from_secs(120);
 static PENDING: Mutex<Option<HashMap<u64, tokio::sync::oneshot::Sender<Reply>>>> = Mutex::new(None);
 
 /// What the person pressed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
     /// Allow once (or a page's and an agent's Allow / Send).
     Once,
     /// Always allow (a connector's card only).
     Always,
-    /// Don't / Deny.
+    /// Don't / Deny (a question's Let Yap decide).
     Deny,
+    /// A question's options picked or words written (`chat/cards/ask.rs`): each
+    /// question's text → a label, a list of them, or the person's own words.
+    Picked(serde_json::Value),
+    /// A question answered out loud: what the person said.
+    Said(String),
 }
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
@@ -128,6 +139,11 @@ pub struct Card {
     /// older Yap's save drops it (the card stays, with the tool as its label).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connector: Option<Box<ConnectorCard>>,
+    /// **A question's card** (act "question", `chat/cards/ask.rs`): its questions,
+    /// and once answered what was picked or said. An older Yap's save drops
+    /// it (the card stays, with the first question's header as its label).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question: Option<Box<crate::chat::cards::ask::QuestionCard>>,
 }
 
 /// **The connector's tool a card asks about** (act "connector"): "Use
@@ -240,7 +256,7 @@ impl Drop for Pending {
 /// tab's strip): `true` if that question was still waiting.
 #[tauri::command]
 pub fn chat_page_confirm(id: u64, allow: bool) -> bool {
-    answered(id, if allow { Reply::Once } else { Reply::Deny })
+    reply(id, if allow { Reply::Once } else { Reply::Deny })
 }
 
 /// **A connector's card's answer** (`answer`: "once", "always" or
@@ -253,18 +269,20 @@ pub fn chat_connector_confirm(id: u64, answer: String) -> bool {
         "once" => Reply::Once,
         _ => Reply::Deny,
     };
-    answered(id, reply)
+    self::reply(id, reply)
 }
 
-/// Question `id` answered `reply`, if it was still waiting.
-fn answered(id: u64, reply: Reply) -> bool {
+/// **Question `id` answered `reply`**, if it was still waiting: whether it was.
+pub fn reply(id: u64, reply: Reply) -> bool {
     let tx = PENDING.lock().unwrap_or_else(|p| p.into_inner()).as_mut().and_then(|m| m.remove(&id));
     match tx {
         Some(tx) => {
-            let pressed = match reply {
+            let pressed = match &reply {
                 Reply::Once => "once",
                 Reply::Always => "always",
                 Reply::Deny => "deny",
+                Reply::Picked(_) => "picked",
+                Reply::Said(_) => "said",
             };
             tracing::info!(id, pressed, "Chat: the user answered a question before an action");
             tx.send(reply).is_ok()
@@ -276,7 +294,7 @@ fn answered(id: u64, reply: Reply) -> bool {
 #[cfg(test)]
 thread_local! {
     /// A unit test's answer, given at once (`None`: as in the app).
-    static TEST_ANSWER: std::cell::Cell<Option<Reply>> = const { std::cell::Cell::new(None) };
+    static TEST_ANSWER: std::cell::RefCell<Option<Reply>> = const { std::cell::RefCell::new(None) };
 }
 
 /// A unit test answers every question this way from now on (on its thread).
@@ -288,7 +306,23 @@ pub fn answer_in_test(allow: Option<bool>) {
 /// [`answer_in_test`] with any of the replies (Always allow too).
 #[cfg(test)]
 pub fn reply_in_test(reply: Option<Reply>) {
-    TEST_ANSWER.with(|a| a.set(reply));
+    TEST_ANSWER.with(|a| *a.borrow_mut() = reply);
+}
+
+/// The unit test's answer, if it gives one ([`reply_in_test`]).
+#[cfg(test)]
+pub fn test_reply() -> Option<Reply> {
+    TEST_ANSWER.with(|a| a.borrow().clone())
+}
+
+/// **A new question waiting** (a card of `chat/cards/ask.rs`'s): its id, where its
+/// answer comes, and the guard that takes it out of the waiting list when
+/// dropped (answered, timed out, or the turn stopped).
+pub(crate) fn waiting() -> (u64, tokio::sync::oneshot::Receiver<Reply>, impl Drop) {
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    PENDING.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashMap::new).insert(id, tx);
+    (id, rx, Pending(id))
 }
 
 /// **Ask the person** (`what`), showing the card through `live`, and wait
@@ -307,7 +341,7 @@ pub async fn ask_connector(live: Option<crate::chat::stream::Live<'_>>, what: As
 fn answer_of(reply: Reply, always: bool) -> Answer {
     match reply {
         Reply::Always if always => Answer::AlwaysAllowed,
-        Reply::Always | Reply::Once => Answer::Allowed,
+        Reply::Always | Reply::Once | Reply::Picked(_) | Reply::Said(_) => Answer::Allowed,
         Reply::Deny => Answer::Refused,
     }
 }
@@ -316,7 +350,7 @@ async fn ask_with(live: Option<crate::chat::stream::Live<'_>>, what: Ask<'_>, co
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let always = connector.as_ref().is_some_and(|c| c.always);
     #[cfg(test)]
-    if let Some(r) = TEST_ANSWER.with(|a| a.get()) {
+    if let Some(r) = test_reply() {
         return answer_of(r, always);
     }
     if let Some(a) = crate::ai::eval::confirm_answer(what.label, what.does) {
@@ -346,6 +380,7 @@ async fn ask_with(live: Option<crate::chat::stream::Live<'_>>, what: Ask<'_>, co
             key: what.key.to_string(),
             agent: what.agent.clone(),
             connector: connector.clone().map(Box::new),
+            question: None,
         })
     };
     live.sink.send(card("asking"));

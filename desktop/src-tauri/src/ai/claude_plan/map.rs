@@ -341,6 +341,9 @@ impl Mapper {
                 self.chips.push(format!("Read {short}"));
                 true
             }
+            // The next-step box and a chapter (chat/cards.rs): what they show
+            // is the box and the divider, no chip.
+            Tool::Yap(name) if crate::chat::cards::quiet(name) => false,
             Tool::Yap(name) => {
                 // The page beside the chat, read: a page the turn read, as
                 // a WebFetch's is (its own title, its text for the checks).

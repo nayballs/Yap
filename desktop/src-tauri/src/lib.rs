@@ -329,6 +329,7 @@ pub fn run() {
             chat::pages::pick::page_annotated,
             chat::pages::act::confirm::chat_page_confirm,
             chat::pages::act::confirm::chat_connector_confirm,
+            chat::cards::ask::chat_question_answer,
             dictation::commands::cancel_recording,
             shell::autostart::set_autostart,
             shell::commands::is_portable,

@@ -645,6 +645,13 @@ fn instructions(g: &Gates, profile: &crate::ai::about_you::Profile, memory: bool
             s.push(' ');
             s.push_str(crate::chat::tools::connectors::INSTRUCTIONS);
         }
+        // The cards in the thread (chat/cards.rs): a question to the user,
+        // the next-step box, chapters — where the turn offers them.
+        let cards = g.cards.instructions();
+        if !cards.is_empty() {
+            s.push(' ');
+            s.push_str(&cards);
+        }
     } else {
         // No tools: it can't do anything on the PC, so it mustn't say so.
         s.push_str("\n\n");
@@ -818,6 +825,7 @@ mod tests {
             picture_tools: true,
             files: Gate::Off,
             share_tools: true,
+            cards: Default::default(),
             visuals: false,
         }
     }
@@ -947,6 +955,7 @@ mod tests {
             picture_tools: true,
             files: Gate::Off,
             share_tools: true,
+            cards: Default::default(),
             visuals: false,
         };
         let asks = "What's the latest version of Python?";
