@@ -383,6 +383,10 @@ pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applie
     let cfg = crate::config::load();
     let conv = crate::chat::chats::get(conversation).ok_or("Conversation not found")?;
     let len = conv.messages.len();
+    // (Nor an incognito chat: nothing of it learned or kept, chat/incognito.rs.)
+    if conv.incognito {
+        return Ok(nothing());
+    }
     // A Code chat is never read (its messages marked read, so a chat made
     // plain again isn't learned from what it said there either).
     if never_learned(conversation) {
@@ -622,6 +626,13 @@ fn never_learned(conversation: u64) -> bool {
 /// (another chat started). A Code chat isn't ([`never_learned`]).
 pub fn after_turn(conversation: u64) {
     if !scheduled() || !crate::config::load().memory_learn_chats {
+        return;
+    }
+    // **An incognito chat** (chat/incognito.rs): never learned from, and
+    // nothing of it kept here (not even how far it was read: a later chat
+    // may take its id).
+    if crate::chat::chats::is_incognito(conversation) {
+        activity(|a| a.remove(&conversation));
         return;
     }
     if never_learned(conversation) {

@@ -249,7 +249,38 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     dropTurn(rec);
     rec.conv = conv;
     setTurn(rec);
+    // A new chat asked incognito: its conversation is one.
+    if (rec.ghost) markGhost(conv);
   }
+
+  // ---- Incognito (chat/incognito.rs, 15 Nov 2026; the Claude app's ghost) ----
+  // A new chat's ghost (`ghostNew`) makes its first question start an
+  // incognito chat: kept in memory only, never listed or remembered. The
+  // ones this view holds (`ghostIds`) end when left — another chat opened, a
+  // new one — or, left while their answer was still coming, once it's in.
+  let ghostNew = $state(false);
+  let ghostIds = $state([]);
+  /** The chat shown is (or, a new one, will be) incognito. */
+  const incognito = $derived(activeId == null ? ghostNew : ghostIds.includes(activeId));
+  function markGhost(id) {
+    if (id != null && !ghostIds.includes(id)) ghostIds = [...ghostIds, id];
+  }
+  /** The ghost on a new chat, on or off (never on a Code chat's new chat). */
+  function setGhost(on) {
+    if (activeId != null) return;
+    ghostNew = !!on;
+    reportView();
+  }
+  // Each incognito chat not shown and not answering any more: ended (it goes).
+  $effect(() => {
+    const shown = activeId;
+    const left = ghostIds.filter((id) => id !== shown && !turns[String(id)]);
+    if (!left.length) return;
+    untrack(() => {
+      ghostIds = ghostIds.filter((id) => !left.includes(id));
+      for (const id of left) invoke('chat_incognito_end', { id }).catch(() => {});
+    });
+  });
   /** `rec`'s conversation is the one open (a new chat's: the new chat it was asked in). */
   const isShown = (rec) => (rec.conv != null ? activeId === rec.conv : activeId == null && rec.view === viewSeq);
   /** **The open conversation's answer being written**, if any: the only one the thread and the composer show. */
@@ -902,6 +933,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // pills reopen the panel, its tabs with it — less the ones closed in it).
       doc.reset(conv.closedTabs);
       quote = null;
+      if (conv.incognito) markGhost(id);
       activeId = id;
       scope = conv.scope || null;
       summary = conv.summary ?? null;
@@ -1056,6 +1088,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     byVoice = false;
     scope = null;
     choseNew = true;
+    // A new chat starts kept, its ghost off (the Claude app's).
+    ghostNew = false;
     // A new chat has every connector on.
     connectors.resetNew();
     reportView();
@@ -1136,6 +1170,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       conversationId: activeId,
       newChat: activeId == null && choseNew,
       codeFolder: activeId == null ? (pendingFolder?.() ?? null) : null,
+      // Its ghost on: a question asked out loud there starts it incognito.
+      incognito: activeId == null && ghostNew && !(pendingFolder?.() ?? null),
     }).catch(() => {});
   }
   $effect(() => {
@@ -1347,6 +1383,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         // (its tabs closed before stay closed; a new chat it became keeps what it shows).
         if (activeId != null) doc.reset(conv.closedTabs);
         else doc.takeClosed(conv.closedTabs);
+        // (A question asked out loud into a new chat with its ghost on: incognito.)
+        if (conv.incognito) markGhost(id);
         activeId = id;
         scope = conv.scope || null;
       }
@@ -2000,6 +2038,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // lands there.
     const rec = new Answer({ conv: activeId, turn, view: viewSeq, question });
     if (retry != null) rec.askedId = question.id ?? null;
+    // A new chat's ghost on (never a Code chat's): its conversation is incognito.
+    rec.ghost = activeId == null && ghostNew && !(newChatFolder?.() ?? null);
     setTurn(rec);
     // (Read again as it ends when it didn't answer: Rust put the chat back as it was.)
     let reloadAfter = false;
@@ -2069,6 +2109,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         connectorsOff: activeId == null ? connectors.newChatOff() : null,
         // An edit (chat/commands.rs `edit`): the message it replaces, its picked elements again.
         ...(edit != null ? { edit, editFiles: opts.editFiles === true, elements: opts.elements?.length ? opts.elements : null } : {}),
+        // A new chat asked incognito (chat/incognito.rs).
+        incognito: rec.ghost || null,
       },
       onEvent
     );
@@ -2418,6 +2460,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get conversations() { return conversations; },
     set conversations(v) { conversations = v; },
     get activeId() { return activeId; },
+    /** The chat shown is incognito (a new one: its ghost is on). */
+    get incognito() { return incognito; },
+    setGhost,
     get messages() { return messages; },
     get input() { return input; },
     set input(v) { input = v; },

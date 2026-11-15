@@ -602,7 +602,8 @@ fn open(t: &Asked<'_>, conversation_id: Option<u64>, asked: impl FnOnce(u64, usi
 /// keeps Yap's memory out (the words go to the model as they are).
 async fn remembered(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, String> {
     // (Your Claude plan's tools only read: Yap's own pass remembers for it.)
-    if opened.code.is_some() || t.gates.tools && t.ep.provider != crate::ai::claude_plan::PROVIDER {
+    // (Nor in an incognito chat: memory never learns from it, chat/incognito.rs.)
+    if opened.code.is_some() || opened.conv.incognito || t.gates.tools && t.ep.provider != crate::ai::claude_plan::PROVIDER {
         return Ok(None);
     }
     let Some(done) = crate::memory::learn::spoken(&t.text).await else {
@@ -655,7 +656,12 @@ fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chat::c
             } else {
                 text.to_string()
             };
-            crate::chat::chats::create(&title)
+            // A new chat asked incognito (chat/incognito.rs): in memory only.
+            if crate::chat::incognito::new_chat() {
+                crate::chat::chats::create_incognito(&title)
+            } else {
+                crate::chat::chats::create(&title)
+            }
         }
     }
 }

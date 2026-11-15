@@ -190,6 +190,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `chat/pictures.rs` (+ `pictures/local.rs`: a picture file on this PC, by its path; `pictures/markdown.rs`: a markdown picture's "Show image", fetched only on its click, never kept) — find and show pictures.
 - `chat/shares.rs` — `share_files`: files shared into the conversation (a picture inline, other files as cards to open), an agent's report showing its turn's pictures.
 - `chat/attachments.rs` (+ `attachments/pdf.rs`, `word.rs`) — files attached to a question (+ or dropped): text, code, a PDF's and a Word file's text read on this PC, sent before the question and in its history; kept in `chat-files/` like screenshots ("Keep chat files"); anything else said plainly.
+- `chat/incognito.rs` — Incognito chats (a new chat's ghost): in memory only, never listed, searched or remembered, gone when left.
 - `chat/export.rs` — Export a chat (a conversation's ⋯): a Markdown file and its pictures in a folder beside it, never uploaded.
 - `chat/cards.rs` (+ `cards/ask.rs`, `cards/next_step.rs`, `cards/chapters.rs`) — the cards Chat's model puts in the thread: a question (`ask_user`, answered by click or out loud, kept answered), the next-step box, chapters; the plan's runs over `claude_live/cards.rs`.
 - `chat/made.rs` (+ `made/serve.rs`) — `show_visual`: an SVG diagram or small HTML widget in the answer, a sandboxed frame (`yapmade` scheme, its CSP in the response, no Yap IPC); kept in `chat-made/<chat>/`, never chats.json.

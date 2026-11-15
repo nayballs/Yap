@@ -1914,6 +1914,10 @@ one side.
   ⋯ → Export… as a Markdown file and its pictures beside it, never uploaded
   ([below](#export-a-chat-2026-11-15)).
 
+- **`chat/incognito.rs`** — **Incognito chats** (15 Nov 2026): a new chat's
+  ghost; kept in memory only, never listed, searched, remembered or used by
+  memory, gone when left ([below](#incognito-chats-2026-11-15)).
+
 ## Questions about selected text (2026-10-31)
 
 Wispr Flow's Command Mode ("Wispr Lens": "select text and ask Flow") by
@@ -5414,6 +5418,59 @@ The toast says where, and how many pictures went in which folder.
 - The log says counts only. Tests: `cargo test chat::export`;
   `chat-export.spec.js` (the menu, then the file and its folder);
   `right-click.spec.js` (the row's menu).
+
+## Incognito chats (2026-11-15)
+
+The Claude app's incognito chat, from Anthropic's help pages: a chat that
+isn't saved to the history and that memory neither uses nor learns from.
+
+- **Starting one**: a new chat on Chat's side (never a Code chat) has a
+  ghost at the thread's top right (`ChatView.svelte`, `chat-incognito`,
+  `aria-pressed`). On, the empty thread says what it means ("It isn't
+  saved to your chats, and memory isn't used or updated. It's gone when you
+  leave it.") and a ring goes round the thread (`--yap-fg-80`); its first
+  question goes with `incognito: true` (`chat_send`), and the conversation
+  the turn makes is one (`incognito::with_new` → `turn_conversation` →
+  `chats::create_incognito`). A question asked out loud with that new chat
+  in view starts it incognito too (`chat_view_state`'s `incognito`,
+  `assistant.rs` `NEW_INCOGNITO`; never a phone's). It can't be made a
+  kept chat later, and a new chat starts kept again (`newChat`).
+- **Never saved** (`chats.rs`): `Conversation::incognito`, never read from
+  a file (`skip_deserializing`); the store's save writes the others only
+  (`kept`), and so does the shared files' copy. It's never in `list`,
+  `list_archived`, `with_all` (search by meaning, the phone, Download your
+  data…), `stamp`, `search` (past chats by words) or `latest` (the Voice
+  Assistant's chat to carry on). Its pictures stay while it's open
+  (`image_ids` includes it, so the sweep keeps them).
+- **Memory unused and never learned from**: no memory's "You" or passages,
+  no past chats (`prompt::build`'s `no_memory`), no `remember` / `forget` /
+  `search_chats` (`run.rs`; on the plan, `RunSpec::with_memory(false)`), no
+  "Remember that…" for a model without tools (`turn::remembered`), and
+  `memory::learn::after_turn` / `learn_from_chat` skip it, keeping nothing
+  of it (not even how far it was read: a later chat may take its id).
+  About you applies whole: it's a setting, not something learned.
+- **On your Claude plan** (`plan.rs`): its session runs with
+  `--no-session-persistence` (`Spec::persist`), is kept in memory while Yap
+  runs (`sessions::Kept::unsaved`, never written to `claude_sessions.json`)
+  and is never resumed: a process that ended starts a new session seeded
+  with the chat so far.
+- **The thread** says so above its messages ("Incognito chat · not saved,
+  not remembered · gone when you leave it", `chat-incognito-line`) and keeps
+  its ring; the list shows no row for it.
+- **Gone when left** (`chatState.svelte.js`): the page ends each incognito
+  chat it holds once it's neither shown nor answering
+  (`chat_incognito_end` → `chats::end_incognito`: the conversation and its
+  screenshots and pictures deleted, its Claude plan session, Code-chat and
+  connectors' entries forgotten, as a deleted chat's), and Yap ends them all
+  as it quits (`shutdown_cleanup` → `end_all_incognito`). After a crash its
+  pictures are swept a day later (no chat names them). Its documents are
+  still notes in Notes (the person asked for them), and its tokens still
+  count in the AI usage numbers.
+- Tests: `cargo test chat::incognito`, `chat::chats`,
+  `chat::turn::plan::tests::an_incognito…`; `chat-incognito.spec.js` (the
+  ghost, the ring and the band in light and dark, nothing saved, no memory
+  in the request or learned, ended on New chat; on the plan,
+  `--no-session-persistence` and nothing in claude_sessions.json).
 
 ## Cards in the thread: a question, the next-step box, chapters (2026-11-15)
 
