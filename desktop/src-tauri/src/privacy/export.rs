@@ -574,6 +574,18 @@ pub fn disk_files(data: &Path, notes: &[(u64, String)], when: &dyn Fn(u64) -> St
         let file = p.file_name().and_then(|n| n.to_str()).unwrap_or("screenshot.png").to_string();
         out.push(DiskFile { name: format!("screenshots/{file}"), path: p, bytes });
     }
+    // What Chat made (chat/made.rs): each chat's visuals, as their own files.
+    let mut made: Vec<PathBuf> = std::fs::read_dir(data.join(crate::chat::made::FOLDER)).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    made.sort();
+    for d in made {
+        let Some(chat) = d.file_name().and_then(|n| n.to_str()).filter(|n| n.parse::<u64>().is_ok()).map(str::to_string) else { continue };
+        for ext in ["svg", "html"] {
+            for (p, bytes) in files_in(&d, ext) {
+                let file = p.file_name().and_then(|n| n.to_str()).unwrap_or("visual").to_string();
+                out.push(DiskFile { name: format!("chat-made/{chat}/{file}"), path: p, bytes });
+            }
+        }
+    }
     // The pictures agents' steps came back with (agents/pictures.rs):
     // agents/<id>/pictures/*.png, beside each agent's log. Never its backups.
     let mut agents: Vec<PathBuf> = std::fs::read_dir(data.join("agents")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
