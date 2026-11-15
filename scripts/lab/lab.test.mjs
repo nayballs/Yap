@@ -41,6 +41,8 @@ import { cardsOf, conversationOf, cut, endOf, summarize, toolsOf } from './turns
 describe('options', () => {
   test('arguments: values, = values, switches, positionals', () => {
     assert.deepEqual(parseArgs(['hello there', '--spoken', '--chat', 'new', '--timeout=30']), { _: ['hello there'], spoken: true, chat: 'new', timeout: '30' });
+    // (A switch never takes the next flag: `--incognito --timeout 540`, 15 Nov 2026.)
+    assert.deepEqual(parseArgs(['hi', '--incognito', '--timeout', '540', '--style', 'Concise']), { _: ['hi'], incognito: true, timeout: '540', style: 'Concise' });
     assert.throws(() => parseArgs(['--chat']), /--chat needs a value/);
     assert.equal(onOff('on', false, 'web'), true);
     assert.equal(onOff(undefined, true, 'web'), true);
