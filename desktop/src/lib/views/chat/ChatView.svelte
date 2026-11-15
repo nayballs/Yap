@@ -130,6 +130,7 @@
   import { chatSummary } from '../../stores/chatSummary.svelte.js';
   import { chatOutputs } from '../../stores/chatOutputs.svelte.js';
   import { CODE_FILES } from '../../ui/fileLinks.js';
+  import { archiveChats } from './chatLibrary.svelte.js';
   import { runCommand } from './codeRuns.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
   import { agents, initAgents, agentById } from '../../stores/agents.svelte.js';
@@ -165,6 +166,8 @@
       tick().then(() => chat.inputEl?.focus());
     },
     openSettings: (section) => onopensettings?.(section),
+    // A merged pull request's Archive in the summary (SummaryTab.svelte): this chat, as the list archives it.
+    archive: (id) => archiveChats(chat, [id], true),
   });
   // A message sent while a Code chat's own session works waits in the queue (chatState's `queued`).
   // (A Code chat: Rust says whether its own session works — the page's list of agents lags a moment behind.)
@@ -501,6 +504,8 @@
       // A long chat's older messages were summarised (chat/compact.rs).
       listen('yap-chat-summary', (e) => chat.onSummary(e.payload)),
       listen('yap-chat-images-deleted', chat.reloadActive),
+      // Chats auto-archived, or brought back by its Undo (chat/auto_archive.rs).
+      listen('yap-chats-archived', () => chat.refreshList()),
       // The document beside the chat, changed in another window or by Chat's
       // tools (its sections landing), or deleted.
       listen('yap-note-changed', (e) => doc.onNoteChanged(e.payload)),

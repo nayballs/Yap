@@ -14,9 +14,14 @@
 //   (Stop, Run again, Add to message); under Bypass permissions nothing asks.
 //   A block of two lines has no ▶; neither has a Chat (non-Code) chat.
 // - **The summary** (the title bar's button, or the list button in the panel's row of tabs):
-//   Environment (the workspace, its branch, a worktree), Context, the chat's
-//   connectors, Outputs (the files its work changed) and Background tasks (a
-//   run's clock and Stop, "N finished").
+//   Environment (the workspace, its branch, a worktree, Remote Control's
+//   switch), Changes (the branch's pull requests from the person's own `gh`:
+//   here `yap.exe fake-gh`), Context (broken down from Claude Code's own
+//   `/context`, run for the session without writing to it: the stand-in's
+//   `_context`; with no breakdown, the one number), the chat's connectors,
+//   Outputs (the files its work changed, each with a right-click menu) and
+//   Background tasks (a run's clock and Stop, "N finished"). A merged pull
+//   request's Archive archives the chat.
 //
 // The chat is on the plan with Yap's stand-in for Claude Code (agents-direct.spec.js'
 // way); the workspace and the folder "outside" it are in this run's own folder.
@@ -29,11 +34,15 @@ import { newCodeChat, toSide } from './support/code-chats.js';
 import { looksLikePath, pathsIn } from '../src/lib/ui/fileLinks.js';
 import { runnable, blockLang } from '../src/lib/ui/codeRun.js';
 import { outputItems, splitPath } from '../src/lib/views/chat/outputs.js';
+import { contextView, fmtTokens, fmtShare, shortPath, prsNote } from '../src/lib/views/chat/contextBreakdown.js';
 
 const HERE = path.join(RUNS, 'code-chat-files-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
 const GARDEN = path.join(HERE, 'folders', 'garden-planner');
 const OUTSIDE = path.join(HERE, 'folders', 'outside');
+// What the stand-ins were started with: Claude Code's `/context`, GitHub's `gh`.
+const CONTEXT_DUMP = path.join(HERE, 'context-runs.jsonl');
+const GH_DUMP = path.join(HERE, 'gh-runs.jsonl');
 
 const CONVERT0 = 'export function toCm(inches) {\n  return inches * 2.54;\n}\n\nexport function toInches(cm) {\n  return cm / 2.54;\n}\n';
 const CONVERT1 = CONVERT0.replace('return cm / 2.54;', 'return Math.round((cm / 2.54) * 10) / 10;');
@@ -95,6 +104,62 @@ function freshFolders() {
   fs.mkdirSync(gitdir, { recursive: true });
   fs.writeFileSync(path.join(gitdir, 'HEAD'), 'ref: refs/heads/claude/round-inches\n');
   fs.writeFileSync(path.join(GARDEN, '.git'), `gitdir: ${gitdir}\n`);
+  // Its repository's config, with a GitHub remote (a worktree's is its repository's: `commondir`).
+  fs.writeFileSync(path.join(gitdir, 'commondir'), '../..\n');
+  fs.writeFileSync(path.join(HERE, 'folders', 'repo.git', 'config'), '[core]\n\tbare = false\n[remote "origin"]\n\turl = https://github.com/example-org/garden-planner.git\n');
+}
+
+/** Claude Code's `/context` for the chat's session, as 2.1.296 answers it (a fictional setup). */
+const CATEGORIES = [
+  ['System prompt', 4324, 'used'],
+  ['System tools', 14959, 'used'],
+  ['MCP tools', 2050, 'used'],
+  ['MCP server instructions', 1031, 'used'],
+  ['MCP tools (deferred)', 12410, 'deferred'],
+  ['System tools (deferred)', 17928, 'deferred'],
+  ['Custom agents', 220, 'used'],
+  ['Memory files', 3612, 'used'],
+  ['Skills', 1166, 'used'],
+  ['Messages', 129046, 'used'],
+  ['Autocompact buffer', 33000, 'buffer'],
+];
+const USED = CATEGORIES.filter((c) => c[2] === 'used').reduce((sum, c) => sum + c[1], 0);
+const USAGE = {
+  model: 'claude-haiku-5-5',
+  total_tokens: USED,
+  raw_max_tokens: 1_000_000,
+  percentage: 16,
+  categories: [...CATEGORIES, ['Free space', 1_000_000 - USED - 33000, 'free']].map(([name, tokens, kind]) => ({ name, tokens, kind })),
+  mcp_tools: [
+    { name: 'mcp__notes__search', server_name: 'notes', tokens: 640 },
+    { name: 'mcp__notes__read', server_name: 'notes', tokens: 410 },
+    { name: 'mcp__calendar__list_events', server_name: 'calendar', tokens: 1000 },
+  ],
+  memory_files: [
+    { path: 'C:\\Users\\sam\\.claude\\CLAUDE.md', type: 'User', tokens: 700 },
+    { path: 'C:\\Projects\\garden-planner\\CLAUDE.md', type: 'Project', tokens: 2912 },
+  ],
+  agents: [{ agent_type: 'reviewer', source: 'userSettings', tokens: 120 }],
+  skills: [
+    { name: 'release-notes', source: 'userSettings', tokens: 237 },
+    { name: 'pdf', source: 'plugin', tokens: 904 },
+  ],
+};
+/** `gh pr list --json …`'s answer for the branch: one open (its checks running), one merged. */
+const PULLS = [
+  { number: 117, title: 'Measure the beds in centimetres', state: 'MERGED', isDraft: false, url: 'https://github.com/example-org/garden-planner/pull/117', statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS', name: 'check' }] },
+  { number: 131, title: 'Round toInches to one decimal', state: 'OPEN', isDraft: false, url: 'https://github.com/example-org/garden-planner/pull/131', statusCheckRollup: [{ __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: '', name: 'e2e' }] },
+];
+function writeGh(name, body) {
+  fs.mkdirSync(SCRIPTS, { recursive: true });
+  const file = path.join(SCRIPTS, `${name}.json`);
+  fs.writeFileSync(file, JSON.stringify(body));
+  return file;
+}
+const dumped = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+async function theme(yap, main, which) {
+  await setConfig(yap, main, { theme: which });
+  await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe(which);
 }
 
 const test = base.extend({
@@ -121,8 +186,8 @@ async function send(main, text) {
   await main.getByRole('button', { name: 'Send', exact: true }).click();
 }
 /** A Code chat in garden-planner, asked to round the converter: its turn done, its answer shown. Its conversation. */
-async function rounded(yap, main) {
-  await script(yap, ROUNDS, 'rounds');
+async function rounded(yap, main, lines = ROUNDS) {
+  await script(yap, lines, 'rounds');
   const before = (await agents(yap)).length;
   await openView(main, 'Chat');
   if (await panel(main).count()) await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
@@ -139,6 +204,8 @@ async function rounded(yap, main) {
 test.beforeEach(async ({ yap, main }) => {
   freshFolders();
   await yap.invoke('e2e_claude_approve_auto', { allow: true });
+  // No gh on this PC unless a test says otherwise.
+  await yap.invoke('e2e_gh_script', { script: null });
   await setConfig(yap, main, { agentsEnabled: true, agentsDirect: true, agentsAsk: 'new-or-web', agentsSpeak: 'never', agentsMode: 'auto', webSearch: false, speakReplies: false, assistantScreen: false });
   if (!(await yap.invoke('workspaces_list')).some((f) => f.name === 'garden-planner')) await yap.invoke('workspaces_add', { path: GARDEN });
 });
@@ -262,7 +329,11 @@ test('the summary: the workspace, its branch and worktree, context, connectors, 
   await expect(env).toContainText('garden-planner');
   await expect(env.getByTestId('chat-summary-branch')).toContainText('claude/round-inches');
   await expect(env.getByTestId('chat-summary-worktree')).toHaveText('Worktree');
+  // No breakdown (this stand-in's `/context` says nothing readable): the one number, never an error.
   await expect(summary.getByTestId('chat-summary-context').locator('.ctxpct')).toHaveText(/^\d+%$/);
+  await expect(summary.getByTestId('chat-summary-context-head')).toHaveCount(0);
+  // No gh on this PC: one quiet line.
+  await expect(summary.getByTestId('chat-summary-changes-note')).toHaveText("Install GitHub's gh to see this branch's pull requests.");
   await expect(summary.getByTestId('chat-summary-connectors')).toContainText('None in this chat');
   // Outputs: the file its work changed, which opens beside the chat.
   const outputs = summary.getByTestId('chat-summary-outputs').getByTestId('chat-output');
@@ -282,6 +353,108 @@ test('the summary: the workspace, its branch and worktree, context, connectors, 
   await button.click();
   await expect(panel(main)).toHaveCount(0);
   await expect(button).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('the summary after the Claude app: context by category from /context, the branch’s pull requests, Remote Control, an output’s menu, Archive', async ({ yap, main, shot }) => {
+  fs.rmSync(CONTEXT_DUMP, { force: true });
+  fs.rmSync(GH_DUMP, { force: true });
+  await yap.invoke('e2e_gh_script', { script: writeGh('gh-list', { stdout: PULLS, dump: GH_DUMP }) });
+  const conversation = await rounded(yap, main, [{ _context: { usage: USAGE, markdown: '## Context Usage', dump: CONTEXT_DUMP } }, ...ROUNDS]);
+  const agent = (await agents(yap)).find((a) => a.conversation === conversation);
+  await main.getByTestId('chat-summary-button').click();
+  const summary = main.getByTestId('chat-summary');
+
+  // Context: Claude Code's own /context for the chat's session, drawn as the Claude app draws it.
+  const context = summary.getByTestId('chat-summary-context');
+  await expect(context.getByTestId('chat-summary-context-head')).toHaveText('16% used · 156k / 1M');
+  await expect
+    .poll(() => context.getByTestId('chat-summary-context-cat').evaluateAll((els) => els.map((e) => e.dataset.name)))
+    .toEqual(['Messages', 'Memory files', 'System tools', 'MCP tools', 'System prompt', 'Skills', 'MCP server instructions', 'Custom agents', 'Autocompact buffer', 'Free space']);
+  const messagesRow = context.locator('[data-testid="chat-summary-context-cat"][data-name="Messages"]');
+  await expect(messagesRow).toContainText('129k');
+  await expect(messagesRow).toContainText('12.9%');
+  // The deferred ones: their tokens, no share of the window.
+  const deferred = context.getByTestId('chat-summary-context-deferred');
+  await expect(deferred).toHaveCount(2);
+  await expect(deferred.first()).toContainText('MCP tools (deferred)');
+  await expect(deferred.first().locator('.cp')).toHaveText('');
+  // The lists behind them, folded, each with its count.
+  const lists = context.getByTestId('chat-summary-context-list');
+  await expect(lists.locator('summary')).toHaveText([/MCP tools\s*3/, /Memory files\s*2/, /Custom agents\s*1/, /Skills\s*2/]);
+  await lists.first().locator('summary').click();
+  await expect(lists.first().locator('.crow')).toHaveCount(3);
+  await expect(lists.first().locator('.crow').first()).toContainText('mcp__notes__search');
+  await expect(lists.first().locator('.crow').first()).toContainText('notes');
+  // Run for the session, in its workspace, never written into it.
+  const runs = dumped(CONTEXT_DUMP);
+  expect(runs.length).toBeGreaterThanOrEqual(1);
+  for (const r of runs) {
+    expect(r.args.slice(0, 2)).toEqual(['-p', '/context']);
+    expect(r.args[r.args.indexOf('--resume') + 1]).toBe(agent.session);
+    expect(r.args).toContain('--no-session-persistence');
+    expect(r.persist).toBe(false);
+    expect(path.resolve(r.cwd).toLowerCase()).toBe(path.resolve(GARDEN).toLowerCase());
+  }
+
+  // Changes: the branch's pull requests, newest first, from the person's own gh.
+  const changes = summary.getByTestId('chat-summary-changes');
+  const pulls = changes.getByTestId('chat-summary-pr');
+  await expect(pulls).toHaveCount(2);
+  await expect(pulls.first()).toHaveAttribute('data-state', 'open');
+  await expect(pulls.first()).toHaveAttribute('data-checks', 'running');
+  await expect(pulls.first()).toContainText('Round toInches to one decimal');
+  await expect(pulls.first()).toContainText('example-org/garden-planner #131');
+  await expect(pulls.first()).toContainText('Checks running');
+  await expect(pulls.nth(1)).toHaveAttribute('data-state', 'merged');
+  await expect(pulls.nth(1)).toContainText('Checks passing');
+  await expect(pulls.first().getByTestId('chat-summary-pr-archive')).toHaveCount(0);
+  await expect(pulls.nth(1).getByTestId('chat-summary-pr-archive')).toBeVisible();
+  const gh = dumped(GH_DUMP)[0];
+  expect(gh.args).toEqual(expect.arrayContaining(['pr', 'list', '--head=claude/round-inches', '--state', 'all']));
+  expect(gh.prompts).toBe(false);
+  expect(path.resolve(gh.cwd).toLowerCase()).toBe(path.resolve(GARDEN).toLowerCase());
+
+  // Remote Control's switch: the "Code · garden-planner" card's; with Settings → Phone's off, asked first.
+  const rc = summary.getByTestId('chat-summary-remote-switch');
+  await expect(rc).toHaveAttribute('aria-checked', 'false');
+  await theme(yap, main, 'light');
+  await shot(main, '07-the-summary-broken-down');
+  await theme(yap, main, 'dark');
+  await shot(main, '07-the-summary-broken-down-dark');
+  await theme(yap, main, 'light');
+  await rc.click();
+  const ask = main.getByRole('alertdialog', { name: 'Turn on Remote Control?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(ask).toHaveCount(0);
+  await expect(rc).toHaveAttribute('aria-checked', 'false');
+
+  // A pull request opens in the person's browser (a test run keeps the link).
+  await pulls.first().locator('.propen').click();
+  await expect.poll(() => yap.invoke('e2e_opened_urls')).toContainEqual('https://github.com/example-org/garden-planner/pull/131');
+
+  // An output's right-click menu: Open, Show in folder, Copy path, Open in editor.
+  const output = summary.getByTestId('chat-summary-outputs').getByTestId('chat-output').first();
+  const menuItems = async () => {
+    await output.click({ button: 'right' });
+    const names = await main.getByRole('menu').getByRole('menuitem').allTextContents();
+    await main.keyboard.press('Escape');
+    return names.map((n) => n.trim());
+  };
+  await expect.poll(menuItems).toEqual(['Open', 'Show in folder', 'Copy path', 'Open in editor']);
+  await output.click({ button: 'right' });
+  await main.getByRole('menu').getByRole('menuitem', { name: 'Show in folder' }).click();
+  await expect.poll(() => yap.invoke('e2e_opened_urls')).toContainEqual('reveal:src/convert.js');
+  await output.click({ button: 'right' });
+  await main.getByRole('menu').getByRole('menuitem', { name: 'Open in editor' }).click();
+  await expect.poll(() => yap.invoke('e2e_opened_urls')).toContainEqual('editor:src/convert.js:0');
+
+  // A merged pull request's Archive: this chat archived, as the list archives it.
+  await pulls.nth(1).getByTestId('chat-summary-pr-archive').click();
+  await expect.poll(async () => (await yap.invoke('chats_archived')).some((c) => c.id === conversation)).toBe(true);
+  await expect(main.getByText('Chat archived')).toBeVisible();
+  await yap.invoke('chat_archive', { ids: [conversation], archived: false });
+  await yap.invoke('e2e_gh_script', { script: null });
 });
 
 test('a Chat (non-Code) chat: the same answer has no file links and no ▶, and no summary button', async ({ yap, main }) => {
@@ -329,4 +502,22 @@ test('ui/fileLinks.js, ui/codeRun.js and outputs.js: what may be a path, which b
   ]);
   expect(items[0].rel).toBe('src/a.js');
   expect(items[3].picture).toBe(true);
+  // contextBreakdown.js: the context's numbers as the Claude app writes them, the rows in its order.
+  expect([628, 4324, 32164, 156408, 934836, 1_000_000].map(fmtTokens)).toEqual(['628', '4.3k', '32.2k', '156k', '935k', '1M']);
+  expect(fmtShare(129046, 1_000_000)).toBe('12.9%');
+  expect(shortPath('C:\\Users\\sam\\.claude\\CLAUDE.md')).toBe('…\\.claude\\CLAUDE.md');
+  expect(shortPath('docs/CLAUDE.md')).toBe('docs/CLAUDE.md');
+  const view = contextView({ window: 200_000, used: 30_000, percent: 15, categories: [{ name: 'Free space', tokens: 137_000, kind: 'free' }, { name: 'Something new', tokens: 1000, kind: 'used' }, { name: 'Messages', tokens: 29_000, kind: 'used' }, { name: 'Autocompact buffer', tokens: 33_000, kind: 'buffer' }, { name: 'MCP tools (deferred)', tokens: 9000, kind: 'deferred' }], skills: [{ name: 'pdf', source: 'Plugin', tokens: 904 }] });
+  expect(view.label).toBe('15% used · 30k / 200k');
+  expect(view.rows.map((r) => [r.name, r.colour])).toEqual([['Messages', 'messages'], ['Something new', 'other'], ['Autocompact buffer', 'buffer'], ['Free space', 'free']]);
+  expect(view.segments.map((g) => g.key)).toEqual(['Messages', 'Something new', 'Autocompact buffer']);
+  expect(view.deferred.map((d) => d.name)).toEqual(['MCP tools (deferred)']);
+  expect(view.lists.map((l) => [l.key, l.count])).toEqual([['skills', 1]]);
+  expect(contextView(null)).toBe(null);
+  expect(contextView({ window: 0, categories: [{ name: 'Messages', tokens: 1, kind: 'used' }] })).toBe(null);
+  // The Changes section's quiet lines; no git: no section.
+  expect(prsNote({ status: 'no-git' })).toBe(null);
+  expect(prsNote({ status: 'ok', list: [] })).toBe('No pull requests for this branch yet.');
+  expect(prsNote({ status: 'ok', list: [{ number: 1 }] })).toBe('');
+  expect(prsNote({ status: 'signed-out' })).toMatch(/gh auth login/);
 });

@@ -627,6 +627,17 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     TEST_STORE.with(|s| f(&mut s.borrow_mut()))
 }
 
+/// Tests: conversation `id` last used at `ts` (created then too).
+#[cfg(test)]
+pub fn backdate(id: u64, ts: u64) {
+    with_store(|s| {
+        if let Some(c) = s.conversations.iter_mut().find(|c| c.id == id) {
+            c.created_ts = ts;
+            c.updated_ts = ts;
+        }
+    });
+}
+
 /// chats.json as a save would write it now (tests: never an incognito chat).
 #[cfg(test)]
 pub fn saved_json() -> String {

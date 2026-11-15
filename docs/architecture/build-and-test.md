@@ -438,6 +438,15 @@ ever reaches it, or anyone's Claude account.
   {allow?}` answers every permission prompt at once; `e2e_workspace {path}`
   is the folder the next Add workspace… takes (Settings → Yap Code, or Chat's
   workspace picker).
+- **`/context`** (a Code chat's summary, `agents/context.rs`): the stand-in
+  answers it from the script's `_context` line (`usage`, `markdown`, `turns`,
+  `cost`, `dump`), as Claude Code answers it itself — no turn, no cost.
+- **GitHub's `gh`** (the summary's Changes, `agents/prs.rs`): `yap.exe fake-gh
+  <script.json> …` (debug builds, `agents/prs/fake.rs`) prints the script's
+  `stdout` (`gh pr list --json`'s array), `stderr` and `code`, and appends
+  what it was started with to `dump`; `e2e_gh_script {script?}` switches it
+  (`null`: no `gh`), `YAP_GH_EXE` / `YAP_GH_ARGS_PREFIX` as Claude Code's. A
+  test run without one finds no `gh`, never the person's own.
 - **The recordings**: `desktop/src-tauri/src/ai/claude_code/fixtures/<version>/`,
   per Claude Code version — `real-*` recorded from the real one **signed out,
   with an empty config folder** (`CLAUDE_CONFIG_DIR`), so no login and no

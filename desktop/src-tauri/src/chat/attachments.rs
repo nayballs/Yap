@@ -4,11 +4,13 @@
 //!
 //! - **Which files** ([`read`]): text and code (by their bytes: UTF-8, or
 //!   UTF-16 with its mark; no NUL bytes), Markdown, a PDF's text read on this
-//!   PC (`pdf.rs`, never uploaded to be read), a Word document's text
-//!   (`word.rs`). Anything else — a spreadsheet, a zip, a program — is said
-//!   plainly ("Chat can't read budget.xlsx…"), never added. At most
-//!   [`MAX_BYTES`] a file and [`MAX_CHARS`] of text; [`MAX_FILES`] a
-//!   question.
+//!   PC (`pdf.rs`, never uploaded to be read; a scanned page read with
+//!   Windows' OCR, `scan.rs`, the chip saying so), a Word document's text
+//!   (`word.rs`; an older `.doc`'s, `doc.rs`), a PowerPoint presentation's
+//!   slides and speaker notes (`powerpoint.rs`). Anything else — a
+//!   spreadsheet, a zip, a program, an older `.ppt` — is said plainly
+//!   ("Chat can't read budget.xlsx…"), never added. At most [`MAX_BYTES`] a
+//!   file and [`MAX_CHARS`] of text; [`MAX_FILES`] a question.
 //! - **Kept** like Chat's screenshots: the file's copy and its text in
 //!   `<data>/chat-files/` (`<id>/<name>`, `<id>.txt`); the question keeps
 //!   its [`Attachment`]s (`ChatMessage::attachments`: ids, names, sizes,
@@ -38,7 +40,10 @@
 //! leaves the PC only inside the Chat request it's sent with (and that
 //! chat's follow-ups); nothing reads it but Chat.
 
+pub mod doc;
 pub mod pdf;
+pub mod powerpoint;
+pub mod scan;
 pub mod word;
 
 use std::collections::{HashMap, HashSet};
@@ -73,7 +78,7 @@ pub struct Attachment {
     pub id: String,
     /// Its name ("seed-order.pdf").
     pub name: String,
-    /// "text" | "code" | "markdown" | "pdf" | "word".
+    /// "text" | "code" | "markdown" | "pdf" | "word" | "powerpoint".
     pub kind: String,
     /// The file's size.
     #[serde(default)]
@@ -84,6 +89,13 @@ pub struct Attachment {
     /// A PDF's pages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pages: Option<u32>,
+    /// A PDF's pages read with OCR (scans: no text in them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr_pages: Option<u32>,
+    /// A PDF's pages with no text that weren't read (past OCR's limit, or
+    /// too slow): named in a note at the end of its text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unread_pages: Option<u32>,
     /// The page's copy only (`for_page`): past "Keep chat files", removed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub gone: bool,
@@ -184,34 +196,52 @@ pub fn delete(ids: &[String]) -> usize {
 
 // ---- reading a file -----------------------------------------------------------------------------
 
-/// A file's text, read: its kind, the text, a PDF's pages.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A file's text, read: its kind, the text, a PDF's pages (and how many of
+/// them were read with OCR, or left unread).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Read {
     pub kind: &'static str,
     pub text: String,
     pub pages: Option<u32>,
+    pub ocr_pages: Option<u32>,
+    pub unread_pages: Option<u32>,
+}
+
+impl Read {
+    fn of(kind: &'static str, text: String) -> Read {
+        Read { kind, text, ..Read::default() }
+    }
 }
 
 /// **The text of a file** called `name` with `bytes`, or why Chat can't
-/// read it (a plain sentence, the file named). A PDF is read in its own
-/// thread (`pdf::text`): blocking.
+/// read it (a plain sentence, the file named). A PDF, its scanned pages and
+/// an older `.doc` are read in their own threads (`pdf::text`,
+/// `scan::read`, [`old_word`]): blocking.
 pub fn read(name: &str, bytes: Vec<u8>) -> Result<Read, String> {
     let ending = Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     if bytes.is_empty() {
         return Err(format!("{name} is empty."));
     }
-    let (kind, text, pages) = match ending.as_str() {
+    let couldnt = || format!("Yap couldn't read the text of {name}.");
+    let read = match ending.as_str() {
         "pdf" => match pdf::text(bytes) {
-            Ok((text, pages)) => ("pdf", text, Some(pages)),
+            Ok(t) => Read { kind: "pdf", text: t.text, pages: Some(t.pages), ocr_pages: (t.ocr > 0).then_some(t.ocr), unread_pages: (t.unread > 0).then_some(t.unread) },
             Err(pdf::Why::Locked) => return Err(format!("{name} is password-protected, so Yap can't read it.")),
-            Err(pdf::Why::NoText) => return Err(format!("{name} has no text Yap can read: its pages may be pictures (a scan). Snip a page to Chat instead.")),
-            Err(pdf::Why::Failed) => return Err(format!("Yap couldn't read the text of {name}.")),
+            Err(pdf::Why::NoText) => return Err(format!("{name} has no text Yap can read: its pages are pictures, and Windows' text recognition found no words on them.")),
+            Err(pdf::Why::NoOcr) => return Err(format!("{name} has no text Yap can read: its pages are pictures (a scan), and Windows' text recognition isn't set up on this PC (add a language in Settings → Time & language). Snip a page to Chat instead.")),
+            Err(pdf::Why::Failed) => return Err(couldnt()),
         },
-        "docx" => match word::text(&bytes) {
-            Some(text) if !text.trim().is_empty() => ("word", text, None),
-            Some(_) => return Err(format!("{name} has no text in it.")),
-            None => return Err(format!("Yap couldn't read the text of {name}.")),
+        "docx" | "docm" | "dotx" => match word::text(&bytes) {
+            Some(text) => Read::of("word", text),
+            None => return Err(couldnt()),
         },
+        "pptx" | "pptm" | "ppsx" | "potx" => match powerpoint::text(&bytes) {
+            Some(text) => Read::of("powerpoint", text),
+            None => return Err(couldnt()),
+        },
+        "doc" | "dot" => old_word(name, bytes)?,
+        // (No small, safe reader of the older binary presentations: said.)
+        "ppt" | "pps" | "pot" => return Err(cant_read(name, &ending)),
         _ => {
             let kind = match crate::chat::shares::kind_of(Path::new(name)) {
                 "markdown" => "markdown",
@@ -220,32 +250,95 @@ pub fn read(name: &str, bytes: Vec<u8>) -> Result<Read, String> {
                 _ => "text",
             };
             match decode(&bytes) {
-                Some(text) if !text.trim().is_empty() => (kind, text, None),
-                Some(_) => return Err(format!("{name} is empty.")),
+                Some(text) => Read::of(kind, text),
                 None => return Err(cant_read(name, &ending)),
             }
         }
     };
-    let chars = text.chars().count();
+    if read.text.trim().is_empty() {
+        return Err(match read.kind {
+            "word" | "powerpoint" => format!("{name} has no text in it."),
+            _ => format!("{name} is empty."),
+        });
+    }
+    let chars = read.text.chars().count();
     if chars > MAX_CHARS {
-        let tokens = crate::chat::budget::estimate(&text);
+        let tokens = crate::chat::budget::estimate(&read.text);
         return Err(format!("{name} is too long to send: about {} tokens of text.", round_tokens(tokens)));
     }
-    Ok(Read { kind, text, pages })
+    Ok(read)
 }
 
-/// What's said for a file whose text isn't readable. Pure.
+/// **An older Word document** (`.doc`): its text through `doc.rs`, in its
+/// own thread (a panic in the container's reader stays there). One that's
+/// really another kind, as some apps save them — a `.docx`, or RTF or HTML
+/// (text) — is read as what it is.
+fn old_word(name: &str, bytes: Vec<u8>) -> Result<Read, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new().name("doc-text".into()).spawn(move || {
+        let got = std::panic::catch_unwind(|| doc::text(&bytes));
+        let _ = tx.send((got, bytes));
+    });
+    if spawned.is_err() {
+        return Err(format!("Yap couldn't read the text of {name}."));
+    }
+    let Ok((got, bytes)) = rx.recv_timeout(std::time::Duration::from_secs(30)) else {
+        tracing::warn!("Chat: an older Word document took too long to read");
+        return Err(format!("Yap couldn't read the text of {name}."));
+    };
+    match got {
+        Ok(Ok(text)) => Ok(Read::of("word", text)),
+        Ok(Err(doc::Why::Locked)) => Err(format!("{name} is password-protected, so Yap can't read it.")),
+        Ok(Err(doc::Why::NotOle)) => match word::text(&bytes) {
+            Some(text) => Ok(Read::of("word", text)),
+            None => decode(&bytes).map(|text| Read::of("text", text)).ok_or_else(|| format!("Yap couldn't read the text of {name}.")),
+        },
+        Ok(Err(doc::Why::Unreadable)) => Err(format!("Yap couldn't read the text of {name} (it may be from Word 95 or older): save it as .docx in Word to attach it.")),
+        Err(_) => {
+            tracing::warn!("Chat: the Word document reader gave up on a file");
+            Err(format!("Yap couldn't read the text of {name}."))
+        }
+    }
+}
+
+/// What's said for a file whose text isn't readable, worded for its kind.
+/// Pure.
 pub fn cant_read(name: &str, ending: &str) -> String {
     let what = match ending {
         "xlsx" | "xls" | "xlsm" | "ods" => " (a spreadsheet: save it as CSV to attach it)",
-        "doc" => " (an older Word document: save it as .docx to attach it)",
-        "pptx" | "ppt" | "odp" | "key" => " (a presentation)",
+        "ppt" | "pps" | "pot" => " (an older PowerPoint presentation: save it as .pptx in PowerPoint to attach it)",
+        "odp" => " (an OpenDocument presentation: save it as .pptx to attach it)",
+        "key" => " (a Keynote presentation: export it as PowerPoint to attach it)",
+        "odt" | "pages" => " (a document: save it as .docx to attach it)",
         "zip" | "7z" | "rar" | "tar" | "gz" => " (an archive)",
         "mp3" | "wav" | "m4a" | "flac" | "ogg" => " (audio: Upload transcribes it)",
         "mp4" | "mov" | "mkv" | "webm" | "avi" => " (a video)",
         _ => "",
     };
-    format!("Chat can't read {name}{what}. It reads text, code, PDF and Word files, and pictures.")
+    format!("Chat can't read {name}{what}. It reads text, code, PDF, Word and PowerPoint files, and pictures.")
+}
+
+/// **A file's `<source>` line**: its name and, for a PDF, Word document or
+/// presentation, what its text is (a PDF's pages, those read with OCR,
+/// those left out). Chat's questions and a project's files say it alike.
+/// Pure.
+pub fn source(name: &str, kind: &str, pages: Option<u32>, ocr_pages: Option<u32>, unread_pages: Option<u32>) -> String {
+    let s = |n: u32| if n == 1 { "" } else { "s" };
+    match kind {
+        "pdf" => {
+            let mut what = format!("a PDF{}: its text, read on the person's PC", pages.map(|p| format!(", {p} page{}", s(p))).unwrap_or_default());
+            if let Some(n) = ocr_pages.filter(|n| *n > 0) {
+                what.push_str(&format!("; {n} scanned page{} read with OCR, which can get words wrong", s(n)));
+            }
+            if let Some(n) = unread_pages.filter(|n| *n > 0) {
+                what.push_str(&format!("; {n} page{} not read, named at the end", s(n)));
+            }
+            format!("{name} ({what})")
+        }
+        "word" => format!("{name} (a Word document: its text)"),
+        "powerpoint" => format!("{name} (a PowerPoint presentation: each slide's text, then its speaker notes)"),
+        _ => name.to_string(),
+    }
 }
 
 /// Tokens said roughly ("12k", "1.2M", "800"). Pure.
@@ -337,6 +430,8 @@ pub fn keep(name: &str, bytes: Vec<u8>) -> Result<Attachment, String> {
         bytes: size,
         tokens: crate::chat::budget::estimate(&read.text),
         pages: read.pages,
+        ocr_pages: read.ocr_pages,
+        unread_pages: read.unread_pages,
         gone: false,
     };
     let folder = dir();
@@ -350,7 +445,7 @@ pub fn keep(name: &str, bytes: Vec<u8>) -> Result<Attachment, String> {
         delete(std::slice::from_ref(&a.id));
         return Err(format!("Yap couldn't keep {name}: {e}"));
     }
-    tracing::info!(kind = a.kind, bytes = a.bytes, tokens = a.tokens, pages = a.pages, "Chat: a file attached");
+    tracing::info!(kind = a.kind, bytes = a.bytes, tokens = a.tokens, pages = a.pages, ocr_pages = a.ocr_pages, unread_pages = a.unread_pages, "Chat: a file attached");
     added().map().insert(a.id.clone(), a.clone());
     Ok(a)
 }
@@ -416,11 +511,7 @@ pub fn block_of(files: &[(Attachment, Option<String>)]) -> String {
             lines.push(removed_line(&a.name));
             continue;
         };
-        let source = match a.kind.as_str() {
-            "pdf" => format!("{} (a PDF{}: its text, read on the person's PC)", a.name, a.pages.map(|p| format!(", {p} page{}", if p == 1 { "" } else { "s" })).unwrap_or_default()),
-            "word" => format!("{} (a Word document: its text)", a.name),
-            _ => a.name.clone(),
-        };
+        let source = source(&a.name, &a.kind, a.pages, a.ocr_pages, a.unread_pages);
         out.push_str(&format!("<document index=\"{}\">\n<source>{source}</source>\n<document_content>\n{}\n</document_content>\n</document>\n", i + 1, text.trim_end()));
     }
     out.push_str("</documents>");
@@ -610,7 +701,9 @@ fn mirror_of(convs: &[crate::chat::chats::Conversation]) -> Mirror {
 }
 
 /// **Put back** the files an older Yap's save dropped: a question at the
-/// copy's place, at its time, with none. How many. Pure.
+/// copy's place, at its time, with none; and a file's fields a Yap from
+/// before them dropped (a PDF's `ocrPages` / `unreadPages`, 16 Nov 2026).
+/// How many questions. Pure.
 fn restore_from(convs: &mut [crate::chat::chats::Conversation], mirror: &Mirror) -> usize {
     let mut put = 0;
     for k in &mirror.messages {
@@ -619,12 +712,25 @@ fn restore_from(convs: &mut [crate::chat::chats::Conversation], mirror: &Mirror)
             Some(m) if m.ts == k.ts => Some(k.index),
             _ => c.messages.iter().position(|m| m.ts == k.ts && m.role == "user" && m.attachments.is_empty()),
         };
-        if let Some(m) = at.and_then(|i| c.messages.get_mut(i)) {
-            if m.attachments.is_empty() && m.role == "user" {
-                m.attachments = k.files.clone();
-                put += 1;
+        let Some(m) = at.and_then(|i| c.messages.get_mut(i)).filter(|m| m.role == "user") else { continue };
+        if m.attachments.is_empty() {
+            m.attachments = k.files.clone();
+            put += 1;
+            continue;
+        }
+        let mut filled = false;
+        for a in m.attachments.iter_mut() {
+            let Some(kept) = k.files.iter().find(|f| f.id == a.id) else { continue };
+            if a.ocr_pages.is_none() && kept.ocr_pages.is_some() {
+                a.ocr_pages = kept.ocr_pages;
+                filled = true;
+            }
+            if a.unread_pages.is_none() && kept.unread_pages.is_some() {
+                a.unread_pages = kept.unread_pages;
+                filled = true;
             }
         }
+        put += usize::from(filled);
     }
     put
 }

@@ -120,6 +120,14 @@ pub fn run_fake_claude() -> i32 {
     ai::claude_code::fake::main(std::env::args().skip(2).collect())
 }
 
+/// `yap.exe fake-gh <script.json> …` (main.rs, debug builds): a stand-in
+/// for GitHub's `gh`, for tests (`agents/prs/fake.rs`). Nothing of the app
+/// itself starts.
+#[cfg(debug_assertions)]
+pub fn run_fake_gh() -> i32 {
+    agents::prs::fake::main(std::env::args().skip(2).collect())
+}
+
 /// `yap.exe eval …` (main.rs): the model evaluation harness (`eval.rs`,
 /// docs/model-evals.md). Debug builds only; a release build says so and
 /// exits. Returns the exit code (0 = every scenario passed).
@@ -519,6 +527,10 @@ pub fn run() {
             chat::commands::chat_tabs_closed,
             chat::commands::chats_archived,
             chat::commands::chat_archive,
+            chat::auto_archive::chat_queued,
+            chat::auto_archive::chats_auto_archive_unsaid,
+            chat::auto_archive::chats_auto_archive_said,
+            chat::auto_archive::chats_auto_archive_undo,
             chat::commands::chat_send,
             chat::shares::chat_file_open,
             chat::shares::chat_file_reveal,
@@ -594,6 +606,9 @@ pub fn run() {
             agents::files::code_file_read,
             agents::files::code_file_open_editor,
             agents::files::code_chat_environment,
+            agents::files::code_file_reveal,
+            agents::context::code_chat_context,
+            agents::prs::code_chat_pull_requests,
             agents::run_block::code_run_check,
             agents::run_block::code_run_start,
             agents::run_block::code_run_stop,
@@ -894,6 +909,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_claude_script,
             #[cfg(debug_assertions)]
+            shell::e2e::e2e_gh_script,
+            #[cfg(debug_assertions)]
             shell::e2e::e2e_agents_seed,
             #[cfg(debug_assertions)]
             ai::claude_plan::spare::e2e_claude_spares,
@@ -965,6 +982,8 @@ pub fn run() {
             ai::local_llm::vision::e2e_local_vision,
             #[cfg(debug_assertions)]
             notices::policy::e2e_notice_reset,
+            #[cfg(debug_assertions)]
+            chat::auto_archive::e2e_chat_auto_archive,
             #[cfg(debug_assertions)]
             notices::policy::e2e_notice,
             #[cfg(debug_assertions)]
@@ -1438,6 +1457,8 @@ pub fn run() {
             chat::pages::view::init(&handle);
             // Which conversations are answering (chat/stream.rs): Chat's status dots.
             chat::stream::init(&handle);
+            // Chats not used in a while archived (chat/auto_archive.rs; off by default): soon, then daily.
+            chat::auto_archive::init(&handle);
 
             // A saved transform's shortcut (transforms.rs): its slot, run on
             // its own thread.
@@ -1564,6 +1585,8 @@ pub fn run() {
                             // moves into the window (one place: notices/policy.rs).
                             calls::meeting_detect::on_main_window_focused(&focus_handle);
                             calendar::on_main_window_focused();
+                            // …and chats archived while the person was away are said.
+                            chat::auto_archive::on_main_window_focused(&focus_handle);
                             // Files dragged in from Explorer: any input window
                             // WebView2 made anew gets Yap's drop target.
                             shell::file_drop::attach(&w);

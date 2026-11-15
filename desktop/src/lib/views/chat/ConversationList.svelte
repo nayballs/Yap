@@ -12,6 +12,7 @@
   // Shift+click and Ctrl+click pick several (the "N selected" bar deletes
   // them); Delete, Esc and Ctrl+A from the keyboard.
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
   import { toast } from '../../ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, devInspect } from '../../ui/contextMenu.svelte.js';
   import { THREAD_VIEWS, threadViewOf, setThreadView } from './threadView.svelte.js';
@@ -47,6 +48,14 @@
   // Search every chat, and the archive (chatLibrary.svelte.js; their lists
   // are ChatLibraryList.svelte, loaded the first time one shows).
   const lib = createChatLibrary(() => chat);
+  // Chats auto-archived, or brought back by its Undo (chat/auto_archive.rs): Archived looks again.
+  $effect(() => {
+    const un = listen('yap-chats-archived', async () => {
+      await lib.refreshArchived();
+      if (!lib.archived.length) lib.showArchived = false;
+    });
+    return () => un.then((f) => f()).catch(() => {});
+  });
   let searchEl = $state(null);
   let libView = $state(null);
   function searchKeydown(e) {

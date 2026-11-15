@@ -64,7 +64,7 @@
   gets its next one moved up); the hook gives every first shortcut and
   earlier one precedence, `input_hook::assign_more`), triple_tap_meeting
   (`tripleTapMeeting`, off: push-to-talk's triple-tap starts meeting notes,
-  `dictation/gesture.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + snip_listen ("Then listen for my question", on, 2026-10-25: after a spoken "snip" lands in Chat a Voice Assistant question starts by itself; `snip::listens_after`) + snip_copy ("Copy every snip to the clipboard", on, 2026-10-25: Settings → Shortcuts; a snip to Chat is copied too, out of Win+V history). Both new fields: an older Yap sharing the folder drops them on its next save and they come back on (their default) — harmless + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md) + chat_file_days ("Keep chat files", 2026-11-15: the same choices for the files attached to Chat's questions; `chat/attachments.rs`) + snip_save_dir (the folder a snip's or a chat screenshot's Save opened in last, "" = Pictures; `snip/copy_save.rs`), rewrite_last_dictation (`rewriteLastDictation`,
+  `dictation/gesture.rs`), snip_hotkey (Snip to Chat, default Win+Alt+S "kb:alt+win+83", "" = unbound; never a clash, `input_hook::configure_snip_from`) + snip_voice ("Say “snip” to take a screenshot", on) + snip_listen ("Then listen for my question", on, 2026-10-25: after a spoken "snip" lands in Chat a Voice Assistant question starts by itself; `snip::listens_after`) + snip_copy ("Copy every snip to the clipboard", on, 2026-10-25: Settings → Shortcuts; a snip to Chat is copied too, out of Win+V history). Both new fields: an older Yap sharing the folder drops them on its next save and they come back on (their default) — harmless + chat_image_days ("Keep chat screenshots": 7 / 30 (default) / 90 / 0 = forever; another value counts as 30; changing it sweeps at once; all `snip.rs`, docs/architecture/snip.md) + chat_file_days ("Keep chat files", 2026-11-15: the same choices for the files attached to Chat's questions; `chat/attachments.rs`) + chat_archive_days ("Archive chats you haven't used in", Settings → Privacy & data, 2026-11-15: 7 / 30 / 90 days, **0 = never, the default**; a chat whose last message is that old moves to Archived by itself, at start, once a day and when the setting changes; `chat/auto_archive.rs`. Off by default, so no migration; an older Yap drops it on its next save and auto-archive is off again) + snip_save_dir (the folder a snip's or a chat screenshot's Save opened in last, "" = Pictures; `snip/copy_save.rs`), rewrite_last_dictation (`rewriteLastDictation`,
   serde default on: the rewrite shortcut with nothing selected rewrites the
   last dictation — within a minute, in the same field, still ending at the
   cursor —; off, it writes new text as before 2026-10-23; Settings →
@@ -708,17 +708,22 @@
   Kept by Reset app.
 - Chat's attached files (2026-11-15, `chat/attachments.rs`):
   `%APPDATA%/yap/chat-files/` — `file_<16 hex>/<name>`, the file's copy, and
-  `file_<16 hex>.txt`, its text as sent (a PDF's and a Word document's read
-  on this PC); `chats.json` keeps the question's `attachments` (id, name,
-  kind, bytes, tokens, a PDF's pages), never the text. Deleted with its
+  `file_<16 hex>.txt`, its text as sent (a PDF's — its scanned pages read
+  with Windows' OCR —, a Word document's, `.docx` or an older `.doc`, and a
+  PowerPoint presentation's, read on this PC); `chats.json` keeps the
+  question's `attachments` (id, name, kind, bytes, tokens, a PDF's pages,
+  and since 16 Nov 2026 `ocrPages` / `unreadPages`: its pages read with OCR,
+  and those with no text left unread), never the text. Deleted with its
   conversation, after "Keep chat files" (`chat_file_days`: 7 / 30 (default) /
   90 / 0 = forever; another value counts as 30), and a day after a file
   that was never sent. **New field**: an older Yap's save drops
   `attachments`, so every save also writes
   `%APPDATA%/yap/chat_attachments.json` (`{version, messages:
   [{conversation, index, ts, files}]}`, removed when there are none), put
-  back at the next start (`attachments::restore_from_disk`). Never logged;
-  leaves the PC only inside the Chat request it's sent with.
+  back at the next start (`attachments::restore_from_disk`); so are
+  `ocrPages` / `unreadPages`, which a Yap from before them drops from a
+  question's files. Never logged; leaves the PC only inside the Chat
+  request it's sent with.
 - Chat screenshots: `%APPDATA%/yap/chat-images/` — `img_<16 hex>.png` for each
   screenshot a question carries (Snip to Chat, `snip/images.rs`); `chats.json`
   keeps only its id, size, bytes and source. Deleted with its conversation, after
@@ -773,7 +778,9 @@
   `note`: the thread is then an ordinary chat in Chat, its messages kept.
   An archived conversation has `archivedTs` (when; 2026-10-25, written only when
   set — a Yap from before keeps the conversation and drops the field on
-  its next save, so it shows in the list again). An answer may keep
+  its next save, so it shows in the list again); auto-archive
+  (`chat_archive_days`, `chat/auto_archive.rs`) sets the same field, in one
+  write per run, and leaves `updatedTs` as it was. An answer may keep
   `tokens` (`{prompt, answer, perSecond?}`, 2026-10-25: its last model
   call's counts, for Chat's context ring); an older Yap's save drops it,
   and the ring estimates instead. An answer Yap's free web sources couldn't
@@ -1074,7 +1081,8 @@
   data has it (`chats/chat_styles.json`). Never logged (counts only).
 - Projects: `%APPDATA%/yap/projects.json` (2026-11-15, `chat/projects.rs`,
   Chat's Projects) — `{projects: [{id, name, description, instructions,
-  files: [{id, name, kind, bytes, tokens, pages?, addedMs}], createdMs,
+  files: [{id, name, kind, bytes, tokens, pages?, ocrPages?, unreadPages?,
+  addedMs}], createdMs,
   updatedMs}], chats: {"<conversation id>": "<project id>"}}`: the person's
   projects (at most 100; a name at most 60 characters, what it's for 300,
   instructions 8,000; at most 50 files each) and which chat is in which.
@@ -1286,7 +1294,8 @@
   Win+Alt+S (`snip_hotkey`), saying "snip" taking one (`snip_voice`) and then
   listening for the question (`snip_listen`), every snip to Chat on the
   clipboard too (`snip_copy`), and chat
-  screenshots kept 30 days (`chat_image_days`), a snip's Save opening in
+  screenshots kept 30 days (`chat_image_days`), chats never archived by
+  themselves (`chat_archive_days` 0), a snip's Save opening in
   Pictures until a folder is chosen (`snip_save_dir` ""), the rewrite
   shortcut taking the last dictation when nothing is selected
   (`rewrite_last_dictation` on; the shortcut itself unbound), Yap's five
