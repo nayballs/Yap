@@ -260,11 +260,17 @@ pub struct Beside {
     pub pictures: Vec<crate::chat::pictures::ShownPicture>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<crate::chat::shares::Share>,
+    /// The next-step box it ended with (`suggest_next_step`, `chat/cards.rs`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_step: Option<crate::chat::cards::next_step::NextStep>,
+    /// The chapter it started (`mark_chapter`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapter: Option<crate::chat::cards::chapters::Chapter>,
 }
 
 impl Beside {
     pub fn is_empty(&self) -> bool {
-        self.pages.is_empty() && self.pictures.is_empty() && self.files.is_empty()
+        self.pages.is_empty() && self.pictures.is_empty() && self.files.is_empty() && self.next_step.is_none() && self.chapter.is_none()
     }
 
     /// Another turn's, after these (a report covering several turns): each once.
@@ -283,6 +289,13 @@ impl Beside {
             if !self.files.contains(f) {
                 self.files.push(f.clone());
             }
+        }
+        // The box is the latest turn's (a report covering several turns ends as the last did); the chapter the first's.
+        if more.next_step.is_some() {
+            self.next_step = more.next_step.clone();
+        }
+        if self.chapter.is_none() {
+            self.chapter = more.chapter.clone();
         }
     }
 }
@@ -1404,6 +1417,27 @@ pub fn disk_bytes() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reports_box_is_its_last_turns_and_its_chapter_its_first() {
+        use crate::chat::cards::{chapters::Chapter, next_step::NextStep};
+        let turn = |recap: &str, title: &str| Beside {
+            next_step: (!recap.is_empty()).then(|| NextStep { recap: recap.into(), ..Default::default() }),
+            chapter: (!title.is_empty()).then(|| Chapter { title: title.into(), ..Default::default() }),
+            ..Default::default()
+        };
+        assert!(Beside::default().is_empty());
+        assert!(!turn("Done.", "").is_empty() && !turn("", "Beds").is_empty(), "a box or a chapter alone is something to keep");
+        let mut covered = Beside::default();
+        for t in [turn("First.", "Beds"), turn("", "Watering"), turn("Last.", "")] {
+            covered.add(&t);
+        }
+        assert_eq!(covered.next_step.map(|n| n.recap).as_deref(), Some("Last."));
+        assert_eq!(covered.chapter.map(|c| c.title).as_deref(), Some("Beds"));
+        // An older Yap's turn (no fields): read as none.
+        let old: Beside = serde_json::from_str(r#"{"pages":[]}"#).unwrap();
+        assert!(old.next_step.is_none() && old.chapter.is_none());
+    }
     use serde_json::json;
 
     fn agent(id: &str, status: Status, ended: u64) -> Agent {

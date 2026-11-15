@@ -5276,7 +5276,9 @@ turn. Chat and Code chats alike, wherever Chat's model answers: the tool loop
 Claude Code over Yap's run endpoint (`integrations/claude_live/cards.rs`), the
 same code. A Code chat that works directly is Claude Code's own session:
 its questions are Claude Code's `AskUserQuestion` ([yap-code.md](./yap-code.md#the-agent-tab)),
-now on the same form.
+now on the same form, and its run lists the next-step box and chapters too
+(`Cards::for_code_session`, kept with its answer through the report:
+[yap-code.md](./yap-code.md#a-code-chat-that-works-directly)).
 
 - **Where** (`Cards::for_turn`, the turn's `Gates::cards`): a model that calls
   tools, in Chat or the Voice Assistant, never across the meetings. A

@@ -999,7 +999,10 @@ no Local API (the bridge can be off), and it reaches the live UI.
   result; the box and a chapter go at once. A turn may use what its own
   gates say (`turn::Context::cards`: never a question from a phone, the box
   with Chat in view); a Code chat's own session in Bypass permissions is
-  asked nothing. [chat-and-assistant.md](./chat-and-assistant.md#cards-in-the-thread-a-question-the-next-step-box-chapters-2026-11-15).
+  asked nothing. A Code chat's own session (an agent's run that
+  `RunSpec::reads`) lists the box and chapters as well
+  (`Cards::for_code_session`, `server.rs` keeps them for it); never an
+  agent Chat sent out. [chat-and-assistant.md](./chat-and-assistant.md#cards-in-the-thread-a-question-the-next-step-box-chapters-2026-11-15).
 - **The screen and the pages from a plan chat** (`eyes.rs`, 2026-11-07; the
   one browser toolset since 8 Nov 2026): for a Chat run registered with
   `RunSpec::eyes` (`with_eyes`: the screen look's gate, the pages' and

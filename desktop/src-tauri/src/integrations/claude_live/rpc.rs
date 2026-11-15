@@ -185,13 +185,16 @@ fn instructions(spec: &RunSpec) -> String {
     match spec.tools {
         Tools::Chat if spec.agents => with_cards(format!("{} {AGENT_INSTRUCTIONS}", chat()), spec.cards),
         Tools::Chat => with_cards(chat(), spec.cards),
-        Tools::Agent if spec.reads => [AGENT_RUN_INSTRUCTIONS, READS_INSTRUCTIONS]
-            .into_iter()
-            .chain(agent_eyes_lines(spec.eyes, spec.approval.as_ref().is_some_and(|a| a.unattended)))
-            .chain(servers_offered(spec).then_some(crate::chat::pages::preview::INSTRUCTIONS))
-            .chain(std::iter::once(VISUALS_INSTRUCTIONS))
-            .collect::<Vec<_>>()
-            .join(" "),
+        Tools::Agent if spec.reads => with_cards(
+            [AGENT_RUN_INSTRUCTIONS, READS_INSTRUCTIONS]
+                .into_iter()
+                .chain(agent_eyes_lines(spec.eyes, spec.approval.as_ref().is_some_and(|a| a.unattended)))
+                .chain(servers_offered(spec).then_some(crate::chat::pages::preview::INSTRUCTIONS))
+                .chain(std::iter::once(VISUALS_INSTRUCTIONS))
+                .collect::<Vec<_>>()
+                .join(" "),
+            spec.cards,
+        ),
         Tools::Agent => AGENT_RUN_INSTRUCTIONS.to_string(),
     }
 }
@@ -320,6 +323,8 @@ pub fn tools(ep: &Endpoint, spec: &RunSpec) -> Vec<Value> {
             }
             // Visuals in the chat's thread (chat/made.rs, 15 Nov 2026).
             out.push(visual_tool());
+            // The next-step box and chapters (chat/cards.rs, 15 Nov 2026): its questions are Claude Code's own.
+            out.extend(cards::definitions(spec.cards));
             out
         }
         Tools::Agent => vec![approve::definition()],
@@ -385,9 +390,10 @@ fn call(ep: &Endpoint, run: &Run, id: Value, params: &Value) -> Value {
     // Only the run's own tools; `create_note` is never one (read only).
     // (Its workspace's dev servers, where it lists them: `servers_offered`.)
     let preview = servers_offered(&run.spec) && crate::chat::pages::preview::NAMES.contains(&name);
-    // The cards in the thread (a Chat run listing them): the tool loop's code, for the turn
-    // the call belongs to; a question waits here for the answer. It logs its own outcome.
-    if run.spec.tools == Tools::Chat && run.spec.cards.offers(name) {
+    // The cards in the thread (a Chat run listing them, or a Code chat's own session its box and
+    // chapters): the tool loop's code, for the turn the call belongs to; a question waits here for
+    // the answer. It logs its own outcome.
+    if run.spec.cards.offers(name) {
         return ok(id, cards::call(run, name, &args));
     }
     if !preview && !tool_names(run.spec.tools, true, run.spec.agents, run.spec.memory, run.spec.eyes, run.spec.reads).contains(&name) {

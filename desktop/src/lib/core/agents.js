@@ -542,8 +542,9 @@ export function stepRow(s, live = false) {
   return { text: doneLine(s.step) };
 }
 
-/** Yap's and Claude Code's own plumbing among a stretch's steps: no row of its own once it's past. */
-const PLUMBING = /^(Starting Claude Code|Thinking|Picking up your request|Picking up where it left off|Finding a tool|Using yap · approve)$/;
+/** Yap's and Claude Code's own plumbing among a stretch's steps: no row of its own once it's past (the next-step
+ * box and a chapter, chat/cards.rs, show as themselves: the box, the divider). */
+const PLUMBING = /^(Starting Claude Code|Thinking|Picking up your request|Picking up where it left off|Finding a tool|Using yap · approve|Wrapping up|Marking a chapter)$/;
 
 /**
  * **The rows of a stretch opened**: `[{ step, i, now, times }]` — its
