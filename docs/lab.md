@@ -194,6 +194,16 @@ permission prompt), `plan:<agent id>` (an agent's plan: `allow` is Go ahead, `de
 stops it). A card unanswered for 2 minutes is a no (Yap's own rule), so answer
 promptly.
 
+**A question of Chat's own model** (`ask_user`, 15 Nov 2026: `confirm:<n>` with
+`kind: "question"`, its `questions` and their options listed in `cards`, and once
+answered `picked` and `said`): `answer confirm:<n> pick "Plain text"` picks an option
+(several questions: `"Plain text|Short"`, in order; several picks on one: `"Route,Budget"`;
+words that aren't an option are the person's own), `allow` each question's first
+option, `deny` Let Yap decide. A single question with one answer is clicked on its card
+in the thread, as the person would; the rest go through `chat_question_answer`. It
+waits 10 minutes. Asked out loud, answer it out loud: `ask "the second one" --spoken
+--chat same` (whatever is said next in that conversation is its answer).
+
 ```json
 {"ok":true,"answered":{"id":"approve:1","how":"allow","wasWaiting":true},"agents":[{"id":"1a1bad23b2f261d619b","folder":"lab-sandbox","status":"done","conversation":1,"mode":"auto","plan":false,"text":"Done. I changed Draft to Final in notes.md and the tests pass.","files":["notes.md"],"commands":["npm test"],"denials":[],"error":null,"cost":0.041}],"pending":[],"reports":[{"conversation":1,"report":"The agent in lab-sandbox: it's done.\n…","answer":"OK"}]}
 ```

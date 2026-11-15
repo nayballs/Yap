@@ -143,14 +143,21 @@ export function cardsOf(items, { approvals = [], agents = [] } = {}) {
     if (ev.kind !== 'confirm' || ev.id == null) continue;
     const card = {
       id: `confirm:${ev.id}`,
-      kind: ev.act === 'connector' ? 'connector' : ev.act === 'agent' ? 'agent' : 'page',
+      kind: ev.act === 'connector' ? 'connector' : ev.act === 'agent' ? 'agent' : ev.act === 'question' ? 'question' : 'page',
       act: ev.act || 'press',
       label: ev.label ?? '',
       site: ev.site ?? '',
       does: ev.does ?? '',
       state: ev.state ?? '',
-      answers: ev.act === 'connector' ? ['allow', 'always', 'deny'] : ['allow', 'deny'],
+      answers: ev.act === 'connector' ? ['allow', 'always', 'deny'] : ev.act === 'question' ? ['allow', 'deny', 'pick'] : ['allow', 'deny'],
     };
+    // Chat's own model's question (chat/cards/ask.rs): its questions and options, and once answered what was picked.
+    if (ev.question) {
+      card.questions = (ev.question.questions ?? []).map((q) => ({ question: q.question, header: q.header ?? '', multiSelect: !!q.multiSelect, options: (q.options ?? []).map((o) => o.label) }));
+      if (Object.keys(ev.question.answers ?? {}).length) card.picked = ev.question.answers;
+      if (ev.question.said) card.said = ev.question.said;
+      if (ev.question.voice) card.voice = true;
+    }
     if (ev.text) card.text = cut(ev.text, 200);
     if (ev.agent) card.agent = { folder: ev.agent.folder ?? ev.agent.name ?? '', mode: ev.agent.mode ?? '', brief: cut(ev.agent.brief ?? '', 300) };
     if (ev.connector) card.connector = { connector: ev.connector.connector ?? '', tool: ev.connector.tool ?? '', args: (ev.connector.args ?? []).map((a) => `${a.key}: ${a.value}`) };
@@ -373,7 +380,12 @@ export function summarize({ turn, items, conv, pages = [], approvals = [], agent
       cost: note?.cost ?? null,
     };
   }
-  if (out.status === 'waiting') out.hint = `A card is waiting (it times out after 2 minutes): npm run lab -- answer ${pending[0].id} allow|deny${pending[0].answers.includes('always') ? '|always' : ''}`;
+  if (out.status === 'waiting') {
+    out.hint =
+      pending[0].kind === 'question'
+        ? `A question is waiting (10 minutes): npm run lab -- answer ${pending[0].id} pick "<option>" (several questions: "A|B"; several picks: "A,B"), allow (each one's first option), deny (Let Yap decide); or out loud: ask "<answer>" --spoken --chat same`
+        : `A card is waiting (it times out after 2 minutes): npm run lab -- answer ${pending[0].id} allow|deny${pending[0].answers.includes('always') ? '|always' : ''}`;
+  }
   if (out.status === 'running') out.hint = direct ? 'Claude Code is still working in the Code chat: npm run lab -- wait' : 'Still answering: npm run lab -- wait';
   return out;
 }

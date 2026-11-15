@@ -44,7 +44,7 @@
    * opened (a `ShownPicture`). `pagethumb(url)`: a page's picture taken
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, onnext = null, busy = false } = $props();
   // **Under the person's message in a Code chat** (14 Nov 2026, the Claude Code app's: Copy, Rewind, Fork from here;
   // `actions`: `{ rewind, fork }` — why each can't run now, '' when it can —, `onrewind`, `onfork`; agents/rewind.rs).
   const act = (why, run) => () => {
@@ -365,6 +365,13 @@
       <span class="byline stopped" title="You stopped this answer while it was being written">· Stopped</span>
     {/if}
   </div>
+{/if}
+{#if m.role === 'assistant' && m.nextStep?.recap && last && !m.streaming}
+  <!-- The next-step box (suggest_next_step): under the chat's latest answer only, its buttons sending the
+       person's answer (its own chunk). -->
+  {#await import('./NextStepBox.svelte') then { default: NextStepBox }}
+    <NextStepBox next={m.nextStep} onpick={onnext} {busy} />
+  {/await}
 {/if}
 
 <style>

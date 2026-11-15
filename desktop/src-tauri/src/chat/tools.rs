@@ -314,6 +314,9 @@ pub struct Extra<'a> {
     /// Where those pictures are kept for the turn (the answer keeps the ones
     /// shown).
     pub file_pictures: Option<&'a crate::chat::pictures::Files>,
+    /// **The cards in the thread** (`chat/cards.rs`): `ask_user`,
+    /// `suggest_next_step`, `mark_chapter`, as the turn's gates offer them.
+    pub cards: crate::chat::cards::Cards,
     /// **`share_files`** (`chat/shares.rs`): files shared into the
     /// conversation, wherever `show_picture` takes a path — with the web on
     /// (a path, or one of the turn's pictures: the web turn's), or the

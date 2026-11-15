@@ -94,6 +94,9 @@ class Answer {
     // What it showed so far, for its bubble when its conversation opens again:
     // the ask-first cards, the documents, pictures, pages and buttons, the screen it looked at.
     this.confirms = null;
+    // The next-step box it ended with and the chapter it started (chat/cards.rs): kept with its answer.
+    this.nextStep = null;
+    this.chapter = null;
     this.docs = [];
     this.pictures = [];
     // The shots the model took of a page (its steps' thumbnails: chat/pages/see.rs).
@@ -501,6 +504,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (rec.spoken) b.spoken = true;
     else b.turn = rec.turn;
     if (rec.confirms?.length) b.confirms = rec.confirms;
+    if (rec.nextStep) b.nextStep = rec.nextStep;
+    if (rec.chapter) b.chapter = rec.chapter;
     if (rec.docs.length) b.liveDocs = rec.docs;
     if (rec.pictures.length) b.livePictures = rec.pictures;
     if (rec.shots.length) b.liveShots = rec.shots;
@@ -529,6 +534,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       m.waiting = l.waiting;
       m.liveThinking = l.thinking;
       if (rec.confirms) m.confirms = rec.confirms;
+      if (rec.nextStep) m.nextStep = rec.nextStep;
+      if (rec.chapter) m.chapter = rec.chapter;
       if (rec.shots.length) m.liveShots = rec.shots;
       if (rec.shares.length) m.liveFiles = rec.shares;
     }
@@ -937,6 +944,16 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
    * its question, sent at once as its Skill. On an empty chat it's asked
    * across the meetings from then on.
    */
+  /**
+   * **A next-step box's button** (chat/cards/next_step.rs): its words sent as
+   * the person's next message, as if typed (the box goes once anything follows it).
+   */
+  function sendNextStep(button) {
+    const text = String(button?.reply || button?.label || '').trim();
+    if (!text || sending) return;
+    send({ text });
+  }
+
   function runPrompt(skill) {
     if (sending || !skill?.question) return;
     if (!messages.length) scope = 'meetings';
@@ -1031,6 +1048,17 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (shown) doc.setAsking(ev);
       const have = rec.confirms || [];
       rec.confirms = have.some((c) => c.id === ev.id) ? have.map((c) => (c.id === ev.id ? ev : c)) : [...have, ev];
+      paint(rec);
+      return true;
+    }
+    // **The next-step box and a chapter** (chat/cards.rs): kept with the answer, drawn as it's written.
+    if (ev?.kind === 'nextStep' && ev.next) {
+      rec.nextStep = ev.next;
+      paint(rec);
+      return true;
+    }
+    if (ev?.kind === 'chapter' && ev.chapter) {
+      rec.chapter = ev.chapter;
       paint(rec);
       return true;
     }
@@ -1843,6 +1871,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         offers: res.offers ?? rec.offers,
         // The questions it asked before acting on a page (their cards, answered).
         confirms: (ai >= 0 ? messages[ai].confirms : null) || rec.confirms || null,
+        // The next-step box it ended with, the chapter it started (chat/cards.rs).
+        nextStep: rec.nextStep,
+        chapter: rec.chapter,
         revisedFrom: streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
       // The question as saved: with its screenshots' text when it went as text.
@@ -2179,6 +2210,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     skillKey,
     pickSkill,
     runPrompt,
+    sendNextStep,
     openSource,
     reportView,
     followAssistantStream,

@@ -17,6 +17,13 @@
 //!   "Send this to an agent in garden-planner, in Auto mode? Say yes, or
 //!   press Allow.", the bar card titled "Send this to an agent?" with its
 //!   folder, mode and brief ([`agent_line`], [`agent_card`]).
+//! - **A question of Chat's own model** (act "question", `chat/cards/ask.rs`,
+//!   15 Nov 2026): the question and its options said ("Which format should
+//!   the notes use: Markdown, Plain text or A table? Say one, or pick on the
+//!   card."), the bar listing them (two: its buttons) with Let Yap decide.
+//!   Not a yes or no: **whatever the person says next** in that conversation,
+//!   within the question's own wait (`ask::WAIT`), is its answer
+//!   ([`Spoken::Words`]), matched to the options there (`ask::heard`).
 //!
 //! **The spoken answer** works as Yap Code's spoken yes does
 //! (`agents/voice.rs`): the next Voice Assistant question in that
@@ -72,6 +79,10 @@ pub struct Waiting {
     pub generation: u64,
     pub since: Arc<AtomicU64>,
     pub owner: u64,
+    /// **A question's card** (act "question"): its questions — whatever is
+    /// said next answers it, and the bar's options pick from them. Empty
+    /// for a card that asks yes or no.
+    pub questions: Vec<crate::chat::cards::ask::Question>,
 }
 
 static WAITING: Mutex<Option<Waiting>> = Mutex::new(None);
@@ -124,6 +135,9 @@ pub enum Spoken {
     No,
     /// A yes to a question that takes a click: said so, still waiting.
     NeedsClick,
+    /// Words that answer a question's card (act "question"), whatever they
+    /// are: matched to its options there (`ask::heard`).
+    Words,
 }
 
 /// **The spoken answer to the question waiting in `conversation`**, if
@@ -132,8 +146,16 @@ pub enum Spoken {
 /// question, for its answer and its turn. A yes or a no takes it out of the
 /// slot (its card's answer follows); a yes that needs a click leaves it.
 pub fn take(conversation: Option<u64>, question: &str, langs: &[String], meeting: bool) -> Option<(Spoken, Waiting)> {
-    let yes = reply(question, langs)?;
     let mut s = slot();
+    // A question's card: whatever is said next in its conversation answers it.
+    if let Some(w) = s.as_ref().filter(|w| !w.questions.is_empty() && Some(w.conversation) == conversation && w.at.elapsed() <= crate::chat::cards::ask::WAIT).cloned() {
+        if question.trim().is_empty() {
+            return None;
+        }
+        *s = None;
+        return Some((Spoken::Words, w));
+    }
+    let yes = reply(question, langs)?;
     let w = s.as_ref().filter(|w| Some(w.conversation) == conversation && w.at.elapsed() <= WAIT)?.clone();
     let said = match (yes, w.spoken && !meeting) {
         (false, _) => Spoken::No,
@@ -142,6 +164,12 @@ pub fn take(conversation: Option<u64>, question: &str, langs: &[String], meeting
     };
     *s = None;
     Some((said, w))
+}
+
+/// **The questions of question card `card`**, if it's the one waiting (the
+/// bar's options pick from them).
+pub fn questions_of(card: u64) -> Option<Vec<crate::chat::cards::ask::Question>> {
+    slot().as_ref().filter(|w| w.card == card && !w.questions.is_empty()).map(|w| w.questions.clone())
 }
 
 /// The bar card's buttons: `allow:<id>` / `deny:<id>` → (id, allow). Pure.
@@ -178,6 +206,11 @@ pub fn asking(card: &Card, meeting: bool) -> Option<Asking> {
             let a = card.agent.as_ref()?;
             let spoken = !meeting && a.mode != "bypassPermissions";
             Some(Asking { line: agent_line(a, spoken), bar: agent_card(card.id, a, spoken), spoken })
+        }
+        // A question of Chat's own model: said with its options, any words answer it.
+        crate::chat::cards::ask::ACT => {
+            let q = card.question.as_deref()?;
+            Some(Asking { line: crate::chat::cards::ask::spoken_line(q), bar: crate::chat::cards::ask::bar_card(card.id, q), spoken: !meeting })
         }
         "" | "press" | "enter" | "open" | "type" | "drag" => {
             let spoken = !meeting && !CLICK_ONLY.contains(&card.does.as_str());
@@ -551,7 +584,7 @@ mod tests {
     #[test]
     fn a_spoken_answer_takes_only_the_question_waiting_in_its_conversation() {
         let en = vec!["en".to_string()];
-        let w = |card: u64, spoken: bool| Waiting { conversation: 5, card, spoken, at: Instant::now(), generation: 3, since: Arc::new(AtomicU64::new(0)), owner: 9 };
+        let w = |card: u64, spoken: bool| Waiting { conversation: 5, card, spoken, at: Instant::now(), generation: 3, since: Arc::new(AtomicU64::new(0)), owner: 9, questions: Vec::new() };
         wait(w(1, true));
         assert!(take(Some(6), "Yes", &en, false).is_none(), "another conversation's");
         assert!(take(Some(5), "What's the weather?", &en, false).is_none(), "a question of its own");
@@ -571,5 +604,27 @@ mod tests {
         wait(w(4, true));
         assert!(!ended(1) && ended(9));
         assert!(take(Some(5), "Yes", &en, false).is_none());
+        // A question's card: whatever is said next in its conversation answers it.
+        let q = crate::chat::cards::ask::Question { question: "Which format?".into(), header: "Format".into(), options: vec![], multi_select: false };
+        wait(Waiting { questions: vec![q], ..w(6, true) });
+        assert_eq!(questions_of(6).map(|qs| qs.len()), Some(1));
+        assert!(take(Some(7), "Plain text", &en, false).is_none(), "another conversation's");
+        assert_eq!(take(Some(5), "Plain text please", &en, false).map(|(s, w)| (s, w.card)), Some((Spoken::Words, 6)));
+        assert!(questions_of(6).is_none(), "taken");
+    }
+
+    #[test]
+    fn a_question_card_is_said_with_its_options_and_carded_with_them() {
+        use crate::chat::cards::ask::{Choice, Question, QuestionCard, ACT};
+        let opt = |l: &str| Choice { label: l.into(), description: String::new(), preview: String::new() };
+        let q = QuestionCard { questions: vec![Question { question: "Short or detailed?".into(), header: "Length".into(), options: vec![opt("Short"), opt("Detailed")], multi_select: false }], voice: true, ..Default::default() };
+        let card = Card { id: 11, act: ACT.into(), question: Some(Box::new(q)), ..Default::default() };
+        let a = asking(&card, false).unwrap();
+        assert_eq!(a.line, "Short or detailed: Short or Detailed? Say one, or pick on the card.");
+        assert!(a.spoken);
+        assert_eq!((a.bar.id.as_str(), a.bar.title.as_str()), (CARD, "Short or detailed?"));
+        assert_eq!(a.bar.primary.as_ref().map(|b| b.id.as_str()), Some("pick:11:0"));
+        assert!(!asking(&card, true).unwrap().spoken, "never by voice in a meeting");
+        assert!(asking(&Card { act: ACT.into(), ..Default::default() }, false).is_none(), "no questions: nothing to say");
     }
 }

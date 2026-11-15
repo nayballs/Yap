@@ -152,6 +152,13 @@ pub enum Event {
     /// the panel opens its tab (`agent:<id>`), as for a page. Its progress is
     /// the app-wide `yap-agent` event (`agents/runner.rs`).
     Agent { agent: crate::agents::AgentRef },
+    /// **The next-step box** under the answer (`suggest_next_step`,
+    /// `chat/cards/next_step.rs`): its recap, question and buttons.
+    NextStep { next: crate::chat::cards::next_step::NextStep },
+    /// **A new chapter** starts at this turn's question (`mark_chapter`,
+    /// `chat/cards/chapters.rs`): the divider above it, an entry in the
+    /// contents.
+    Chapter { chapter: crate::chat::cards::chapters::Chapter },
 }
 
 /// Tool calls whose arguments the page sees as they come: a document's
@@ -211,6 +218,9 @@ pub fn doing(name: &str) -> &'static str {
         "agent_status" => "Checking on the agent…",
         "message_agent" => "Telling the agent…",
         "stop_agent" => "Stopping the agent…",
+        // The cards in the thread (chat/cards.rs).
+        "ask_user" => "Asking you…",
+        "suggest_next_step" | "mark_chapter" => "Wrapping up…",
         // Yap's read-only tools on your Claude plan (claude_live.rs).
         "list_meetings" | "search_meetings" | "get_meeting" => "Looking at your meetings…",
         "list_tasks" => "Looking at your tasks…",
@@ -244,8 +254,13 @@ pub struct Seen {
     /// When the answer's first words showed, after the watch began.
     pub first_words: Option<Duration>,
     /// The questions asked before acting on a page, each as it is now (the
-    /// answer keeps them: `chats::set_confirms`).
+    /// answer keeps them: `chats::set_confirms`) — and Chat's own model's
+    /// questions to the person (act "question", `chat/cards/ask.rs`).
     pub confirms: Vec<crate::chat::pages::act::confirm::Card>,
+    /// The next-step box the turn ended with (the latest call's).
+    pub next_step: Option<crate::chat::cards::next_step::NextStep>,
+    /// The chapter the turn started (the latest call's).
+    pub chapter: Option<crate::chat::cards::chapters::Chapter>,
 }
 
 impl<'a> Watch<'a> {
@@ -278,6 +293,8 @@ impl Sink for Watch<'_> {
                     Some(c) => *c = card.clone(),
                     None => s.confirms.push(card.clone()),
                 },
+                Event::NextStep { next } => s.next_step = Some(next.clone()),
+                Event::Chapter { chapter } => s.chapter = Some(chapter.clone()),
                 _ => {}
             }
         }

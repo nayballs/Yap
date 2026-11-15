@@ -1822,6 +1822,11 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   the same card, "The agent has a question", each question with its short
   header, its options as buttons with their descriptions, **Something
   else…** for the person's own words, and **Let it decide**.
+  - **The form is Chat's own question card's** (15 Nov 2026,
+    `views/chat/QuestionForm.svelte`, the questions' type
+    `chat/cards/ask.rs` `Question`): the same look and answers in a Code
+    chat and in Chat ([chat-and-assistant.md](./chat-and-assistant.md#cards-in-the-thread-a-question-the-next-step-box-chapters-2026-11-15)),
+    an option's `preview` beside the options too.
   - **One question with one answer** is answered by the click on its
     option. **Several questions, or one where several options may be
     picked**: each answered, then **Send** (`core/agentNow.js`

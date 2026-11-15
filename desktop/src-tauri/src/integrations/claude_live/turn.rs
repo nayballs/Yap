@@ -98,6 +98,10 @@ pub struct Context {
     /// **A Code chat's workspace** (its own session's turns): where its dev
     /// servers are (`preview_*`, `agents/servers.rs`). `None`: none offered.
     pub workspace: Option<String>,
+    /// **The cards in the thread this turn** (`chat/cards.rs`, as the tool
+    /// loop's gates have them: a phone's question never asks, the box needs
+    /// Chat in view). Off: refused (`claude_live/cards.rs`).
+    pub cards: crate::chat::cards::Cards,
 }
 
 /// The turn open now.

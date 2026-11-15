@@ -1169,6 +1169,8 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         // a plan Code chat's session always could; an agent Chat sent out
         // doesn't (Chat's model reads for its brief).
         reads: direct,
+        // (Chat's cards in the thread are a Chat run's; Claude Code asks with its own AskUserQuestion.)
+        cards: Default::default(),
     }) {
         Ok(r) => r,
         Err(e) => return failed_early(id, n, format!("Couldn't start the agent: {e}"), None),

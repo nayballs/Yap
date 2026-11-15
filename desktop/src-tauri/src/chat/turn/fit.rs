@@ -76,12 +76,18 @@ pub(super) enum Family {
     /// `look_at_picture` by a path, `chat/pictures/local.rs`): cheap, and
     /// only offered when the turn has one to show — kept then ([`keeps`]).
     Files,
+    /// The cards in the thread (`chat/cards.rs`: `ask_user`,
+    /// `suggest_next_step`, `mark_chapter`) and their lines: the first to go
+    /// (a small model answers in words as well).
+    Cards,
 }
 
 /// **The order families go in** — what costs most and matters least to a
 /// small model first (8 Nov 2026, measured with `budget::estimate`, schemas
 /// and lines together; see the `costs` tests):
 ///
+/// 0. the cards in the thread (15 Nov 2026: a question, the next-step box,
+///    chapters), ~700 — a small model asks and wraps up in words as well;
 /// 1. acting, ~580 tokens (the on-device Qwen) — a small model acts on pages
 ///    least well, and only a typed question about an open page needs it;
 /// 2. seeing, ~400 (a model that reads images), and every picture it looks
@@ -103,7 +109,8 @@ pub(super) enum Family {
 ///
 /// Never: the notes and documents' tools, the web's, memory's `remember` /
 /// `forget` — what Chat is for.
-pub(super) const ORDER: [Family; 12] = [
+pub(super) const ORDER: [Family; 13] = [
+    Family::Cards,
     Family::Acting,
     Family::Seeing,
     Family::Agents,
@@ -134,6 +141,7 @@ impl Family {
             Family::Browser => "browser",
             Family::Apps => "apps",
             Family::Files => "files",
+            Family::Cards => "cards",
         }
     }
 
@@ -160,6 +168,7 @@ impl Family {
             Family::Browser => Gates { pictures: Gate::Off, act: false, ..g },
             Family::Apps => Gates { apps: false, ..g },
             Family::Files => Gates { files: Gate::Off, ..g },
+            Family::Cards => Gates { cards: crate::chat::cards::Cards::default(), ..g },
         }
     }
 
@@ -443,6 +452,7 @@ mod tests {
             picture_tools: true,
             files: Gate::Off,
             share_tools: true,
+            cards: Default::default(),
         }
     }
 
