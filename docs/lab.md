@@ -318,12 +318,13 @@ uses it.
 {"ok":true,"window":"thread","found":true,"theme":"light","words":"THE END","has":true}
 ```
 
-### `click --window main|thread|panel --css <selector>`
+### `click --window main|thread|panel --css <selector> [--right]`
 
 Clicks one of the test Yap's own buttons, as the person would (14 Nov 2026, for the
 message box's queue: a queued message's **Send now** — `[data-testid="chat-queued-send-now"]`
 — and **Cancel and edit** — `[data-testid="chat-queued-cancel"]`): the first match that
-shows, in Yap's own window only, never a page beside the chat.
+shows, in Yap's own window only, never a page beside the chat. `--right` right-clicks
+(16 Nov 2026: a file link's menu, `.md-filelink`).
 
 ```json
 {"ok":true,"window":"thread","css":"[data-testid=\"chat-queued-send-now\"]","clicked":true}
@@ -816,6 +817,13 @@ that hits one should say so, and it isn't a bug in the tool:
   its Save as itself, in the lab's folder.
 - **GitHub's `gh`**: none (a Code chat's summary says "Install GitHub's gh"), unless
   `set --gh on`: then the person's own, read only, on Yap's public repository only.
+- **Editors** (16 Nov 2026, a Code chat's file links, `agents/editors.rs`): a link
+  opened in an editor or Windows' default app starts nothing; `state`'s
+  `filesOpened` has the command it would have run (`program`, `args`,
+  `commandLine`). The editors are the ones on this PC, or the stand-ins a JSON
+  file names when `YAP_LAB_EDITORS` points at one before `start`
+  (`[{"id": "vscode", "program": "C:\\Tools\\Microsoft VS Code\\Code.exe"}]`;
+  the ids are `agents/editors.rs` `KINDS`' and `JETBRAINS`').
 - **Other apps' text**: no reading the window in front, the selection or the text
   around the cursor in another app; no pastes, no keys into other apps.
 - **Claude Code's own copies of plan chats**: a test run never looks in the person's

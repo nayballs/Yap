@@ -14,9 +14,13 @@
 //   outside it, `..` or a link that leads out. What Rust says is kept while
 //   Yap runs (a miss for a few seconds only: a file a turn is writing turns
 //   up).
-// - **Opened** with a click or Enter: `files.open({ rel, line })`, the file
-//   view beside the chat (FileTab.svelte). A Chat (non-Code) chat has no
-//   `files` (null): nothing is looked for and every path stays text.
+// - **Opened** with a click or Enter: `files.open({ rel, line })`, where
+//   Settings → Yap Code's "Open file links in" says (views/chat/fileOpen.svelte.js:
+//   the file view beside the chat, FileTab.svelte, by default; an editor; the
+//   default app). A right-click, the ContextMenu key or Shift+F10 on one:
+//   `files.menu(e, { rel, line, abs }, el)` (Open in Yap, Open in <editor>,
+//   Show in folder, Copy path). A Chat (non-Code) chat has no `files`
+//   (null): nothing is looked for and every path stays text.
 // - **Never markup**: the words are split into text nodes and an `a` made
 //   here, never set as HTML.
 //
@@ -98,6 +102,7 @@ function candidates(node) {
 /** Make `el` open `ref` (a link's look, the keyboard's Enter). */
 function mark(el, ref) {
   el.dataset.rel = ref.rel;
+  if (ref.abs) el.dataset.abs = ref.abs;
   if (ref.line) el.dataset.fileLine = String(ref.line);
   el.classList.add('md-filelink');
   el.setAttribute('role', 'link');
@@ -185,20 +190,35 @@ function linker(node, files, find) {
   const seen = new MutationObserver(soon);
   seen.observe(node, { childList: true, subtree: true, characterData: true });
 
-  function opened(e) {
+  /** The file link `e` is on, in this node. */
+  const linkOf = (e) => {
     const el = e.target instanceof Element ? e.target.closest('.md-filelink[data-rel]') : null;
-    if (!el || !node.contains(el)) return false;
+    return el && node.contains(el) ? el : null;
+  };
+  const refOf = (el) => ({ rel: el.dataset.rel, line: Number(el.dataset.fileLine) || null, abs: el.dataset.abs || '' });
+  function opened(e) {
+    const el = linkOf(e);
+    if (!el) return false;
     e.preventDefault();
     e.stopPropagation();
-    ctx?.open?.({ rel: el.dataset.rel, line: Number(el.dataset.fileLine) || null });
+    const { rel, line } = refOf(el);
+    ctx?.open?.({ rel, line });
     return true;
+  }
+  /** Its menu (Yap's, at the pointer or under the link): nothing without a `menu`, so the message's own shows. */
+  function menu(e) {
+    const el = linkOf(e);
+    if (!el || !ctx?.menu) return false;
+    return ctx.menu(e, refOf(el), el) !== false;
   }
   const click = (e) => opened(e);
   const key = (e) => {
     if (e.key === 'Enter') opened(e);
+    else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) menu(e);
   };
   node.addEventListener('click', click);
   node.addEventListener('keydown', key);
+  node.addEventListener('contextmenu', menu);
   return {
     update(next) {
       ctx = next;
@@ -210,6 +230,7 @@ function linker(node, files, find) {
       seen.disconnect();
       node.removeEventListener('click', click);
       node.removeEventListener('keydown', key);
+      node.removeEventListener('contextmenu', menu);
     },
   };
 }

@@ -12,6 +12,11 @@
   //   **Most Chat may choose** (`agentsCeilingModel`, `agentsCeilingEffort`:
   //   "No limit" by default; the person's own words still go above it), the
   //   Mode a new chat starts in (`agentsMode`; Bypass permissions asks once).
+  // - **Open file links in** (`agentsOpenFiles`, agents/editors.rs, 16 Nov 2026):
+  //   Yap's file view, VS Code, Cursor, another editor found on this PC
+  //   (`code_editors`, looked for afresh when the page opens), or Windows'
+  //   default app. VS Code and Cursor are always listed, greyed out when
+  //   they aren't here; a chosen editor that's gone stays shown, said so.
   // - **Workspaces** (the workspaces, `workspaces_*`): name, path and a
   //   cap ("Never above:"), Add workspace… (the folder picker), Remove (its
   //   Code chats are plain chats again, said here); their own Claude
@@ -82,6 +87,43 @@
     { value: 'key', label: 'API key' },
   ];
 
+  // "Open file links in": the editors on this PC (agents/editors.rs `code_editors`).
+  const ALWAYS = [
+    ['vscode', 'VS Code'],
+    ['cursor', 'Cursor'],
+  ];
+  let found = $state({ loaded: false, list: [], choice: 'yap', choiceName: null });
+  const openOptions = $derived.by(() => {
+    const here = (id) => found.list.some((e) => e.id === id);
+    const chosen = cfg.agentsOpenFiles || 'yap';
+    const out = [{ value: 'yap', label: "Yap's file view" }];
+    for (const [id, name] of ALWAYS) {
+      const gone = found.loaded && !here(id);
+      out.push({ value: id, label: gone ? `${name} (not on this PC)` : name, disabled: gone && chosen !== id });
+    }
+    for (const e of found.list) if (!ALWAYS.some(([id]) => id === e.id)) out.push({ value: e.id, label: e.name });
+    // The chosen editor, no longer on this PC: still shown, so the box says what's saved.
+    if (!out.some((o) => o.value === chosen) && chosen !== 'default') out.push({ value: chosen, label: `${(found.choice === chosen && found.choiceName) || 'That editor'} (not on this PC)` });
+    out.push({ value: 'default', label: "Windows' default app" });
+    return out;
+  });
+  const openLine = $derived.by(() => {
+    const chosen = cfg.agentsOpenFiles || 'yap';
+    if (chosen === 'yap') return 'Read only, beside the chat, at the line. Right-click a link to open it in an editor, show it in its folder or copy its path.';
+    if (chosen === 'default') return "Each file in the app Windows opens it with. A file Windows would run rather than open, such as a script or a web page, opens in Yap's file view instead.";
+    const name = found.list.find((e) => e.id === chosen)?.name;
+    if (found.loaded && !name) return "That editor isn't on this PC, so links open in Yap's file view until it's back.";
+    return `At the line, in ${name || 'that editor'}. A spreadsheet still opens as a sheet in Yap. Right-click a link to open it in Yap instead.`;
+  });
+  async function loadOpenWith() {
+    try {
+      const v = await invoke('code_editors', { refresh: true });
+      found = { loaded: true, list: v?.editors || [], choice: v?.choice || 'yap', choiceName: v?.choiceName || null };
+    } catch {
+      found = { ...found, loaded: true };
+    }
+  }
+
   let folders = $state([]);
   let bypassConfirmed = $state(false);
   let confirmBypass = $state(false);
@@ -123,6 +165,7 @@
     refreshAgents();
     loadFolders();
     loadMode();
+    loadOpenWith();
     modeBefore = cfg.agentsMode || 'auto';
   });
 
@@ -261,6 +304,12 @@
   </Row>
   <Row label="Mode" desc="The Mode a new code chat starts in. Change it for one chat beside Chat's message box." setting="yap-code-mode">
     <Select bind:value={cfg.agentsMode} options={MODES} ariaLabel="Mode" onchange={onMode} wide />
+  </Row>
+</Group>
+
+<Group title="Files in {CODE_NAME} chats" desc="A file's path in a {CODE_NAME} chat's answer, or one you @-mentioned, is a link to that file." id="settings-yap-code-files">
+  <Row label="Open file links in" desc={openLine} setting="yap-code-open-files" stack>
+    <Select bind:value={cfg.agentsOpenFiles} options={openOptions} ariaLabel="Open file links in" wide />
   </Row>
 </Group>
 

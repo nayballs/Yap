@@ -130,8 +130,9 @@
   import { chatSummary } from '../../stores/chatSummary.svelte.js';
   import { chatOutputs } from '../../stores/chatOutputs.svelte.js';
   import { CODE_FILES } from '../../ui/fileLinks.js';
+  import { openFileLink, openFileLinkMenu, loadEditors } from './fileOpen.svelte.js';
   import { archiveChats } from './chatLibrary.svelte.js';
-  import { SHEETS, isSheetName } from './sheetView.js';
+  import { SHEETS } from './sheetView.js';
   import { runCommand } from './codeRuns.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
   import { agents, initAgents, agentById } from '../../stores/agents.svelte.js';
@@ -164,8 +165,11 @@
     get conversation() {
       return code.current ? (chat.activeId ?? null) : null;
     },
-    // (A spreadsheet opens as a sheet, as Excel draws it: SheetTab.)
-    open: (ref) => (isSheetName(ref?.rel) ? doc.showSheet({ src: { from: 'workspace', conversation: chat.activeId, rel: ref.rel }, name: String(ref.rel).split('/').pop() }) : doc.showFile(ref)),
+    // Where Settings → Yap Code's "Open file links in" says (fileOpen.svelte.js, agents/editors.rs):
+    // Yap's view by default (a spreadsheet as a sheet, as Excel draws it: SheetTab), an editor, the default app.
+    open: (ref) => openFileLink(ref, { doc, conversation: chat.activeId }),
+    // A link's right-click menu: Open in Yap, Open in <editor>, Show in folder, Copy path.
+    menu: (e, ref, el) => openFileLinkMenu(e, ref, el, { doc, conversation: chat.activeId }),
     run: (block) => runCommand(chat.activeId, block, () => doc.showRuns()),
     addToMessage: (text) => {
       chat.input = chat.input.trim() ? `${chat.input.trimEnd()}\n\n${text}` : text;
@@ -535,6 +539,8 @@
     chat.loadVoiceSettings();
     chat.refreshVision();
     chat.refreshLimits();
+    // Where file links open (Settings → Yap Code): the editor a link's menu names.
+    loadEditors();
     // Opened while the Voice Assistant thinks or speaks: its ■ shows here too
     // (on its question's conversation).
     chat.refreshAssistant();
@@ -599,6 +605,7 @@
       // Settings changed "Speak replies" or "When to speak" (or the Chat
       // model, or how long screenshots are kept).
       listen('yap-config-saved', () => {
+        loadEditors();
         chat.loadVoiceSettings();
         chat.refreshVision();
         chat.refreshLimits();

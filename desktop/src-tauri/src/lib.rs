@@ -632,6 +632,8 @@ pub fn run() {
             agents::files::code_files_check,
             agents::files::code_file_read,
             agents::files::code_file_open_editor,
+            agents::files::code_file_open,
+            agents::editors::code_editors,
             agents::files::code_chat_environment,
             agents::files::code_file_reveal,
             agents::context::code_chat_context,
@@ -1045,6 +1047,8 @@ pub fn run() {
             calendar::calendar_e2e_call_window,
             #[cfg(debug_assertions)]
             shell::commands::e2e_opened_urls,
+            #[cfg(debug_assertions)]
+            agents::editors::e2e_file_opens,
             #[cfg(debug_assertions)]
             chat::pages::view::e2e_page_view_eval,
             #[cfg(debug_assertions)]
