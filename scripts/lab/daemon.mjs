@@ -146,7 +146,7 @@ async function tick() {
   readRecord();
   const t = turn;
   // (A turn of the lab's own ends when its command does: `actionTurn`.)
-  if (!t || t.finalized || t.ticking || t.kind === 'lab') return;
+  if (!t || t.finalized || t.finalizing || t.ticking || t.kind === 'lab') return;
   t.ticking = true;
   try {
     // A routine's run (`routine new|now`): over when Settings' runs list says so, never by a Chat stream.
@@ -187,6 +187,8 @@ async function tick() {
     // "Plan not used".)
     const agents = (await agentsNow()).filter((a) => !a.plan || (Number(a.endedTs) || 0) * 1000 >= t.startedAt);
     const pending = pendingOf(cardsOf(t.items, { approvals: t.approvals, agents })).filter((c) => !t.answered.has(c.id));
+    // (Ended meanwhile — a question that couldn't be asked: how it ended stands.)
+    if (t.finalizing) return;
     if (!pending.length) {
       t.status = 'running';
       return;
@@ -235,8 +237,13 @@ function withShots(t, out) {
 }
 
 async function finalize(t) {
+  // (How it ended, kept: a look at the turn already under way (`tick`) mustn't make a question that couldn't be
+  // asked "running" again — 16 Nov 2026, "Couldn't ask" came back as a turn still going, for good.)
+  t.finalizing = true;
+  const ended = t.status;
   // Its last events (a card's end, the page's chips) a moment after its end.
   await sleep(300);
+  t.status = ended;
   readRecord();
   const conv = t.conversation != null ? await tryInvoke('chat_get', { id: t.conversation }) : null;
   const pages = (await tryInvoke('e2e_page_views', {}, [])) ?? [];
@@ -556,29 +563,6 @@ async function dropFiles(files) {
   await chips.nth(before + paths.length - 1).waitFor({ state: 'visible', timeout: 60_000 });
 }
 
-/**
- * **Toasts over the message box's Send**, closed with their own × as the person closes them to reach it (Yap's
- * notices stack at the foot of the main window, over the box's right end: 16 Nov 2026, auto-archive's notice and
- * "Chat restored" left Send unclickable and the next `ask` timed out).
- */
-async function clearSend() {
-  const send = main().getByRole('button', { name: 'Send', exact: true });
-  const box = await send.boundingBox({ timeout: 2_000 }).catch(() => null);
-  if (!box) return;
-  const toasts = main().getByRole('status');
-  for (let i = 0; i < 6; i++) {
-    const hit = await toasts
-      .evaluateAll((els, b) => els.findIndex((e) => {
-        const r = e.getBoundingClientRect();
-        return r.width > 0 && r.left < b.x + b.width && r.right > b.x && r.top < b.y + b.height && r.bottom > b.y;
-      }), box)
-      .catch(() => -1);
-    if (hit < 0) return;
-    await toasts.nth(hit).getByRole('button', { name: 'Close', exact: true }).click({ timeout: 2_000 }).catch(() => {});
-    await sleep(300);
-  }
-}
-
 async function startTurn({ text, spoken = false, away = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null, research = false, feedback = null }) {
   if (!text?.trim()) throw new Error('Nothing to ask');
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
@@ -618,7 +602,14 @@ async function startTurn({ text, spoken = false, away = false, chat = 'new', aut
     if (research) {
       const chip = main().getByTestId('chat-research-chip');
       if ((await chip.getAttribute('aria-pressed', { timeout: 10_000 })) !== 'true') await chip.click({ timeout: 10_000 });
-      if ((await chip.getAttribute('aria-pressed')) !== 'true') throw new Error(`Research can't be switched on: ${await chip.getAttribute('title')}`);
+      // (The chip asks Rust whether Chat's model can research before it turns on, so it's on a moment after the
+      // click: 16 Nov 2026, read at once it was still off and the question never went — the chip on just after.)
+      const on = await chip
+        .and(main().locator('[aria-pressed="true"]'))
+        .waitFor({ state: 'attached', timeout: 5_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!on) throw new Error(`Research can't be switched on: ${await chip.getAttribute('title')}`);
     }
     // A new chat made incognito with its ghost (chat/incognito.rs).
     if (incognito) {
@@ -638,7 +629,7 @@ async function startTurn({ text, spoken = false, away = false, chat = 'new', aut
       if (attach?.length) await dropFiles(attach);
       const box = main().getByRole('textbox', { name: 'Message' });
       await box.fill(text, { timeout: 10_000 });
-      await clearSend();
+      // (Toasts never cover the box since 16 Nov 2026, ui/toastClear.js: Send is clicked as the person clicks it.)
       // (Exactly "Send": with an agent's tab beside the chat, other buttons' names have the word.)
       await main().getByRole('button', { name: 'Send', exact: true }).click({ timeout: 10_000 });
     }
@@ -970,7 +961,19 @@ async function probe({ window: which = 'main', css, text }) {
       if (css) {
         const els = [...root.querySelectorAll(css)];
         out.count = els.length;
-        out.visible = els.filter((e) => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden').length;
+        const shows = els.filter((e) => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden');
+        out.visible = shows.length;
+        // Whether something else is over the first that shows, at its centre (16 Nov 2026: a toast over Send), and what.
+        if (shows.length) {
+          const r = shows[0].getBoundingClientRect();
+          const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          out.covered = !!top && !shows[0].contains(top) && !top.contains(shows[0]);
+          if (out.covered) {
+            const toast = top.closest('[role="status"]');
+            const named = (e) => `${e.tagName.toLowerCase()}${e.getAttribute('data-testid') ? `[data-testid="${e.getAttribute('data-testid')}"]` : e.className && typeof e.className === 'string' ? `.${e.className.trim().split(/\s+/)[0]}` : ''}`;
+            out.over = toast ? `a toast: ${String(toast.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80)}` : named(top);
+          }
+        }
       }
       if (text) {
         const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -1428,7 +1431,15 @@ function triggerOf(a) {
 /** The last routine `routine new` made (`routine now` with no id runs it). */
 let lastRoutine = null;
 
-function routineTurn(routine, a, question) {
+async function routineTurn(routine, a, question) {
+  // A routine's turn still waiting for its time (`routine new --at` hours away: no run yet) gives way to the next
+  // `routine new` or `routine now` (16 Nov 2026: Run now on a routine made for later was refused until its time).
+  if (turn && !turn.finalized && turn.routine && !turn.run) {
+    turn.status = 'stopped';
+    turn.error = 'Set aside before its time: the lab ran another routine turn';
+    turn.endedAt = Date.now();
+    await finalize(turn);
+  }
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it first`);
   readRecord();
   const t = new Turn({ question, spoken: false, since: lastSeq(), askedAt: 0, ...shotsFor(a) });
@@ -1483,7 +1494,7 @@ async function routineCmd(a) {
     const saved = await invoke('routine_save', { routine: { id: '', skill: skill.id, words: String(a.words ?? ''), trigger, on: true, to } });
     const listed = ((await invoke('routines_list')).routines ?? []).find((r) => r.id === saved.id);
     const when = trigger.kind === 'schedule' ? `${trigger.days} at ${trigger.time}` : `after a meeting${trigger.folder ? ` in ${trigger.folder}` : ''}${to === 'note' ? ', with its note' : ''}`;
-    const t = routineTurn(saved, a, `Routine /${skill.command} (${when})`);
+    const t = await routineTurn(saved, a, `Routine /${skill.command} (${when})`);
     if (t.away) await invoke('e2e_focus', { focused: false });
     return {
       routine: { id: saved.id, skill: skill.command, trigger, to, next: listed?.next ? new Date(listed.next * 1000).toISOString() : null },
@@ -1497,7 +1508,7 @@ async function routineCmd(a) {
     if (!which) throw new Error('routine now <id> (routine list has them; none: the last one routine new made)');
     const r = ((await invoke('routines_list')).routines ?? []).find((x) => x.id === which);
     if (!r) throw new Error(`No routine ${which}`);
-    const t = routineTurn(r, a, `Routine /${r.command} (Run now)`);
+    const t = await routineTurn(r, a, `Routine /${r.command} (Run now)`);
     if (t.away) await invoke('e2e_focus', { focused: false });
     await invoke('routine_run_now', { id: which });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));

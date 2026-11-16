@@ -434,7 +434,7 @@ pub(super) struct Built {
     pub(super) calendar_chip: Option<String>,
     /// The documents of this chat (documents.rs) and the ones this turn
     /// makes or changes, for its pills.
-    pub(super) doc_turn: crate::chat::documents::Turn,
+    pub(super) doc_turn: std::sync::Arc<crate::chat::documents::Turn>,
     /// **A strong model writing a document** (2026-10-31, as the Claude app
     /// writes one): it may research deeper — how far is sized to the
     /// model's request (`web::Reach::deep`, `deep_reach`), said in the
@@ -524,7 +524,7 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     // the person changed since the model last saw them, for a model that
     // can change them; the ones this turn makes or changes, for its pills.
     let chat_docs = crate::chat::documents::of_conversation(&conv.messages);
-    let doc_turn = crate::chat::documents::Turn::new(&chat_docs);
+    let doc_turn = std::sync::Arc::new(crate::chat::documents::Turn::new(&chat_docs));
     // A strong model writing a document, and a new one outlined first
     // ([`Built::writes_doc`]).
     let writes_doc = g.strong && !t.meetings && crate::chat::documents::writes_document(&t.text, &chat_docs, selection.is_some());

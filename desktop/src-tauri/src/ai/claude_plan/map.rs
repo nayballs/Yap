@@ -402,7 +402,11 @@ impl Mapper {
                 // the screen's and the pages': `{"success", "displayText",
                 // …}`): its own chip, refusals too.
                 if let Some(chips) = display_texts(text) {
-                    self.chips.extend(chips);
+                    // (A document's sections fold into one chip, "Wrote 3
+                    // sections in …", as the tool loop's: chat/documents.rs.)
+                    for chip in chips {
+                        crate::chat::documents::push_chip(&mut self.chips, chip);
+                    }
                     return true;
                 }
                 let chip = yap_chip(name, input);

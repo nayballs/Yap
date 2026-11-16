@@ -111,6 +111,16 @@ pub struct Context {
     /// with Claude Code's pages, in the parts' size for the model. `None`:
     /// no project searched in parts (the tools number nothing).
     pub project: Option<Arc<crate::chat::projects::sources::Cites>>,
+    /// **The documents beside the chat this turn** (`documents.rs`): the
+    /// plan turn's own `documents::Turn` — the conversation's documents and
+    /// the ones this turn makes or changes, which the answer keeps (its
+    /// pills). `None` (a research turn, whose report is Yap's): refused.
+    pub docs: Option<Arc<crate::chat::documents::Turn>>,
+    /// **The answering model is a strong one** (`documents::rich::strong`:
+    /// every plan model): the safety rule after outside content locks only
+    /// `tools::STRONG_LOCKED`, so its documents still change, as the tool
+    /// loop has it for the same model on an API key.
+    pub strong: bool,
 }
 
 /// The turn open now.

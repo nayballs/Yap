@@ -820,6 +820,49 @@ fn a_chat_run_offered_agents_lists_and_allows_their_tools_and_runs_them_for_its_
     assert!(agent.allowed_tools().is_empty());
 }
 
+// ---- Documents beside the chat on a plan chat's run ----
+
+#[test]
+fn a_plan_chats_run_with_documents_lists_and_allows_the_rich_set_and_runs_it_only_in_a_turn() {
+    let (ep, _) = endpoint(Duration::from_secs(5));
+    let plain = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
+    let h = ep.register(RunSpec::new("Plan chat", Tools::Chat).with_documents(true)).unwrap();
+    // Not offered: neither listed, allowed nor run.
+    let mut p = Client::of(&plain);
+    assert!(!names(&p.request("tools/list", json!({}))).iter().any(|n| n == "create_document"));
+    assert!(!plain.allowed_tools().iter().any(|t| t.ends_with("_document")));
+    assert_eq!(p.request("tools/call", json!({ "name": "create_document", "arguments": {} }))["error"]["code"], -32602);
+    // Offered: the tool loop's rich set, last, with its schemas; allowed by Claude Code's names; the model told.
+    let mut c = Client::of(&h);
+    let init = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }));
+    let said = init["result"]["instructions"].as_str().unwrap();
+    assert!(said.contains("create_document, write_section, read_document, edit_document") && said.contains("their words stay"), "{said}");
+    let list = c.request("tools/list", json!({}));
+    let all = names(&list);
+    assert_eq!(all[all.len() - documents::NAMES.len()..], *documents::NAMES);
+    for name in documents::NAMES {
+        assert!(h.allowed_tools().contains(&format!("mcp__yap__{name}")), "{name}");
+    }
+    // (Never an edit_note, create_note or update_note: the run changes only its documents.)
+    for name in ["create_note", "edit_note", "update_note"] {
+        assert_eq!(c.request("tools/call", json!({ "name": name, "arguments": {} }))["error"]["code"], -32602, "{name}");
+    }
+    // Outside a chat turn: nothing done.
+    let (err, text) = c.tool("create_document", json!({ "title": "Composting at home", "sections": ["Introduction"] }));
+    assert!(err);
+    assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["displayText"], "Didn't change a document");
+    // A turn without documents (a research's): refused, nothing made.
+    let turn = h.begin_turn(turn::Context { question: "Research composting".into(), conversation: Some(15), ..Default::default() }, None);
+    let (err, text) = c.tool("create_document", json!({ "title": "Composting at home", "sections": ["Introduction"] }));
+    assert!(err);
+    assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["displayText"], "Didn't change a document: not for this question");
+    drop(turn);
+    // An agent's run never gets them, whatever its spec says.
+    let agent = ep.register(RunSpec::new("Tidy", Tools::Agent).with_documents(true)).unwrap();
+    assert_eq!(names(&Client::of(&agent).request("tools/list", json!({}))), ["approve"]);
+    assert!(agent.allowed_tools().is_empty());
+}
+
 // ---- The screen and the pages on a plan chat's run ----
 
 #[test]

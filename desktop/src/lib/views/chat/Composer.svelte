@@ -49,6 +49,8 @@
   import { mentionedPaths } from './chatMentions.js';
   import { picked, removePicked } from '../../stores/pickedElements.svelte.js';
   import ConnectorLogo from '../../settings/connectors/ConnectorLogo.svelte';
+  // Toasts never cover the box (ui/toastClear.js).
+  import { keepClear } from '../../ui/toastClear.js';
 
   /**
    * `chat`: the view's state; `onopensettings(section)`: ControlPanel's
@@ -265,6 +267,7 @@
   class:code-chat={!!code?.current}
   class:code-room={!!code?.enabled}
   style:--thread-gutter="{chat.threadGutter}px"
+  use:keepClear
   data-model-picker-above
 >
   {#if chat.dragging}

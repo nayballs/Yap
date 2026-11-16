@@ -1,7 +1,6 @@
 {
   "name": "outline-card",
-  "about": "A new document's outline before the writing, on a real model (16 Nov 2026, chat/cards/outline.rs; built 15 Nov in #129, checked then only on --fake). A plan chat makes no documents (Claude Code's: no create_document), so this needs a model of Yap's own tool loop: `--model ondevice` (the on-device Qwen on this PC, through a llama-server you started: YAP_LAB_LOCAL_LLM; free), an API model, or --fake. Chat is asked for a short guide; its create_document comes to the person as a card first — nothing written — then Edit's Go with a section renamed and one taken out, and a note; the document is made with those sections, in that order.",
-  "needs": { "toolLoop": true },
+  "about": "A new document's outline before the writing, on a real model (16 Nov 2026, chat/cards/outline.rs; built 15 Nov in #129, checked then only on --fake). Any model: a plan chat's create_document comes over Yap's run endpoint since 16 Nov (claude_live/documents.rs), the tool loop's on `--model ondevice` (the on-device Qwen on this PC, through a llama-server you started: YAP_LAB_LOCAL_LLM; free), an API model, or --fake. Chat is asked for a short guide; its create_document comes to the person as a card first — nothing written — then Edit's Go with a section renamed and one taken out, and a note; the document is made with those sections, in that order.",
   "steps": [
     { "set": { "config": { "chatOutlineReview": true } }, "note": "On by default in the app; the e2e suite's base config has it off." },
     {

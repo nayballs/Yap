@@ -1040,7 +1040,11 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   drawn as `a.md-link.md-image`, which the view makes a "Show image" box
   (below); any other "![alt](url)" reads as a "!" and a link, and the "!"
   goes (not before a bare link). In `app.css`,
-  `li.task` has no bullet beside its checkbox, and a table's cells wrap
+  `li.task` has no bullet beside its checkbox (moved 18 px left into the
+  bullet's place; a page that puts the box in the list's own indent —
+  `RichNote`'s, `DocPanel`'s `.docmd` — sets its margin back to 0, or the box
+  sat past the page's edge, half hidden and out of a click's reach: 16 Nov
+  2026, `notes-rich-text.spec.js`), and a table's cells wrap
   between words only (`overflow-wrap: break-word`: under an answer's
   `anywhere`, short headers broke mid-word, "Siz e");
   `blockquote.md-quote` and `hr.md-rule`; single line breaks kept

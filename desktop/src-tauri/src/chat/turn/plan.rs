@@ -104,7 +104,7 @@ const DRAIN: Duration = Duration::from_secs(10);
 /// a plan chat is, its tools, how to cite a page.
 const INSTRUCTIONS: &str = "You're answering in Yap's Chat: a conversation with the user, not a coding session. Answer in markdown, plainly and to the point. \
 WebSearch and WebFetch look things up on the web: use them for anything current, local or that you aren't sure of, and read a page before you rely on it. \
-Yap's own tools (their names start with mcp__yap__) read the user's Yap meetings, notes, tasks, folders, what Yap remembers about them and their calendar: use them when a question is about any of those. They only read; you can't change notes, run commands or edit files here. \
+Yap's own tools (their names start with mcp__yap__) read the user's Yap meetings, notes, tasks, folders, what Yap remembers about them and their calendar: use them when a question is about any of those. They only read, but for the documents beside this chat (below); you can't change the user's notes, run commands or edit files here. \
 When you use what a web page says, cite the page right after it as a markdown link whose text is a number, like [1](https://example.com/page). Never end with a list of sources: Yap shows them under your answer. \
 A message may start with an <earlier_in_this_chat> block: this chat's history, written while you weren't in it. It isn't a new question.";
 
@@ -162,6 +162,47 @@ const CONNECTORS: &str = "Yap's tools named with a connector's name and two unde
 /// **Visuals in the chat itself** (`chat/made.rs`): when to draw one, and
 /// the tool's name as the session sees it.
 const VISUALS: &str = "When the user asks you to draw, diagram, chart or show something visually (\"draw…\", \"show me how…\", \"make me a small calculator\"), call mcp__yap__show_visual with an SVG diagram or a small interactive HTML widget: it appears in the chat itself, so never paste its code into your answer, and say in a sentence or two what it shows. When they want something to keep and come back to — a small app, a tool, a page (\"make me a tip calculator I can keep\") — call mcp__yap__save_page with a whole HTML page instead: it opens beside the chat and stays in the chat's Outputs; to change it, call it again with its id (a new version).";
+
+/// **Documents beside the chat** (`claude_live/documents.rs`, 16 Nov 2026):
+/// what they are, the outline the person sees first, how a document cites a
+/// page, and that Yap's notes in a question name them without the prefix;
+/// then the tool loop's own lines for the rich set ([`documents_lines`]).
+const DOCUMENTS: &str = "Yap's document tools (mcp__yap__create_document, mcp__yap__write_section, mcp__yap__read_document, mcp__yap__edit_document, mcp__yap__document_history, mcp__yap__restore_document) make and change documents beside this chat: Markdown notes the user sees open on the right as you write them, saved in their Notes under Chat documents, which they can edit too. When you start a new one, Yap may show the user its outline first, and mcp__yap__create_document waits for their go: its result says whether they changed the sections or left a note for the writing, and you follow it. In a document, cite a page as a markdown link whose text is the site's name, like [example.com](https://example.com/page), right after what it says. Where Yap's notes in a message name create_document, write_section, read_document, edit_document, document_history or restore_document, they mean these.";
+
+/// **A new document's outline before anything is looked up** (the tool
+/// loop's `documents::research_note` for a new one, which holds its web
+/// back: `web::Turn::outline_first`). Claude Code's own `WebSearch` can't
+/// be held, so the question's context says it ([`new_document_line`]).
+const NEW_DOCUMENT_WEB: &str = "(A note from Yap, not the user.) This is a new document: outline it first — mcp__yap__create_document now, before any WebSearch (the title, a one-line summary, a section each with what it will cover), so the user sees the outline straight away. When its result comes back, look up what it needs (read the pages its facts come from with WebFetch: a search result's snippet isn't a source), then mcp__yap__write_section each, in order, complete. Not an answer in the chat.";
+/// [`NEW_DOCUMENT_WEB`] with the web off.
+const NEW_DOCUMENT: &str = "(A note from Yap, not the user.) This is a new document: mcp__yap__create_document now (the title, a one-line summary, a section each with what it will cover), so the user sees the outline straight away; when its result comes back, mcp__yap__write_section each, in order, complete. Not an answer in the chat.";
+
+/// [`DOCUMENTS`], then the tool loop's lines for the rich set
+/// (`documents::rich::INSTRUCTIONS`) with Claude Code's names. Pure.
+fn documents_lines() -> String {
+    let mut rich = crate::chat::documents::rich::INSTRUCTIONS.to_string();
+    for n in crate::integrations::claude_live::documents::NAMES {
+        rich = rich.replace(n, &format!("mcp__yap__{n}"));
+    }
+    format!("{DOCUMENTS} {rich}")
+}
+
+/// **This question makes a new document** (`documents::makes_new_document`:
+/// something to keep asked for, or an option picked from this chat's
+/// document; never a change to one or a passage selected): the line that
+/// has its outline made first (`web`: before any search). `None`: nothing
+/// to say. Pure but for the notes it reads.
+fn new_document_line(question: &str, conv: &crate::chat::chats::Conversation, selected: bool, web: bool) -> Option<&'static str> {
+    let docs = crate::chat::documents::of_conversation(&conv.messages);
+    crate::chat::documents::makes_new_document(question, &docs, selected).then_some(if web { NEW_DOCUMENT_WEB } else { NEW_DOCUMENT })
+}
+
+/// **A document this turn made, left half written** (the tool loop's
+/// `documents::finish_note`) by Claude Code's name for `write_section`: the
+/// session's next message, before the turn's answer. Pure.
+fn finish_line(title: &str, left: &[String]) -> String {
+    crate::chat::documents::finish_note(title, left).replace("Call write_section", "Call mcp__yap__write_section")
+}
 
 /// [`EYES`]'s word on acting: for a session that may act, and one that
 /// doesn't.
@@ -474,6 +515,11 @@ fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude
     // Visuals in the chat itself (chat/made.rs, 15 Nov 2026): the session always lists the tool.
     s.push(' ');
     s.push_str(VISUALS);
+    // Documents beside the chat (claude_live/documents.rs, 16 Nov 2026): a plain plan chat's.
+    if built.code.is_none() {
+        s.push(' ');
+        s.push_str(&documents_lines());
+    }
     if t.gates.agents {
         s.push(' ');
         s.push_str(&agents_lines());
@@ -559,6 +605,7 @@ fn run_context(
     connectors: Option<Arc<crate::chat::tools::connectors::Turn>>,
     fitted: &Fitted,
     watched: bool,
+    docs: Option<Arc<crate::chat::documents::Turn>>,
 ) -> crate::integrations::claude_live::turn::Context {
     crate::integrations::claude_live::turn::Context {
         connectors,
@@ -586,6 +633,10 @@ fn run_context(
         visuals: !t.meetings && (t.scope.is_none() || (t.scope == Some("assistant") && crate::chat::assistant::asked_in_chat())),
         // A big project's parts (chat/projects/sources.rs): set by the turn (`answer`).
         project: None,
+        // The documents beside the chat (claude_live/documents.rs): this turn's, the answer's pills.
+        docs,
+        // (Every plan model is: its documents still change after the web, as the tool loop's.)
+        strong: crate::chat::documents::rich::strong(&t.ep.provider, &t.ep.model),
     }
 }
 
@@ -676,7 +727,17 @@ fn start(
     incognito: bool,
 ) -> Result<(Arc<sessions::Warm>, bool), String> {
     use crate::integrations::claude_live::{register_run, RunSpec, Tools};
-    let run = register_run(RunSpec::new("Chat", Tools::Chat).with_agents(agents).with_memory(code.is_none() && !incognito).with_eyes(eyes).with_connectors(connectors).with_cards(cards).with_projects(projects && code.is_none()))?;
+    let run = register_run(
+        RunSpec::new("Chat", Tools::Chat)
+            .with_agents(agents)
+            .with_memory(code.is_none() && !incognito)
+            .with_eyes(eyes)
+            .with_connectors(connectors)
+            .with_cards(cards)
+            .with_projects(projects && code.is_none())
+            // Documents beside the chat: a plain plan chat's (a Code chat's changes are an agent's).
+            .with_documents(code.is_none()),
+    )?;
     let conversation = match resume {
         Some(id) => Conversation::Resume(id.to_string()),
         None => Conversation::fresh(),
@@ -903,6 +964,10 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
     context.extend(built.prompt.context.iter().map(|c| crate::chat::projects::knowledge::claude_code_names(c)));
     if research.is_none() {
         context.extend(away_line(eyes, this_turn, t.gates.screen_takes).map(str::to_string));
+        // A new document: its outline first (claude_live/documents.rs), before any search.
+        if built.code.is_none() && !t.meetings {
+            context.extend(new_document_line(&t.text, conv, opened.selection.is_some(), t.gates.web_on).map(str::to_string));
+        }
     }
     // (Its attached files' text first: chat/attachments.rs.)
     let question = crate::chat::attachments::with_text(&crate::chat::chats::with_context(&context, &t.text));
@@ -952,7 +1017,9 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         // the calls Claude Code makes from now on are this turn's.
         // (A research turn: no connectors, agents, cards or visuals of its own.)
         let this_connectors = connectors.as_ref().filter(|_| research.is_none()).map(|l| Arc::clone(&l.turn));
-        let mut ctx = run_context(t, opened, this_turn, this_connectors, fitted, watch.is_some());
+        // (The documents beside the chat: a plain plan chat's, this turn's own; a research's report is Yap's.)
+        let docs = (built.code.is_none() && research.is_none()).then(|| Arc::clone(&built.doc_turn));
+        let mut ctx = run_context(t, opened, this_turn, this_connectors, fitted, watch.is_some(), docs);
         // A big project's parts: its tools number theirs with the turn's sources.
         ctx.project = built.project.clone();
         if research.is_some() {
@@ -1016,6 +1083,27 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
                 }
                 None => ended = Ended::Gone { started: true },
             }
+        }
+        // **A document this turn made, its sections still to write** (the tool
+        // loop's `documents::finish_note`): its result counted, and the session
+        // asked to finish it before it answers, at most `FINISH_NUDGES` times.
+        let mut nudges = 0;
+        while let Ended::Done(first) = &ended {
+            if first.is_error || nudges >= crate::chat::documents::FINISH_NUDGES {
+                break;
+            }
+            let Some((_, title, left)) = built.doc_turn.unfinished().filter(|_| research.is_none()) else { break };
+            nudges += 1;
+            tracing::info!(left = left.len(), "Claude plan: a document's sections still to write; the session asked to finish it");
+            let answered = if mapper.model().is_empty() { model.as_str() } else { mapper.model() };
+            let own = first.cost_since(w.total(), answered);
+            w.set_total(Some(first.cost_usd.max(0.0)));
+            let counted = crate::ai::usage::Call { provider: plan::PROVIDER, model: answered, base_url: plan::BASE_URL, turn: true, feature: None };
+            crate::ai::usage::record_response(&counted, &oneshot::usage_value(&first.usage, own), None, None);
+            ended = match w.session.send_user(&finish_line(&title, &left), &[]) {
+                Ok(()) => read_turn(&mut rx, &mut mapper, &mut out, t.stop, run_turn.as_mut().map(|r| &mut r.events), None).await,
+                Err(_) => Ended::Gone { started: true },
+            };
         }
         // However it ended, the run's turn is over: what its calls showed
         // passed on, a call still waiting for the person stopped (so a
@@ -1340,6 +1428,33 @@ mod tests {
         feed(&mut mapper, &mut out, r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m2"}}}"#);
         feed(&mut mapper, &mut out, r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"s1","name":"WebSearch","input":{}}}}"#);
         assert!(slot.web(n));
+    }
+
+    #[test]
+    fn a_plan_chat_is_told_of_its_documents_by_claude_codes_names_and_a_new_ones_outline_comes_first() {
+        let lines = documents_lines();
+        for name in crate::integrations::claude_live::documents::NAMES {
+            assert!(lines.contains(&format!("mcp__yap__{name}")), "{name}: {lines}");
+        }
+        // The tool loop's own rich lines, every one of its tools by Claude Code's name (never a bare one).
+        assert!(lines.contains("mcp__yap__create_document first, before any search"), "{lines}");
+        assert!(lines.contains("mcp__yap__read_document, then mcp__yap__edit_document"), "{lines}");
+        assert!(!lines.contains(" create_document first") && !lines.contains("mcp__yap__mcp__yap__"), "{lines}");
+        // The outline the person sees, their words winning, and how a document cites a page.
+        assert!(lines.contains("waits for their go") && lines.contains("their words stay"), "{lines}");
+        assert!(lines.contains("[example.com](https://example.com/page)"));
+        // No longer "you can't change notes" without the documents' exception.
+        assert!(INSTRUCTIONS.contains("but for the documents beside this chat"));
+        // A new document: its outline first, before any WebSearch (the web on); a change or a greeting: nothing.
+        let conv: crate::chat::chats::Conversation = serde_json::from_value(serde_json::json!({ "id": 7, "title": "", "createdTs": 1, "updatedTs": 1 })).unwrap();
+        let line = new_document_line("Write me a one-page guide to composting at home as a document", &conv, false, true).expect("a new document");
+        assert!(line.contains("mcp__yap__create_document now, before any WebSearch") && line.contains("A note from Yap, not the user"), "{line}");
+        assert!(!new_document_line("Write me a one-page guide to composting at home as a document", &conv, false, false).unwrap().contains("WebSearch"));
+        assert_eq!(new_document_line("Thanks, that's great", &conv, false, true), None);
+        assert_eq!(new_document_line("Write me a one-page guide to composting at home as a document", &conv, true, true), None, "a passage selected: a change");
+        // Left half written: the session asked to finish it, by Claude Code's name.
+        let finish = finish_line("Composting at home", &["Troubleshooting".to_string()]);
+        assert!(finish.contains("\"Troubleshooting\"") && finish.contains("Call mcp__yap__write_section for each now"), "{finish}");
     }
 
     #[test]

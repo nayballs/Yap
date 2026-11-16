@@ -411,17 +411,20 @@ pub const WRITE_NOW: &str = "(A note from Yap, not the user.) The research is ov
 /// (once).
 pub const SEARCH_FIRST: &str = "(A note from Yap, not the user.) This is a research turn: research the plan on the web first (web_search, then read_page on the pages your facts come from), then write the report.";
 
-/// The tools a research turn runs: the web's, `find_pictures` aside, and
-/// the notes' reads. Everything else is refused ([`refusal`]). Pure.
+/// The tools a research turn runs: the web's, `find_pictures` aside, the
+/// notes' reads, and a big project's (`read_project_file`,
+/// `search_project_files`: read only, offered only in a project chat whose
+/// files are searched in parts — until 16 Nov 2026 offered there and then
+/// refused). Everything else is refused ([`refusal`]). Pure.
 pub fn allows(name: &str) -> bool {
-    crate::web::TOOL_NAMES.contains(&name) || matches!(name, "search_notes" | "get_note" | "read_note" | "search_in_note")
+    crate::web::TOOL_NAMES.contains(&name) || matches!(name, "search_notes" | "get_note" | "read_note" | "search_in_note") || crate::chat::projects::knowledge::NAMES.contains(&name)
 }
 
 /// A tool a research turn doesn't run: its result. Pure.
 pub fn refusal(name: &str) -> Value {
     json!({
         "success": false,
-        "error": format!("{name} doesn't run in a research turn: only web_search and read_page (and reading notes). When you've researched enough, write the report as your answer; Yap puts it in a document."),
+        "error": format!("{name} doesn't run in a research turn: only web_search and read_page (and reading notes or the project's files). When you've researched enough, write the report as your answer; Yap puts it in a document."),
         "data": Value::Null,
         "displayText": "",
     })
@@ -644,12 +647,25 @@ fn is_sources_heading(words: &str) -> bool {
     matches!(w.as_str(), "sources" | "references" | "bibliography" | "works cited" | "citations" | "further reading" | "sources consulted" | "sources cited")
 }
 
+/// **What came before a report's `# title`, if it's only a word to the
+/// person** (Opus on the plan, 16 Nov 2026: "I have enough sources now, so
+/// here's the report."): nothing, or at most [`PREAMBLE_LINES`] short lines
+/// with no heading — never a part of the report itself. Pure.
+fn preamble(lines: &[&str]) -> bool {
+    let said: Vec<&str> = lines.iter().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    said.len() <= PREAMBLE_LINES && said.iter().all(|l| heading(l).is_none() && l.chars().count() <= 300)
+}
+
+/// The most lines a word before the report's title may be ([`preamble`]).
+const PREAMBLE_LINES: usize = 3;
+
 /// **The report as Yap keeps it** (`written`: the model's report, its
 /// citations Yap's `[n]` — a plan turn's links made so by `claude_plan::
 /// map::cite` —; `sources`: every page the turn found, read ones marked
 /// `opened`; `plan_title`: the plan's, when the report has no # title;
 /// `byline`: the line under the title, "*Researched 16 November 2026 · 12
-/// searches, 8 pages read*"). Pure.
+/// searches, 8 pages read*"). A word to the person before its # title
+/// ([`preamble`]) goes. Pure.
 pub fn report(written: &str, sources: &[Source], plan_title: &str, byline: &str) -> Report {
     // Its own title, and nothing from a sources list it wrote anyway.
     let mut title = String::new();
@@ -657,8 +673,11 @@ pub fn report(written: &str, sources: &[Source], plan_title: &str, byline: &str)
     let mut in_sources = false;
     for line in written.lines() {
         match heading(line) {
-            Some((1, words)) if title.is_empty() && lines.iter().all(|l| l.trim().is_empty()) => {
+            // (After a word or two before it — "I have enough sources now, so here's the report." — the
+            // report starts there: those words go, never the document's first line under a title of its own.)
+            Some((1, words)) if title.is_empty() && preamble(&lines) => {
                 title = one_line(words, 120);
+                lines.clear();
                 continue;
             }
             Some((_, words)) if is_sources_heading(words) => {
@@ -957,8 +976,9 @@ mod tests {
         assert!(yaps.contains("like [3]") && yaps.contains("\"Keep it short\""), "{yaps}");
         let code = instructions(&plan, &Caps::USUAL, true);
         assert!(code.contains("WebFetch") && code.contains("[3](https://example.com/page)"), "{code}");
-        // Only the web's tools and the notes' reads run.
+        // Only the web's tools and the notes' (and a big project's) reads run.
         assert!(allows("web_search") && allows("read_page") && allows("search_notes"));
+        assert!(allows("read_project_file") && allows("search_project_files"));
         for no in ["open_app", "copy_to_clipboard", "remember", "forget", "create_note", "create_document", "start_agent", "browser_click"] {
             assert!(!allows(no), "{no}");
             assert_eq!(refusal(no)["success"], json!(false));
@@ -1018,6 +1038,28 @@ mod tests {
         assert_eq!(r.answer, "A claim.\n\nThe full report is open on the right.");
         let r = report("", &[], "", "");
         assert_eq!(r.answer, "The report, “Research”, is open on the right.");
+    }
+
+    #[test]
+    fn a_word_to_the_person_before_the_reports_title_goes_and_its_title_is_the_reports() {
+        // Opus on the plan (16 Nov 2026): a line to the person, then the report.
+        let sources = vec![src(1, "https://a.example/mayfly", true)];
+        let written = "I have enough sources now, so here's the report.\n\n# The Short Life of Adult Mayflies\n\n## Summary\n\nAdults live a day or two [1].\n\n## Lifespan\n\nMost live hours [1].";
+        let r = report(written, &sources, "How long do adult mayflies live", "Researched 16 November 2026 · 2 searches, 1 page read");
+        assert_eq!(r.title, "The Short Life of Adult Mayflies");
+        assert!(!r.body.contains("enough sources"), "{}", r.body);
+        assert_eq!(r.body.lines().filter(|l| l.starts_with("# ")).count(), 1, "one title: {}", r.body);
+        assert!(r.body.starts_with("# The Short Life of Adult Mayflies\n"), "{}", r.body);
+        assert_eq!(r.answer, "Adults live a day or two [1].\n\nThe full report is open on the right.");
+        // A part of the report before a # heading (a heading of its own, or more than a word or two): kept; the
+        // title is the plan's.
+        let r = report("## Background\n\nMayflies are insects [1].\n\n# Lifespan\n\nHours [1].", &sources, "Mayflies", "");
+        assert_eq!(r.title, "Mayflies");
+        assert!(r.body.contains("## Background") && r.body.contains("# Lifespan"), "{}", r.body);
+        let long = "One.\nTwo.\nThree.\nFour.\n\n# Lifespan\n\nHours [1].";
+        let r = report(long, &sources, "Mayflies", "");
+        assert_eq!(r.title, "Mayflies");
+        assert!(r.body.contains("Four.") && r.body.contains("# Lifespan"), "{}", r.body);
     }
 
     #[test]

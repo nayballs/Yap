@@ -92,7 +92,8 @@ pub mod calendar;
 pub mod agents;
 pub mod connectors;
 mod memory;
-mod notes;
+// (Its `execute` and `changed_note` run a plan chat's document calls too: `claude_live/documents.rs`.)
+pub(crate) mod notes;
 
 use serde_json::{json, Value};
 

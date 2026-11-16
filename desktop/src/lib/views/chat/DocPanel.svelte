@@ -1583,6 +1583,8 @@
   .docmd :global(li.task) {
     position: relative;
     list-style: none;
+    /* (Not an answer's -18px, app.css: this box sits in the list's own indent.) */
+    margin-left: 0;
   }
   .docmd :global(li.task > input) {
     position: absolute;
