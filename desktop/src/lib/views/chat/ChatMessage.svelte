@@ -751,9 +751,6 @@
   .ticks + .when {
     margin-left: 0.3em;
   }
-  .ticks[data-state='read'] {
-    color: var(--yap-link);
-  }
   .ticks svg {
     width: 1.35em;
     height: 1.15em;

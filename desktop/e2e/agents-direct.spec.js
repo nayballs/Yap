@@ -1450,7 +1450,7 @@ test('a Code chat’s rows are the Claude app’s: ✓✓ time, Copy, Rewind to 
   const row = actionsOf(main, 'Two');
   await expect(row.getByTestId('chat-read')).toHaveAttribute('data-state', 'read');
   await expect(row.locator('time.when')).toHaveText(/just now|1 minute ago/);
-  expect(await labels(row)).toEqual(['Copy', 'Rewind to here', 'Fork from here']);
+  await expect.poll(() => labels(row)).toEqual(['Copy', 'Rewind to here', 'Fork from here']);
   await expect(row.getByTestId('chat-edit-message')).toHaveCount(0);
   // The app's tooltip: its name, and what it does.
   await row.getByTestId('chat-rewind').hover();
@@ -1462,7 +1462,7 @@ test('a Code chat’s rows are the Claude app’s: ✓✓ time, Copy, Rewind to 
 
   // Under the answer: Copy, Fork from here, Pin as chapter, Read aloud, then when — never 👍 / 👎 or ↻.
   const foot = thread(main).getByTestId('chat-answer-actions').last();
-  expect(await labels(foot)).toEqual(['Copy', 'Fork from here', 'Pin as chapter', 'Read aloud']);
+  await expect.poll(() => labels(foot)).toEqual(['Copy', 'Fork from here', 'Pin as chapter', 'Read aloud']);
   await expect(foot.locator('time.when')).toHaveText(/just now|1 minute ago/);
   await expect(main.getByTestId('chat-retry')).toHaveCount(0);
   await expect(main.getByTestId('chat-thumbs-up')).toHaveCount(0);

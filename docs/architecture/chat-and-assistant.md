@@ -2460,7 +2460,8 @@ grey with ⤢ and ⌄, as the Claude app has it, over a frame in a hairline
 box the column's width — **above the answer's words** (the words come
 after the call: `placeVisuals` puts each in the first answer after its
 question, `questionIndex` finding it by its time, or its place while a
-question just sent has none here; a Code chat's turn still working shows
+question just sent has none here — never an Edit's new words there, sent
+after it was saved (`shownAt`, 16 Nov 2026); a Code chat's turn still working shows
 it under the question's work, `ChatThread`). The frame (`sandbox="allow-scripts"`,
 `referrerpolicy="no-referrer"`, `loading="lazy"`) **sizes to what it
 draws** (the bridge's height, 24–2,400 px) and **takes Yap's colours**

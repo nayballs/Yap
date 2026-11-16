@@ -130,7 +130,8 @@ fn model_title(reply: &str) -> Option<String> {
     let line = reply.lines().map(str::trim).find(|l| !l.is_empty())?;
     let line = line.strip_prefix("Title:").or_else(|| line.strip_prefix("title:")).unwrap_or(line);
     let t = one_line(line.trim().trim_matches(['"', '\'', '“', '”', '#', '*', ' ']).trim_end_matches(['.', '!']), TITLE_MAX);
-    (!t.is_empty()).then_some(t)
+    // (A reply that echoes the request's own markup — "<question>" — is no title: its words then.)
+    (!t.is_empty() && !t.contains(['<', '>'])).then_some(t)
 }
 
 /// **A pinned chapter's title from words alone**: the question's first line
@@ -186,6 +187,7 @@ mod tests {
         assert_eq!(model_title("\"Trip budget.\"\n"), Some("Trip budget".into()));
         assert_eq!(model_title("Title: Fixing the export"), Some("Fixing the export".into()));
         assert_eq!(model_title("  \n "), None);
+        assert_eq!(model_title("Answer to: <question>"), None, "an echo of the request is no title");
         assert_eq!(words_title("how much is the trip going to cost us in total for the week?", ""), "How much is the trip going to cost us in");
         assert_eq!(words_title("  \n", "## Packing list\nSocks."), "Packing list");
         assert_eq!(words_title("", ""), "Chapter");

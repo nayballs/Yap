@@ -642,7 +642,7 @@ async function startTurn({ text, spoken = false, away = false, chat = 'new', aut
 /**
  * **Edit** the person's last message to `text` (15 Nov 2026, the Claude app's message actions:
  * chat/chats/branches.rs), as the person does — by its buttons: the pencil, the words in place, Save and send. A new
- * version of the conversation from there (‹ 2/2 ›).
+ * version of the conversation from there (‹ 2/2 ›). Chat's only: a Code chat has no Edit (16 Nov 2026).
  */
 async function editTurn(text) {
   const col = main().locator('[data-testid="chat-column"]');
@@ -650,22 +650,6 @@ async function editTurn(text) {
   await col.getByTestId('chat-edit-message').last().click({ timeout: 10_000 });
   await col.getByTestId('chat-edit-input').fill(text, { timeout: 10_000 });
   await col.getByTestId('chat-edit-save').click({ timeout: 10_000 });
-  await confirmIfAsked();
-}
-
-/**
- * A Code chat asks first: its Edit goes through Rewind ("Send the edited message?", ChatThread.svelte). Its confirm
- * pressed, as the person would (Lab, 15 Nov 2026: an edit waited on the question for good). A plain chat asks
- * nothing: back at once.
- */
-async function confirmIfAsked() {
-  const confirm = main().locator('[role="alertdialog"] .btns button:not([data-cancel])').first();
-  try {
-    await confirm.waitFor({ state: 'visible', timeout: 2_500 });
-  } catch {
-    return;
-  }
-  await confirm.click({ timeout: 5_000 });
 }
 
 /**

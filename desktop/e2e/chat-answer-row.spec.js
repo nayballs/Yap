@@ -89,7 +89,7 @@ test('under an answer: Copy, Fork from here, Pin as chapter, Read aloud and its 
   await freshChat(main);
   await ask(main, fakeLlm, 'What should I pack for a weekend of hill walking?', 'Pack **layers**, a waterproof and a flask.');
   const row = rows(main).last();
-  expect(await labels(row)).toEqual(['Copy', 'Fork from here', 'Pin as chapter', 'Read aloud']);
+  await expect.poll(() => labels(row)).toEqual(['Copy', 'Fork from here', 'Pin as chapter', 'Read aloud']);
   await expect(row.locator('time.when')).toHaveText('just now');
   await expect(row.locator('.byline')).toContainText('fake-chat');
   for (const gone of ['chat-retry', 'chat-thumbs-up', 'chat-thumbs-down', 'chat-feedback-card']) await expect(main.getByTestId(gone)).toHaveCount(0);
@@ -103,7 +103,7 @@ test('under an answer: Copy, Fork from here, Pin as chapter, Read aloud and its 
   // Under the question, on hover: Copy and Edit (no ticks, no Rewind: those are a Code chat's).
   await questions(main).first().hover();
   const urow = thread(main).getByTestId('chat-message-actions').first();
-  expect(await labels(urow)).toEqual(['Copy', 'Edit']);
+  await expect.poll(() => labels(urow)).toEqual(['Copy', 'Edit']);
   await expect(urow.getByTestId('chat-read')).toHaveCount(0);
   await theme(yap, main, 'dark');
   await row.getByTestId('chat-answer-copy').hover();
@@ -234,7 +234,7 @@ test('a chat saved with a thumb still opens, its answer row as any; the thumbsâ€
     await openView(main, 'Chat');
     await main.locator('.conv').filter({ hasText: 'Buses to the harbour' }).click();
     await expect(answers(main)).toHaveText(['The 42, every ten minutes.']);
-    expect(await labels(rows(main).last())).toEqual(['Copy', 'Fork from here', 'Pin as chapter', 'Read aloud']);
+    await expect.poll(() => labels(rows(main).last())).toEqual(['Copy', 'Fork from here', 'Pin as chapter', 'Read aloud']);
     await expect(rows(main).last().locator('time.when')).toHaveText(/^1[2-5] minutes ago$/);
     await expect(main.getByTestId('chat-thumbs-down')).toHaveCount(0);
     await shot(main, '06-old-chat-opens');
