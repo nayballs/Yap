@@ -458,7 +458,14 @@ test('a file link’s ⋯: on hover or focus, the link’s menu under it; the ne
   });
   // None until a link is pointed at.
   await expect(more).toBeHidden();
-  const before = await placeOf(links.nth(1));
+  /** Where a link is in the answer (the thread may scroll as the pointer moves). */
+  const inAnswer = (loc) =>
+    loc.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const a = el.closest('.cbody').getBoundingClientRect();
+      return { left: r.left - a.left, top: r.top - a.top, width: r.width, height: r.height };
+    });
+  const before = await inAnswer(links.nth(1));
 
   // The pointer on a link: its ⋯ at the link's end, its middle on the link's line; the link where it was.
   await links.first().hover();
@@ -469,7 +476,7 @@ test('a file link’s ⋯: on hover or focus, the link’s menu under it; the ne
   const btn = await placeOf(more);
   expect(Math.abs(btn.left - link0.right)).toBeLessThanOrEqual(5);
   expect(Math.abs((btn.top + btn.bottom) / 2 - (link0.top + link0.bottom) / 2)).toBeLessThanOrEqual(2);
-  expect(await placeOf(links.nth(1))).toEqual(before);
+  expect(await inAnswer(links.nth(1))).toEqual(before);
   // Its icon only: the answer's words are as they were (a copy of them has no "⋯").
   expect(await answer(main).locator('.cbody').evaluate((el) => el.textContent)).toBe(words);
   await shot(main, '02g-a-file-links-more-on-hover');

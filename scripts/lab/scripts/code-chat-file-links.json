@@ -1,6 +1,6 @@
 {
   "name": "code-chat-file-links",
-  "about": "Three leftovers of a Code chat's files and summary (16 Nov 2026), on a real model: a file link's ⋯ (ui/fileLinks.js: it comes up on a hover, its menu the right-click's, Open in Yap from it); an Outputs row that opens where Settings → Yap Code's \"Open file links in\" says (outputsOpen.js: VS Code there — test mode keeps the command, `state`'s filesOpened — and a .js file under Windows' default app shown in Yap instead, as #147's links); and the summary's Changes on a real pull request of Yap's own with cancelled checks (agents/prs.rs: \"Checks cancelled · 8 of 10 passed\", never \"Checks failing\"), through the lab's read-only gh on branch claude/lab-untested (#146: two cancelled E2E shards, CodeQL's neutral). Needs a live lab, Yap Code, and an editor the test Yap finds (YAP_LAB_EDITORS, or this PC's).",
+  "about": "Three leftovers of a Code chat's files and summary (16 Nov 2026), on a real model: a file link's ⋯ (ui/fileLinks.js: it comes up on a hover, its menu the right-click's, Open in Yap from it); an Outputs row that opens where Settings → Yap Code's \"Open file links in\" says (outputsOpen.js: Notepad there — test mode keeps the command, `state`'s filesOpened — and a .js file under Windows' default app shown in Yap instead, as #147's links); and the summary's Changes on a real pull request of Yap's own with cancelled checks (agents/prs.rs: \"Checks cancelled · 8 of 10 passed\", never \"Checks failing\"), through the lab's read-only gh on branch claude/lab-untested (#146: two cancelled E2E shards, CodeQL's neutral). Needs a live lab and Yap Code.",
   "needs": { "yapCode": true, "live": true },
   "steps": [
     { "set": { "git": "claude/lab-untested", "gh": "on", "bypass": true, "config": { "agentsDirect": true, "agentsOpenFiles": "yap" } }, "note": "A branch of Yap's own repository whose pull request (#146) has two cancelled checks." },
@@ -17,7 +17,7 @@
     { "expect": { "selector": { "window": "panel", "css": "[data-testid=\"chat-file\"][data-rel=\"src/convert.js\"]", "count": 1 } } },
     { "shot": "file-view", "window": "panel" },
 
-    { "set": { "config": { "agentsOpenFiles": "vscode" } }, "note": "Links open in VS Code now." },
+    { "set": { "config": { "agentsOpenFiles": "notepad" } }, "note": "Links open in Notepad now (Windows' own: on every PC, so the script runs anywhere; an editor the PC hasn't opens in Yap instead)." },
     { "lab": "summary", "args": { "chat": "same" } },
     {
       "expect": {
@@ -34,11 +34,11 @@
       },
       "note": "#146's cancelled E2E shards: cancelled, as GitHub says it, not failing."
     },
-    { "lab": "click", "args": { "window": "panel", "css": "[data-testid=\"chat-summary-outputs\"] [data-testid=\"chat-output\"][data-kind=\"changed\"]" }, "note": "The changed file's Outputs row, with links opening in VS Code: VS Code (test mode keeps the command), not Yap's view." },
+    { "lab": "click", "args": { "window": "panel", "css": "[data-testid=\"chat-summary-outputs\"] [data-testid=\"chat-output\"][data-kind=\"changed\"]" }, "note": "The changed file's Outputs row, with links opening in Notepad: Notepad (test mode keeps the command: state's filesOpened), not Yap's view." },
     { "expect": { "selector": [{ "window": "panel", "css": "[data-testid=\"chat-summary\"]", "count": 1 }, { "window": "panel", "css": "[data-testid=\"chat-file\"]", "present": false }] } },
-    { "lab": "click", "args": { "window": "panel", "css": "[data-testid=\"chat-summary-outputs\"] [data-testid=\"chat-output\"][data-kind=\"changed\"]", "right": true }, "note": "Its menu: Open (VS Code), Open in Yap, Show in folder, Copy path, Open in VS Code." },
+    { "lab": "click", "args": { "window": "panel", "css": "[data-testid=\"chat-summary-outputs\"] [data-testid=\"chat-output\"][data-kind=\"changed\"]", "right": true }, "note": "Its menu: Open (Notepad), Open in Yap, Show in folder, Copy path, Open in Notepad." },
     { "expect": { "selector": { "window": "main", "css": "[role=\"menuitem\"]", "count": { "min": 4, "max": 5 } } } },
-    { "shot": "outputs-menu-vscode", "window": "main" },
+    { "shot": "outputs-menu-editor", "window": "main" },
     { "lab": "type", "args": { "window": "main", "press": "Escape" } },
 
     { "set": { "config": { "agentsOpenFiles": "default" } }, "note": "Windows' default app: convert.js is a script it would run." },
