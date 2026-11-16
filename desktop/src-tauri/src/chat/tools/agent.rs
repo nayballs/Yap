@@ -220,11 +220,13 @@ fn searching(live: Option<crate::chat::stream::Live<'_>>, args: &Value) {
 
 /// The chips so far, and the web sources found so far (a "[1]" in the
 /// answer draws as a pill while it's written) — with the calendar's
-/// meetings the turn numbered (`calendar`).
-fn report(live: Option<crate::chat::stream::Live<'_>>, tools_used: &[String], web: Option<&crate::web::Turn>, calendar: Option<&super::calendar::Log>) {
+/// meetings the turn numbered (`calendar`) and the project's parts
+/// (`project`, chat/projects/sources.rs).
+fn report(live: Option<crate::chat::stream::Live<'_>>, tools_used: &[String], web: Option<&crate::web::Turn>, calendar: Option<&super::calendar::Log>, project: Option<&crate::chat::projects::sources::Cites>) {
     if let Some(live) = live {
         let mut sources = web.map(|w| w.sources.clone()).unwrap_or_default();
         sources.extend(calendar.into_iter().flat_map(|log| log.all()).map(|c| c.source()));
+        sources.extend(project.map(crate::chat::projects::sources::Cites::sources).unwrap_or_default());
         sources.sort_by_key(|s| s.n);
         live.sink.send(crate::chat::stream::Event::Chips {
             chips: tools_used.to_vec(),
@@ -322,7 +324,7 @@ impl Loop<'_> {
     async fn search_for(&mut self, query: &str) {
         if let Some(turn) = self.web.as_deref_mut() {
             search_for_the_model(turn, query, &mut self.messages, &mut self.tools_used, self.room, self.live).await;
-            report(self.live, &self.tools_used, Some(turn), self.extra.calendar.map(|c| c.log));
+            report(self.live, &self.tools_used, Some(turn), self.extra.calendar.map(|c| c.log), self.extra.project_cites);
         }
     }
 
@@ -339,7 +341,7 @@ impl Loop<'_> {
 
     /// The chips and sources so far, to whoever watches ([`report`]).
     fn report(&self) {
-        report(self.live, &self.tools_used, self.web.as_deref(), self.extra.calendar.map(|c| c.log));
+        report(self.live, &self.tools_used, self.web.as_deref(), self.extra.calendar.map(|c| c.log), self.extra.project_cites);
     }
 }
 

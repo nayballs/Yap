@@ -395,6 +395,41 @@ pub struct Source {
     /// Sources row too. An older Yap drops it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cited: bool,
+    /// **A part of a big project's file** (`chat/projects/sources.rs`, 16 Nov
+    /// 2026): the file's name its title, the part's place its site
+    /// ("pages 12–13"), its words its quote, and where it opens. An older
+    /// Yap drops it, and its pill opens nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectPlace>,
+}
+
+/// **Where a project file's part is** (a big project's, searched in parts:
+/// `chat/projects/sources.rs`): its pill opens the file there, read only,
+/// beside the chat — a spreadsheet in the sheet view at its row, any other
+/// file as Yap read it at its page, slide, heading or line.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectPlace {
+    pub project: String,
+    /// The file's id in the project (`pf_…`).
+    pub file: String,
+    /// What its reader made of it: "pdf", "markdown", "word", "powerpoint",
+    /// "sheet", "code", "text".
+    pub kind: String,
+    /// The part's number in the file (at the size the turn's model read it).
+    pub part: usize,
+    /// Its first and last line in the file's text as Yap read it (from 1).
+    pub from: u32,
+    pub to: u32,
+    /// Its first page, slide, row or line, when the file counts them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<u32>,
+    /// A workbook's sheet it's in.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sheet: String,
+    /// The section it's in ("Leave › Annual leave").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub section: String,
 }
 
 fn is_zero(n: &u64) -> bool {

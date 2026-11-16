@@ -484,9 +484,11 @@ function webContext(sources) {
   };
 }
 
-/** A passage of the person's meetings and notes, or a meeting on their
- * calendar (chat/tools/calendar.rs: an `event` key) — not a web page. */
-const isPassage = (s) => s && (s.note != null || !!s.event) && !s.url;
+/** A passage of the person's meetings and notes, a meeting on their
+ * calendar (chat/tools/calendar.rs: an `event` key), or a part of a big
+ * project's file (chat/projects/sources.rs: its `project` place) — not a web
+ * page. Opened in Yap by the view, never as a link. */
+const isPassage = (s) => s && (s.note != null || !!s.event || !!s.project) && !s.url;
 
 const CITATION = /\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\]/g;
 
@@ -577,7 +579,7 @@ rules.yap_cite = (tokens, idx) => {
     const n = escapeHtml(String(s.n));
     if (isPassage(s)) {
       // Opened in Yap by the view (its click handler), never as a link.
-      const what = s.event ? 'Meeting' : 'Passage';
+      const what = s.project ? 'Source' : s.event ? 'Meeting' : 'Passage';
       return `<a class="md-cite md-passage" href="#passage-${n}" title="${label}" aria-label="${what} ${n}: ${label}">${n}</a>`;
     }
     return `<a class="md-link md-cite" href="${escapeHtml(s.url)}" title="${label}" aria-label="Source ${n}: ${label}">${n}</a>`;

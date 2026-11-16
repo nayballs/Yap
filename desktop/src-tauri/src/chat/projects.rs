@@ -40,6 +40,7 @@
 
 pub mod knowledge;
 pub mod parts;
+pub mod sources;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -219,6 +220,18 @@ pub fn file_text(project: &str, file: &str) -> Option<String> {
     std::fs::read_to_string(text_path(project, file)?).ok()
 }
 
+/// **A project file's kept copy** (the bytes added, `add_bytes`): its name
+/// and path, while the project has it (`None`: no such file, or its copy
+/// gone). The sheet view shows a project's spreadsheet from it.
+pub fn copy_of(project: &str, file: &str) -> Option<(String, PathBuf)> {
+    if !(is_project_id(project) && is_file_id(file)) {
+        return None;
+    }
+    let name = with_store(|s| s.project(project).and_then(|p| p.files.iter().find(|f| f.id == file)).map(|f| f.name.clone()))?;
+    let path = dir().join(project).join(file).join(crate::chat::attachments::safe_name(&name));
+    path.is_file().then_some((name, path))
+}
+
 // ---- the prompt ---------------------------------------------------------------------------------
 
 /// The block's start: the project's name, what it's for, its instructions.
@@ -301,10 +314,11 @@ pub fn of(id: &str) -> Option<Project> {
 /// **Project `p`'s block for a model with `room`**: its files whole while
 /// they fit (`knowledge::Room::whole`), else the list of their parts
 /// (`knowledge::index_block`; `tools`: the model may read more with the
-/// project's tools). Reads the files.
-pub fn block_for(p: &Project, room: knowledge::Room, tools: bool) -> String {
+/// project's tools; `numbered`: its answer cites them by number, as
+/// Chat's do — a side question's in words). Reads the files.
+pub fn block_for(p: &Project, room: knowledge::Room, tools: bool, numbered: bool) -> String {
     if knowledge::searched(p, room) {
-        return format!("{}{}", head(p), knowledge::index_block(p, tools, room.list()));
+        return format!("{}{}", head(p), knowledge::index_block(p, tools, room, numbered));
     }
     let texts: Vec<(ProjectFile, Option<String>)> = p.files.iter().map(|f| (f.clone(), file_text(&p.id, &f.id))).collect();
     block_of(p, &texts, room.whole())
@@ -313,9 +327,9 @@ pub fn block_for(p: &Project, room: knowledge::Room, tools: bool) -> String {
 /// **The project block for conversation `conv`'s system prompt**, sized
 /// to a model with `room` ([`block_for`]); `None` when it's in none. Reads
 /// the files' texts.
-pub fn prompt_block(conv: Option<u64>, room: knowledge::Room, tools: bool) -> Option<String> {
+pub fn prompt_block(conv: Option<u64>, room: knowledge::Room, tools: bool, numbered: bool) -> Option<String> {
     let p = of_conversation(conv)?;
-    Some(block_for(&p, room, tools))
+    Some(block_for(&p, room, tools, numbered))
 }
 
 /// **A new chat was made** (`turn_conversation`): it's in the project its
@@ -427,6 +441,33 @@ pub async fn project_knowledge(id: String) -> Result<Value, String> {
     let room = knowledge::Room::new(context, crate::chat::budget::request_cap(&provider, &model));
     let label = crate::chat::budget::model_label(&provider, &model, &crate::ai::local_llm::active_model_display(&cfg));
     Ok(json!({ "tokens": tokens, "room": room.whole(), "searched": knowledge::searched(&p, room), "model": label }))
+}
+
+/// The most of a file's text the view beside the chat is sent (a 250K-token
+/// spreadsheet's is about 1 MB; the rest said).
+const VIEW_MAX: usize = 2_000_000;
+
+/// **A project file as Yap read it, for the view beside the chat**
+/// (`ProjectFileTab.svelte`: a source's pill, read only): `{name, kind,
+/// text, pages, cut, project}` — its text (at most [`VIEW_MAX`] bytes,
+/// `cut` when there was more) and its project's name. Only a file of that
+/// project (its ids checked: no path in them).
+#[tauri::command]
+pub fn project_file_view(project: String, file: String) -> Result<Value, String> {
+    let (f, name) = with_store(|s| s.project(&project).and_then(|p| p.files.iter().find(|f| f.id == file).map(|f| (f.clone(), p.name.clone())))).ok_or("That file isn't in the project any more.")?;
+    let text = file_text(&project, &file).ok_or_else(|| format!("{} is gone from this PC.", f.name))?;
+    let cut = text.len() > VIEW_MAX;
+    let text = if cut {
+        let mut end = VIEW_MAX;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text[..end].to_string()
+    } else {
+        text
+    };
+    tracing::info!(kind = f.kind, bytes = text.len(), cut, "Chat: a project file shown beside the chat");
+    Ok(json!({ "name": f.name, "kind": f.kind, "text": text, "pages": f.pages, "cut": cut, "project": name }))
 }
 
 /// **A new project**: its name and what it's for.
@@ -724,14 +765,21 @@ mod tests {
         // A chat joins it; its block has the file; deleting the chat takes it out.
         chat_project_set(5, Some(p.id.clone())).unwrap();
         let room = knowledge::Room::new(10_000, None);
-        let b = prompt_block(Some(5), room, true).unwrap();
+        let b = prompt_block(Some(5), room, true, true).unwrap();
         assert!(b.contains("Use metric units.") && b.contains("Beans in May."), "{b}");
-        assert_eq!(prompt_block(Some(6), room, true), None);
+        assert_eq!(prompt_block(Some(6), room, true, true), None);
         chats_deleted(&[5]);
-        assert_eq!(prompt_block(Some(5), room, true), None);
+        assert_eq!(prompt_block(Some(5), room, true, true), None);
+        // Shown beside the chat as Yap read it (a source's pill), its copy for the sheet view.
+        let view = project_file_view(p.id.clone(), f.id.clone()).unwrap();
+        assert_eq!((view["name"].as_str(), view["kind"].as_str(), view["text"].as_str(), view["project"].as_str()), (Some("sowing.md"), Some("markdown"), Some("# Sowing\nBeans in May."), Some("Garden 2027")));
+        assert_eq!(copy_of(&p.id, &f.id).map(|(n, path)| (n, std::fs::read(path).unwrap())), Some(("sowing.md".to_string(), b"# Sowing\nBeans in May.".to_vec())));
+        assert!(project_file_view(p.id.clone(), "pf_0000000000000bad".into()).is_err());
+        assert_eq!(copy_of(&p.id, "../x"), None);
         // A file taken out goes from the disk too.
         project_file_remove(p.id.clone(), f.id.clone()).unwrap();
         assert_eq!(file_text(&p.id, &f.id), None);
+        assert_eq!(copy_of(&p.id, &f.id), None);
         // Deleted: its chats leave it.
         chat_project_set(7, Some(p.id.clone())).unwrap();
         project_delete(p.id.clone()).unwrap();

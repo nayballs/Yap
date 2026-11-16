@@ -26,6 +26,10 @@ pub(super) fn check(t: &Asked<'_>, answer: Answer, conv: &crate::chat::chats::Co
         Some(s) => crate::chat::skills::tidy_answer(&s.skill, &reply),
         None => reply,
     };
+    // **A big project's parts it cites** (chat/projects/sources.rs): its
+    // sources too, numbered with the web's — one named in words as its
+    // "[n]" first, and never a number another source has.
+    let (reply, sources) = cited_parts(reply, sources, built.project.as_deref().filter(|_| !t.meetings));
     let (mut reply, fixed) = if t.meetings {
         let (r, mut f) = crate::chat::chats::checked_answer(&reply, text, looked, &[], passages);
         let only_these: Vec<usize> = passages.iter().map(|s| s.n).collect();
@@ -117,6 +121,23 @@ pub(super) fn check(t: &Asked<'_>, answer: Answer, conv: &crate::chat::chats::Co
     Ok(Answer { reply, tools_used, sources, looked, pages, stopped, pictures, files, shown_pages, offers, browser })
 }
 
+/// **The answer's project parts** (`cites`: the turn's, none without a
+/// project searched in parts): a citation in words ("(staff-handbook.pdf,
+/// page 12)") as its part's "[n]", then the parts it cites among its
+/// `sources`, by number — none whose number one of them has. Pure.
+fn cited_parts(reply: String, mut sources: Vec<crate::chat::chats::Source>, cites: Option<&crate::chat::projects::sources::Cites>) -> (String, Vec<crate::chat::chats::Source>) {
+    let Some(cites) = cites.filter(|c| !c.is_empty()) else { return (reply, sources) };
+    let reply = crate::chat::projects::sources::cite_mentions(&reply, cites);
+    let taken: Vec<usize> = sources.iter().map(|s| s.n).collect();
+    let parts = cites.cited_in(&reply, &taken);
+    if !parts.is_empty() {
+        tracing::info!(parts = parts.len(), "Chat: the answer cites the project's files");
+        sources.extend(parts);
+        sources.sort_by_key(|s| s.n);
+    }
+    (reply, sources)
+}
+
 /// `first`, then `chips` without any of them again. Pure.
 fn with_first(first: &[String], chips: Vec<String>) -> Vec<String> {
     if first.is_empty() {
@@ -195,4 +216,33 @@ pub(super) async fn save(
         offers,
         direct: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chat::chats::Source;
+    use crate::chat::projects::parts::{Part, Size};
+    use crate::chat::projects::sources::Cites;
+    use crate::chat::projects::ProjectFile;
+
+    #[test]
+    fn the_parts_an_answer_cites_are_its_sources_beside_the_webs() {
+        let pdf = ProjectFile { id: "pf_00000000000000c1".into(), name: "staff-handbook.pdf".into(), kind: "pdf".into(), ..Default::default() };
+        let part = |n: usize, page: u32| Part { n, at: format!("page {page}"), text: format!("[Page {page}]\nPermits come from reception, desk {n}."), tokens: 12, lines: (page * 10, page * 10 + 9), span: Some((page, page)), ..Default::default() };
+        let cites = Cites::new(Size::LARGE);
+        cites.number_own("p-1", &pdf, &part(4, 12));
+        cites.number_own("p-1", &pdf, &part(9, 40));
+        let web = vec![Source { n: 3, title: "Car parks".into(), url: "https://parking.example.com/".into(), ..Default::default() }];
+        let (reply, sources) = cited_parts("Permits come from reception [1], and the car park is on level two [3] (staff-handbook.pdf, page 40).".into(), web.clone(), Some(&cites));
+        assert_eq!(reply, "Permits come from reception [1], and the car park is on level two [3] [2].");
+        assert_eq!(sources.iter().map(|s| (s.n, s.title.as_str())).collect::<Vec<_>>(), [(1, "staff-handbook.pdf"), (2, "staff-handbook.pdf"), (3, "Car parks")]);
+        assert!(sources[0].cited && sources[0].project.as_ref().unwrap().at == Some(12));
+        // A number another source has (a small model's web pipeline numbers its pages from 1): not the part.
+        let (_, sources) = cited_parts("From the web [1].".into(), vec![Source { n: 1, url: "https://a.example.com/".into(), ..Default::default() }], Some(&cites));
+        assert_eq!(sources.len(), 1);
+        assert!(sources[0].project.is_none());
+        // No project searched in parts: as it was.
+        assert_eq!(cited_parts("Hello [1].".into(), web.clone(), None), ("Hello [1].".to_string(), web));
+    }
 }

@@ -379,11 +379,20 @@ struct ToChat<'a> {
     /// The chips that come first (a big project's parts sent with the
     /// question, chat/projects/knowledge.rs).
     lead: Vec<String>,
+    /// The turn's project parts (chat/projects/sources.rs): the page hears
+    /// them as sources beside the pages, a "[2]" a pill as it's written.
+    project: Option<Arc<crate::chat::projects::sources::Cites>>,
 }
 
 impl<'a> ToChat<'a> {
     fn new(sink: Option<&'a dyn Sink>, marks: Option<crate::integrations::claude_live::turn::Marks>, lead: Vec<String>) -> ToChat<'a> {
-        ToChat { step: sink.map(|s| Step::new(s, true)), sink, cites: map::Cites::default(), sources: Vec::new(), marks, lead }
+        ToChat { step: sink.map(|s| Step::new(s, true)), sink, cites: map::Cites::default(), sources: Vec::new(), marks, lead, project: None }
+    }
+
+    /// The same, with the turn's project parts.
+    fn with_project(mut self, project: Option<Arc<crate::chat::projects::sources::Cites>>) -> ToChat<'a> {
+        self.project = project;
+        self
     }
 
     /// What one of Yap's tools showed for the turn (a card, an agent's tab),
@@ -457,7 +466,10 @@ impl map::Out for ToChat<'_> {
         }
         if let Some(sink) = self.sink {
             let all: Vec<String> = self.lead.iter().cloned().chain(chips.iter().filter(|c| !self.lead.contains(c)).cloned()).collect();
-            sink.send(crate::chat::stream::Event::Chips { chips: all, sources: sources.to_vec(), web });
+            let mut shown = sources.to_vec();
+            shown.extend(self.project.as_deref().map(crate::chat::projects::sources::Cites::sources).unwrap_or_default());
+            shown.sort_by_key(|s| s.n);
+            sink.send(crate::chat::stream::Event::Chips { chips: all, sources: shown, web });
         }
     }
 }
@@ -619,6 +631,8 @@ fn run_context(
         cards: t.gates.cards,
         // Visuals in the thread (chat/made.rs): asked in Chat, typed or out loud with Chat in view.
         visuals: !t.meetings && (t.scope.is_none() || (t.scope == Some("assistant") && crate::chat::assistant::asked_in_chat())),
+        // A big project's parts (chat/projects/sources.rs): set by the turn (`answer`).
+        project: None,
         // The documents beside the chat (claude_live/documents.rs): this turn's, the answer's pills.
         docs,
         // (Every plan model is: its documents still change after the web, as the tool loop's.)
@@ -1006,6 +1020,8 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         // (The documents beside the chat: a plain plan chat's, this turn's own; a research's report is Yap's.)
         let docs = (built.code.is_none() && research.is_none()).then(|| Arc::clone(&built.doc_turn));
         let mut ctx = run_context(t, opened, this_turn, this_connectors, fitted, watch.is_some(), docs);
+        // A big project's parts: its tools number theirs with the turn's sources.
+        ctx.project = built.project.clone();
         if research.is_some() {
             ctx.agents = None;
             ctx.cards = crate::chat::cards::Cards::default();
@@ -1036,14 +1052,15 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
             return Err(e);
         }
 
-        let mut mapper = Mapper::new();
+        // (Its pages numbered after a big project's parts, with its tools' parts: chat/projects/sources.rs.)
+        let mut mapper = Mapper::new().numbered(built.project.as_ref().map(|c| c.numbers.clone()));
         // (A research's words never stream into the thread: its report goes in a document.)
         let quiet = watch.filter(|_| research.is_some()).map(|w| crate::chat::research::Quiet::new(w));
         let sink: Option<&dyn Sink> = match &quiet {
             Some(q) => Some(q),
             None => watch.map(|w| w as &dyn Sink),
         };
-        let mut out = ToChat::new(sink, run_turn.as_ref().map(|r| r.marks()), built.project_chips.clone());
+        let mut out = ToChat::new(sink, run_turn.as_ref().map(|r| r.marks()), built.project_chips.clone()).with_project(built.project.clone());
         let mut ended = read_turn(&mut rx, &mut mapper, &mut out, t.stop, run_turn.as_mut().map(|r| &mut r.events), research).await;
         // A research past a cap: its turn stopped, its usage counted, and the
         // report asked for on the same session (no cap: it may only write).
