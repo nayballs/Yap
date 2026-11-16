@@ -234,7 +234,14 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   `normal_url` drops "www.", the fragment, `utm_` parameters and a trailing
   slash, before a query too); **a page read** (`opened`: `read_page`, Claude's
   fetch) is marked `opened` and takes the page's own title (a search's
-  result is often titled with the site or the game); `sources_for(reply)` =
+  result is often titled with the site or the game); **a page read that
+  came with none** (Claude Code's `WebFetch` says none; a fetch with no
+  title: `page::untitled`, its title its address or its site, "www." or not) can get its
+  own afterwards (`title_read_pages`, 16 Nov 2026, Research's report:
+  `page_title` reads its first 160 KB with a page read's guards and
+  receipt, `title_in` takes its `og:title`, else the `<title>` in its head,
+  never an SVG's; a page read here in the last minutes comes from the cache;
+  all at once, within a time, one not back keeping its address); `sources_for(reply)` =
   the ones cited (`citations`: [1], [2, 3], [1][4]) or all — **a document's
   turn** (`cited_in`: what its document cites, by `[n]` or a link to the
   page) keeps all, the cited ones marked `cited`, for the Sources row's

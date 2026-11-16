@@ -16,7 +16,16 @@
   // diagrams and pictures drawn (ui/markdownVisuals.js: KaTeX and mermaid in
   // chunks of their own, loaded the first time one shows) on the card's dark
   // colours, whatever the app's theme.
+  //
+  // Never over a message box (16 Nov 2026, ui/toastClear.js): the stack rises
+  // above every box marked `use:keepClear` under its column (Chat's
+  // composer, the notepad's Ask…), or goes to the window's top when there's
+  // no room above it — measured as boxes come, go or change size, as the
+  // window resizes, and every quarter second while a toast is up (a panel
+  // opening moves the composer without resizing it).
+  import { untrack } from 'svelte';
   import { toastStore, dismiss, pauseToast, resumeToast } from './toast.svelte.js';
+  import { clearRects, onKeepClear, placeToasts } from './toastClear.js';
   import { renderMarkdown } from '../core/markdown.js';
   import { markdownVisuals } from './markdownVisuals.js';
   import BriefView from '../components/BriefView.svelte';
@@ -29,6 +38,52 @@
   let expanded = $state([]);
 
   const CHIP_LABELS = { default: 'Tip', success: 'Done', destructive: 'Error' };
+
+  // The stack's place when a box would be under it (`{bottom}` or `{top}`, px), else the CSS's own.
+  let vp = $state(null);
+  let lift = $state(null);
+  // (Its first place set before it shows; only a move after that glides.)
+  let glide = $state(false);
+
+  function measure() {
+    if (!vp?.isConnected) return;
+    const cs = getComputedStyle(vp);
+    const px = (name, fallback) => {
+      const v = parseFloat(cs.getPropertyValue(name));
+      return Number.isFinite(v) ? v : fallback;
+    };
+    const base = { right: px('--yap-toast-right', 20), bottom: px('--yap-toast-bottom', 20) };
+    const r = vp.getBoundingClientRect();
+    const at = placeToasts({
+      view: { width: window.innerWidth, height: window.innerHeight },
+      base,
+      top: px('--yap-toast-top', 56),
+      stack: { width: r.width, height: r.height },
+      boxes: clearRects(),
+    });
+    const next = at.top != null ? { top: at.top } : at.bottom !== base.bottom ? { bottom: at.bottom } : null;
+    if (next?.top !== lift?.top || next?.bottom !== lift?.bottom) lift = next;
+  }
+
+  $effect(() => {
+    if (!vp) return;
+    untrack(measure);
+    const settle = requestAnimationFrame(() => (glide = true));
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => measure()) : null;
+    ro?.observe(vp);
+    const off = onKeepClear(measure);
+    const timer = setInterval(measure, 250);
+    window.addEventListener('resize', measure);
+    return () => {
+      cancelAnimationFrame(settle);
+      glide = false;
+      ro?.disconnect();
+      off();
+      clearInterval(timer);
+      window.removeEventListener('resize', measure);
+      lift = null;
+    };
+  });
 
   function toggleExpand(id) {
     expanded = expanded.includes(id) ? expanded.filter((x) => x !== id) : [...expanded, id];
@@ -66,7 +121,15 @@
 </script>
 
 {#if toastStore.list.length > 0}
-  <div class="viewport">
+  <div
+    class="viewport"
+    class:lifted={lift?.bottom != null}
+    class:attop={lift?.top != null}
+    class:glide
+    data-testid="toast-stack"
+    bind:this={vp}
+    style={lift?.top != null ? `top:${lift.top}px;bottom:auto` : lift?.bottom != null ? `bottom:${lift.bottom}px` : undefined}
+  >
     {#each toastStore.list as t (t.id)}
       <div
         class="toast {t.variant}"
@@ -200,13 +263,23 @@
     gap: 8px;
     pointer-events: none;
   }
+  .viewport.glide {
+    transition: bottom 180ms ease-out;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .viewport.glide {
+      transition: none;
+    }
+  }
   /* Wispr card: warm near-black, big radius, generous padding. */
   .toast {
     pointer-events: auto;
     position: relative;
     display: flex;
     flex-direction: column;
-    width: 320px;
+    /* (A narrow window's full width, its gutters kept.) */
+    width: min(352px, calc(100vw - 2 * var(--yap-toast-right, 20px)));
+    box-sizing: border-box;
     padding: 14px 16px 15px;
     border-radius: 16px;
     overflow: hidden;

@@ -339,7 +339,20 @@ unchanged).
   a note moved, "Added to Claude" with its restart step, "Won't ask about
   Teams", "Updated to X", sign-in); a state the screen already shows gets
   none (recording / paused / ended, an action run, a switch flipped, a row
-  gone, the transcript's copy ✓). Mounted in ControlPanel (and the notepad)
+  gone, the transcript's copy ✓). **Never over a message box** (16 Nov
+  2026, `ui/toastClear.js`; the stack sat on Chat's Send and Yap Lab had to
+  close toasts to reach it): a box marks itself `use:keepClear` — Chat's
+  composer (its chips row too), the side question, an edit in place, the
+  notepad's Ask row — and the stack rises above every marked box under its
+  column (`placeToasts`, pure: as Material's snackbars rise above a bottom
+  bar), or goes to the window's top (`--yap-toast-top`, 56px) when there's no
+  room above it; a box clear of the column (a wide window's centred
+  composer) moves nothing, and the window's own corner
+  (`--yap-toast-bottom` / `--yap-toast-right`) is never lowered. Measured as
+  a box comes, goes or resizes, as the window does, and every 250 ms while a
+  toast is up (a panel opening moves the composer without resizing it);
+  cards are at most the window's width less its gutters. e2e:
+  `toast-placement.spec.js`. Mounted in ControlPanel (and the notepad)
   and wired to action runs, uploads, clipboard copies, backend `yap-error`
   events (kind `alert`; a dictation's own errors are the overlay's only,
   `yap-dictation-error`), push-to-talk coaching (`yap-hint` → a 10 s Tip
