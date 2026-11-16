@@ -517,7 +517,7 @@ async function dropFiles(files) {
   await chips.nth(before + paths.length - 1).waitFor({ state: 'visible', timeout: 60_000 });
 }
 
-async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null }) {
+async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null, research = false }) {
   if (!text?.trim()) throw new Error('Nothing to ask');
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
   readRecord();
@@ -532,6 +532,12 @@ async function startTurn({ text, spoken = false, chat = 'new', autoCards = null,
     if (project) await newChatInProject(project);
     // The chat's style from Style under the box (chat/styles.rs), as the person picks it.
     if (style) await pickStyle(style);
+    // Research under the box (chat/research.rs), switched on as the person would.
+    if (research) {
+      const chip = main().getByTestId('chat-research-chip');
+      if ((await chip.getAttribute('aria-pressed', { timeout: 10_000 })) !== 'true') await chip.click({ timeout: 10_000 });
+      if ((await chip.getAttribute('aria-pressed')) !== 'true') throw new Error(`Research can't be switched on: ${await chip.getAttribute('title')}`);
+    }
     // A new chat made incognito with its ghost (chat/incognito.rs).
     if (incognito) {
       const ghost = main().getByTestId('chat-incognito');
@@ -666,7 +672,8 @@ async function answerOutline(card, edit) {
   if (edit == null) {
     const box = main().locator(`[data-testid="chat-outline-card"][data-state="asking"]`).first();
     if (await box.isVisible().catch(() => false)) {
-      await box.getByRole('button', { name: 'Go', exact: true }).click({ timeout: 5_000 });
+      // (A research's plan, chat/research.rs: its Go is "Start research".)
+      await box.getByRole('button', { name: /^(Go|Start research)$/ }).click({ timeout: 5_000 });
       return true;
     }
     return invoke('chat_outline_answer', { id, outline: null });
@@ -1182,7 +1189,7 @@ const COMMANDS = {
     const attach = Array.isArray(a.attach) ? a.attach : a.attach ? String(a.attach).split(',').filter(Boolean) : null;
     const how = a.retry ? 'retry' : a.edit ? 'edit' : 'ask';
     const text = how === 'retry' ? String(a.text ?? '').trim() || 'Retry' : a.text;
-    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null } : null, ...shotsFor(a) });
+    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, research: !!a.research && how === 'ask', project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null } : null, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
   wait: async (a) => {

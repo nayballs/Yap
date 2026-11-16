@@ -672,6 +672,8 @@ enum Ended {
     Gone { started: bool },
     Halted(Halt),
     TimedOut,
+    /// A research's cap reached (chat/research.rs `past`): the report next.
+    Capped(crate::chat::research::Spent),
 }
 
 /// What Yap's tools showed for the turn (`calls`: the run turn's stream),
@@ -693,10 +695,14 @@ async fn read_turn(
     out: &mut ToChat<'_>,
     stop: &crate::chat::stream::Stoppable,
     mut calls: Option<&mut tokio::sync::mpsc::UnboundedReceiver<crate::chat::stream::Event>>,
+    research: Option<crate::chat::research::Budget>,
 ) -> Ended {
     let mut started = false;
     let deadline = tokio::time::sleep(TURN_TIMEOUT);
     tokio::pin!(deadline);
+    // A research's own time (chat/research.rs): its report asked for then.
+    let research_time = tokio::time::sleep(research.map_or(TURN_TIMEOUT, |b| b.caps.time.saturating_sub(b.elapsed())));
+    tokio::pin!(research_time);
     let mut calls_open = calls.is_some();
     loop {
         tokio::select! {
@@ -709,7 +715,16 @@ async fn read_turn(
                     _ => {}
                 }
                 match mapper.feed(&ev, out) {
-                    Fed::More => {}
+                    Fed::More => {
+                        // A research past one of its caps: the report next.
+                        if let Some(b) = research {
+                            let done = crate::chat::research::counts(mapper.chips(), mapper.sources());
+                            let tokens = mapper.tokens() + crate::ai::usage::turn_tokens();
+                            if let Some(why) = crate::chat::research::past(&b.caps, mapper.web_calls(), done, b.elapsed(), tokens) {
+                                return Ended::Capped(why);
+                            }
+                        }
+                    }
                     Fed::Done(r) => return Ended::Done(r),
                     Fed::Problem(p) => return Ended::Problem(p),
                     Fed::Exited(_) => return Ended::Gone { started },
@@ -721,6 +736,7 @@ async fn read_turn(
             },
             why = stop.halted() => return Ended::Halted(why),
             _ = &mut deadline => return Ended::TimedOut,
+            _ = &mut research_time, if research.is_some() => return Ended::Capped(crate::chat::research::Spent::Time),
         }
     }
 }
@@ -763,6 +779,34 @@ async fn interrupted(warm: &sessions::Warm, rx: &mut tokio::sync::mpsc::Unbounde
     resets
 }
 
+/// **A research's turn stopped at a cap** (chat/research.rs): interrupted
+/// and read to its end, its result back (its usage is the research's too),
+/// so the report can be asked for next on the same session. `None`: it
+/// didn't end by itself (its process ended).
+async fn stopped_for_report(warm: &sessions::Warm, rx: &mut tokio::sync::mpsc::UnboundedReceiver<Event>) -> Option<Box<crate::ai::claude_code::events::TurnResult>> {
+    let _ = warm.session.interrupt();
+    let drained = tokio::time::timeout(DRAIN, async {
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                Event::Result(r) => return Some(Box::new(r)),
+                Event::Exited(_) => return None,
+                _ => {}
+            }
+        }
+        None
+    })
+    .await;
+    match drained {
+        Ok(Some(r)) => Some(r),
+        _ => {
+            tracing::info!("Claude plan: a research stopped at its cap didn't end by itself; its process ended");
+            sessions::end_warm(warm.conv);
+            warm.session.kill();
+            None
+        }
+    }
+}
+
 /// How full a plan conversation is after a turn: its last model call's
 /// prompt and answer (`Mapper::last_call_tokens`) against the model's
 /// context window, Claude Code's own word (`modelUsage`) else Anthropic's
@@ -777,14 +821,22 @@ async fn fill_of(mapper: &Mapper, result: &crate::ai::claude_code::events::TurnR
 }
 
 /// **The answer on the person's Claude plan** (see the module's doc).
-pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted: &Fitted, watch: Option<&crate::chat::stream::Watch<'_>>) -> Result<Answer, String> {
+///
+/// **A research turn** (`research`: its caps and clock, chat/research.rs,
+/// its plan in the question's context): Claude Code's own `WebSearch` and
+/// `WebFetch` and Yap's read-only tools only (none of the screen, the pages
+/// beside the chat, agents, connectors or cards this turn); its words never
+/// stream into the thread (`research::Quiet`); stopped at the first call
+/// past a cap, or at its time, and asked for the report on the same session
+/// (`research::write_now_after`); every page it found kept with the answer.
+pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted: &Fitted, watch: Option<&crate::chat::stream::Watch<'_>>, research: Option<crate::chat::research::Budget>) -> Result<Answer, String> {
     let conv = &opened.conv;
     let model = t.ep.model.clone();
     let effort = oneshot::effort_for(&model);
     // The screen and the pages beside the chat (claude_live/eyes.rs): what
-    // the session lists, and what this turn may use of it.
+    // the session lists, and what this turn may use of it (a research's: none).
     let eyes = session_eyes(t, built.code.is_some());
-    let this_turn = turn_eyes(t, eyes);
+    let this_turn = if research.is_some() { crate::integrations::claude_live::eyes::Eyes::default() } else { turn_eyes(t, eyes) };
     // The person's connectors (claude_live/connectors.rs): listed for the
     // session, this turn's own for its calls.
     let connectors = plan_connectors(t, built.code.is_some(), conv.id);
@@ -805,7 +857,9 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
     // The question, its context (a question asked away from Chat told it
     // has no screen or panel) and its screenshots.
     let mut context = built.prompt.context.clone();
-    context.extend(away_line(eyes, this_turn, t.gates.screen_takes).map(str::to_string));
+    if research.is_none() {
+        context.extend(away_line(eyes, this_turn, t.gates.screen_takes).map(str::to_string));
+    }
     // (Its attached files' text first: chat/attachments.rs.)
     let question = crate::chat::attachments::with_text(&crate::chat::chats::with_context(&context, &t.text));
     let images = if crate::snip::vision::reads_images(plan::PROVIDER, &model) == Some(false) { Vec::new() } else { question_images() };
@@ -852,8 +906,15 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         w.set_busy(true);
         // This turn opens on the session's run before its question goes in:
         // the calls Claude Code makes from now on are this turn's.
-        let this_connectors = connectors.as_ref().map(|l| Arc::clone(&l.turn));
-        let mut run_turn = w.run().map(|r| r.begin_turn(run_context(t, opened, this_turn, this_connectors, fitted, watch.is_some()), web_side(t, conv, fitted, this_turn)));
+        // (A research turn: no connectors, agents, cards or visuals of its own.)
+        let this_connectors = connectors.as_ref().filter(|_| research.is_none()).map(|l| Arc::clone(&l.turn));
+        let mut ctx = run_context(t, opened, this_turn, this_connectors, fitted, watch.is_some());
+        if research.is_some() {
+            ctx.agents = None;
+            ctx.cards = crate::chat::cards::Cards::default();
+            ctx.visuals = false;
+        }
+        let mut run_turn = w.run().map(|r| r.begin_turn(ctx, web_side(t, conv, fitted, this_turn)));
         // What the session hasn't seen: another model's answers since, or —
         // a new session — the chat so far (sized to the model).
         let kept = sessions::get(conv.id, conv.created_ts);
@@ -879,8 +940,36 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         }
 
         let mut mapper = Mapper::new();
-        let mut out = ToChat::new(watch.map(|w| w as &dyn Sink), run_turn.as_ref().map(|r| r.marks()));
-        let ended = read_turn(&mut rx, &mut mapper, &mut out, t.stop, run_turn.as_mut().map(|r| &mut r.events)).await;
+        // (A research's words never stream into the thread: its report goes in a document.)
+        let quiet = watch.filter(|_| research.is_some()).map(|w| crate::chat::research::Quiet::new(w));
+        let sink: Option<&dyn Sink> = match &quiet {
+            Some(q) => Some(q),
+            None => watch.map(|w| w as &dyn Sink),
+        };
+        let mut out = ToChat::new(sink, run_turn.as_ref().map(|r| r.marks()));
+        let mut ended = read_turn(&mut rx, &mut mapper, &mut out, t.stop, run_turn.as_mut().map(|r| &mut r.events), research).await;
+        // A research past a cap: its turn stopped, its usage counted, and the
+        // report asked for on the same session (no cap: it may only write).
+        if let (Ended::Capped(why), Some(b)) = (&ended, research) {
+            let why = *why;
+            tracing::info!(cap = ?why, "Claude plan: the research reached a cap; the report next");
+            mapper.add_chip(format!("Stopped researching: {}", why.chip(&b.caps)));
+            map::Out::chips(&mut out, &mapper.chips().to_vec(), &mapper.sources().to_vec(), mapper.looked());
+            match stopped_for_report(&w, &mut rx).await {
+                Some(first) => {
+                    let answered = if mapper.model().is_empty() { model.as_str() } else { mapper.model() };
+                    let own = first.cost_since(w.total(), answered);
+                    w.set_total(Some(first.cost_usd.max(0.0)));
+                    let counted = crate::ai::usage::Call { provider: plan::PROVIDER, model: answered, base_url: plan::BASE_URL, turn: true, feature: None };
+                    crate::ai::usage::record_response(&counted, &oneshot::usage_value(&first.usage, own), None, None);
+                    ended = match w.session.send_user(&crate::chat::research::write_now_after(why, &b.caps), &[]) {
+                        Ok(()) => read_turn(&mut rx, &mut mapper, &mut out, t.stop, run_turn.as_mut().map(|r| &mut r.events), None).await,
+                        Err(_) => Ended::Gone { started: true },
+                    };
+                }
+                None => ended = Ended::Gone { started: true },
+            }
+        }
         // However it ended, the run's turn is over: what its calls showed
         // passed on, a call still waiting for the person stopped (so a
         // stopped turn's Claude Code isn't left waiting on it).
@@ -936,7 +1025,8 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
                 }
                 return Err("Claude Code stopped before it answered. Try again.".to_string());
             }
-            Ended::TimedOut => {
+            // (A research past its cap is asked for its report first: never here.)
+            Ended::TimedOut | Ended::Capped(_) => {
                 interrupted(&w, &mut rx).await;
                 w.set_busy(false);
                 return Err("Claude Code took too long to answer. Try again.".to_string());
@@ -954,7 +1044,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
                         keep(opened.user_index + 2);
                         let seen = watch.map(|w| w.seen()).unwrap_or_default();
                         tracing::info!(shown = seen.text.len(), "Chat: the answer on the Claude plan was stopped");
-                        let (reply, sources) = cited(&seen.text, mapper.sources());
+                        let (reply, sources) = if research.is_some() { map::cite(&seen.text, mapper.sources()) } else { cited(&seen.text, mapper.sources()) };
                         let files = shown.files.clone();
                         let (pictures, shown_pages) = shown_of(shown, &sources);
                         Ok(Answer {
@@ -1003,7 +1093,8 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         crate::ai::usage::record_response(&counted, &oneshot::usage_value(&result.usage, own_cost), None, None);
         // The answer: the result's words (else what was shown).
         let said = if result.text.trim().is_empty() { watch.map(|w| w.seen().text).unwrap_or_default() } else { result.text.clone() };
-        let (reply, sources) = cited(&said, mapper.sources());
+        // (A research's: every page it found, the report's picked from them.)
+        let (reply, sources) = if research.is_some() { map::cite(&said, mapper.sources()) } else { cited(&said, mapper.sources()) };
         let files = shown.files.clone();
         let (pictures, shown_pages) = shown_of(shown, &sources);
         tracing::info!(chips = mapper.chips().len(), sources = sources.len(), pictures = pictures.len(), pages = shown_pages.len(), "Chat: answered on the Claude plan");

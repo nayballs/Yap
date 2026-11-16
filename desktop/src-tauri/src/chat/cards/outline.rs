@@ -87,6 +87,11 @@ pub struct OutlineCard {
     pub said: String,
     /// Asked out loud (the Voice Assistant): said, and on the Yap bar too.
     pub voice: bool,
+    /// **A research's plan** (chat/research.rs), not a document's outline:
+    /// the card says "Research plan", its Go "Start research". An older
+    /// Yap drops it and shows the card as an outline.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub research: bool,
 }
 
 /// `s` on one line, at most `max` characters, "…" when cut. Pure.
@@ -141,7 +146,8 @@ pub fn card_of(args: &Value, voice: bool) -> Option<OutlineCard> {
     if title.is_empty() || sections.is_empty() {
         return None;
     }
-    Some(OutlineCard { title, summary: one_line(args["summary"].as_str().unwrap_or(""), 400), sections, voice, ..Default::default() })
+    let research = args["research"].as_bool().unwrap_or(false);
+    Some(OutlineCard { title, summary: one_line(args["summary"].as_str().unwrap_or(""), 400), sections, voice, research, ..Default::default() })
 }
 
 /// **The person's Edit** (`given`: `{sections: [{key, intent}], note}`): the
@@ -453,7 +459,7 @@ pub async fn review(live: Option<Live<'_>>, args: &Value, voice: bool, reviews: 
         })
     };
     live.sink.send(card("asking", &shown_card));
-    crate::chat::activity::tell(live.sink, crate::chat::activity::outline_waits());
+    crate::chat::activity::tell(live.sink, if shown_card.research { crate::chat::activity::research_waits() } else { crate::chat::activity::outline_waits() });
     tracing::info!(id, sections = shown_card.sections.len(), voice, "Chat: a document's outline waits for the user");
     let reply = match tokio::time::timeout(WAIT, rx).await {
         Ok(Ok(reply)) => Some(reply),

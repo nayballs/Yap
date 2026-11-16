@@ -33,6 +33,7 @@ import { mentionAt, withMention, written as mentionWritten } from './chatMention
 import { fmtContext } from '../../core/aiUsage.js';
 import { SkillPicker } from '../../stores/skills.svelte.js';
 import { think, takeThink } from './chatThink.svelte.js';
+import { researchIt } from './chatResearch.svelte.js';
 import { createDocPanel } from './chatDoc.svelte.js';
 import { createChatConnectors } from './chatConnectors.svelte.js';
 // Chat's status dots (stores/chatStatus.svelte.js): the list as read here,
@@ -2224,6 +2225,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         incognito: rec.ghost || null,
         // …or in a project (chat/projects.rs).
         project: inProject,
+        // The Research switch under the box (chat/research.rs).
+        research: fromBox && researchIt() ? true : null,
       },
       onEvent
     );

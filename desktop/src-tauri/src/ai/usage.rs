@@ -120,7 +120,16 @@ impl Feature {
 
 tokio::task_local! {
     static FEATURE: Feature;
-    static TALLY: Arc<Mutex<Option<LastCall>>>;
+    static TALLY: Arc<Mutex<Tally>>;
+}
+
+/// **A turn's tally** ([`tallied`]): its last model call, and every call's
+/// tokens added up (a research's cap, `chat/research.rs`: the turn's model
+/// calls and its provider's search sub-calls alike).
+#[derive(Debug, Default)]
+struct Tally {
+    last: Option<LastCall>,
+    tokens: u64,
 }
 
 /// Run `fut` as `feature` for the tracker (finer than the network
@@ -159,13 +168,19 @@ pub struct LastCall {
 /// Run `fut` keeping the last call it makes ([`last_call`] inside it): a
 /// Chat turn, whose last model call is the conversation's context.
 pub async fn tallied<F: Future>(fut: F) -> F::Output {
-    TALLY.scope(Arc::new(Mutex::new(None)), fut).await
+    TALLY.scope(Arc::new(Mutex::new(Tally::default())), fut).await
 }
 
 /// The last call made inside [`tallied`] so far (`None`: none, or not
 /// inside one).
 pub fn last_call() -> Option<LastCall> {
-    TALLY.try_with(|t| *t.lock().unwrap_or_else(|p| p.into_inner())).ok().flatten()
+    TALLY.try_with(|t| t.lock().unwrap_or_else(|p| p.into_inner()).last).ok().flatten()
+}
+
+/// **Every token the calls inside [`tallied`] read and wrote so far** (0:
+/// none, or not inside one): a research's token cap (`chat/research.rs`).
+pub fn turn_tokens() -> u64 {
+    TALLY.try_with(|t| t.lock().unwrap_or_else(|p| p.into_inner()).tokens).unwrap_or(0)
 }
 
 /// How fast a llama.cpp server read the prompt and wrote the answer
@@ -330,17 +345,19 @@ fn count(call: &Call, reported: &Reported) {
     let target = crate::ai::ai_model::describe(call.provider, call.model, call.base_url, "");
     let here = target.provider == crate::ai::local_llm::PROVIDER_ONDEVICE
         || crate::privacy::net::place_of_url(call.base_url) == Some(crate::privacy::net::Place::Pc);
+    // Every call's tokens, the turn's own and its sub-calls (a research's cap).
+    let _ = TALLY.try_with(|t| t.lock().unwrap_or_else(|p| p.into_inner()).tokens += reported.total_tokens());
     if call.turn {
         let cost = call_cost(&target.provider, &target.model, here, reported);
         let _ = TALLY.try_with(|t| {
             let mut t = t.lock().unwrap_or_else(|p| p.into_inner());
             // The turn's cost so far, every call of it.
-            let before = t.and_then(|l| l.cost_micros);
+            let before = t.last.and_then(|l| l.cost_micros);
             let cost_micros = match (before, cost) {
                 (None, None) => None,
                 (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
             };
-            *t = Some(LastCall { prompt: reported.prompt, answer: reported.answer, per_second: reported.speed.per_second(), cost_micros });
+            t.last = Some(LastCall { prompt: reported.prompt, answer: reported.answer, per_second: reported.speed.per_second(), cost_micros });
         });
     }
     let feature = call.feature.unwrap_or_else(current_feature);
