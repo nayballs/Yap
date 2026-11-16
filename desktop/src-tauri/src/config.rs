@@ -1367,6 +1367,15 @@ pub struct YapConfig {
     /// Chat's model hands each request to an agent, as before.
     #[serde(default = "default_true")]
     pub agents_direct: bool,
+    /// **"Open file links in"** (Settings → Yap Code, 16 Nov 2026,
+    /// `agents/editors.rs`): where a file link in a Code chat opens on a
+    /// click — "yap" (Yap's file view beside the chat, the default),
+    /// "default" (Windows' default app, never for a file it would run), or
+    /// an editor's id ("vscode", "cursor", "zed", "notepadpp", "idea"…). An
+    /// editor that isn't on the PC any more opens Yap's view and says so. A
+    /// new field: an older Yap drops it on its save (Yap's view again).
+    #[serde(default = "default_agents_open_files")]
+    pub agents_open_files: String,
 
     // ---- Memory (Settings → Memory; `memory.rs`) ----
     // The switches only: what Yap remembers lives in memory.json, never
@@ -1593,6 +1602,9 @@ fn default_agents_ask() -> String {
 fn default_agents_speak() -> String {
     "voice".into()
 }
+fn default_agents_open_files() -> String {
+    "yap".into()
+}
 fn default_agents_max() -> u32 {
     3
 }
@@ -1797,6 +1809,7 @@ impl Default for YapConfig {
             agents_animate: true,
             agents_clean_speech: true,
             agents_direct: true,
+            agents_open_files: default_agents_open_files(),
             memory_search_chats: true,
             memory_learn_chats: true,
             memory_learn_meetings: false,
@@ -3843,6 +3856,18 @@ mod tests {
         // A new install: Yap Code's defaults, off.
         let fresh: YapConfig = serde_json::from_str("{}").unwrap();
         assert!(!fresh.agents_enabled && fresh.agents_animate && fresh.agents_clean_speech && fresh.agents_direct);
+    }
+
+    #[test]
+    fn file_links_open_in_yap_until_another_place_is_chosen() {
+        // A config from before the setting (or an older Yap's save): Yap's file view.
+        let old: YapConfig = serde_json::from_str(r#"{"agentsEnabled": true}"#).unwrap();
+        assert_eq!(old.agents_open_files, "yap");
+        assert_eq!(YapConfig::default().agents_open_files, "yap");
+        // Chosen, it's kept, under its camelCase name.
+        let chosen: YapConfig = serde_json::from_str(r#"{"agentsOpenFiles": "cursor"}"#).unwrap();
+        assert_eq!(chosen.agents_open_files, "cursor");
+        assert_eq!(serde_json::to_value(&chosen).unwrap()["agentsOpenFiles"], "cursor");
     }
 
     #[test]

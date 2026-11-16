@@ -160,11 +160,22 @@ fn a_file_reads_as_text_capped_and_binary_files_say_so() {
 }
 
 #[test]
-fn editors_get_the_line_their_own_way() {
-    assert_eq!(Editor::VsCode.args(r"C:\a\b.rs", Some(12)), vec!["-g".to_string(), r"C:\a\b.rs:12".to_string()]);
-    assert_eq!(Editor::Cursor.args(r"C:\a\b.rs", None), vec![r"C:\a\b.rs".to_string()]);
-    assert_eq!(Editor::NotepadPlusPlus.args(r"C:\a\b.rs", Some(3)), vec!["-n3".to_string(), r"C:\a\b.rs".to_string()]);
-    assert_eq!(Editor::Notepad.args(r"C:\a\b.rs", Some(3)), vec![r"C:\a\b.rs".to_string()]);
+fn opening_elsewhere_keeps_to_the_workspace_and_yaps_view_is_the_pages() {
+    let f = Fixture::new("open-elsewhere");
+    std::fs::write(f.root.join("src/report.xlsx"), b"PK\x03\x04").unwrap();
+    // Yap's own view, or a value Yap doesn't know: the page shows it.
+    assert_eq!(open(&f.root, "src/convert.js:3", None, editors::YAP, true), Ok(Opened::Yap { note: None }));
+    assert_eq!(open(&f.root, "src/convert.js", None, "rm -rf", true), Ok(Opened::Yap { note: None }));
+    // Never a file outside the workspace, however it's asked.
+    for with in [editors::YAP, editors::DEFAULT_APP, editors::ANY_EDITOR, "vscode"] {
+        assert!(open(&f.root, "../elsewhere/secret.txt", None, with, true).is_err(), "{with}");
+    }
+    // A workbook a link opens stays in Yap's sheet view, whatever the editor.
+    assert_eq!(open(&f.root, "src/report.xlsx", None, "vscode", true), Ok(Opened::Yap { note: None }));
+    // A script under "Windows' default app": shown in Yap, and said why.
+    std::fs::write(f.root.join("src/build.ps1"), "Write-Output hi\n").unwrap();
+    let Ok(Opened::Yap { note: Some(why) }) = open(&f.root, "src/build.ps1", None, editors::DEFAULT_APP, true) else { panic!("a script never goes to its default app") };
+    assert!(why.contains(".ps1"), "{why}");
 }
 
 #[test]

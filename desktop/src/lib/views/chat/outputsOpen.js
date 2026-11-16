@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../../ui/toast.svelte.js';
 import { copyText } from '../../core/itemMenus.js';
 import { isSheetName } from './sheetView.js';
+import { editorLabel } from './fileOpen.svelte.js';
 
 /** A Code chat's spreadsheet beside the chat (SheetTab), as Excel draws it. */
 const showSheet = (doc, conversationId, rel) => doc.showSheet({ src: { from: 'workspace', conversation: conversationId, rel }, name: String(rel).split('/').pop() });
@@ -47,7 +48,7 @@ export async function openOutput(it, { doc, conversationId }) {
 
 /**
  * **An output's right-click menu** (Yap's menus: ui/contextMenu.svelte.js): Open; for a file, Show in folder
- * and Copy path; for a file in a Code chat's workspace, Open in editor. `ref`: the workspace's file the row
+ * and Copy path; for a file in a Code chat's workspace, Open in <editor> (fileOpen.svelte.js: the setting's, else the first found). `ref`: the workspace's file the row
  * is (`code_files_check`'s `{rel, abs}`: a changed file's, or a shared file inside the workspace), else null.
  */
 export function outputMenuItems(it, { doc, conversationId, ref = null }) {
@@ -67,7 +68,7 @@ export function outputMenuItems(it, { doc, conversationId, ref = null }) {
   items.push({ label: 'Copy path', icon: 'copy', onselect: () => copyText(path, 'Path copied') });
   if (ref) {
     items.push({
-      label: 'Open in editor',
+      label: editorLabel(),
       icon: 'pencil',
       onselect: () =>
         invoke('code_file_open_editor', { conversation: conversationId, path: ref.rel, line: null }).catch((e) =>

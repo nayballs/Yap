@@ -17,7 +17,8 @@
   } = $props();
 
   // An option's `style` draws it in the list (e.g. a font picker showing
-  // each font in itself) and draws the box while it's the one picked.
+  // each font in itself) and draws the box while it's the one picked; its
+  // `disabled` greys it out (an editor that isn't on this PC).
   const pickedStyle = $derived(options.find((o) => o.value === value)?.style || undefined);
 
   // Options with a `group` go under an <optgroup> of that name (runs of the
@@ -46,12 +47,12 @@
         {#if b.group}
           <optgroup label={b.group}>
             {#each b.options as o (o.value)}
-              <option value={o.value} style={o.style || undefined}>{o.label}</option>
+              <option value={o.value} style={o.style || undefined} disabled={o.disabled || undefined}>{o.label}</option>
             {/each}
           </optgroup>
         {:else}
           {#each b.options as o (o.value)}
-            <option value={o.value} style={o.style || undefined}>{o.label}</option>
+            <option value={o.value} style={o.style || undefined} disabled={o.disabled || undefined}>{o.label}</option>
           {/each}
         {/if}
       {/each}

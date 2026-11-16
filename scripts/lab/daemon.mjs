@@ -972,13 +972,14 @@ async function probe({ window: which = 'main', css, text }) {
  * (14 Nov 2026, the message box's queue: a queued message's Send now and Cancel and edit). Only Yap's own windows,
  * never a page beside the chat (that's Claude's to act on, with its rules); the first match that shows.
  */
-async function click({ window: which = 'main', css }) {
+async function click({ window: which = 'main', css, right = false }) {
   if (!css) throw new Error('click needs --css');
   if (!['main', 'thread', 'panel'].includes(which)) throw new Error("click works in Yap's own window: main, thread or panel");
   const scope = which === 'panel' ? '[data-testid="chat-panel-slot"] ' : which === 'thread' ? '[data-testid="chat-column"] ' : '';
   const target = main().locator(`${scope}${css}`).first();
-  await target.click({ timeout: 5_000 });
-  return { window: which, css, clicked: true };
+  // `--right`: a right-click (a file link's menu, 16 Nov 2026).
+  await target.click({ timeout: 5_000, button: right ? 'right' : 'left' });
+  return { window: which, css, clicked: true, ...(right ? { right: true } : {}) };
 }
 
 /**
@@ -1173,6 +1174,8 @@ async function state() {
   const approvals = (await tryInvoke('claude_approve_pending', {}, [])) ?? [];
   const cards = turn && !turn.finalized ? pendingOf(cardsOf(turn.items, { approvals, agents: await agentsNow() })).filter((c) => !turn.answered.has(c.id)) : cardsOf([], { approvals, agents: await agentsNow() });
   const opened = (await tryInvoke('e2e_opened_apps', {}, [])) ?? [];
+  // A Code chat's file links opened in an editor or the default app: the command each would have run.
+  const filesOpened = (await tryInvoke('e2e_file_opens', {}, [])) ?? [];
   // The panel beside the chat: its tabs (documents, pictures, pages, agents), as its strip has them.
   const panelTabs = await main()
     .getByTestId('chat-panel-tab')
@@ -1187,6 +1190,7 @@ async function state() {
     agents,
     pending: cards,
     appsOpened: opened,
+    filesOpened,
   };
 }
 
@@ -1947,6 +1951,9 @@ async function start() {
   // stand-ins (`--fake --live-web`: the fake AI on the real web, for the
   // lab's own checks; a stand-in for Claude Code still wins: YAP_CLAUDE_EXE).
   if (!START.fake || START.liveWeb) env.YAP_LAB_LIVE = '1';
+  // Stand-in editors for "Open file links in" (agents/editors.rs): a JSON file of `[{id, program}]`
+  // the person points `YAP_LAB_EDITORS` at — never started; `state`'s `filesOpened` has each command.
+  if (process.env.YAP_LAB_EDITORS) env.YAP_E2E_EDITORS = process.env.YAP_LAB_EDITORS;
   let fakeBase = '';
   if (START.fake) {
     if (!START.liveWeb) {

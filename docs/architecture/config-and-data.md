@@ -368,7 +368,15 @@
   at once, one per folder, 1 to 3; 3) + agents_animate ("Animate Code chats":
   a slow light round a Code chat's box while its agent runs; on) +
   agents_clean_speech ("Clean up what you say in Code chats": chat_clean_speech's
-  twin for a Code chat's spoken questions, its own switch; on, 2026-11-07) — `jobs_*` (`jobsEnabled`…) until the same day: each
+  twin for a Code chat's spoken questions, its own switch; on, 2026-11-07) +
+  agents_open_files (`agentsOpenFiles`, "Open file links in", Settings → Yap
+  Code → Files in Code chats, 2026-11-16, `agents/editors.rs`: where a Code
+  chat's file link opens on a click — "yap", Yap's file view, the default;
+  "default", Windows' default app, never for a file it would run; or an
+  editor's id, "vscode", "cursor", "zed", "notepadpp", "idea"… — an editor
+  no longer on the PC, or a value Yap doesn't know, opens Yap's view. A new
+  field: an older Yap drops it on its save and links open in Yap's view
+  again; no `migrate_once` step) — `jobs_*` (`jobsEnabled`…) until the same day: each
   field reads its old name as an alias, and `migrate_once` v8 saves them
   once under the new ones, every value kept; an older Yap sharing the folder
   drops them on its save (Yap Code off again),
