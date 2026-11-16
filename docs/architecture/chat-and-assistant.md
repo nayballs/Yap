@@ -6597,8 +6597,11 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   tools the deeper ones (`max_uses`, its fetches as many as the reads), a
   provider's own search gets Yap's `read_page` beside it too (the report
   cites only pages read; decided 16 Nov 2026, against "own tools only" for
-  this one mode) —; the gate runs only the web's tools and the notes' reads
-  (`research::allows`; anything else — an app, the clipboard, memory, a
+  this one mode) —; the gate runs only the web's tools, the notes' reads and
+  a big project's two reads (`read_project_file`, `search_project_files`:
+  offered only in a project chat searched in parts — until 16 Nov 2026 they
+  were offered there and then refused, while the plan's session could use
+  them) (`research::allows`; anything else — an app, the clipboard, memory, a
   note, a document, an agent, a page click — refused with
   `research::refusal`); `STEPS` (40) steps; a first step that answers before
   any search is asked once to search first (`SEARCH_FIRST`); past its time

@@ -305,7 +305,10 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   pictures"): on the `--bar-*` tokens, a diagram in the bar's own Light /
   Dark (`themeFrom('data-bar-theme')`, not the app's), a picture as "Show
   image" (fetched only on a click; then at most 180 px tall), a notice's
-  body scrolling past 170 px; no shadow or backdrop-filter on any of it, and
+  body scrolling past 170 px (the answer's past 210 px, with 8 px of room
+  under its words, given back by its margin, for KaTeX's hidden layout boxes
+  below a tall inline formula: without it a one-formula answer scrolled by
+  6 px, 16 Nov 2026, `voice-assistant.spec.js`); no shadow or backdrop-filter on any of it, and
   the card's region reported again when it changes size (a ResizeObserver
   on `.cards` in `Overlay.svelte`: a picture shown, KaTeX's fonts arriving).
   `bar_simulate {card: "answer" | "markdown"}` puts up demo ones

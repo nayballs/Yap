@@ -473,6 +473,9 @@
   .richpage :global(li.task) {
     position: relative;
     list-style: none;
+    /* (Not an answer's -18px, app.css: this box sits in the list's own indent, so with that too it went off the
+       page's edge, half hidden and out of a click's reach — 16 Nov 2026.) */
+    margin-left: 0;
   }
   .richpage :global(li.task > input) {
     position: absolute;

@@ -100,8 +100,11 @@ test('Notes: typed and formatted on the page, saved as exact markdown; a box tic
   md = md.replace('# Tasks', '## Tasks');
   await saved(yap, n.id, md);
 
-  // A box ticked on the page: its line, in place.
+  // A box ticked on the page: its line, in place. (Where the bullet would be, inside the page: an answer's -18px
+  // from app.css once put it past the page's edge, half hidden and out of a click's reach.)
   const box = raw(main).locator('li.task', { hasText: 'Order seeds' }).locator('input.taskbox');
+  const [boxAt, pageAt] = await Promise.all([box.boundingBox(), raw(main).boundingBox()]);
+  expect(boxAt.x).toBeGreaterThanOrEqual(pageAt.x);
   await box.click();
   await expect(box).toBeChecked();
   md = md.replace('- [ ] Order seeds', '- [x] Order seeds');
