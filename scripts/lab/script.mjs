@@ -326,7 +326,7 @@ export async function runScript(script, { send, state, options = {} }) {
             ...(step.style ? { style: step.style } : {}),
             ...(step.incognito ? { incognito: true } : {}),
             // A new chat in a project (chat/projects.rs), made first if need be.
-            ...(step.project ? { project: step.project, ...(step.projectInstructions ? { 'project-instructions': step.projectInstructions } : {}) } : {}),
+            ...(step.project ? { project: step.project, ...(step.projectInstructions ? { 'project-instructions': step.projectInstructions } : {}), ...(step.projectPage ? { 'project-page': true } : {}) } : {}),
             ...(shots === false ? { 'no-shots': true } : {}),
             ...((step.theme ?? options.theme) ? { theme: step.theme ?? options.theme } : {}),
           })

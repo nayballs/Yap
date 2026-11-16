@@ -255,6 +255,9 @@ mod tests {
         let thought = json!({ "id": "ab12", "thought": "Check the notes first." });
         assert_eq!(live(thought.clone()), json!({ "id": "ab12", "thought": null }));
         assert_eq!(stripped(thought), json!({ "id": "ab12", "thought": null }));
+        // (How long it thought is no content: it goes as it is.)
+        let time = json!({ "id": "ab12", "thought": "Check the notes first.", "thoughtMs": 3400 });
+        assert_eq!(live(time), json!({ "id": "ab12", "thought": null, "thoughtMs": 3400 }));
         // Nor what a helper came back with (its view in the PC's Agent panel); that it's back still goes.
         let back = json!({ "id": "ab12", "call": "toolu_task", "helper": "back", "report": "The docs are in order." });
         assert_eq!(live(back.clone()), json!({ "id": "ab12", "call": "toolu_task", "helper": "back", "report": null }));
