@@ -611,7 +611,7 @@ pub fn pdf_pages(path: &Path) -> Option<u32> {
 /// The endings that run a program, a script or a web page when opened on
 /// Windows (its own list of risky types, and the scripting and web ones):
 /// never opened from a card — Show in folder instead.
-const RUNS: &[&str] = &[
+pub const RUNS: &[&str] = &[
     "exe", "com", "bat", "cmd", "ps1", "psm1", "psd1", "ps1xml", "ps2", "ps2xml", "psc1", "psc2", "vbs", "vbe", "vb", "js", "jse", "wsf", "wsh", "ws", "wsc", "msi", "msp", "mst",
     "msc", "msh", "msh1", "msh2", "mshxml", "scr", "pif", "lnk", "url", "hta", "cpl", "jar", "reg", "inf", "sys", "dll", "ocx", "chm", "hlp", "scf", "sct", "shb", "shs", "gadget",
     "application", "appref-ms", "appx", "appxbundle", "msix", "msixbundle", "appinstaller", "library-ms", "search-ms", "searchconnector-ms", "settingcontent-ms",
