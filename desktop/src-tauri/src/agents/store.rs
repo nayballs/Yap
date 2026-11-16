@@ -258,9 +258,29 @@ pub struct Agent {
     /// to finished). Never saved: the store's own copy is always false.
     #[serde(skip_deserializing, skip_serializing_if = "std::ops::Not::not")]
     pub active: bool,
+    /// **The background work its turn waits for** (16 Nov 2026,
+    /// `runner/background.rs`): its answer is in, and its Claude Code stays
+    /// up until what it left running reports back. Set on the copies the
+    /// page reads, as `active` is; never saved.
+    #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<Waiting>,
     /// The step it's on now (not kept: the tab's live line).
     #[serde(skip)]
     pub step: String,
+}
+
+/// **What a turn waits for** ([`Agent::waiting`]): its answer is in, and
+/// work it left running in the background hasn't reported back.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Waiting {
+    /// "1 helper", "2 commands", "1 helper, 1 command", "a wake-up".
+    pub what: String,
+    /// Since when (unix seconds).
+    pub since: u64,
+    /// Waited [`super::runner::BACKGROUND_ASK`]: the person is asked whether
+    /// to keep waiting or stop it.
+    pub ask: bool,
 }
 
 /// **What a Code chat's own Claude showed beside the chat in a turn**

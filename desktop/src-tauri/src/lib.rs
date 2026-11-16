@@ -650,6 +650,7 @@ pub fn run() {
             agents::commands::agent_get,
             agents::commands::agent_stop,
             agents::commands::agent_continue,
+            agents::commands::agent_keep_waiting,
             agents::commands::agent_message,
             agents::commands::agent_go_ahead,
             agents::commands::agent_move_to_finished,

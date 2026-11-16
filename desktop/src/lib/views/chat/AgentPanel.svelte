@@ -235,8 +235,8 @@
   const toggleDismissed = () => (panelMemory.dismissed = { ...panelMemory.dismissed, [agent?.id ?? '']: !showDismissed });
 
   const pct = (v) => `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;
-  const todoMark = (s) => (s === 'completed' ? '✓' : s === 'in_progress' ? '●' : '○');
-  const todoWord = (s) => (s === 'completed' ? ', done' : s === 'in_progress' ? ', in progress' : ', to do');
+  const todoMark = (s) => (s === 'completed' ? '✓' : s === 'in_progress' ? '●' : s === 'stopped' ? '‖' : '○');
+  const todoWord = (s) => (s === 'completed' ? ', done' : s === 'in_progress' ? ', in progress' : s === 'stopped' ? ', stopped' : ', to do');
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 </script>
 

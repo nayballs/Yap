@@ -122,8 +122,8 @@
     doc.showAgent({ id: agent.id, folder: agent.folder, status: agent.status, mode: agent.mode, conversation: agent.conversation, turn: row.n, view: 'timeline' });
   }
 
-  const todoMark = (s) => (s === 'completed' ? '✓' : s === 'in_progress' ? '●' : '○');
-  const todoWord = (s) => (s === 'completed' ? ', done' : s === 'in_progress' ? ', in progress' : ', to do');
+  const todoMark = (s) => (s === 'completed' ? '✓' : s === 'in_progress' ? '●' : s === 'stopped' ? '‖' : '○');
+  const todoWord = (s) => (s === 'completed' ? ', done' : s === 'in_progress' ? ', in progress' : s === 'stopped' ? ', stopped' : ', to do');
 </script>
 
 <section
