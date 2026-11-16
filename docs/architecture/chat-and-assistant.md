@@ -6319,6 +6319,9 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   rule runs on every call as ever (`tools::refused_after_outside`) — and a
   research runs none of the tools it locks anyway. The plan step has no
   tools and reads no outside content.
+- **Retry and Edit**: a question that plainly asks ("research …") researches
+  again; one researched by the switch alone is answered as an ordinary
+  question (the switch isn't kept with the question).
 - The log has counts, caps and times, never the question, a plan's words, a
   query or an address.
 - Tests: `cargo test chat::research` (a plain ask, the caps, the reads sized
