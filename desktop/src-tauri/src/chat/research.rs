@@ -411,17 +411,20 @@ pub const WRITE_NOW: &str = "(A note from Yap, not the user.) The research is ov
 /// (once).
 pub const SEARCH_FIRST: &str = "(A note from Yap, not the user.) This is a research turn: research the plan on the web first (web_search, then read_page on the pages your facts come from), then write the report.";
 
-/// The tools a research turn runs: the web's, `find_pictures` aside, and
-/// the notes' reads. Everything else is refused ([`refusal`]). Pure.
+/// The tools a research turn runs: the web's, `find_pictures` aside, the
+/// notes' reads, and a big project's (`read_project_file`,
+/// `search_project_files`: read only, offered only in a project chat whose
+/// files are searched in parts — until 16 Nov 2026 offered there and then
+/// refused). Everything else is refused ([`refusal`]). Pure.
 pub fn allows(name: &str) -> bool {
-    crate::web::TOOL_NAMES.contains(&name) || matches!(name, "search_notes" | "get_note" | "read_note" | "search_in_note")
+    crate::web::TOOL_NAMES.contains(&name) || matches!(name, "search_notes" | "get_note" | "read_note" | "search_in_note") || crate::chat::projects::knowledge::NAMES.contains(&name)
 }
 
 /// A tool a research turn doesn't run: its result. Pure.
 pub fn refusal(name: &str) -> Value {
     json!({
         "success": false,
-        "error": format!("{name} doesn't run in a research turn: only web_search and read_page (and reading notes). When you've researched enough, write the report as your answer; Yap puts it in a document."),
+        "error": format!("{name} doesn't run in a research turn: only web_search and read_page (and reading notes or the project's files). When you've researched enough, write the report as your answer; Yap puts it in a document."),
         "data": Value::Null,
         "displayText": "",
     })
@@ -957,8 +960,9 @@ mod tests {
         assert!(yaps.contains("like [3]") && yaps.contains("\"Keep it short\""), "{yaps}");
         let code = instructions(&plan, &Caps::USUAL, true);
         assert!(code.contains("WebFetch") && code.contains("[3](https://example.com/page)"), "{code}");
-        // Only the web's tools and the notes' reads run.
+        // Only the web's tools and the notes' (and a big project's) reads run.
         assert!(allows("web_search") && allows("read_page") && allows("search_notes"));
+        assert!(allows("read_project_file") && allows("search_project_files"));
         for no in ["open_app", "copy_to_clipboard", "remember", "forget", "create_note", "create_document", "start_agent", "browser_click"] {
             assert!(!allows(no), "{no}");
             assert_eq!(refusal(no)["success"], json!(false));

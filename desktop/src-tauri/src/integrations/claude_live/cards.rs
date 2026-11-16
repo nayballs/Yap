@@ -61,7 +61,7 @@ fn mcp_result(result: &Value) -> Value {
 }
 
 /// The run's question was asked out loud (its turn's part of Yap).
-fn by_voice(feature: Option<crate::privacy::net::Feature>) -> bool {
+pub(super) fn by_voice(feature: Option<crate::privacy::net::Feature>) -> bool {
     use crate::privacy::net::Feature;
     matches!(feature, Some(Feature::Assistant | Feature::AssistantScreen | Feature::AssistantSelection))
 }

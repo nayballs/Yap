@@ -146,7 +146,7 @@ async function tick() {
   readRecord();
   const t = turn;
   // (A turn of the lab's own ends when its command does: `actionTurn`.)
-  if (!t || t.finalized || t.ticking || t.kind === 'lab') return;
+  if (!t || t.finalized || t.finalizing || t.ticking || t.kind === 'lab') return;
   t.ticking = true;
   try {
     // A routine's run (`routine new|now`): over when Settings' runs list says so, never by a Chat stream.
@@ -187,6 +187,8 @@ async function tick() {
     // "Plan not used".)
     const agents = (await agentsNow()).filter((a) => !a.plan || (Number(a.endedTs) || 0) * 1000 >= t.startedAt);
     const pending = pendingOf(cardsOf(t.items, { approvals: t.approvals, agents })).filter((c) => !t.answered.has(c.id));
+    // (Ended meanwhile — a question that couldn't be asked: how it ended stands.)
+    if (t.finalizing) return;
     if (!pending.length) {
       t.status = 'running';
       return;
@@ -235,8 +237,13 @@ function withShots(t, out) {
 }
 
 async function finalize(t) {
+  // (How it ended, kept: a look at the turn already under way (`tick`) mustn't make a question that couldn't be
+  // asked "running" again — 16 Nov 2026, "Couldn't ask" came back as a turn still going, for good.)
+  t.finalizing = true;
+  const ended = t.status;
   // Its last events (a card's end, the page's chips) a moment after its end.
   await sleep(300);
+  t.status = ended;
   readRecord();
   const conv = t.conversation != null ? await tryInvoke('chat_get', { id: t.conversation }) : null;
   const pages = (await tryInvoke('e2e_page_views', {}, [])) ?? [];
@@ -618,7 +625,14 @@ async function startTurn({ text, spoken = false, away = false, chat = 'new', aut
     if (research) {
       const chip = main().getByTestId('chat-research-chip');
       if ((await chip.getAttribute('aria-pressed', { timeout: 10_000 })) !== 'true') await chip.click({ timeout: 10_000 });
-      if ((await chip.getAttribute('aria-pressed')) !== 'true') throw new Error(`Research can't be switched on: ${await chip.getAttribute('title')}`);
+      // (The chip asks Rust whether Chat's model can research before it turns on, so it's on a moment after the
+      // click: 16 Nov 2026, read at once it was still off and the question never went — the chip on just after.)
+      const on = await chip
+        .and(main().locator('[aria-pressed="true"]'))
+        .waitFor({ state: 'attached', timeout: 5_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!on) throw new Error(`Research can't be switched on: ${await chip.getAttribute('title')}`);
     }
     // A new chat made incognito with its ghost (chat/incognito.rs).
     if (incognito) {
@@ -1454,7 +1468,15 @@ function triggerOf(a) {
 /** The last routine `routine new` made (`routine now` with no id runs it). */
 let lastRoutine = null;
 
-function routineTurn(routine, a, question) {
+async function routineTurn(routine, a, question) {
+  // A routine's turn still waiting for its time (`routine new --at` hours away: no run yet) gives way to the next
+  // `routine new` or `routine now` (16 Nov 2026: Run now on a routine made for later was refused until its time).
+  if (turn && !turn.finalized && turn.routine && !turn.run) {
+    turn.status = 'stopped';
+    turn.error = 'Set aside before its time: the lab ran another routine turn';
+    turn.endedAt = Date.now();
+    await finalize(turn);
+  }
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it first`);
   readRecord();
   const t = new Turn({ question, spoken: false, since: lastSeq(), askedAt: 0, ...shotsFor(a) });
@@ -1509,7 +1531,7 @@ async function routineCmd(a) {
     const saved = await invoke('routine_save', { routine: { id: '', skill: skill.id, words: String(a.words ?? ''), trigger, on: true, to } });
     const listed = ((await invoke('routines_list')).routines ?? []).find((r) => r.id === saved.id);
     const when = trigger.kind === 'schedule' ? `${trigger.days} at ${trigger.time}` : `after a meeting${trigger.folder ? ` in ${trigger.folder}` : ''}${to === 'note' ? ', with its note' : ''}`;
-    const t = routineTurn(saved, a, `Routine /${skill.command} (${when})`);
+    const t = await routineTurn(saved, a, `Routine /${skill.command} (${when})`);
     if (t.away) await invoke('e2e_focus', { focused: false });
     return {
       routine: { id: saved.id, skill: skill.command, trigger, to, next: listed?.next ? new Date(listed.next * 1000).toISOString() : null },
@@ -1523,7 +1545,7 @@ async function routineCmd(a) {
     if (!which) throw new Error('routine now <id> (routine list has them; none: the last one routine new made)');
     const r = ((await invoke('routines_list')).routines ?? []).find((x) => x.id === which);
     if (!r) throw new Error(`No routine ${which}`);
-    const t = routineTurn(r, a, `Routine /${r.command} (Run now)`);
+    const t = await routineTurn(r, a, `Routine /${r.command} (Run now)`);
     if (t.away) await invoke('e2e_focus', { focused: false });
     await invoke('routine_run_now', { id: which });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));

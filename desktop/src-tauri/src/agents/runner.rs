@@ -1327,6 +1327,8 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         cards: if direct && agent.conversation.is_some() { crate::chat::cards::Cards::for_code_session(phone.is_some()) } else { Default::default() },
         // (A Code chat is in no project.)
         projects: false,
+        // (Nor are Chat's documents an agent's: its changes are the workspace's files.)
+        documents: false,
     }) {
         Ok(r) => r,
         Err(e) => return failed_early(id, n, format!("Couldn't start the agent: {e}"), None),
