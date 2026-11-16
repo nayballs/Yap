@@ -108,7 +108,35 @@ export function contextView(b) {
 
 /** A pull request's state and checks in words (agents/prs.rs `Pr`). Pure. */
 export const PR_STATE = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' };
-export const PR_CHECKS = { passing: 'Checks passing', failing: 'Checks failing', running: 'Checks running', none: '' };
+export const PR_CHECKS = {
+  failing: 'Checks failing',
+  running: 'Checks running',
+  cancelled: 'Checks cancelled',
+  passing: 'Checks passing',
+  skipped: 'Checks skipped',
+  neutral: 'Checks neutral',
+  none: '',
+};
+/** GitHub's states in the order its checks list says them (agents/prs.rs `Counts`). */
+const CHECK_STATES = ['failing', 'cancelled', 'pending', 'skipped', 'neutral', 'successful'];
+
+/**
+ * **A pull request's checks in GitHub's words** (16 Nov 2026, agents/prs.rs `checks` and `counts`): the rolled-up
+ * word ("Checks cancelled"), "8 of 10 passed" when not all did (GitHub counts skipped and neutral as passed:
+ * "8 of 10 checks passed"), and every state on hover ("1 failing, 2 cancelled, 1 neutral, 6 successful checks").
+ * A cancelled check is cancelled, never failing. `{ word, detail, title }`; no word with no checks. Pure.
+ */
+export function prChecks(p) {
+  const word = PR_CHECKS[p?.checks] ?? '';
+  const n = p?.counts || {};
+  const of = (k) => (Number.isFinite(n[k]) && n[k] > 0 ? n[k] : 0);
+  const total = CHECK_STATES.reduce((sum, k) => sum + of(k), 0);
+  if (!word || !total) return { word, detail: '', title: word };
+  const passed = of('successful') + of('skipped') + of('neutral');
+  const parts = CHECK_STATES.filter((k) => of(k)).map((k) => `${of(k)} ${k}`);
+  const title = `${parts.join(', ')} ${total === 1 ? 'check' : 'checks'}`;
+  return { word, detail: passed < total ? `${passed} of ${total} passed` : '', title };
+}
 
 /** The quiet line for a Changes section with no list (agents/prs.rs `Status`), or null: no section. Pure. */
 export function prsNote(prs) {

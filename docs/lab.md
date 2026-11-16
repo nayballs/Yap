@@ -335,13 +335,16 @@ does, closing nothing first.)
 {"ok":true,"window":"main","css":"button[aria-label=\"Send\"]","found":true,"theme":"light","count":1,"visible":1,"covered":false}
 ```
 
-### `click --window main|thread|panel --css <selector> [--right]`
+### `click --window main|thread|panel --css <selector> [--right|--hover]`
 
 Clicks one of the test Yap's own buttons, as the person would (14 Nov 2026, for the
 message box's queue: a queued message's **Send now** — `[data-testid="chat-queued-send-now"]`
 — and **Cancel and edit** — `[data-testid="chat-queued-cancel"]`): the first match that
 shows, in Yap's own window only, never a page beside the chat. `--right` right-clicks
-(16 Nov 2026: a file link's menu, `.md-filelink`).
+(16 Nov 2026: a file link's menu, `.md-filelink`). `--hover` puts the pointer on it and
+clicks nothing (16 Nov 2026: a file link's ⋯ comes up, `[data-testid="md-filelink-more"]`
+to click next; `shot` takes it). Playwright's own `:has-text("…")` picks a menu's item:
+`--css '[role="menuitem"]:has-text("Open in VS Code")'`.
 
 ```json
 {"ok":true,"window":"thread","css":"[data-testid=\"chat-queued-send-now\"]","clicked":true}
@@ -694,7 +697,7 @@ warn).
 | `set` | As the `set` command: `{ "web": true, "yapCode": true, "config": {…}, "files": [ … ] }`. |
 | `expect` | Checks on the last turn (below). |
 | `fake` | The fake AI's next calls (as `fake`): played only in a `--fake` lab, skipped otherwise, so one script can be checked offline too. |
-| `lab` | One of the lab's own commands (16 Nov 2026): `"lab": "archive"` or `["routine", "new"]` / `["age", "40"]` (its words), `args` its flags (`{ "skill": "…", "in": 2 }`). `routine`, `meeting`, `age`, `archive`, `summary`, `kept`. One that's a turn is the last turn after it (`routine new`'s is still running: `wait` next). |
+| `lab` | One of the lab's own commands (16 Nov 2026): `"lab": "archive"` or `["routine", "new"]` / `["age", "40"]` (its words), `args` its flags (`{ "skill": "…", "in": 2 }`). `routine`, `meeting`, `age`, `archive`, `summary`, `kept`; and `click` and `type` on Yap's own window (`args` `{ "window": "thread", "css": "…", "hover": true }`: not turns, a probe `expect` checks what shows after). One that's a turn is the last turn after it (`routine new`'s is still running: `wait` next). |
 | `note` | Just words, in the summary. |
 
 | `expect` | Passes when |
@@ -729,6 +732,7 @@ warn).
 | `routines` | the default `start` (`--fake` passes too) | Routines (16 Nov 2026; #131 had only its e2e spec): a made-up meeting (`meeting`), then a Skill of the person's own on a schedule two minutes away, run by the scheduler with the person in another app — its own chat, marked in Chat's list, its one quiet card on the bar (shot) — following its instructions (on the plan they never reached Claude Code before: fixed, `chat/turn/plan.rs` `across_lines`); Run now into the same chat (`run.sameChat`); then a Skill on one meeting after another made-up meeting, with the meeting's note: a new Ask thread on it. |
 | `auto-archive` | any `start` | Auto-archive (16 Nov 2026; #125 had only its e2e spec) on the lab's own chats: two real chats made 40 days older one by one (`age --chat same`), the rule set to 30 days — the chat not shown archived, the one Chat shows kept; the notice in Yap's window and its Undo; the next run takes it again; then the other once another chat is shown, a day-old one kept. |
 | `code-chat-prs` | `start --yap-code on` (live) | A Code chat summary's Changes from the real `gh` (16 Nov 2026; #128): the lab's read-only `gh` on, the scratch workspace on a merged branch of Yap's repository (`set --git`, `--gh`), one short question, then `summary`: the branch's pull requests, merged, each `nayballs/Yap #N` with Archive; `gh` off, the quiet line. |
+| `code-chat-file-links` | `start --yap-code on` (live) | A Code chat's file links and Outputs, and Changes on a real pull request with cancelled checks (16 Nov 2026): the scratch workspace on `claude/lab-untested` (#146: two cancelled E2E shards, CodeQL's neutral) with the read-only `gh`; one change to `src/convert.js` asked in a Bypass Code chat; the answer's link hovered (`click --hover`), its ⋯ shown and clicked (the link's menu under it), Open in Yap from it; then the summary: the row "Checks cancelled · N of M passed", never "Checks failing"; the changed file's Outputs row with links opening in Notepad (Windows' own, so on every PC; the file view stays shut: `state`'s `filesOpened` has the command; an editor the PC hasn't opens in Yap instead, as the first pass found with VS Code) and under Windows' default app (a `.js`: shown in Yap instead, said so). Shots of the ⋯, its menu, the outputs' menu and the toast. |
 | `kept-page-outside` | the default `start` | A kept page outside Yap (16 Nov 2026; #130): Chat's model keeps a tip calculator (`save_page`), then `kept save` (Windows' dialog answered by the lab: the suggested `.html` name, the toast, the file with the sandbox's policy and a title) and `kept open` (the copy test mode would have opened, run in the lab's own browser, light and dark; no console errors or policy refusals: soft). |
 | `outline-card` | any `start`: the plan (since 16 Nov 2026), `--model ondevice` or `--fake` | A new document's outline before the writing on a real model (16 Nov 2026; #129 was checked on `--fake` only): asked for a short guide, its `create_document` is a card first, nothing written; Edit's Go with a section renamed, one taken out and a note; the document made with those sections. Its `fake` steps make it pass on `--fake` too. |
 | `code-chat-retry` | `start --yap-code on` (live) | ↻ Retry and Edit in a Code chat that works directly (16 Nov 2026): the new answer read back — it came back empty before, Rewind having cut the thread where the old one was — with `branch` and the question it answered again. |

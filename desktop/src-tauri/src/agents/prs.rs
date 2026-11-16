@@ -2,7 +2,8 @@
 //! right column): the summary panel's Changes — the pull requests of the
 //! workspace's branch (a worktree's own branch too: `files::environment`),
 //! newest first, each its title, `owner/repo #N`, its state (open, draft,
-//! merged, closed) and its checks (passing, failing, running).
+//! merged, closed) and its checks (failing, running, cancelled, passing,
+//! skipped, neutral: GitHub's own words; only a real failure is failing).
 //!
 //! - **Read with the person's own GitHub CLI** (`gh pr list --head <branch>
 //!   --state all --json …`), in the workspace, on their own sign-in: Yap has
@@ -80,8 +81,27 @@ pub struct Pr {
     pub url: String,
     /// "open", "draft", "merged" or "closed".
     pub state: &'static str,
-    /// "passing", "failing", "running", or "none" (no checks).
+    /// Its checks rolled up ([`rolled_up`]): "failing", "running",
+    /// "cancelled", "passing", "skipped", "neutral", or "none" (no checks).
     pub checks: &'static str,
+    /// How many are in each of GitHub's states.
+    pub counts: Counts,
+}
+
+/// **A pull request's checks by GitHub's own states** (16 Nov 2026), the
+/// latest run of each ([`latest_checks`]): what GitHub's checks list and
+/// `gh pr checks` call failing, cancelled, pending, skipped, neutral and
+/// successful. Skipped and neutral count as passed, as GitHub's "8 of 10
+/// checks passed" counts them; only `failing` is a failure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Counts {
+    pub failing: u32,
+    pub cancelled: u32,
+    pub pending: u32,
+    pub skipped: u32,
+    pub neutral: u32,
+    pub successful: u32,
 }
 
 /// **The branch's pull requests**, or why there are none.
@@ -113,44 +133,102 @@ pub fn repo_of(url: &str) -> String {
     }
 }
 
-/// **Its checks, rolled up** (`statusCheckRollup`: check runs' `status` and
-/// `conclusion`, commit statuses' `state`): any failed → "failing", else any
-/// not finished → "running", else "passing"; none at all → "none". Pure.
-pub fn checks_of(rollup: Option<&Value>) -> &'static str {
+/// A check's field, upper case ("" when it has none).
+fn field(c: &Value, k: &str) -> String {
+    c.get(k).and_then(Value::as_str).unwrap_or_default().to_ascii_uppercase()
+}
+
+/// A commit status (`StatusContext`: a `state`, no `status`), not a check run.
+fn is_status(c: &Value) -> bool {
+    c.get("status").is_none() && !field(c, "state").is_empty()
+}
+
+/// **The latest run of each check** (`statusCheckRollup` keeps every run on
+/// the commit: a run a newer one replaced — cancelled by a workflow's
+/// concurrency, or re-run — is there too). As `gh pr checks` does it: a check
+/// run by its name and workflow, the one started last; a commit status by its
+/// context; one with no name stands alone. In the rollup's order otherwise.
+/// Pure.
+pub fn latest_checks(items: &[Value]) -> Vec<&Value> {
+    let text = |c: &Value, k: &str| c.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+    let key = |i: usize, c: &Value| {
+        let (name, workflow) = if is_status(c) { (text(c, "context"), "\0status".to_string()) } else { (text(c, "name"), text(c, "workflowName")) };
+        if name.is_empty() {
+            format!("\0{i}")
+        } else {
+            format!("{name}\0{workflow}")
+        }
+    };
+    let started = |c: &Value| text(c, "startedAt");
+    // key → the index of the latest (ISO 8601 times compare as text; a tie keeps the first).
+    let mut best: HashMap<String, usize> = HashMap::new();
+    for (i, c) in items.iter().enumerate() {
+        best.entry(key(i, c)).and_modify(|b| if started(c) > started(&items[*b]) { *b = i }).or_insert(i);
+    }
+    let mut keep: Vec<usize> = best.into_values().collect();
+    keep.sort_unstable();
+    keep.into_iter().map(|i| &items[i]).collect()
+}
+
+/// **How many checks are in each of GitHub's states** (`statusCheckRollup`,
+/// the latest run of each): a check run by its `status` and `conclusion`, a
+/// commit status by its `state`, sorted as `gh pr checks` sorts them —
+/// FAILURE, TIMED_OUT, ACTION_REQUIRED, STARTUP_FAILURE and a status's ERROR
+/// failing; CANCELLED cancelled; SKIPPED skipped; NEUTRAL neutral; SUCCESS
+/// successful; anything not finished (and STALE: it never did) pending. Pure.
+pub fn counts_of(rollup: Option<&Value>) -> Counts {
     let items = rollup.and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
-    if items.is_empty() {
-        return "none";
+    let mut n = Counts::default();
+    for c in latest_checks(items) {
+        let (status, conclusion) = (field(c, "status"), field(c, "conclusion"));
+        let state = if is_status(c) {
+            field(c, "state")
+        } else if status.is_empty() || status == "COMPLETED" {
+            conclusion
+        } else {
+            status
+        };
+        let bucket = match state.as_str() {
+            "SUCCESS" => &mut n.successful,
+            "FAILURE" | "ERROR" | "TIMED_OUT" | "ACTION_REQUIRED" | "STARTUP_FAILURE" => &mut n.failing,
+            "CANCELLED" => &mut n.cancelled,
+            "SKIPPED" => &mut n.skipped,
+            "NEUTRAL" => &mut n.neutral,
+            // QUEUED, IN_PROGRESS, WAITING, REQUESTED, PENDING, EXPECTED, STALE, none yet.
+            _ => &mut n.pending,
+        };
+        *bucket += 1;
     }
-    let (mut failing, mut running) = (false, false);
-    for c in items {
-        let up = |k: &str| c.get(k).and_then(Value::as_str).unwrap_or_default().to_ascii_uppercase();
-        let (status, conclusion, state) = (up("status"), up("conclusion"), up("state"));
-        if !state.is_empty() && c.get("status").is_none() {
-            // A commit status: SUCCESS, FAILURE, ERROR, PENDING, EXPECTED.
-            match state.as_str() {
-                "FAILURE" | "ERROR" => failing = true,
-                "PENDING" | "EXPECTED" => running = true,
-                _ => {}
-            }
-            continue;
-        }
-        if !status.is_empty() && status != "COMPLETED" {
-            running = true;
-            continue;
-        }
-        match conclusion.as_str() {
-            "FAILURE" | "TIMED_OUT" | "CANCELLED" | "ACTION_REQUIRED" | "STARTUP_FAILURE" | "ERROR" => failing = true,
-            "" => running = true,
-            _ => {} // SUCCESS, NEUTRAL, SKIPPED, STALE
-        }
-    }
-    if failing {
+    n
+}
+
+/// **Its checks, rolled up**: any real failure → "failing", else any not
+/// finished → "running", else any cancelled → "cancelled" (GitHub's own
+/// word, never a failure); else "passing" when one succeeded, "skipped" or
+/// "neutral" when every one was that; none at all → "none". Pure.
+pub fn rolled_up(n: &Counts) -> &'static str {
+    if n.failing > 0 {
         "failing"
-    } else if running {
+    } else if n.pending > 0 {
         "running"
-    } else {
+    } else if n.cancelled > 0 {
+        "cancelled"
+    } else if n.successful > 0 {
         "passing"
+    } else if n.skipped > 0 && n.skipped >= n.neutral {
+        "skipped"
+    } else if n.neutral > 0 {
+        "neutral"
+    } else {
+        "none"
     }
+}
+
+/// **Its checks, rolled up** from `statusCheckRollup` ([`counts_of`],
+/// [`rolled_up`]: what [`parse_list`] does for each). Pure.
+#[cfg(test)]
+pub fn checks_of(rollup: Option<&Value>) -> &'static str {
+    rolled_up(&counts_of(rollup))
 }
 
 /// **`gh pr list --json number,title,state,isDraft,url,statusCheckRollup`'s
@@ -169,7 +247,8 @@ pub fn parse_list(stdout: &str) -> Option<Vec<Pr>> {
                 (_, true) => "draft",
                 _ => "open",
             };
-            Some(Pr { number, title: p.get("title").and_then(Value::as_str).unwrap_or_default().trim().to_string(), repo: repo_of(&url), url, state, checks: checks_of(p.get("statusCheckRollup")) })
+            let counts = counts_of(p.get("statusCheckRollup"));
+            Some(Pr { number, title: p.get("title").and_then(Value::as_str).unwrap_or_default().trim().to_string(), repo: repo_of(&url), url, state, checks: rolled_up(&counts), counts })
         })
         .collect();
     out.sort_by_key(|p| std::cmp::Reverse(p.number));
