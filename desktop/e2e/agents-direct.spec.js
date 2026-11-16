@@ -1473,6 +1473,45 @@ test('in a Code chat, Edit and Retry rewind to before the message and send it ag
   expect([after(args, '--resume-session-at'), args.includes('--fork-session')]).toEqual(['end-One', true]);
 });
 
+// 16 Nov 2026 (chat/feedback.rs): 👍 / 👎 beside a Code chat's answer actions too; 👎's Retry with this note goes
+// through Rewind, the note after the message for Claude only. No "Learn from this": a Code chat keeps memory out.
+test('in a Code chat, 👎 with a reason and Retry with this note rewinds and sends the message again with the note for Claude', async ({ yap, main, shot }) => {
+  test.setTimeout(150_000);
+  await script(yap, ECHOES, 'echoes');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'One');
+  const agent = await newAgent(yap, before);
+  await ended(yap, agent.id);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One']);
+  const turns = (await agents(yap)).find((j) => j.id === agent.id).turnList.length;
+  // The thumbs beside Copy and ↻.
+  await expect(thread(main).getByTestId('chat-thumbs-up')).toBeVisible();
+  await thread(main).getByTestId('chat-thumbs-down').click();
+  const card = thread(main).getByTestId('chat-feedback-card');
+  await expect(card).toBeVisible();
+  await card.getByTestId('chat-feedback-reason-ignored').click();
+  await card.getByTestId('chat-feedback-reason-other').click();
+  await card.getByTestId('chat-feedback-note').fill('Use the notes file');
+  await expect(card.getByTestId('chat-feedback-learn')).toHaveCount(0);
+  await shot(main, '99-code-thumbs-down-card');
+  await card.getByTestId('chat-feedback-retry').click();
+  const ask = main.getByRole('alertdialog', { name: 'Retry with your note?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(turns + 1);
+  await ended(yap, agent.id);
+  // The message is as it was asked; Claude got the note after it (the stand-in answers with what it got).
+  await expect(thread(main).locator('.cbubble.user')).toHaveText(['One']);
+  const answer = thread(main).locator('.cbubble.assistant');
+  await expect(answer).toHaveCount(1);
+  await expect(answer).toContainText('Answer to: One');
+  await expect(answer).toContainText('do exactly that this time');
+  await expect(answer).toContainText('Use the notes file');
+  const conv = (await agents(yap)).find((j) => j.id === agent.id).conversation;
+  expect((await yap.invoke('chat_get', { id: conv })).messages[0].text).toBe('One');
+});
+
 test('Rewind to before the first message puts back the files Claude changed, and the next message starts a new session', async ({ yap, main }) => {
   test.setTimeout(120_000);
   await script(yap, WATERING_MARKED, 'watering-marked');

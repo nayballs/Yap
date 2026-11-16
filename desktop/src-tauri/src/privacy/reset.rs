@@ -138,6 +138,7 @@ pub const KINDS: &[About] = &[
             "(chat_files.json)",
             "(chat_attachments.json)",
             "(chat_branches.json)",
+            "(chat_feedback.json)",
             "(memory.json)",
             "(search-index/)",
             "(calendar.json)",
@@ -160,6 +161,7 @@ pub const KINDS: &[About] = &[
             "(chat_files.json)",
             "(chat_attachments.json)",
             "(chat_branches.json)",
+            "(chat_feedback.json)",
             "(memory.json)",
             "(search-index/)",
             "(calendar.json)",
@@ -179,7 +181,7 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: "Chats",
         says: "Every chat, archived ones too, with its screenshots and the files attached to it. Documents Chat wrote stay in Notes",
-        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "(chat_branches.json)", "chat-images/", "chat-files/", "chat-made/", "claude_sessions.json", "connector_chats.json", "(chat_styles.json)", "(projects.json)", "(routines.json)", "(memory.json)", "(search-index/)"],
+        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "(chat_branches.json)", "(chat_feedback.json)", "chat-images/", "chat-files/", "chat-made/", "claude_sessions.json", "connector_chats.json", "(chat_styles.json)", "(projects.json)", "(routines.json)", "(memory.json)", "(search-index/)"],
         stores: &["chats", "claudeSessions", "memory"],
     },
     About {
@@ -575,6 +577,8 @@ const STORES: &[(&str, Rule)] = &[
     ("chat_attachments.json", Choice::chats),
     // (And the branches' copy, Retry and Edit's versions: chat/chats/branches.rs.)
     ("chat_branches.json", Choice::chats),
+    // (And the answers' 👍 / 👎 copy: chat/feedback.rs.)
+    ("chat_feedback.json", Choice::chats),
     ("chat-images/", Choice::chat_images),
     // (Files attached to Chat's questions: Chat's alone, as its screenshots are.)
     ("chat-files/", Choice::chat_images),

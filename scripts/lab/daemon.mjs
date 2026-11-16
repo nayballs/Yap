@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { APP, labConfig, localServer, minutesFrom, onOff, parseModel } from './options.mjs';
+import { APP, feedbackOf, labConfig, localServer, minutesFrom, onOff, parseModel } from './options.mjs';
 import { drawPng, pngSize } from './png.mjs';
 import { templated } from './fake.mjs';
 import { captureElement, captureLivePage, capturePanel, captureThread, captureWindow, livePage, pinTheme, shotNames, slug, themeNow, themesOf } from './shots.mjs';
@@ -579,7 +579,7 @@ async function clearSend() {
   }
 }
 
-async function startTurn({ text, spoken = false, away = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null, research = false }) {
+async function startTurn({ text, spoken = false, away = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null, research = false, feedback = null }) {
   if (!text?.trim()) throw new Error('Nothing to ask');
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
   // `--away` (a spoken question asked from another app, 16 Nov 2026): the test Yap told its window isn't in front
@@ -626,7 +626,7 @@ async function startTurn({ text, spoken = false, away = false, chat = 'new', aut
       if ((await ghost.getAttribute('aria-pressed', { timeout: 10_000 })) !== 'true') await ghost.click({ timeout: 10_000 });
     }
     if (how === 'retry' || how === 'edit') {
-      await branchTurn(how, text);
+      await branchTurn(how, text, feedback);
     } else if (spoken) {
       // (Pictures and files in the box first, as a person drops them before asking out loud: the question takes
       // them with Chat in view, 16 Nov 2026.)
@@ -656,8 +656,26 @@ async function startTurn({ text, spoken = false, away = false, chat = 'new', aut
  * message actions: chat/chats/branches.rs), as the person does — by its buttons: ↻ under the answer; the pencil,
  * the words in place, Save and send. A new version of the conversation from there (‹ 2/2 ›).
  */
-async function branchTurn(how, text) {
+async function branchTurn(how, text, feedback = null) {
   const col = main().locator('[data-testid="chat-column"]');
+  if (how === 'retry' && feedback) {
+    // **👎 with what was wrong, then Retry with this note** (16 Nov 2026, chat/feedback.rs): as the person does —
+    // 👎 under the last answer, its card's reasons and line, then the card's Retry.
+    await col.locator('.cbubble.assistant').last().hover({ timeout: 10_000 });
+    const down = col.getByTestId('chat-thumbs-down').last();
+    if ((await down.getAttribute('aria-pressed', { timeout: 10_000 })) === 'true') await down.click({ timeout: 10_000 });
+    await down.click({ timeout: 10_000 });
+    const card = col.getByTestId('chat-feedback-card');
+    await card.waitFor({ state: 'visible', timeout: 10_000 });
+    for (const r of feedback.reasons) await card.getByTestId(`chat-feedback-reason-${r}`).click({ timeout: 10_000 });
+    if (feedback.note) {
+      if (!feedback.reasons.includes('other')) await card.getByTestId('chat-feedback-reason-other').click({ timeout: 10_000 });
+      await card.getByTestId('chat-feedback-note').fill(feedback.note, { timeout: 10_000 });
+    }
+    await card.getByTestId('chat-feedback-retry').click({ timeout: 10_000 });
+    await confirmIfAsked();
+    return;
+  }
   if (how === 'retry') {
     await col.locator('.cbubble.assistant').last().hover({ timeout: 10_000 });
     await col.getByTestId('chat-retry').last().click({ timeout: 10_000 });
@@ -1799,7 +1817,9 @@ const COMMANDS = {
     const attach = Array.isArray(a.attach) ? a.attach : a.attach ? String(a.attach).split(',').filter(Boolean) : null;
     const how = a.retry ? 'retry' : a.edit ? 'edit' : 'ask';
     const text = how === 'retry' ? String(a.text ?? '').trim() || 'Retry' : a.text;
-    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', away: !!a.away && !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, research: !!a.research && how === 'ask', project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null, page: !!a['project-page'] } : null, ...shotsFor(a) });
+    // `--retry --feedback long,untrue [--note "…"]`: 👎 with those reasons (and a line), then its card's Retry with this note.
+    const feedback = how === 'retry' && (a.feedback || a.note) ? feedbackOf(a.feedback, a.note) : null;
+    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', away: !!a.away && !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, research: !!a.research && how === 'ask', project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null, page: !!a['project-page'] } : null, feedback, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
   wait: async (a) => {

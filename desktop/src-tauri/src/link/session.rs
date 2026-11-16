@@ -758,6 +758,7 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
             say(tx, empty_thread());
         }
         In::ReadAloud { id } => read_aloud(hub, tx, session, latest, asking, &id),
+        In::Rate { id, rating } => rate(hub, tx, asking, &id, rating),
         In::ShowVersion { chat, at, place } => show_version(hub, tx, session, latest, asking, chat, at, place),
         In::Retry { id } => retry(hub, tx, session, latest, asking, &id),
         In::SetModel { id, provider, model, base_url, file } => {
@@ -909,6 +910,8 @@ fn retry(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking:
     if crate::chat::stream::is_answering(conversation) {
         return refuse(WAIT_FOR_ANSWER.into());
     }
+    // An answer marked 👎 (chat/feedback.rs): retried with its note, as ↻ on the PC does (read before it's set aside).
+    let note = crate::chat::feedback::retry_note_at(conversation, index);
     let begun = match crate::chat::chats::begin_retry(conversation, index) {
         Ok(b) => b,
         Err(e) => return refuse(e),
@@ -929,7 +932,7 @@ fn retry(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking:
         turn.tell(Out::State { phase: Phase::Thinking });
         let question = begun.question.sent_words();
         let asked = crate::chat::assistant::ask_from_phone(app, question, Arc::clone(&turn) as Arc<dyn Phone>);
-        Box::pin(crate::chat::turn::again(conversation, begun.question_at, asked)).await;
+        Box::pin(crate::chat::feedback::with_note(note, crate::chat::turn::again(conversation, begun.question_at, asked))).await;
         if !turn.voiced.load(Ordering::SeqCst) {
             turn.tell(Out::State { phase: Phase::Idle });
         }
@@ -1018,6 +1021,29 @@ fn read_aloud(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
     };
     tracing::info!(chars = text.chars().count(), "Yap Link: an answer read aloud on the phone");
     speak_on_phone(hub, session, latest, asking, id, text);
+}
+
+/// **👍 / 👎 on an answer** (`rate`, 16 Nov 2026, `chat/feedback.rs`): kept
+/// with it in Chat as the desktop's thumbs keep it — only an answer this
+/// phone was given. A 👎 the PC's card gave reasons to keeps them; `rating`
+/// none takes the mark back. `rated` says what's kept.
+fn rate(hub: &Arc<Hub>, tx: &Tx, asking: &Asking, id: &str, rating: Option<String>) {
+    let at = if hub.was_given(&asking.device, id) { parse_message_id(id) } else { None };
+    let Some((conversation, index)) = at else {
+        say(tx, Out::Error { message: NOT_HERE.into() });
+        return;
+    };
+    let was = crate::chat::chats::answer_feedback(conversation, index).map(|(f, _)| f);
+    let mark = match rating.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        // (The same mark again: as it is, its reasons kept.)
+        Some(r) if was.as_ref().is_some_and(|f| f.rating == r) => was.map(|f| crate::chat::feedback::FeedbackIn { rating: f.rating, reasons: f.reasons, note: f.note }),
+        Some(r) => Some(crate::chat::feedback::FeedbackIn { rating: r.to_string(), ..Default::default() }),
+        None => None,
+    };
+    match crate::chat::feedback::chat_feedback(conversation, index, None, mark) {
+        Ok(kept) => say(tx, Out::Rated { id: id.to_string(), rating: kept.map(|f| f.rating) }),
+        Err(message) => say(tx, Out::Error { message }),
+    }
 }
 
 /// An answer's words in Chat, by its id (`chat:<conversation>:<index>`).

@@ -16,6 +16,7 @@ import {
   type,
   snapshot,
   RECENTS,
+  CAN,
   CAN_BEFORE_CHATS,
   PC,
 } from './support/harness.js';
@@ -85,6 +86,46 @@ test('a chat opened from the drawer: its messages, its title, and the next quest
   // The drawer marks it.
   await page.getByTestId('menu').click();
   await expect(drawer(page).locator('[aria-current="true"]')).toHaveText('Trip packing list');
+});
+
+// 16 Nov 2026 (chat/feedback.rs): 👍 / 👎 under an answer, as the desktop's thumbs — kept with it in Chat on the PC.
+test('👍 / 👎 under an answer: rate by its id, shown at once, the PC’s rated is what shows; pressed again, taken back', async ({ page }) => {
+  const pc = await mockPc(page, { can: [...CAN, 'rate'] });
+  await open(page);
+  await ready(page, pc);
+  await page.getByTestId('menu').click();
+  await recents(page).filter({ hasText: 'Trip packing list' }).click();
+  await expect(page.getByTestId('turn')).toHaveCount(2);
+  const ups = page.getByTestId('thumbs-up');
+  const downs = page.getByTestId('thumbs-down');
+  // As Chat keeps them: the second answer marked 👍; Copy first, ▶ last.
+  await expect(ups).toHaveCount(2);
+  await expect(ups.last()).toHaveAttribute('aria-pressed', 'true');
+  await expect(ups.first()).toHaveAttribute('aria-pressed', 'false');
+  const row = await page.getByTestId('turn').first().locator('.msgfoot button').evaluateAll((bs) => bs.map((b) => b.dataset.testid));
+  expect(row).toEqual(['copy', 'thumbs-up', 'thumbs-down', 'read-aloud']);
+  // 👎 on the first: `rate` with its id, pressed at once.
+  await downs.first().click();
+  await expect.poll(() => pc.of('rate')).toEqual([{ type: 'rate', id: 'chat:41:1', rating: 'bad' }]);
+  await expect(downs.first()).toHaveAttribute('aria-pressed', 'true');
+  pc.send({ type: 'rated', id: 'chat:41:1', rating: 'bad' });
+  // Pressed again: taken back.
+  await downs.first().click();
+  await expect.poll(() => pc.of('rate').at(-1)).toEqual({ type: 'rate', id: 'chat:41:1', rating: null });
+  await expect(downs.first()).toHaveAttribute('aria-pressed', 'false');
+  // What the PC keeps wins (changed on the PC meanwhile).
+  pc.send({ type: 'rated', id: 'chat:41:3' });
+  await expect(ups.last()).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('a PC from before 👍 / 👎 shows none', async ({ page }) => {
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  await page.getByTestId('menu').click();
+  await recents(page).filter({ hasText: 'Trip packing list' }).click();
+  await expect(page.getByTestId('read-aloud')).toHaveCount(2);
+  await expect(page.getByTestId('thumbs-up')).toHaveCount(0);
 });
 
 test("an agent's report in a chat is a note, never the person's own bubble", async ({ page }) => {
