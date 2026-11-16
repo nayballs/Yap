@@ -126,6 +126,8 @@
             ? String(t.file?.rel || '').split('/').pop() || 'File'
             : t.kind === 'sheet'
               ? t.sheet?.name || String(t.sheet?.src?.rel || '').split('/').pop() || 'Spreadsheet'
+            : t.kind === 'pfile'
+              ? t.pfile?.name || t.title || 'Project file'
             : t.kind === 'runs'
               ? 'Runs'
               : t.kind === 'summary'
@@ -657,7 +659,7 @@
 <aside
   class="docpanel"
   class:cover
-  aria-label={doc.showing === 'page' ? 'Page' : doc.showing === 'agent' ? 'Agent' : doc.showing === 'task' ? 'Agent' : doc.showing === 'file' ? 'File' : doc.showing === 'sheet' ? 'Spreadsheet' : doc.showing === 'runs' ? 'Runs' : doc.showing === 'summary' ? 'Summary' : doc.showing === 'kept' ? 'Kept page' : doc.showing === 'outputs' ? 'Outputs' : away ? 'Picture' : 'Document'}
+  aria-label={doc.showing === 'page' ? 'Page' : doc.showing === 'agent' ? 'Agent' : doc.showing === 'task' ? 'Agent' : doc.showing === 'file' ? 'File' : doc.showing === 'pfile' ? 'Project file' : doc.showing === 'sheet' ? 'Spreadsheet' : doc.showing === 'runs' ? 'Runs' : doc.showing === 'summary' ? 'Summary' : doc.showing === 'kept' ? 'Kept page' : doc.showing === 'outputs' ? 'Outputs' : away ? 'Picture' : 'Document'}
   data-testid="chat-doc"
   onkeydown={panelKey}
 >
@@ -692,6 +694,8 @@
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
             {:else if t.kind === 'file'}
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="m10 13-2 2 2 2M14 13l2 2-2 2" /></svg>
+            {:else if t.kind === 'pfile'}
+              <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 12h6M9 16h4" /></svg>
             {:else if t.kind === 'sheet'}
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9.5h18M3 15h18M9 4v16" /></svg>
             {:else if t.kind === 'runs'}
@@ -748,6 +752,11 @@
   {:else if doc.showing === 'sheet' && doc.sheet}
     <!-- A spreadsheet as Excel draws it, read only, live while it changes on disk. -->
     <SheetTab {doc} {narrow} {conversationId} />
+  {:else if doc.showing === 'pfile' && doc.projectFile}
+    <!-- A big project's file as Yap read it, read only, at the part an answer cites (its own chunk). -->
+    {#await import('./ProjectFileTab.svelte') then { default: ProjectFileTab }}
+      <ProjectFileTab {doc} {narrow} />
+    {/await}
   {:else if doc.showing === 'runs'}
     <!-- What ▶ Run ran in this Code chat. -->
     <RunsTab {doc} {narrow} {conversationId} {workspace} />

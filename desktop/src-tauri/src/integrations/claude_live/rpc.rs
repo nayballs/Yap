@@ -427,9 +427,12 @@ fn call(ep: &Endpoint, run: &Run, id: Value, params: &Value) -> Value {
     // A big project's files (a plan chat whose project is searched in parts):
     // read for the conversation of the turn the call belongs to.
     if run.spec.projects && crate::chat::projects::knowledge::NAMES.contains(&name) {
-        let conversation = run.turn.call().and_then(|t| t.ctx.conversation);
+        let call = run.turn.call();
+        let conversation = call.as_ref().and_then(|t| t.ctx.conversation);
+        // (Its parts numbered with the turn's sources: chat/projects/sources.rs.)
+        let cites = call.as_ref().and_then(|t| t.ctx.project.clone());
         let started = std::time::Instant::now();
-        let (text, is_error) = tauri::async_runtime::block_on(crate::chat::projects::knowledge::mcp_call(name, &args, conversation));
+        let (text, is_error) = tauri::async_runtime::block_on(crate::chat::projects::knowledge::mcp_call(name, &args, conversation, cites.as_deref()));
         tracing::info!(run = %run.id, tool = name, ok = !is_error, ms = started.elapsed().as_millis() as u64, "Claude Code: a Yap tool answered");
         return ok(id, text_result(text, is_error));
     }

@@ -10,6 +10,8 @@
   import { renderMarkdown } from '../../core/markdown.js';
   import { closePartial } from '../../core/streaming.js';
   import { KEEP_LATER } from './sideQuestion.svelte.js';
+  // Toasts never cover the box (ui/toastClear.js).
+  import { keepClear } from '../../ui/toastClear.js';
 
   /**
    * `side`: the box's state. `busy`: the thread is answering (Keep it waits).
@@ -90,6 +92,7 @@
   aria-modal="false"
   aria-label="Side question"
   style:bottom="{bottom}px"
+  use:keepClear
   onkeydown={onKeydown}
   data-testid="chat-sideq"
 >

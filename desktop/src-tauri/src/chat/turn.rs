@@ -493,6 +493,11 @@ async fn answer_turn(
     // first, then the loop, then the report as a document (research.rs);
     // nothing to research (a greeting): answered as any turn.
     let researched = if research::wanted(&t, &opened) {
+        // Asked with the switch on: kept with the question, so its Retry and
+        // Edit research again (chats.rs `ChatMessage::research`).
+        if crate::chat::research::switched() {
+            crate::chat::chats::set_research(opened.conv.id, opened.user_index);
+        }
         Box::pin(research::answer(&t, &opened, &mut built, &fitted, &sizing, live, watch.as_ref())).await?
     } else {
         None

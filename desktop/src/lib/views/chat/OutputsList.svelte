@@ -6,7 +6,7 @@
   // Shown first in a Code chat's summary (SummaryTab.svelte); usable
   // anywhere that lists what a chat made.
   // A right-click (or the ContextMenu key, Shift+F10) on a row: `onmenu(event, item)` opens its menu
-  // (outputsOpen.js `outputMenuItems`: Open, Show in folder, Copy path, Open in editor).
+  // (outputsOpen.js `outputMenuItems`: Open, Open in Yap, Show in folder, Copy path, Open in editor).
   import { menuKey, menuOpenFor } from '../../ui/contextMenu.svelte.js';
   /** `items`: outputs.js's rows; `onopen(item)`; `onmenu(event, item)`: its menu; `max`: rows shown before "Show N more". */
   let { items = [], onopen = null, onmenu = null, max = 8 } = $props();

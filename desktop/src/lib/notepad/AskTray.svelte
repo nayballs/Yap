@@ -42,6 +42,8 @@
   import { openContextMenu, menuKey } from '../ui/contextMenu.svelte.js';
   import { copyToClipboard, openSettings, LABEL } from './actions.js';
   import Icon from './NotepadIcon.svelte';
+  // Toasts never cover the Ask box (ui/toastClear.js).
+  import { keepClear } from '../ui/toastClear.js';
 
   /**
    * `open`: the sheet is up (the notepad puts it away on Esc, a click above
@@ -646,7 +648,7 @@
       {/if}
     </div>
   {/if}
-  <div class="barrow">
+  <div class="barrow" use:keepClear>
     <button
       class="rec"
       class:circle={open}

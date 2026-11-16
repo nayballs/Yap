@@ -28,9 +28,12 @@
   // A passage of the person's meetings and notes, or a meeting on their
   // calendar (chat/tools/calendar.rs), not a web page.
   const isPassage = (s) => (s?.note != null || !!s?.event) && !s?.url;
-  const fromMeetings = $derived((m.sources?.length ?? 0) > 0 && m.sources.every(isPassage));
+  // A part of a big project's file (chat/projects/sources.rs): opens the file at its place beside the chat.
+  const isPart = (s) => !!s?.project && !s?.url;
+  const fromProject = $derived((m.sources?.length ?? 0) > 0 && m.sources.every(isPart));
+  const fromMeetings = $derived(!fromProject && (m.sources?.length ?? 0) > 0 && m.sources.every((s) => isPassage(s) || isPart(s)));
   const fromCalendar = $derived(fromMeetings && m.sources.every((s) => !!s.event));
-  const label = $derived(fromCalendar ? 'From your calendar' : fromMeetings ? 'From your meetings' : 'Sources');
+  const label = $derived(fromProject ? 'From the project' : fromCalendar ? 'From your calendar' : fromMeetings ? 'From your meetings' : 'Sources');
 
   const row = $derived(sourceRow(m.sources, m.text));
   let open = $state(false);
@@ -47,6 +50,21 @@
         <span class="srcn" aria-hidden="true">{s.n}</span>
         <span class="srctitle">{s.title}</span>
       </span>
+    {:else if isPart(s)}
+      <!-- A part of the project's file: opens it at its page, slide, row or heading beside the chat. -->
+      <button
+        class="srcchip passage part"
+        data-testid="chat-project-source"
+        data-n={s.n}
+        title={`${s.title}${s.site ? ` · ${s.site}` : ''}${s.quote ? `\n${s.quote}` : ''}\nOpens it beside the chat`}
+        aria-label={`Source ${s.n}: ${s.title}${s.site ? `, ${s.site}` : ''}. Opens it beside the chat.`}
+        onclick={() => onsource?.(s)}
+      >
+        <span class="srcn" aria-hidden="true">{s.n}</span>
+        <svg class="srcfile" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>
+        <span class="srctitle">{s.title}</span>
+        {#if s.site}<span class="srcsite">{s.site}</span>{/if}
+      </button>
     {:else if isPassage(s)}
       <button
         class="srcchip passage"
@@ -151,6 +169,14 @@
   .srcsite {
     flex: 0 0 auto;
     color: var(--yap-muted-55);
+  }
+  /* A project file's part: its file's mark before its name. */
+  .srcfile {
+    flex: 0 0 auto;
+    width: 11px;
+    height: 11px;
+    margin-right: -1px;
+    color: var(--yap-muted);
   }
   /* "+N more" / "Show fewer": quiet, the row's own size. */
   .srcmore {

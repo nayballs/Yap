@@ -563,29 +563,6 @@ async function dropFiles(files) {
   await chips.nth(before + paths.length - 1).waitFor({ state: 'visible', timeout: 60_000 });
 }
 
-/**
- * **Toasts over the message box's Send**, closed with their own × as the person closes them to reach it (Yap's
- * notices stack at the foot of the main window, over the box's right end: 16 Nov 2026, auto-archive's notice and
- * "Chat restored" left Send unclickable and the next `ask` timed out).
- */
-async function clearSend() {
-  const send = main().getByRole('button', { name: 'Send', exact: true });
-  const box = await send.boundingBox({ timeout: 2_000 }).catch(() => null);
-  if (!box) return;
-  const toasts = main().getByRole('status');
-  for (let i = 0; i < 6; i++) {
-    const hit = await toasts
-      .evaluateAll((els, b) => els.findIndex((e) => {
-        const r = e.getBoundingClientRect();
-        return r.width > 0 && r.left < b.x + b.width && r.right > b.x && r.top < b.y + b.height && r.bottom > b.y;
-      }), box)
-      .catch(() => -1);
-    if (hit < 0) return;
-    await toasts.nth(hit).getByRole('button', { name: 'Close', exact: true }).click({ timeout: 2_000 }).catch(() => {});
-    await sleep(300);
-  }
-}
-
 async function startTurn({ text, spoken = false, away = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null, research = false, feedback = null }) {
   if (!text?.trim()) throw new Error('Nothing to ask');
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
@@ -652,7 +629,7 @@ async function startTurn({ text, spoken = false, away = false, chat = 'new', aut
       if (attach?.length) await dropFiles(attach);
       const box = main().getByRole('textbox', { name: 'Message' });
       await box.fill(text, { timeout: 10_000 });
-      await clearSend();
+      // (Toasts never cover the box since 16 Nov 2026, ui/toastClear.js: Send is clicked as the person clicks it.)
       // (Exactly "Send": with an agent's tab beside the chat, other buttons' names have the word.)
       await main().getByRole('button', { name: 'Send', exact: true }).click({ timeout: 10_000 });
     }
@@ -984,7 +961,19 @@ async function probe({ window: which = 'main', css, text }) {
       if (css) {
         const els = [...root.querySelectorAll(css)];
         out.count = els.length;
-        out.visible = els.filter((e) => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden').length;
+        const shows = els.filter((e) => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden');
+        out.visible = shows.length;
+        // Whether something else is over the first that shows, at its centre (16 Nov 2026: a toast over Send), and what.
+        if (shows.length) {
+          const r = shows[0].getBoundingClientRect();
+          const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          out.covered = !!top && !shows[0].contains(top) && !top.contains(shows[0]);
+          if (out.covered) {
+            const toast = top.closest('[role="status"]');
+            const named = (e) => `${e.tagName.toLowerCase()}${e.getAttribute('data-testid') ? `[data-testid="${e.getAttribute('data-testid')}"]` : e.className && typeof e.className === 'string' ? `.${e.className.trim().split(/\s+/)[0]}` : ''}`;
+            out.over = toast ? `a toast: ${String(toast.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80)}` : named(top);
+          }
+        }
       }
       if (text) {
         const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -1028,12 +1017,17 @@ async function spokenCmd({ clear = false }) {
   return { spoken: said.map((s) => ({ messageId: s.messageId ?? null, engine: s.engine, streamed: !!s.streamed, sentences: s.sentences })), reading };
 }
 
-async function click({ window: which = 'main', css, right = false }) {
+async function click({ window: which = 'main', css, right = false, hover = false }) {
   if (!css) throw new Error('click needs --css');
   if (!['main', 'thread', 'panel', 'bar'].includes(which)) throw new Error("click works in Yap's own windows: main, thread, panel or bar");
   const scope = which === 'panel' ? '[data-testid="chat-panel-slot"] ' : which === 'thread' ? '[data-testid="chat-column"] ' : '';
   // `bar`: the Yap bar's own buttons (the reading card's ⏸, 16 Nov 2026).
   const target = (which === 'bar' ? yap.overlay : main()).locator(`${scope}${css}`).first();
+  // `--hover`: the pointer put on it, no click (a file link's ⋯, 16 Nov 2026): what shows then, `shot` or `click` next.
+  if (hover) {
+    await target.hover({ timeout: 5_000 });
+    return { window: which, css, hovered: true };
+  }
   // `--right`: a right-click (a file link's menu, 16 Nov 2026).
   await target.click({ timeout: 5_000, button: right ? 'right' : 'left' });
   return { window: which, css, clicked: true, ...(right ? { right: true } : {}) };

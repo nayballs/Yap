@@ -295,14 +295,30 @@ impl Loop<'_> {
             Source::Chats => search_chats(&args, self.extra.conversation).await,
             // Ask across meetings' search: passages, by meaning too.
             Source::NotesSearch => crate::chat::tools::notes::search_notes_tool(&args).await,
-            // A big project's files: a part by its number, or a search.
-            Source::Project => crate::chat::projects::knowledge::execute(name, &args, self.extra.conversation).await,
+            // A big project's files: a part by its number, or a search —
+            // each part numbered with the turn's sources (chat/projects/
+            // sources.rs): after the web's, else after the calendar's and
+            // the parts numbered so far (one numbering for the answer).
+            Source::Project => {
+                let Some(cites) = self.extra.project_cites else {
+                    return crate::chat::projects::knowledge::execute(name, &args, self.extra.conversation, None).await;
+                };
+                let calendar = self.extra.calendar.map_or(0, |c| c.log.len());
+                let mut web = self.web.as_deref_mut();
+                let mut next = move || match web.as_deref_mut() {
+                    Some(t) => t.reserve_number(),
+                    None => calendar + cites.len() + 1,
+                };
+                let numbering = crate::chat::projects::knowledge::Numbering { cites, next: &mut next };
+                crate::chat::projects::knowledge::execute(name, &args, self.extra.conversation, Some(numbering)).await
+            }
             Source::Calendar => {
                 // (Named only while the calendar's offered, `Source::of`.)
                 let Some(cal) = self.extra.calendar else { return execute(name, &args) };
                 // Its meetings numbered with the turn's web sources (one
-                // numbering for the answer's citations).
-                let mut counter = cal.log.len();
+                // numbering for the answer's citations), and the project's
+                // parts without the web.
+                let mut counter = cal.log.len() + self.extra.project_cites.map_or(0, crate::chat::projects::sources::Cites::len);
                 let mut next = || match self.web.as_deref_mut() {
                     Some(t) => t.reserve_number(),
                     None => {
