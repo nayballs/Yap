@@ -250,6 +250,38 @@ pub fn new_code_chat(pc: bool, conversation: Option<u64>, picked: Option<String>
     picked.filter(|f| pc && conversation.is_none() && !f.trim().is_empty())
 }
 
+/// **A new chat in a project** for a spoken question (16 Nov 2026): Chat
+/// shows a project's page, or the new chat its New chat started ("New chat
+/// in <project>", `shown`: `chat_view_state`'s `project`), and the question
+/// makes a new conversation (`conversation`: none to continue) — it's in
+/// that project, as the first typed question there is (`chat_send`'s
+/// `project`, `projects::with_new`). Never a phone's (`pc`: the shortcut's),
+/// a Code chat (`code_folder`: it has its workspace) nor an incognito one
+/// (`ghost`), as for a typed one. Pure.
+pub fn new_in_project(pc: bool, conversation: Option<u64>, code_folder: Option<&str>, ghost: bool, shown: Option<String>) -> Option<String> {
+    shown.filter(|p| pc && conversation.is_none() && code_folder.is_none_or(|f| f.trim().is_empty()) && !ghost && !p.trim().is_empty())
+}
+
+/// **Do the files waiting in Chat's box go with a spoken question?** (16 Nov
+/// 2026.) As a typed question takes them, when the person can see them:
+/// asked with Chat in view (`in_view`, [`answer_in_view`]) showing the box
+/// they wait in — the conversation the question goes to, or the new chat it
+/// makes (`viewing` and `conversation` agree). Asked from another app, or
+/// with Chat on another view or a Projects page (`Viewing::Closed`, or its
+/// box not the question's), the question is about something else and they
+/// stay for the box, as a quoted passage does (`documents::quote_goes`).
+/// (Screenshots are the one exception: snipped, then asked about from any
+/// app — `snip/waiting.rs`, the maintainer's own "snip, then ask".) Pure.
+pub fn box_files_go(waiting: usize, in_view: bool, viewing: Viewing, conversation: Option<u64>) -> bool {
+    waiting > 0
+        && in_view
+        && match viewing {
+            Viewing::Conversation(id) => conversation == Some(id),
+            Viewing::New => conversation.is_none(),
+            Viewing::Closed => false,
+        }
+}
+
 // ---- which side a spoken question goes to (its cleanup's switch) -------------------------
 
 /// **Does a spoken question go into a Code chat?** (2026-11-07: each side
@@ -377,9 +409,9 @@ pub struct Spoken {
     pub viewing: Viewing,
     /// The conversation it goes to.
     pub conversation: Option<u64>,
-    /// Its words alone: no screenshots, quote, selection, Skill, app to
-    /// open, nor a phone's pictures (a typed message with any of those
-    /// goes at once too, never queued).
+    /// Its words alone: no screenshots, files from the box, quote,
+    /// selection, Skill, app to open, nor a phone's pictures (a typed
+    /// message with any of those goes at once too, never queued).
     pub alone: bool,
     /// It goes straight to its Code chat's session
     /// (`turn::goes_to_session`, `agents/direct.rs`).
@@ -587,6 +619,10 @@ static NEW_CODE_CHAT: Mutex<Option<String>> = Mutex::new(None);
 /// The new chat Chat shows (no question yet) has its ghost on
 /// (chat/incognito.rs): a question asked out loud there starts it incognito.
 static NEW_INCOGNITO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The project whose page Chat shows, or whose new chat ("New chat in
+/// <project>", no question yet): a question asked out loud there starts a
+/// new chat in it ([`new_in_project`], chat/projects.rs).
+static NEW_PROJECT: Mutex<Option<String>> = Mutex::new(None);
 
 /// Never held while emitting, touching windows or another module's lock.
 fn lock() -> MutexGuard<'static, State> {
@@ -608,6 +644,10 @@ pub fn shown_conversation() -> Option<u64> {
 
 fn code_chat_shown() -> Option<String> {
     NEW_CODE_CHAT.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
+fn project_shown() -> Option<String> {
+    NEW_PROJECT.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
 
 /// What the Chat view shows (Snip to Chat puts a screenshot in the
@@ -1470,6 +1510,10 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // A new chat on screen with its ghost on (chat/incognito.rs): the new
     // conversation is incognito. Never a phone's, nor a Code chat.
     let ghost = matches!(asker, Asker::Shortcut(_)) && conversation_id.is_none() && code_folder.is_none() && NEW_INCOGNITO.load(std::sync::atomic::Ordering::SeqCst);
+    // A project's page on screen, or the new chat its New chat started
+    // (chat/projects.rs): the new conversation is in that project, as the
+    // first typed question there makes it. Never a phone's.
+    let in_project = new_in_project(pc, conversation_id, code_folder.as_deref(), ghost, project_shown());
     // "Open Teams" needs no model, nor a "yes" to Yap's "Did you mean …?":
     // Yap opens it and says so (apps.rs). Never a question about a selection
     // or a Skill.
@@ -1568,10 +1612,22 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // quoted in, as a typed or dictated question takes it
     // (`documents::quote_goes`); the box's quote goes.
     let quote = if opens_an_app || !pc || about_selection || said.is_some() { None } else { crate::chat::documents::take_waiting_quote(&app, in_chat, conversation_id) };
+    // The files attached in Chat's box (chat/attachments.rs): with Chat in
+    // view showing that box, they go as a typed question takes them — out of
+    // the box, their text before the question, kept with it
+    // ([`box_files_go`]). From another app they stay. (Not when Yap opens an
+    // app, nor with a selection or a Skill: that's what it's about.)
+    let box_files = if pc && !opens_an_app && !about_selection && said.is_none() && box_files_go(crate::chat::attachments::waiting_count(), in_chat, viewing, conversation_id) {
+        crate::chat::attachments::take_waiting(&app)
+    } else {
+        Vec::new()
+    };
+    let with_files = !box_files.is_empty();
     // **Claude is working in the Code chat shown** ([`to_chat_queue`]): the
     // question joins Chat's own queue, as a typed one would — the page sends
-    // it from there, so nothing more happens here.
-    let alone = !shots_wait && quote.is_none() && !about_selection && said.is_none() && !opens_an_app && !with_pictures;
+    // it from there, so nothing more happens here. (With files it goes at
+    // once, as a typed message with files does.)
+    let alone = !shots_wait && !with_files && quote.is_none() && !about_selection && said.is_none() && !opens_an_app && !with_pictures;
     let queued = conversation_id.filter(|_| pc && in_chat && alone).and_then(|conv| {
         to_chat_queue(Spoken {
             pc,
@@ -1594,9 +1650,9 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // its picture, or its text read on this PC — or a line tells the model
     // why it can't see it. No model is asked first (8 Nov 2026): anything
     // else is the answering model's to look at if it needs to (below). Not
-    // beside screenshots already waiting, a quoted passage or a selection
-    // (they're what it's about), nor when Yap opens an app (no model), nor
-    // for a Skill (its passages are what it reads).
+    // beside screenshots already waiting, files from the box, a quoted
+    // passage or a selection (they're what it's about), nor when Yap opens
+    // an app (no model), nor for a Skill (its passages are what it reads).
     let mut window_picture: Option<(String, String)> = None;
     // With Yap's own window in front the window in front is Yap, which a
     // capture leaves out: a model that calls tools looks itself
@@ -1608,7 +1664,7 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let chat_looks = focused && endpoint.as_ref().is_some_and(|(_, _, model, provider, _, _)| crate::chat::tools::supports_tools(provider, model));
     let mut took_window = false;
     if let (Some(generation), false, Some((base_url, _key, model, provider, _persona, _thinking))) =
-        (asker.shortcut(), shots_wait || quote.is_some() || about_selection || chat_looks || said.is_some(), &endpoint)
+        (asker.shortcut(), shots_wait || with_files || quote.is_some() || about_selection || chat_looks || said.is_some(), &endpoint)
     {
         let ep = screen::Endpoint { base_url, model, provider };
         let look_app = app.clone();
@@ -1628,8 +1684,8 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // model may look at the window in front itself, when the question needs
     // it (`look_at_screen`, the window its look: `may_look_at_window`) — the
     // whole conversation in view, never a guess from the words.
-    let window_look = pc && !in_chat && !opens_an_app && !shots_wait && quote.is_none() && !about_selection && said.is_none() && shots.images.is_empty() && shots.note.is_none();
-    tracing::info!(phone = !pc, ?viewing, ?choice, ?seen, shots = shots.images.len(), window = took_window, window_look, quoted = quote.is_some(), selection = about_selection, skill = said.is_some(), "Voice Assistant: asking Chat");
+    let window_look = pc && !in_chat && !opens_an_app && !shots_wait && !with_files && quote.is_none() && !about_selection && said.is_none() && shots.images.is_empty() && shots.note.is_none();
+    tracing::info!(phone = !pc, ?viewing, ?choice, ?seen, shots = shots.images.len(), files = box_files.len(), project = in_project.is_some(), window = took_window, window_look, quoted = quote.is_some(), selection = about_selection, skill = said.is_some(), "Voice Assistant: asking Chat");
     // A Skill with nothing to run on (`skills::ask_first`): Yap asks out loud,
     // and waits for the answer by voice (below).
     let asks = said.as_ref().and_then(|t| crate::chat::skills::ask_first(t, true));
@@ -1716,11 +1772,21 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let turn = IN_CHAT.scope(in_chat, turn);
     // From another app: its model may look at the window in front.
     let turn = WINDOW_LOOK.scope(window_look, turn);
+    // (Its type erased here, as `chat_send`'s is: the layers' nesting stays
+    // under the compiler's recursion limit for proving a phone's turn's
+    // future is Send — one more layer pushed past it, 16 Nov 2026.)
+    let turn: std::pin::Pin<Box<dyn std::future::Future<Output = Result<crate::chat::turn::ChatTurn, String>> + Send + '_>> = Box::pin(turn);
     // A new code chat's: the conversation it makes is a Code chat in its workspace.
     let turn = crate::agents::code_chat::with_new(code_folder, turn);
     // (Boxed: the turn's future grows with each layer, and its thread's
     // stack is small — unboxed, this one overflowed it.)
     let turn = Box::pin(crate::chat::incognito::with_new(ghost, turn));
+    // The files from the box: the question carries them, as a typed one's
+    // does — their text before its words, kept with it (chat/attachments.rs).
+    let turn = Box::pin(crate::chat::attachments::with(box_files.clone(), turn));
+    // A project's page or new chat: the conversation it makes is in that
+    // project (chat/projects.rs).
+    let turn = Box::pin(crate::chat::projects::with_new(in_project, turn));
     // Its AI calls and searches are the Voice Assistant's in the network
     // receipts (net.rs), though they run Chat's code — and say so when the
     // window in front or a selection went with them, or the question came
@@ -1782,6 +1848,11 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
                 if let Some((conv, images)) = taken {
                     crate::snip::waiting::put_back(&app, conv, images);
                 }
+                // Its files stay with the question, as a typed one's do once
+                // it's saved; stopped before that, back in the box.
+                if question_id.is_none() {
+                    crate::chat::attachments::put_back_waiting(&app, box_files);
+                }
                 let conv = streamed.lock().conversation.or(conversation_id);
                 let _ = app.emit(
                     TURN,
@@ -1795,6 +1866,8 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
             if let Some(q) = quote {
                 crate::chat::documents::put_back_quote(&app, q);
             }
+            // …and the files it took from the box (as a typed question's are).
+            crate::chat::attachments::put_back_waiting(&app, box_files);
             // A phone's pictures turned down by the model's server: that
             // model is a "no" from now on, and the phone offers Chat's ways
             // on (as Chat's own line does for a typed question).
@@ -2225,10 +2298,19 @@ pub fn on_tts_state(app: &AppHandle, speaking: bool, message_id: Option<&str>) {
 /// nothing has no preference: as if closed). `code_folder`: that new chat is
 /// a new code chat, its workspace picked (a name or path): a spoken
 /// question's new conversation is a Code chat there ([`new_code_chat`]).
+/// `project` (16 Nov 2026): a project's page is shown (no chat: the page
+/// sends none), or the new chat its New chat started — a spoken question's
+/// new conversation is in that project ([`new_in_project`]). The Projects
+/// list shows no chat either: as Chat with nothing chosen.
 #[tauri::command]
-pub fn chat_view_state(open: bool, conversation_id: Option<u64>, new_chat: Option<bool>, code_folder: Option<String>, incognito: Option<bool>) {
+pub fn chat_view_state(open: bool, conversation_id: Option<u64>, new_chat: Option<bool>, code_folder: Option<String>, incognito: Option<bool>, project: Option<String>) {
     let shows_new = open && conversation_id.is_none() && new_chat.unwrap_or(false);
     NEW_INCOGNITO.store(shows_new && incognito.unwrap_or(false), std::sync::atomic::Ordering::SeqCst);
+    *NEW_PROJECT.lock().unwrap_or_else(|p| p.into_inner()) = project.filter(|p| shows_new && !p.trim().is_empty());
+    // Chat left: its box (the page's) goes with it.
+    if !open {
+        crate::chat::attachments::box_closed();
+    }
     *VIEW.lock().unwrap_or_else(|p| p.into_inner()) = match (open, conversation_id) {
         (false, _) => Viewing::Closed,
         (true, Some(id)) => Viewing::Conversation(id),
@@ -2316,6 +2398,43 @@ mod tests {
         assert_eq!(new_code_chat(false, None, garden()), None);
         assert_eq!(new_code_chat(true, None, None), None);
         assert_eq!(new_code_chat(true, None, Some("  ".into())), None);
+    }
+
+    #[test]
+    fn a_spoken_question_on_a_projects_page_or_its_new_chat_starts_a_chat_in_it() {
+        let garden = || Some("proj_garden".to_string());
+        // Its new conversation: in the project Chat shows.
+        assert_eq!(new_in_project(true, None, None, false, garden()).as_deref(), Some("proj_garden"));
+        // (A code folder that's only spaces is none.)
+        assert_eq!(new_in_project(true, None, Some(" "), false, garden()).as_deref(), Some("proj_garden"));
+        // One it continues keeps where it is; a phone's keeps its own; a Code
+        // chat has its workspace; an incognito chat is never in one; no
+        // project on screen, none.
+        assert_eq!(new_in_project(true, Some(4), None, false, garden()), None);
+        assert_eq!(new_in_project(false, None, None, false, garden()), None);
+        assert_eq!(new_in_project(true, None, Some("garden-planner"), false, garden()), None);
+        assert_eq!(new_in_project(true, None, None, true, garden()), None);
+        assert_eq!(new_in_project(true, None, None, false, None), None);
+        assert_eq!(new_in_project(true, None, None, false, Some("  ".into())), None);
+    }
+
+    #[test]
+    fn the_boxs_files_go_with_a_spoken_question_only_with_that_box_in_view() {
+        // Chat in view on the conversation the question goes to, or on the new chat it makes: they go.
+        assert!(box_files_go(2, true, Viewing::Conversation(7), Some(7)));
+        assert!(box_files_go(1, true, Viewing::New, None));
+        // None waiting: nothing to take.
+        assert!(!box_files_go(0, true, Viewing::Conversation(7), Some(7)));
+        // Asked from another app (Chat not in view): they stay for the box.
+        assert!(!box_files_go(2, false, Viewing::Conversation(7), Some(7)));
+        assert!(!box_files_go(2, false, Viewing::New, None));
+        // Chat on another view, the Projects list, or closed: no box in view.
+        assert!(!box_files_go(2, true, Viewing::Closed, Some(7)));
+        assert!(!box_files_go(2, true, Viewing::Closed, None));
+        // The question goes elsewhere (the screenshots wait in another chat): not this box's.
+        assert!(!box_files_go(2, true, Viewing::Conversation(7), Some(8)));
+        assert!(!box_files_go(2, true, Viewing::Conversation(7), None));
+        assert!(!box_files_go(2, true, Viewing::New, Some(8)));
     }
 
     #[test]

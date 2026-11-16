@@ -436,6 +436,7 @@ pub fn run() {
             chat::sheets::view::sheet_stamp,
             chat::sheets::view::sheet_open_app,
             chat::attachments::chat_attachment_remove,
+            chat::attachments::chat_files_waiting,
             chat::attachments::chat_attachment_open,
             chat::attachments::chat_attachments_usage,
             chat::attachments::chat_attachments_open_folder,

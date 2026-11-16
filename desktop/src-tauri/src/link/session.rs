@@ -198,16 +198,17 @@ impl crate::chat::assistant::Phone for Turn {
         if done {
             self.answered.store(true, Ordering::SeqCst);
         }
-        self.tell(Out::Answer { text: text.to_string(), done, id: None });
+        self.tell(Out::Answer { text: text.to_string(), done, id: None, retry: false });
     }
 
     fn checked(&self, text: &str, message_id: &str) {
         self.answered.store(true, Ordering::SeqCst);
         if crate::chat::assistant::Phone::current(self) {
-            // ▶ on the phone may read it from now on.
+            // ▶ on the phone may read it from now on (and ↻ ask it again).
             self.hub.gave(&self.device, message_id);
         }
-        self.tell(Out::Answer { text: text.to_string(), done: true, id: Some(message_id.to_string()) });
+        let retry = retryable_here(message_id);
+        self.tell(Out::Answer { text: text.to_string(), done: true, id: Some(message_id.to_string()), retry });
     }
 
     fn by_voice(&self) -> bool {
@@ -757,6 +758,8 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
             say(tx, empty_thread());
         }
         In::ReadAloud { id } => read_aloud(hub, tx, session, latest, asking, &id),
+        In::ShowVersion { chat, at, place } => show_version(hub, tx, session, latest, asking, chat, at, place),
+        In::Retry { id } => retry(hub, tx, session, latest, asking, &id),
         In::SetModel { id, provider, model, base_url, file } => {
             // A row of Chat's picker (`ready.picker`), as the desktop picker
             // picks it; else one of `ready.models` by its id (a first page).
@@ -799,16 +802,144 @@ fn open_chat(hub: &Arc<Hub>, tx: &Tx, asking: &mut Asking, id: u64) {
         return;
     };
     asking.set_chat(ChatRef::Id(id));
-    let (title, messages, more) = crate::link::chats::thread(&conv);
+    let out = thread_out(hub, &asking.device, &conv);
+    if let Out::Thread { messages, more, code, .. } = &out {
+        tracing::info!(messages = messages.len(), more, code = code.is_some(), "Yap Link: the phone opened a chat");
+    }
+    say(tx, out);
+}
+
+/// **Conversation `conv` as phone `device` shows it** (`thread`): its latest
+/// messages with their versions and which answers ↻ may ask again (none in
+/// a Code chat), the answers ones ▶ and ↻ may name from now on, and a Code
+/// chat's own parts (Remote Control on for this phone).
+fn thread_out(hub: &Arc<Hub>, device: &str, conv: &crate::chat::chats::Conversation) -> Out {
+    let code_chat = crate::agents::code_chat::folder_of(Some(conv.id)).is_some();
+    let (title, messages, more) = crate::link::chats::thread(conv, code_chat);
     for m in &messages {
         if let Some(answer) = &m.id {
-            hub.gave(&asking.device, answer);
+            hub.gave(device, answer);
         }
     }
-    // A Code chat's own parts (Remote Control on for this phone).
-    let (code, agents, cards) = crate::link::code::thread_parts(hub, &asking.device, id);
-    tracing::info!(messages = messages.len(), more, code = code.is_some(), "Yap Link: the phone opened a chat");
-    say(tx, Out::Thread { id: Some(id), title, messages, more, code, agents, cards });
+    let (code, agents, cards) = crate::link::code::thread_parts(hub, device, conv.id);
+    Out::Thread { id: Some(conv.id), title, messages, more, code, agents, cards }
+}
+
+/// Can ↻ ask answer `message_id` (`chat:<conversation>:<index>`) again from
+/// a phone: as a thread's message says ([`crate::link::chats::retryable`]).
+fn retryable_here(message_id: &str) -> bool {
+    let Some((conversation, index)) = parse_message_id(message_id) else { return false };
+    let code_chat = crate::agents::code_chat::folder_of(Some(conversation)).is_some();
+    crate::chat::chats::get(conversation).is_some_and(|c| crate::link::chats::retryable(&c, index, code_chat))
+}
+
+/// Said while that chat is answering: ‹ › and ↻ wait for it (as on the PC).
+const WAIT_FOR_ANSWER: &str = "Wait for the answer being written, or stop it first.";
+/// ↻ on an answer this phone wasn't given, or one gone from Chat.
+const NOT_RETRYABLE: &str = "That answer isn't in Chat on your PC any more, so Yap can't try it again.";
+/// ↻ in a Code chat: there it's Claude Code's Rewind, the PC's only.
+const CODE_RETRY: &str = "In a Code chat, Retry is on your PC: there it rewinds Claude's session first.";
+
+/// **‹ › on the phone** (`show_version`, 16 Nov 2026): conversation `chat`'s
+/// message at `at` shows its version `place` — on the PC too, as ‹ › there
+/// does (`chat_branch`'s rules: not while that chat is answering), for there
+/// is one version shown a conversation and the last switch wins. ▶ being
+/// said stops first (its words may be in the version set aside). This phone
+/// gets the thread now; every other phone hears `versions`, and the PC's
+/// Chat view reads it again.
+#[allow(clippy::too_many_arguments)]
+fn show_version(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, chat: u64, at: usize, place: u32) {
+    if crate::chat::chats::get(chat).filter(crate::link::chats::usable).is_none() {
+        say(tx, Out::Error { message: CHAT_GONE.into() });
+        return;
+    }
+    if crate::chat::stream::is_answering(chat) {
+        say(tx, Out::Error { message: WAIT_FOR_ANSWER.into() });
+        return;
+    }
+    if abandon(latest, asking) {
+        say(tx, Out::State { phase: Phase::Idle });
+    }
+    if let Err(e) = crate::chat::chats::switch_branch(chat, at, place) {
+        say(tx, Out::Error { message: e });
+        return;
+    }
+    crate::memory::read_again_from(chat, at);
+    asking.set_chat(ChatRef::Id(chat));
+    tracing::info!(at, place, "Yap Link: the phone showed another version of a message");
+    if let Some(conv) = crate::chat::chats::get(chat) {
+        say(tx, thread_out(hub, &asking.device, &conv));
+    }
+    hub.phone_changed_versions(chat, Some(session));
+}
+
+/// **↻ Retry on the phone** (`retry`, 16 Nov 2026, the Claude app's): answer
+/// `id` — one this phone was given — set aside as a version with what
+/// followed it (`chats::begin_retry`, as `chat_retry` does), and its
+/// question answered again the way the phone's questions are (the Voice
+/// Assistant's path, [`crate::chat::turn::again`]: never saved twice, the
+/// history up to it): with its pictures still on the PC, its Skill again,
+/// answered on screen as a typed question is (▶ to hear it). An answer that
+/// never comes (an error, ■ before any of it) puts the old one back. Not in
+/// a Code chat (there Retry is Claude Code's Rewind: the PC's, asked first),
+/// nor while that chat is answering. Whatever was under way on the phone
+/// stops first. At its end every phone hears `versions` (this one asks for
+/// the thread with its ‹ 2/2 ›) and the PC's Chat view reads it again.
+fn retry(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, id: &str) {
+    if abandon(latest, asking) {
+        say(tx, Out::State { phase: Phase::Idle });
+    }
+    // Why not, then idle (the page shows it working from its tap).
+    let refuse = |message: String| {
+        say(tx, Out::Error { message });
+        say(tx, Out::State { phase: Phase::Idle });
+    };
+    if crate::chat::assistant::is_off() {
+        return refuse(MEETING.into());
+    }
+    let Some((conversation, index)) = parse_message_id(id).filter(|_| hub.was_given(&asking.device, id)) else {
+        return refuse(NOT_RETRYABLE.into());
+    };
+    if crate::chat::chats::get(conversation).filter(crate::link::chats::usable).is_none() {
+        return refuse(CHAT_GONE.into());
+    }
+    if crate::agents::code_chat::folder_of(Some(conversation)).is_some() {
+        return refuse(CODE_RETRY.into());
+    }
+    if crate::chat::stream::is_answering(conversation) {
+        return refuse(WAIT_FOR_ANSWER.into());
+    }
+    let begun = match crate::chat::chats::begin_retry(conversation, index) {
+        Ok(b) => b,
+        Err(e) => return refuse(e),
+    };
+    asking.set_chat(ChatRef::Id(conversation));
+    // Its screenshots still on this PC go again (their text is in its words when it went as text).
+    let (pictures, as_text) = crate::chat::commands::images_again(&begun.question);
+    let pictures = if as_text { Vec::new() } else { pictures };
+    tracing::info!(pictures = pictures.len(), "Yap Link: the phone retried an answer (the old one kept as a version)");
+    let turn_id = latest.fetch_add(1, Ordering::SeqCst) + 1;
+    let turn = Turn::new(turn_id, session, Arc::clone(latest), asking, false, Carries::default());
+    *turn.pictures.lock().unwrap_or_else(|p| p.into_inner()) = pictures;
+    asking.turn = Some(Arc::clone(&turn));
+    let app = hub.app.clone();
+    let hub = Arc::clone(hub);
+    tauri::async_runtime::spawn(async move {
+        use crate::chat::assistant::Phone;
+        turn.tell(Out::State { phase: Phase::Thinking });
+        let question = begun.question.sent_words();
+        let asked = crate::chat::assistant::ask_from_phone(app, question, Arc::clone(&turn) as Arc<dyn Phone>);
+        Box::pin(crate::chat::turn::again(conversation, begun.question_at, asked)).await;
+        if !turn.voiced.load(Ordering::SeqCst) {
+            turn.tell(Out::State { phase: Phase::Idle });
+        }
+        let kept = crate::chat::chats::end_branch(conversation, begun.at, begun.back_to, true);
+        if kept {
+            crate::memory::read_again_from(conversation, begun.at);
+        }
+        tracing::info!(kept, "Yap Link: the phone's retry is over");
+        hub.phone_changed_versions(conversation, None);
+    });
 }
 
 /// A new chat's thread: nothing in it yet.

@@ -613,6 +613,10 @@ async function startTurn({ text, spoken = false, chat = 'new', autoCards = null,
     if (how === 'retry' || how === 'edit') {
       await branchTurn(how, text);
     } else if (spoken) {
+      // (Pictures and files in the box first, as a person drops them before asking out loud: the question takes
+      // them with Chat in view, 16 Nov 2026.)
+      if (pictures?.length) await dropPictures(pictures);
+      if (attach?.length) await dropFiles(attach);
       await invoke('e2e_assistant_ask', { text, listenMs: 300 });
     } else {
       if (pictures?.length) await dropPictures(pictures);
@@ -669,7 +673,9 @@ async function confirmIfAsked() {
 
 /**
  * **A new chat in a project** (`--project`, chat/projects.rs): the project named `project.name` made if there's none
- * (its instructions set when given), then its page opened and its New chat pressed, as the person does.
+ * (its instructions set when given), then its page opened and its New chat pressed, as the person does — or, with
+ * `project.page` (`--project-page`, 16 Nov 2026), its page left in view (a question asked out loud there starts its
+ * new chat in it: chat/assistant.rs `new_in_project`).
  */
 async function newChatInProject(project) {
   const name = String(project.name).trim();
@@ -679,6 +685,10 @@ async function newChatInProject(project) {
   const m = main();
   await m.getByRole('button', { name: 'Projects', exact: true }).click({ timeout: 10_000 });
   await m.getByTestId('chat-projects').getByRole('button', { name }).first().click({ timeout: 10_000 });
+  if (project.page) {
+    await m.getByTestId('chat-project').getByRole('button', { name: `New chat in ${name}` }).waitFor({ state: 'visible', timeout: 10_000 });
+    return;
+  }
   await m.getByRole('button', { name: `New chat in ${name}` }).click({ timeout: 10_000 });
 }
 
@@ -1753,7 +1763,7 @@ const COMMANDS = {
     const attach = Array.isArray(a.attach) ? a.attach : a.attach ? String(a.attach).split(',').filter(Boolean) : null;
     const how = a.retry ? 'retry' : a.edit ? 'edit' : 'ask';
     const text = how === 'retry' ? String(a.text ?? '').trim() || 'Retry' : a.text;
-    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null } : null, ...shotsFor(a) });
+    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null, page: !!a['project-page'] } : null, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
   wait: async (a) => {

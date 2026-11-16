@@ -2198,17 +2198,66 @@ what didn't was the person.
     line of the agent's log (`runner.rs`, at most 12,000 characters), like
     its `said` — never in Yap's log, **never to a phone**
     (`link/code/view.rs` blanks it as it does a command's output).
-  - **On Opus 5.5 there's none to show yet** (checked 15 Nov 2026 on
-    Claude Code 2.1.296): a headless run's stream has its thinking blocks
-    with their text empty, even with `showThinkingSummaries` set (Claude
-    Code's settings reference scopes it to interactive sessions: unset,
-    "the Anthropic API redacts thinking blocks"). An empty block is no
-    thought, so there the Thinking view is the Normal one; whatever text a
-    block carries (another model or version) shows. Verbose opens every
-    step either way.
+  - **How long it thought** (16 Nov 2026): the runner notes when a thinking
+    block of the session's own message starts in the stream
+    (`content_block_start`, which `--include-partial-messages` gives) and
+    puts the block's time on its line, `thoughtMs` (`runner::thought_line`).
+    The view's line says "Thought for 4s" over the words (`core/agents.js`
+    `thoughtFor`, the lead's clock format); an older log's has "Thinking".
+  - **Opus 5.5's and Sonnet 5.5's thinking has no words in Yap's runs**,
+    and no documented way asks for them (researched 16 Nov 2026, Claude
+    Code 2.1.296, from Anthropic's public docs only, never Claude Code's
+    own code):
+    - The Messages API's adaptive thinking has `thinking.display`:
+      `"summarized"` returns a summary of the reasoning, `"omitted"` the
+      blocks with their `thinking` text empty (only the signature). Omitted
+      is the default on Opus 4.7 and later, Sonnet 5 and later, Haiku 5.5
+      and the Fable models; it changes what's returned, not what's thought
+      or billed. Opus 5.5 and Sonnet 5.5 also have `display: "updates"`
+      (beta), progress notes between tool calls in place of the thinking.
+    - The Agent SDK passes it through: its `thinking` option,
+      `{ type: "adaptive", display: "summarized" }` (TypeScript and Python
+      references, `ThinkingConfig`: "On Claude Opus 4.7 and later, the API
+      default is `"omitted"`, so set `"summarized"` to receive thinking
+      content"). Yap doesn't run the SDK; it runs the person's own
+      `claude -p` (stream-json), and the docs don't say how the SDK hands
+      the option to the CLI.
+    - Claude Code's CLI reference has no flag for it (`--effort`,
+      `--betas`, `--forward-subagent-text` — that one is helpers' thinking
+      blocks, empty the same way —, nothing about display). Its environment
+      variables have `MAX_THINKING_TOKENS`, `CLAUDE_CODE_DISABLE_THINKING`,
+      `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING`,
+      `DISABLE_INTERLEAVED_THINKING` and `CLAUDE_CODE_EFFORT_LEVEL`: none
+      changes what's displayed (thinking can't be turned off on these models
+      anyway).
+    - Its settings have `showThinkingSummaries` ("See summaries of Claude's
+      extended thinking **in interactive sessions** … When unset or
+      `false`, the Anthropic API redacts thinking blocks"; model
+      configuration: "Interactive sessions on the Anthropic API receive
+      redacted thinking blocks by default"). Tried in a `-p` run on Opus 5.5
+      with `--settings '{"showThinkingSummaries":true}'`: the block still
+      came with its words empty (a 1,000-character signature, `thinking`
+      ""), as without it. So it isn't passed.
+    - What the stream does have: each block's start and end, empty
+      `thinking_delta`s, `system/thinking_tokens` (an estimate as it goes)
+      and the result's `usage.output_tokens_details.thinking_tokens`.
+  - **So the Thinking view says so plainly** (`AgentWork`): a block with no
+    words is "Thought for 4s" alone, quiet, never an empty box; two in a row
+    are one line, their time added (`workOf`); the first such line of a
+    turn's part says "Claude Code doesn't send this model's thinking to
+    Yap, only how long it thought." (`THOUGHT_NOT_SENT`), the rest on hover.
+    Whatever words a block does carry (another model, a later Claude Code)
+    show under its time. Verbose has the same lines, every step open. If
+    Claude Code ever documents a way to ask for the summaries in `-p`, it
+    goes in `session::args` and the lines fill in by themselves.
   - `workOf(…, { thinking })`: a thought is an item only when the view asks
     for it, and then it splits the stretch round it; in Normal it's no item
     and splits nothing.
+  - e2e `agents-direct.spec.js`: the long turn's thought with its words
+    under "Thought for 1s"; "a model whose thinking Claude Code doesn't
+    send" (Opus 5.5's stream as seen: empty blocks, two in a row) — its
+    times in order, the note once, nothing in Normal, the log's
+    `thoughtMs` without words; `core/agents.js` unit checks.
 - **Pictures, paged** ([A step's pictures](#a-steps-pictures)).
 - **A card asking before acting on a page goes with the work it's about**
   (15 Nov 2026, as the Claude app keeps it with the latest of the turn):

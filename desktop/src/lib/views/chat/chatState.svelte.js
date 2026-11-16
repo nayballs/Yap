@@ -713,9 +713,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (!imgs.length) return;
     if (p.conversationId != null) {
       if (p.conversationId !== activeId) await selectConversation(p.conversationId);
-    } else if (activeId != null) {
-      // Rust has the box as it should be (yap-chat-waiting): kept.
-      newChat({ keepShots: true });
+      else page = null;
+    } else if (activeId != null || page != null) {
+      // Rust has the box as it should be (yap-chat-waiting): kept. (Snipped over a project's page: a new chat in it,
+      // as its New chat starts one.)
+      const pid = page != null && typeof page === 'object' ? page.project : null;
+      const project = pid ? { id: pid, name: projects.find((x) => x.id === pid)?.name || '' } : null;
+      newChat({ keepShots: true, ...(project ? { project } : {}) });
     }
     const fresh = imgs.filter((img) => !waitingShots.list.some((a) => a.id === img.id));
     if (fresh.length) waitingShots.list = [...waitingShots.list, ...fresh].slice(-MAX_SHOTS);
@@ -1251,22 +1255,54 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // `choose_conversation`): the conversation open here, a new chat someone
   // asked for, or — nothing chosen — no preference; and a new code chat's
   // workspace (its new conversation is a Code chat there, `new_code_chat`).
+  // A Projects page in the thread's place (chat/projects.rs) shows no chat: a
+  // project's page is its new chat's (a question asked out loud there starts
+  // one in it, as its New chat does: `new_in_project`); the list, as Chat
+  // with nothing chosen.
   function reportView(open = true) {
+    const onPage = page != null;
+    const pageProject = onPage && typeof page === 'object' ? (page.project ?? null) : null;
+    const shown = onPage ? null : activeId;
+    const project = onPage ? pageProject : activeId == null ? (newProject?.id ?? null) : null;
+    const folder = shown == null && !onPage ? (pendingFolder?.() ?? null) : null;
     invoke('chat_view_state', {
       open,
-      conversationId: activeId,
-      newChat: activeId == null && choseNew,
-      codeFolder: activeId == null ? (pendingFolder?.() ?? null) : null,
-      // Its ghost on: a question asked out loud there starts it incognito.
-      incognito: activeId == null && ghostNew && !(pendingFolder?.() ?? null),
+      conversationId: shown,
+      newChat: onPage ? pageProject != null : activeId == null && choseNew,
+      codeFolder: folder,
+      // Its ghost on: a question asked out loud there starts it incognito (never in a project).
+      incognito: shown == null && !onPage && !project && ghostNew && !folder,
+      project,
     }).catch(() => {});
   }
   $effect(() => {
     void activeId;
+    void page;
+    void newProject;
     untrack(() => {
       if (alive) reportView();
     });
   });
+
+  // The files in the box, in Rust too (chat/attachments.rs `chat_files_waiting`): a question asked out loud with the
+  // box in view takes them as a typed one does (16 Nov 2026). None while a Projects page covers the box.
+  $effect(() => {
+    const ids = page != null ? [] : files.map((f) => f.id);
+    untrack(() => {
+      if (alive) invoke('chat_files_waiting', { ids }).catch(() => {});
+    });
+  });
+
+  /**
+   * Rust took the box's files for a question asked out loud (`yap-chat-files` `{taken}`: their chips go, the question
+   * shows them), or gave them back when no answer came (`{back}`: first in the box, as a typed send's are).
+   */
+  function onBoxFiles(p) {
+    const taken = Array.isArray(p?.taken) ? p.taken : [];
+    if (taken.length) files = files.filter((f) => !taken.includes(f.id));
+    const back = (Array.isArray(p?.back) ? p.back : []).filter((f) => f?.id && !files.some((x) => x.id === f.id));
+    if (back.length) files = [...back, ...files];
+  }
 
   // A question asked with the assistant shortcut (chat/assistant.rs), or on a
   // paired phone: this view switches to its conversation as it's asked and
@@ -1465,13 +1501,19 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
     if (phase === 'asked') opening.add(id);
     try {
-      const conv = await invoke('chat_get', { id });
+      let conv = await invoke('chat_get', { id });
       if (!alive) return;
       if (!follows && activeId !== id) {
         refreshList();
         return;
       }
+      // Its answer landed while this read was under way (a quick one, into a new chat: the read began before the
+      // answer was saved): read again, or the thread would keep the question alone (seen in e2e, 16 Nov 2026).
+      if (phase === 'asked' && landedEarly.has(id)) conv = await invoke('chat_get', { id }).catch(() => conv);
+      if (!alive) return;
       const switched = activeId !== id;
+      // (Asked with a Projects page in the thread's place, or the bar's Open in Chat: the page closes on its chat.)
+      if (follows) page = null;
       if (switched) {
         // Another conversation: the panel's documents and pictures were the last one's
         // (its tabs closed before stay closed; a new chat it became keeps what it shows).
@@ -1831,6 +1873,22 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     editing = null;
     send({ text: words, edit: index, from: m, elements: splitElements(m.text || '').elements, editFiles: !!files, code: !!code });
     return true;
+  }
+
+  /**
+   * **A phone switched a version, or retried an answer** (`yap-chat-versions`, Yap Link: link.rs): one version shown a
+   * conversation, the same on every screen — the chat open here reads it again (after its own answer, when it's
+   * sending: `reloadActive`). Reading aloud stops and an edit closes: their words may be in the version set aside.
+   */
+  function onVersions(p) {
+    const id = p?.conversationId;
+    if (id == null || id !== activeId) return;
+    if (!sending) {
+      stopReading();
+      editing = null;
+    }
+    reloadActive();
+    contextStamp += 1;
   }
 
   /** **‹ ›**: the message at `at` shows its version `place`, what was shown from there kept as a version. */
@@ -2565,6 +2623,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     cancelEdit,
     saveEdit,
     switchBranch,
+    onVersions,
     get editing() { return editing; },
     get forks() { return forks; },
     agentEvent,
@@ -2595,6 +2654,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     setQuote,
     clearQuote,
     onQuote,
+    onBoxFiles,
     onPageQuote,
     get sending() { return sending; },
     // The open conversation has an answer being written (typed or asked out
