@@ -158,18 +158,24 @@ console; `npm run mock:provider` stands in for a social provider). See
 ## The shared compile cache (sccache, 2026-11-16)
 Agents and sessions each build Yap in a target dir of their own
 (`E:\Builds\yap\<task>\`), often several at once, each from scratch. On the
-maintainer's PC every `cargo` goes through **sccache**, one cache of compiled
-crates they all share:
+maintainer's PC every `cargo` run inside Yap's checkout goes through **sccache**,
+one cache of compiled crates they all share:
 
 - **What's installed**: sccache 0.19.0, Mozilla's release zip from GitHub
   (`sccache-v0.19.0-x86_64-pc-windows-msvc.zip`, its SHA-256 checked), as
   `%USERPROFILE%\.cargo\bin\sccache.exe`, on the PATH beside cargo. (`cargo
   install sccache --locked` gives the same.)
-- **Every cargo uses it**: `%USERPROFILE%\.cargo\config.toml` has `[build]
-  rustc-wrapper = '<that sccache.exe>'`, so dev.bat's `tauri dev`, the e2e,
-  robot and eval builds and a plain `cargo test` / `cargo clippy` all go through
-  it, whatever their folder. `RUSTC_WRAPPER=` (empty) turns it off for one
-  command. A PC without it: delete those two lines, nothing else changes.
+- **Yap's cargo runs use it, nothing else on the PC**: a `.cargo\config.toml` at
+  the checkout's root (`E:\Projects\Yap\.cargo\config.toml`, and the same in
+  `E:\Projects\yap-integration`) has `[build] rustc-wrapper = '<that
+  sccache.exe>'`. Cargo finds it by walking up from where it runs, so dev.bat's
+  `tauri dev`, the e2e, robot and eval builds and a plain `cargo test` /
+  `cargo clippy` in the checkout or any worktree under `.claude\worktrees\` go
+  through it; other Rust projects on the PC don't. The file is local to this PC
+  and never committed (`/.cargo/` in `.git/info/exclude`), so CI and other
+  clones are untouched. `RUSTC_WRAPPER=` (empty) turns it off for one command;
+  deleting the file turns it off. (Until 16 Nov it sat in
+  `%USERPROFILE%\.cargo\config.toml`, for every project; moved to Yap only.)
 - **Its cache** is `E:\Builds\sccache`, at most 30 GiB (the least recently used
   goes first), from sccache's own settings file
   `%APPDATA%\Mozilla\sccache\config\config`. `sccache --show-stats` says what
