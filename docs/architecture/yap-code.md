@@ -3488,6 +3488,24 @@ checked against Anthropic's own figures for the account. What those runs
 turned up was fixed the same day: the Agent tab rebuilt to read like Claude
 Code, Open in terminal's blank tab, Chat's thread following a report.
 
+**Background work, through Yap Lab on Opus 5.5 (the real Claude Code
+2.1.296), 2026-11-16:** a Code chat asked to start a helper in the
+background that waited a minute and listed the workspace: its reply showed
+at once, the lead's line said "Waiting for background work (1 helper)", the
+helper reported back (as a `peer` hand-back: [Background work and Claude
+Code's own turns](#background-work-and-claude-codes-own-turns-16-nov-2026)),
+and Claude's follow-up was the chat's answer, the first reply in its work,
+never twice; the process then ended by itself. Then a ten-minute background
+command: a message sent while it waited went straight in and was answered
+in the same process, which went back to waiting; ■ Stop ended it, its answer
+reported. The next message, resumed: Claude Code noted the stopped command
+and ended its empty turn of its own first, which no longer ended the turn —
+the real answer came whole (five model turns), with the quiet line above
+it. An agent Chat sent out did the same with its helper (the Agent panel's
+row "Waiting for background work (1 helper)"). Shots and sheets in the
+private repo (`claude-app-chat-gaps-2026-11/code-chat-turns/`). Not tried:
+the 45-minute ask and a wake-up, outside the tests.
+
 **The queue, through Yap Lab on Opus 5.5 (the real Claude Code),
 2026-11-14:** a 200-word paragraph asked for and, while it was written, a
 second message ("How long do blue whales live?"): it waited as Queued, then
