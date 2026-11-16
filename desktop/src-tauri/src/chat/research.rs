@@ -555,8 +555,9 @@ pub struct Report {
     /// and where the report is.
     pub answer: String,
     /// The answer's sources: the pages the report cites, numbered as it
-    /// cites them (marked cited and read), then the other pages read, then
-    /// the rest the searches found.
+    /// cites them (marked cited and read), then the other pages read — never
+    /// a search's result nobody opened (a Lab run on Opus found 103 pages
+    /// and read 8: "+99 more" under the answer said nothing).
     pub sources: Vec<Source>,
     /// How many pages the report cites.
     pub cited: usize,
@@ -710,7 +711,7 @@ pub fn report(written: &str, sources: &[Source], plan_title: &str, byline: &str)
     }
     let cited = out.len();
     let mut next = cited;
-    for s in sources.iter().filter(|s| s.opened && !order.contains(&s.n)).chain(sources.iter().filter(|s| !s.opened && !order.contains(&s.n))) {
+    for s in sources.iter().filter(|s| s.opened && !order.contains(&s.n)) {
         next += 1;
         out.push(Source { n: next, cited: false, ..s.clone() });
     }
@@ -996,9 +997,11 @@ mod tests {
         assert!(r.body.starts_with("# The QWERTY layout\n\n*Researched 16 November 2026 · 5 searches, 3 pages read*\n"), "{}", r.body);
         // The thread: the summary with the same numbers as pills, then where the report is.
         assert_eq!(r.answer, "QWERTY came from Sholes's typewriter [1] and spread with the Remington No. 2 [2].\n\nThe full report is open on the right.");
-        // Every source: the cited first, then the read, then the rest.
-        assert_eq!(r.sources.len(), 5);
-        assert!(r.sources[3..].iter().all(|s| !s.cited && !s.opened));
+        // Its sources: the pages read, the cited first; never a result nobody opened.
+        assert_eq!(r.sources.len(), 3);
+        assert!(r.sources.iter().all(|s| s.opened));
+        let one_more = report(written, &[sources.clone(), vec![src(6, "https://read.example/uncited", true)]].concat(), "", "");
+        assert_eq!(one_more.sources.iter().map(|s| (s.n, s.cited)).collect::<Vec<_>>(), [(1, true), (2, true), (3, true), (4, false)]);
         // Every citation number in the document is a page read.
         for n in crate::web::citations(&r.answer) {
             assert!(r.sources.iter().any(|s| s.n == n && s.opened && s.cited), "{n}");

@@ -720,7 +720,10 @@ async fn read_turn(
                         if let Some(b) = research {
                             let done = crate::chat::research::counts(mapper.chips(), mapper.sources());
                             let tokens = mapper.tokens() + crate::ai::usage::turn_tokens();
-                            if let Some(why) = crate::chat::research::past(&b.caps, mapper.web_calls(), done, b.elapsed(), tokens) {
+                            // (A fetch that failed read no page: not one of its reads.)
+                            let failed = mapper.chips().iter().filter(|c| c.starts_with("Couldn't read")).count();
+                            let (searches, fetches) = mapper.web_calls();
+                            if let Some(why) = crate::chat::research::past(&b.caps, (searches, fetches.saturating_sub(failed)), done, b.elapsed(), tokens) {
                                 return Ended::Capped(why);
                             }
                         }

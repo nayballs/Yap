@@ -6277,7 +6277,8 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   none of the screen, the pages beside the chat, agents, connectors, cards
   or visuals this turn; Claude Code's own tools can't be refused one at a
   time, so Yap stops its turn at the first call past a cap (`research::past`:
-  `Mapper::web_calls`, the searches and fetches begun; both caps reached; the
+  `Mapper::web_calls`, the searches and fetches begun, a fetch that failed
+  not counted; both caps reached; the
   time — a timer of its own —, or the tokens: `Mapper::tokens`, the
   session's calls so far, plus the turn's), interrupts it, counts its usage,
   and asks for the report on the same session (`write_now_after`), chip
@@ -6314,7 +6315,8 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   "The full report is open on the right.", the document's card, the chips
   with "Researched for 6 min: 12 searches, 8 pages read" and "Wrote the
   report “…”" (folded: "…, researched it, wrote the report"), and the Sources
-  row: the cited pages as numbered, the others read, then the rest found.
+  row: the cited pages as numbered, then the others read — never a result
+  nobody opened (a Lab run on Opus found 103 pages and read 8).
 - **The outside-content rules hold**: it's Chat's own loop, so the safety
   rule runs on every call as ever (`tools::refused_after_outside`) — and a
   research runs none of the tools it locks anyway. The plan step has no
