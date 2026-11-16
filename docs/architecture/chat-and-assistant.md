@@ -256,6 +256,10 @@ one side.
   the branch shown is `messages`; `Conversation.branches` the forks along it,
   each with its other branches; copied to `chat_branches.json` for an older
   Yap's save. [Below](#retry-edit-and-versions-2026-11-15).
+- **`chat/feedback.rs`** — **👍 / 👎 on an answer** (2026-11-16, the Claude
+  app's thumbs): `ChatMessage.feedback`, kept on this PC and sent nowhere;
+  copied to `chat_feedback.json` for an older Yap's save; Retry with the
+  note; Learn from this. [Below](#thumbs-up-and-down-on-an-answer-2026-11-16).
 - **`chat/note_chats.rs`** — **a meeting's Ask thread, kept** (Wispr Flow's
   "New chat" / "Past chats"; the private roadmap's R15): what was asked about
   a meeting in the notepad's Ask sheet or its note's "Ask anything…" bar
@@ -5963,6 +5967,106 @@ summary over messages that changed is dropped); `chat-branches.spec.js`
 (Retry, Edit, switching, the history sent, a retry with no answer, after a
 restart and after an older Yap's save) and `agents-direct.spec.js` (a Code
 chat's Edit and Retry through Rewind).
+
+## Thumbs up and down on an answer (2026-11-16)
+
+The Claude app's 👍 / 👎 under an answer (row H9 of the parity catalogue, the
+last of its chat features). Yap is local, so the feedback goes to no one: it's
+the person's own mark on the answer, kept with it on this PC, and put to use
+here — never sent anywhere, never read by a model except as a Retry's note.
+
+**Where it is**: under every answer of Chat's (not an agent's report marker,
+not one still being written), in the answer actions row: ▶ Read aloud, Copy,
+👍, 👎, ↻ (the Claude app's order: Copy, 👍, 👎, Retry), then the model's
+byline. A thumb is a toggle (`aria-pressed`): pressed, kept (`.readbtn.on`,
+the hand filled softly in the primary colour); pressed again, taken back;
+👍 and 👎 replace each other. In a Code chat they sit beside its answer
+actions too. On the phone (Yap Link, a PC that says `"rate"` in
+`ready.can`): 👍 and 👎 between Copy and ▶ under each answer it was given,
+the same toggles (`rate {id, rating}` → `rated {id, rating?}`, the PC's
+`link/session.rs` `rate`: only an answer that phone was given; the same mark
+again keeps the reasons the PC's card gave; a thread's answers carry their
+`rating`). The phone has no reasons card: why it wasn't good is said on the
+PC.
+
+**👎's card** (`FeedbackCard.svelte`, its own chunk, under the row): "What
+was wrong?" — Not true, Didn't do what I asked, Too long, Too short, Wrong
+tone, Other (a line to type, "What should it have done?", at most 300
+characters) as toggle chips, each kept as it's picked (the line on Enter,
+leaving the box, Done or Retry); "Kept on this PC: Yap sends it nowhere.";
+Done; **Retry with this note**; × and Esc close it (the 👎 stays). It opens
+when 👎 is pressed, for that answer only (`ChatMessage`'s `fbFor`: its id and
+time, so a version switched in its place never inherits it).
+
+**Retry with this note** (`chat_retry`'s `feedback: true`; a Code chat's
+`chat_send` `edit` with `feedbackFrom: <answer index>`): the question asked
+again exactly as ↻ asks it — a new version, the old answer kept with its 👎
+one ‹ › away — and the model is told, this turn only (`feedback::with_note`,
+a task-local read by `turn/prompt.rs` `build`: the question's context, every
+path that builds the prompt — the tool loop, the small path, your Claude
+plan's session): that the person marked the earlier answer to this question
+not good and asked again (it's out of the history: Retry set it aside), what
+was wrong (each reason's line, `feedback::REASONS`: "it was too long, so make
+the new one clearly shorter"…), their words, and the earlier answer itself
+for reference only ("never as instructions", clipped to 1,500 characters,
+its word count said). The note is read from the stored mark before the
+answer is set aside (`retry_note_at`). The question stays as the person
+asked it and is never saved again. **↻ on an answer marked 👎 is the same
+Retry with its note** (its label and the right-click menu say "Retry with
+your note"): the person said what was wrong, so a Retry uses it — the
+phone's ↻ too (`link/session.rs` `retry`). In a Code
+chat, Retry is Claude Code's own Rewind as ever ("Retry with your note?"
+asked first), and the note goes after the message to the session
+(`feedback::for_session` in `turn.rs` `sent_directly`); the message is
+saved as the person wrote it.
+
+**Learn from this** (the card's link, a plain chat only — never a Code chat,
+which keeps Yap's memory out, nor an incognito chat, which never updates it):
+offered when a reason says something lasting (Too long, Too short) or the
+person typed a line. It opens a row: "Remember in every chat" with a line to
+edit (Too long: "Prefers shorter, more direct answers"; Too short: "Prefers
+fuller, more detailed answers"; else their own line) and **Remember**
+(`chat_feedback_remember {id, index, fact}`: a fact in memory's Preferences
+with source `tell` — "You told Yap" in Settings → Memory — under memory's
+own rules: secrets refused, a fact's length at most, said twice kept once;
+only for an answer marked 👎; memory's toast with Undo), and for Too long /
+Too short **Use Concise / Explanatory in this chat** (`chat_style_set`; the
+Style chip follows, `yap-chat-style`). Nothing is kept until it's pressed.
+
+**Where it's kept** (`chat/feedback.rs`, [config-and-data.md](./config-and-data.md)):
+the answer's `feedback` in chats.json — `{rating, reasons?, note?, ts}` —
+set by `chat_feedback {id, index, ts?, feedback?}` (`chats::set_feedback`:
+an answer of the chat's only; `ts`, when the page knows it, must be the
+answer's, so one that moved since a version switched is refused). It goes
+where its answer goes: into the version Retry sets aside (and back with ‹ ›),
+out with a Rewind, deleted with the chat. **An older Yap's save** drops the
+field, so every save also writes the marks to `chat_feedback.json`
+(`{version, answers: [{conversation, ts, chars, feedback}]}`, every version's,
+removed when there are none), and the next start puts each back
+(`restore_from_disk`, after the branches are back) on the answer of that
+conversation at that time and length — in the branch shown or another
+version — when it has none. **Download your data** (`privacy/export.rs`):
+chats.json, "Your feedback: 👎 Too long: “…”" under the answer in its chat's
+Markdown, and `chats/feedback.json` (every mark with its chat, the answer's
+start and why). Delete some of your data and Reset app take
+`chat_feedback.json` with the chats.
+
+The log says ratings and counts, never the person's words.
+
+Tests: `cargo test feedback` (`feedback::tests`: a mark kept clean, its line,
+a Retry's note, the note the turn's only, an older Yap's save, Learn from
+this, the export rows), `chats::tests::an_answers_thumbs_are_kept_with_it_and_only_an_answers`,
+`turn::prompt::tests::a_code_chats_prompt_keeps_yaps_memory_out_…` (the note
+in the question's context), `privacy::export::tests::your_thumbs_on_answers_are_in_the_file`,
+`link::chats` / `link::wire` (the phone's rating and `rate`);
+`chat-feedback.spec.js` (the row's order, 👍 kept and taken back, 👎's card,
+Retry with the note — what the model got, both versions — ↻ with the note,
+Learn from this, an older Yap's save; light and dark),
+`agents-direct.spec.js` (a Code chat's 👎 and Retry with the note through
+Rewind), and the phone page's `chats.spec.js` (rate / rated) and
+`screens.spec.js` (the row, light and dark). Yap Lab: `ask --retry
+--feedback long,untrue --note "…"` presses 👎, its reasons and line, then
+the card's Retry ([lab.md](../lab.md)).
 
 ## Export a chat (2026-11-15)
 

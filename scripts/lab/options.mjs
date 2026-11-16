@@ -94,6 +94,25 @@ export function parseArgs(argv) {
   return out;
 }
 
+/** 👎's reasons (desktop/src-tauri/src/chat/feedback.rs `REASONS`), as `--feedback` names them. */
+export const FEEDBACK_REASONS = ['untrue', 'ignored', 'long', 'short', 'tone', 'other'];
+
+/**
+ * `--feedback long,untrue` and `--note "…"` (`ask --retry`, 16 Nov 2026) → `{reasons, note}`: each a reason of
+ * 👎's card, once, in the card's order; a note alone is Other's line. Pure.
+ */
+export function feedbackOf(reasons, note) {
+  const said = String(reasons === true ? '' : (reasons ?? ''))
+    .split(/[\s,]+/)
+    .map((r) => r.trim().toLowerCase())
+    .filter(Boolean);
+  const unknown = said.filter((r) => !FEEDBACK_REASONS.includes(r));
+  if (unknown.length) throw new Error(`--feedback takes ${FEEDBACK_REASONS.join(', ')} (comma-separated), not "${unknown.join(', ')}"`);
+  const line = String(note === true ? '' : (note ?? '')).trim();
+  const picked = FEEDBACK_REASONS.filter((r) => said.includes(r) || (r === 'other' && line));
+  return { reasons: picked, note: line };
+}
+
 /** The main window's size in a lab run (`--size`): the same every run, so shots compare. */
 export const SIZE = '1280x860';
 

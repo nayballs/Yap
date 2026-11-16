@@ -549,6 +549,8 @@ fn sent_directly(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, Str
     let text = crate::chat::attachments::after_text(&t.text);
     // (…and the side questions kept since its session last heard from the chat: chat/side.rs.)
     let text = crate::chat::side::with_kept(opened.conv.id, text);
+    // (…and a Retry's 👎 note after it all, this turn only: chat/feedback.rs. The message is saved as it is.)
+    let text = crate::chat::feedback::for_session(text);
     let sent = crate::agents::direct::send(opened.conv.id, folder, &text, &shots, message_id, t.by_voice, phone, &t.ep.model, effort.as_deref())?;
     Ok(Some(ChatTurn {
         conversation_id: opened.conv.id,
