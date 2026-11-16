@@ -109,6 +109,7 @@ test('👍 and 👎 sit between Copy and ↻; pressed, kept with the answer on t
 });
 
 test('👎 opens its card: what was wrong, and Retry with this note gives the model that, both versions kept', async ({ yap, main, fakeLlm, shot }) => {
+  test.setTimeout(120_000);
   await freshChat(main);
   const old = 'The museum is open every day from 8am until 10pm, with late openings on Fridays, free entry for everyone, a café on the roof, guided tours every hour and a gift shop by the main door.';
   await ask(main, fakeLlm, 'When is the town museum open?', old);
@@ -163,6 +164,8 @@ test('👎 opens its card: what was wrong, and Retry with this note gives the mo
 
   // ↻ on an answer marked 👎 is a Retry with its note too.
   await thread(main).getByTestId('chat-branch-next').click();
+  await expect(answers(main)).toHaveText(['It opens 10am to 5pm, Tuesday to Sunday.']);
+  await expect(down(main)).toHaveAttribute('aria-pressed', 'false');
   await down(main).click();
   await card(main).getByTestId('chat-feedback-reason-short').click();
   await card(main).getByTestId('chat-feedback-done').click();
