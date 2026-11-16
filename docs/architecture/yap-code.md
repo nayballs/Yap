@@ -319,9 +319,10 @@ workspace, word for word, and no model of Chat's is asked.
   a model wording a brief from what it read ([The safety
   rule](#the-safety-rule)). The instruction is the person's own typed words;
   what the session may do is the Mode's business.
-- **In the thread** (`core/agents.js` `pillsByQuestion`): its to-do card
-  and its work ([Around the tab](#around-the-tab)) hang under the person's
-  message, with no bubble of Chat's between, then — when there's something
+- **In the thread** (`core/agents.js` `pillsByQuestion`): its work
+  ([Around the tab](#around-the-tab)) hangs under the person's message (its
+  to-do card at the thread's foot while it works, then at the work's end),
+  with no bubble of Chat's between, then — when there's something
   to report — its quiet line and report line, and the answer. The page keeps the question as saved when
   `chat_send` answers `direct` (no tab opens: the chat talking, not an
   agent sent).
@@ -381,7 +382,10 @@ workspace, word for word, and no model of Chat's is asked.
   - **✓ Sent, then ✓✓ Read and the time** under a message sent from the
     queue or while a call was out: read when Claude Code echoes it back
     (`yap-agent`'s `read`, the message's id, on its "Read your note" step)
-    or, as a turn of its own, once that turn begins.
+    or, as a turn of its own, once that turn begins. The ✓ / ✓✓ shows at
+    rest under the bubble's edge, WhatsApp's way, ✓✓ in the read blue
+    (`--yap-tick-read`); the time and the buttons on hover
+    ([chat-and-assistant.md](./chat-and-assistant.md#the-rows-under-a-message-2026-11-16-the-claude-apps)).
   - **Another chat shown** as its turn ends: it waits until its own chat is
     shown again, however that comes up (a click in the list, the bar's
     "Claude replied" Open, Open in Chat: an `$effect` on the chat shown,
@@ -909,11 +913,11 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
   - **Not in it**: Yap's own tools for the session (its browser, its cards), which only a turn's endpoint has.
   - **Without a breakdown** (no session yet, a Code chat Chat's model answers, no Claude Code): how full the chat's context is, from what Yap knows already: its own Claude's latest turn (a Code chat that works directly: `agents/usage.rs`), else the plan's count for the chat, else the context ring's (`chat_context`). A plain chat keeps its ring; a breakdown of Chat's own prompt (`chat/budget.rs`) isn't done.
 - **Connectors**: the chat's own (`connector_chat_list`), on or off here, and Manage connectors….
-- **Outputs** (`outputs.js` `outputItems`, drawn by `OutputsList.svelte`, opened by `outputsOpen.js` `openOutput`: **one list** that any kind adds its rows to, the same as any chat's Outputs tab, [chat-and-assistant.md](./chat-and-assistant.md)): the pages it keeps and the documents it wrote first (both open beside the chat), then the files its work changed (its agents' turns' `files`, newest first, its commands' files too, one a command made saying "New") and the files it shared (a picture in the picture tab, any file outside the workspace as its card opens it).
+- **Outputs** (`outputs.js` `outputItems`, drawn by `OutputsList.svelte`, opened by `outputsOpen.js` `openOutput`: **one list** that any kind adds its rows to, the same as any chat's Outputs tab, [chat-and-assistant.md](./chat-and-assistant.md)): the pages it keeps and the documents it wrote first (both open beside the chat), then the files its work changed (its agents' turns' `files`, newest first, its commands' files too, one a command made saying "New") and the files it shared (a picture in the picture tab, any file outside the workspace as its chip opens it: Yap's file or sheet view beside the chat, else its app — `sharedOpen.js`).
   - **A workspace file opens where its links open** (16 Nov 2026; before, always in Yap's view): a changed file's row, or a shared file's in the workspace, goes through `openFileLink` as a link's click does, so "Open file links in" decides — Yap's file view (a spreadsheet in the sheet view), an editor, the default app — with **#147's rules, Rust's**: only a file `code_files_check` finds in the conversation's own workspace leaves Yap (one it doesn't: Yap's view, which says why), `code_file_open` resolves it again, a file Windows would run opens in Yap with "Opened in Yap instead", and a workbook stays in the sheet view under an editor. A test run keeps the command (`e2e_file_opens`), as a link's.
   - **A row's right-click menu** (and the ContextMenu key, Shift+F10; Yap's own menus, `outputsOpen.js` `outputMenuItems`), here and in the Outputs tab: Open (where its links open); **Open in Yap** for a workspace file when "Open file links in" sends links elsewhere (Yap's view one click away; not twice when it's Yap's); for a file, Show in folder (`code_file_reveal` for a workspace file, `chat_file_reveal` for a shared one) and Copy path (its full path); for a file in the workspace, Open in editor (`code_file_open_editor`). Which rows are workspace files Rust says (`code_files_check`, `outputRefs`), from the conversation's own workspace.
 - **Background tasks**: its helpers and the agents Chat sent that are at work now (the Agent panel's own rows, `panelRows`), each with its clock (a helper's since it was handed its part: `helpersOf`'s `ts`) and Stop (a helper's stops the turn that sent it); its running ▶ Runs with theirs; then "N finished" (it opens the Agent panel, or the Runs tab).
-- **Tests**: `agents/context/tests.rs` (a recording's shape with a fictional setup, its markdown, a reordered table, a broken answer, one that cost a turn), `agents/prs/tests.rs` (`gh`'s JSON, checks — cancelled, skipped and neutral as what they are, only the latest run of each — its own words when it can't, no `gh`, no git, branch or remote, a worktree's remotes, finding `gh.exe`), and `code-chat-files.spec.js` (the stand-in's `_context` and `yap.exe fake-gh`: the breakdown, the run's arguments, the pull requests — one with a cancelled check, "Checks cancelled · 3 of 4 passed" — Remote Control's ask, an output's menu, Archive; a file link's ⋯ by pointer and keyboard; the ⋯ clear of every line of its link — a short one, one that wraps, two in a table, one ending a one-line answer at its edge (its very end clicked: the file, not the menu), an @-mention at the thread's edge with the panel open (under it), nothing in the words moved (`moreClearOf` in `support/code-chats.js`, also `chat-sheets.spec.js`'s short `beds.xlsx`; `moreSpot` in Node); an Outputs row under VS Code, the default app and Yap's view; the file view's header at the Lab's sizes; light and dark; `prChecks` in Node).
+- **Tests**: `agents/context/tests.rs` (a recording's shape with a fictional setup, its markdown, a reordered table, a broken answer, one that cost a turn), `agents/prs/tests.rs` (`gh`'s JSON, checks — cancelled, skipped and neutral as what they are, only the latest run of each — its own words when it can't, no `gh`, no git, branch or remote, a worktree's remotes, finding `gh.exe`), and `code-chat-files.spec.js` (the stand-in's `_context` and `yap.exe fake-gh`: the breakdown, the run's arguments, the pull requests — one with a cancelled check, "Checks cancelled · 3 of 4 passed" — Remote Control's ask, an output's menu, Archive; a file link's ⋯ by pointer and keyboard; the ⋯ clear of every line of its link — a short one, one that wraps, two in a table, one ending a one-line answer at its edge (its very end clicked: the file, not the menu), an @-mention at the thread's edge with the panel open (under it), nothing in the words moved (`moreClearOf` in `support/code-chats.js`, also `chat-sheets.spec.js`'s short `beds.xlsx`; `moreSpot` in Node); a report written and shared in one turn: one chip, under the answer, the report's "Changed" a link to it, a click where links open (Yap's view, then VS Code), its ⋯ a file link's menu; an Outputs row under VS Code, the default app and Yap's view; the file view's header at the Lab's sizes; light and dark; `prChecks` in Node).
 
 ## Turns: one agent per Code chat
 
@@ -2104,10 +2108,10 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   turn's `todos` from `yap-agent`); once it ends it stays as its record,
   folded to "7 to-dos · all done" ("5 done", "none done yet") with ▸ to
   open. No list, no card; a plain chat's thread is as it was. In a Code
-  chat that works directly it's drawn by its work (`AgentWork`), and once
-  the person writes mid-turn the list as it stood stays above their
-  message as **"Plan from before your last message"**
-  ([The thread in order](#the-thread-in-order)).
+  chat that works directly it's at the thread's foot while the turn works
+  and its record at the end of the work after, and once the person writes
+  mid-turn the list as it stood stays above their message as **"Plan from
+  before your last message"** ([The thread in order](#the-thread-in-order)).
 - **Whose work shows where** (2026-11-12, the maintainer, on a chat whose
   model had sent an agent: "if you send out an agent I don't think I see the
   work the agent does in the main chat window, only if you yourself do
@@ -2214,10 +2218,15 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   the pictures its turn created or changed — by their own bytes, copied into
   `chat-images/` as a picture shared into the chat is — as a grid, four
   then "+N more", and the other files it created (the turn's `created`: its
-  Write of a new file, a command's new file) as compact cards (Open, Show in folder), four then "+N more";
+  Write of a new file, a command's new file) as file chips (16 Nov 2026, the Claude app's: a
+  coloured type badge, the name, the size; a click opens it where its links open, a ⋯ its menu), four then "+N more";
   checked as any share (`pictures/local.rs`: an agent of this chat's files),
   kept on the marker (`files`), no tool call ([chat-and-assistant.md,
-  `chat/shares.rs`](./chat-and-assistant.md)).
+  `chat/shares.rs`](./chat-and-assistant.md)). **One chip a file a turn**
+  (16 Nov 2026: the maintainer saw a report written and shared show as a card in the work lines and again
+  under the answer): a file the turn's answer shares (`share_files`) is its one chip, under the answer; on the
+  card it's only its name in "Changed …", a link that opens it (every file of the card's the line names is one;
+  `fileChip.js` `chippedElsewhere`, `changedParts`).
 - **The ask-first card** (`AgentConfirm.svelte`, in PageConfirm's chunk): Start
   / Don't ([Asking first](#asking-first)); for a follow-up, "Yap wants to
   carry on the agent in …", Send / Don't.
@@ -2318,14 +2327,28 @@ what didn't was the person.
   message sent and not read yet shows under the work, which grows above it
   until Claude takes it in (a moment, at its tool call's end); one it never
   read is the next turn's, as ever.
+- **The live list at the thread's foot** (16 Nov 2026, the maintainer, from
+  the Claude app: its plan card sits under the latest message, just above
+  the message box, and moves down as messages come). While a direct turn
+  works its to-do card is the thread's last thing — under the person's
+  latest message, Claude's words or the work line, after a queued message
+  too — the column's whole width (`ChatThread`'s `footTodos`, `core/agents.js`
+  `todoAtFoot`, `data-testid chat-todo-foot`). It's part of the thread,
+  never floating over it, so the thread's following the bottom keeps it in
+  view as the work grows (before, at the top of the work, it scrolled out of
+  sight). Once the turn ends the list is its record at the end of the turn's
+  work, folded (AgentWork's `recordCard`, before the answer). Its sizes are
+  the app's proportions to the reading text: rows about 1.85× the text
+  apart, circles and padding about its size. An agent Chat sent out keeps
+  its card under its pill.
 - **The plan from before your last message** (AgentTodoCard's `list` and
-  `before`): the list at the top of the part that's last, live, as the
-  Claude app keeps the plan under the latest message; a part followed by a
-  message it read keeps the list as it stood at its end (`todosIn` that
-  part's events) just above that message, "Plan from before your last
-  message" (an older one "…your message"), never ticked on after; the live
-  one goes on under the message once Claude writes it again. Both open
-  while the turn works and fold once it's over, as the card ever did.
+  `before`): a part followed by a message it read keeps the list as it stood
+  at its end (`todosIn` that part's events) just above that message, "Plan
+  from before your last message" (an older one "…your message"), never
+  ticked on after; the live one goes on at the foot once Claude writes it
+  again after the message (until then the plan from before is all there
+  is). Both open while the turn works and fold once it's over, as the card
+  ever did.
   - **The list is on in every run** (`runner::TODO_ENV`): Yap Lab on Opus
     5.5 found its session had no to-do tool at all ("TodoWrite isn't among
     my tools"). Claude Code's tools reference says why: since 2.1.268 the

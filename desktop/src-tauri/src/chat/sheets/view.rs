@@ -61,6 +61,10 @@ pub enum Src {
     /// A project's file (`chat/projects.rs`, its ids): its kept copy, read
     /// only — a big project's part's pill opens it at its row.
     Project { project: String, file: String },
+    /// A file shared in conversation `conversation` (`chat/shares.rs`), by
+    /// its full path: read only — a file chip's click (16 Nov 2026) for one
+    /// outside a Code chat's workspace.
+    Shared { conversation: u64, path: String },
 }
 
 /// A file's size and time: what changes when it's written.
@@ -96,6 +100,11 @@ pub fn resolve(src: &Src) -> Result<(PathBuf, String, Option<String>), String> {
         }
         Src::Project { project, file } => {
             let (name, path) = crate::chat::projects::copy_of(project, file).ok_or("That file isn't in the project any more.")?;
+            (path, name, None)
+        }
+        Src::Shared { conversation, path } => {
+            let path = crate::chat::shares::shared_path(*conversation, path)?;
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             (path, name, None)
         }
     };
@@ -484,9 +493,12 @@ pub async fn sheet_open(src: Src) -> Result<Opened, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let (path, name, folder) = resolve(&src)?;
         let mut opened = open(path, name, folder)?;
-        // (A project's copy is read only too, said as the project's.)
+        // (A project's copy is read only too, said as the project's; a shared file as one.)
         if matches!(src, Src::Project { .. }) {
             opened.edit.note = Some("This is the project's copy of the file, so it's read only here.".into());
+        }
+        if matches!(src, Src::Shared { .. }) {
+            opened.edit.note = Some("Yap shows a file shared in the chat read only: open it in its app to change it.".into());
         }
         Ok(opened)
     })

@@ -601,6 +601,8 @@ const IN_ORDER = [
   toolResult('toolu_todo3', 'Todos have been modified successfully.'),
   said('o8', [{ type: 'text', text: NOTED }]),
   said('o9', [{ type: 'tool_use', id: 'toolu_herbs', name: 'Read', input: { file_path: '{{cwd}}\\herbs.png' } }]),
+  // (A moment on the herbs: the plan from before stays above the message, the live one at the foot.)
+  { _sleep_ms: 3000 },
   pictureBack('toolu_herbs', HERBS_PNG),
   said('o10', [{ type: 'tool_use', id: 'toolu_todo4', name: 'TodoWrite', input: { todos: bedsPlan(3) } }]),
   toolResult('toolu_todo4', 'Todos have been modified successfully.'),
@@ -1078,10 +1080,27 @@ test('a long turn reads in order: its words between its lines, a message sent me
   const agent = await newAgent(yap, before);
   // On the path's picture, it takes its time: the person writes meanwhile (a call is out: it goes at once).
   await expect(thread(main).getByTestId('chat-agent-work').locator('[data-busy="true"] .wtext')).toHaveText('Reading path.png', { timeout: 20_000 });
-  // The plan, live, under the message that asked.
-  await expect(thread(main).getByTestId('chat-agent-todo-card')).toHaveAttribute('data-live', 'true');
+  // The plan, live, at the thread's foot (as the Claude app keeps it): the last thing in the thread, under the work,
+  // the column's whole width — never inside the work, where it would scroll away as it grows.
+  const foot = thread(main).getByTestId('chat-todo-foot');
+  await expect(foot.getByTestId('chat-agent-todo-card')).toHaveAttribute('data-live', 'true');
+  await expect(thread(main).getByTestId('chat-agent-work').getByTestId('chat-agent-todo-card')).toHaveCount(0);
+  expect(await foot.evaluate((f) => f === f.parentElement.lastElementChild)).toBe(true);
+  expect(await foot.evaluate((f) => Math.round(f.firstElementChild.getBoundingClientRect().width) === Math.round(f.parentElement.clientWidth))).toBe(true);
+  const work = thread(main).getByTestId('chat-agent-work').last();
+  expect(await foot.evaluate((f, w) => f.getBoundingClientRect().top >= w.getBoundingClientRect().bottom, await work.elementHandle())).toBe(true);
+  // In view while the thread follows the bottom, just above the message box.
+  await expect(foot).toBeInViewport();
   await shot(main, '70-a-long-turn-at-work');
   await send(main, 'Keep the herbs by the door.');
+  // Read mid-turn: the plan as it stood stays above the message, titled so; the live one goes to the foot, under it.
+  await expect(thread(main).getByTestId('chat-agent-work').last().locator('[data-busy="true"] .wtext')).toHaveText('Reading herbs.png', { timeout: 20_000 });
+  await expect(thread(main).getByTestId('chat-agent-todo-before')).toHaveAttribute('aria-label', 'Plan from before your last message');
+  await expect(foot.getByTestId('chat-agent-todo-card')).toHaveAttribute('data-live', 'true');
+  expect(await foot.evaluate((f) => f === f.parentElement.lastElementChild)).toBe(true);
+  const herbs = thread(main).locator('.cbubble.user', { hasText: 'Keep the herbs by the door.' });
+  expect(await foot.evaluate((f, b) => f.getBoundingClientRect().top >= b.getBoundingClientRect().bottom, await herbs.elementHandle())).toBe(true);
+  await shot(main, '70b-the-live-plan-at-the-foot-after-a-message');
   const done = await ended(yap, agent.id, 40_000);
   expect(done.turnList.map((t) => [t.n, t.status])).toEqual([[1, 'done']]);
   // (Both messages, its report's marker — a plain reply's, not drawn —, its answer.)
@@ -1103,6 +1122,8 @@ test('a long turn reads in order: its words between its lines, a message sent me
   // (Its final words are the answer's alone; its thinking isn't shown in the Normal view.)
   await expect(thread(main).getByTestId('chat-agent-work-thought')).toHaveCount(0);
 
+  // (The turn over: nothing at the foot; its list is the record at the end of its work.)
+  await expect(thread(main).getByTestId('chat-todo-foot')).toHaveCount(0);
   // **The plan from before the message**: as it stood when Claude read it, just above it; the live one under it.
   const was = first.getByTestId('chat-agent-todo-before');
   await expect(was).toHaveCount(1);
@@ -1114,6 +1135,8 @@ test('a long turn reads in order: its words between its lines, a message sent me
   await expect(first.getByTestId('chat-agent-todo-card')).toHaveCount(0);
   const now = second.getByTestId('chat-agent-todo-card');
   await expect(now).toHaveCount(1);
+  // (At the end of the turn's work, after its last line: its record.)
+  expect(await second.evaluate((w) => w.lastElementChild?.querySelector('[data-testid="chat-agent-todo-card"]') != null)).toBe(true);
   await now.getByTestId('chat-agent-todo-head').click();
   await expect.poll(() => statuses(now)).toEqual(['Look at the beds: completed', 'Look at the path: completed', 'Place the herbs: completed']);
   // (Once the turn is over both fold, as a turn's record does; the one from before says what it is.)
@@ -1565,8 +1588,8 @@ test('a Code chat’s rows are the Claude app’s: ✓✓ time, Copy, Rewind to 
   const divider = thread(main).getByTestId('chat-chapter');
   await expect(divider).toHaveCount(1);
   await expect(divider.locator('.ctitle')).not.toHaveText('');
-  // (Under "Two", before its answer.)
-  expect(await divider.evaluate((d) => !!(d.previousElementSibling?.matches('[data-testid="chat-message-actions"]')))).toBe(true);
+  // (Under "Two", before its answer: each message's parts in one box-less group, .chatmsg.)
+  expect(await divider.evaluate((d) => d.previousElementSibling?.querySelector('.cbubble.user')?.innerText.trim())).toBe('Two');
   await expect(main.getByTestId('chat-chapters')).toBeVisible();
   const kept = (await yap.invoke('chat_get', { id: original.conversation })).messages.at(-1);
   expect(kept.chapter).toMatchObject({ pinned: true });
@@ -1639,13 +1662,32 @@ test('Fork from here: a new Code chat with the conversation up to that message�
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(2);
   const original = await ended(yap, agent.id);
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two']);
-  // The latest message's row always shown (as Claude Code's app has it); an earlier one's as it's hovered.
-  await expect(actionsOf(main, 'Two').locator('.reveal')).toHaveCSS('opacity', '1');
+  // Every message's row on hover, the latest's too (as Claude Code's app has it); its ✓✓ always, in the read blue —
+  // the ticks alone, nothing behind them.
   await main.getByRole('textbox', { name: 'Message' }).hover();
-  await expect(actionsOf(main, 'One').locator('.reveal')).toHaveCSS('opacity', '0');
+  for (const said of ['One', 'Two']) {
+    await expect(actionsOf(main, said).locator('.reveal')).toHaveCSS('opacity', '0');
+    const rest = actionsOf(main, said).getByTestId('chat-ticks-rest');
+    await expect(rest).toHaveAttribute('data-state', 'read');
+    await expect(rest).toHaveCSS('opacity', '1');
+    await expect(rest).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  }
+  const blue = () => main.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--yap-tick-read').trim());
+  expect(await blue()).toBe('#2196d3');
+  await expect(actionsOf(main, 'Two').getByTestId('chat-ticks-rest')).toHaveCSS('color', 'rgb(33, 150, 211)');
+  await shot(main, '98-message-ticks-at-rest');
   await thread(main).locator('.cbubble.user', { hasText: 'One' }).hover();
   await expect(actionsOf(main, 'One').locator('.reveal')).toHaveCSS('opacity', '1');
+  await expect(actionsOf(main, 'One').getByTestId('chat-ticks-rest')).toHaveCSS('opacity', '0');
+  await expect(actionsOf(main, 'One').getByTestId('chat-read')).toHaveCSS('color', 'rgb(33, 150, 211)');
+  await expect(actionsOf(main, 'Two').locator('.reveal')).toHaveCSS('opacity', '0');
   await shot(main, '98-message-actions');
+  // Dark: WhatsApp's own read blue.
+  await setConfig(yap, main, { theme: 'dark' });
+  await expect.poll(blue).toBe('#53bdeb');
+  await expect(actionsOf(main, 'Two').getByTestId('chat-ticks-rest')).toHaveCSS('color', 'rgb(83, 189, 235)');
+  await shot(main, '98-message-actions-dark');
+  await setConfig(yap, main, { theme: 'light' });
   await actionsOf(main, 'One').getByTestId('chat-fork').click();
   // The fork is shown: "One" and its answer, nothing after.
   await expect.poll(async () => Number(await main.locator('.conv.active').getAttribute('data-conv')), { timeout: 10_000 }).not.toBe(original.conversation);

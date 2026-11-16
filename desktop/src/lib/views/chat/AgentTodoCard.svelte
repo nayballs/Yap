@@ -16,14 +16,22 @@
   // "Plan from before your last message" (`before`), never ticked on after
   // (`list`: those to-dos, as they were) — and the live list goes on under
   // their message once Claude writes it again (AgentWork places both).
+  //
+  // **At the thread's foot while it works** (16 Nov 2026, as the Claude app
+  // keeps its plan; `foot`): a direct turn's live list is the thread's last
+  // thing, the column's whole width, just above the message box (ChatThread);
+  // once the turn ends, its record at the end of the turn's work (AgentWork).
+  // Its sizes the app's proportions to the reading text: rows about 1.85× the
+  // text apart, circles about the text's size, padding about its size.
   import { isLive } from '../../core/agentNow.js';
   import { todoCounts, todoSummary } from '../../core/agentPanel.js';
 
   /**
    * `agent`: the agent as stores/agents.svelte.js has it; `turn`: its turn's `n`; `line`: the line the agent is on now;
-   * `list`: a plan as it stood (not the turn's live one); `before`: its label ("Plan from before your last message").
+   * `list`: a plan as it stood (not the turn's live one); `before`: its label ("Plan from before your last message");
+   * `foot`: the live list at the thread's foot (the column's width).
    */
-  let { agent, turn = 1, line = '', list = null, before = '' } = $props();
+  let { agent, turn = 1, line = '', list = null, before = '', foot = false } = $props();
 
   const note = $derived((agent?.turnList || []).find((t) => t.n === turn) ?? (agent?.turnList?.length ? null : agent));
   const todos = $derived((list ?? note?.todos ?? []).filter((t) => t && typeof t.content === 'string'));
@@ -54,6 +62,7 @@
     class="todocard"
     class:live
     class:before={!!before}
+    class:foot
     data-testid={before ? 'chat-agent-todo-before' : 'chat-agent-todo-card'}
     data-agent={agent?.id}
     data-turn={turn}
@@ -101,6 +110,7 @@
 {/if}
 
 <style>
+  /* (Its sizes in em of the reading text, the thread's, in the Claude app's proportions.) */
   .todocard {
     align-self: flex-start;
     box-sizing: border-box;
@@ -109,20 +119,25 @@
     border-radius: var(--yap-r-lg);
     background: var(--yap-s1);
     color: var(--yap-fg);
+    font-size: calc(12.5px * var(--yap-reading-scale, 1));
+  }
+  /* At the thread's foot: the column's whole width, as the app's plan card. */
+  .todocard.foot {
+    width: 100%;
   }
   .chead {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 0.55em;
     width: 100%;
     box-sizing: border-box;
-    padding: 9px 12px;
+    padding: 0.72em 1.05em;
     border: none;
     border-radius: var(--yap-r-lg);
     background: none;
     color: inherit;
     font: inherit;
-    font-size: 12.5px;
+    font-size: 1em;
     text-align: left;
     cursor: pointer;
   }
@@ -135,8 +150,8 @@
   }
   .chev {
     flex: 0 0 auto;
-    width: 12px;
-    height: 12px;
+    width: 0.95em;
+    height: 0.95em;
     color: var(--yap-muted);
     transition: transform 0.15s ease;
   }
@@ -152,26 +167,26 @@
   /* A plan as it stood before a message: its label quieter, as the Claude app's. */
   .before .ctitle {
     color: var(--yap-muted);
-    font-size: 11.5px;
+    font-size: 0.92em;
     font-weight: 600;
   }
   .ccount {
     margin-left: auto;
     color: var(--yap-muted);
-    font-size: 11.5px;
+    font-size: 0.92em;
     font-variant-numeric: tabular-nums;
   }
+  /* (The app's rows: about 1.85× the text apart, a circle about the text's size, the words just after it.) */
   .items {
     margin: 0;
-    padding: 0 12px 10px;
+    padding: 0 1.05em 0.62em;
     list-style: none;
   }
   .item {
     display: flex;
     align-items: flex-start;
-    gap: 9px;
-    padding: 4px 0;
-    font-size: 12.5px;
+    gap: 0.6em;
+    padding: 0.2em 0;
     line-height: 1.45;
   }
   .circle {
@@ -180,9 +195,9 @@
     align-items: center;
     justify-content: center;
     box-sizing: border-box;
-    width: 16px;
-    height: 16px;
-    margin-top: 1px;
+    width: 1.04em;
+    height: 1.04em;
+    margin-top: 0.2em;
     border-radius: 50%;
   }
   .st-completed .circle {
@@ -190,8 +205,8 @@
     color: var(--yap-s1);
   }
   .st-completed .circle svg {
-    width: 12px;
-    height: 12px;
+    width: 0.8em;
+    height: 0.8em;
   }
   .st-in_progress .circle {
     border: 1.5px solid var(--yap-code);
@@ -201,8 +216,8 @@
     border: 1.5px dashed var(--yap-muted);
   }
   .spin {
-    width: 8px;
-    height: 8px;
+    width: 0.56em;
+    height: 0.56em;
     box-sizing: border-box;
     border: 1.5px solid color-mix(in srgb, var(--yap-code) 30%, transparent);
     border-top-color: var(--yap-code);
@@ -222,7 +237,7 @@
     }
   }
   .dots {
-    font-size: 11px;
+    font-size: 0.88em;
     line-height: 1;
   }
   /* Stopped (its turn ended with it in progress): still, muted, never turning. */
@@ -255,7 +270,7 @@
   }
   .sub {
     color: var(--yap-muted);
-    font-size: 11.5px;
+    font-size: 0.92em;
     overflow-wrap: anywhere;
   }
   .sr-only {

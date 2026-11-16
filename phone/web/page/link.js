@@ -106,6 +106,7 @@ import { CODE_INTRO, CODE_PROMPTS } from './core/codeChats.js';
 import { messageAt } from './core/chatStatus.js';
 import { statusTone, statusWord, modeLabel } from './core/agents.js';
 import { whenSaid, whenFull } from './core/whenSaid.js';
+import { badgeOf, familyOf, fileSize, nameParts } from './core/fileChip.js';
 
 const KIND_UP = 0x01;
 const KIND_DOWN = 0x02;
@@ -226,7 +227,7 @@ function loadThread() {
         answerId: String(t.answerId || ''),
         pictures: Math.max(0, Number(t.pictures) || 0),
         pics: [],
-        files: sharedNames(t.files),
+        files: sharedFiles(t.files),
         // An agent's report (Yap Code) and where each part sits in its chat.
         ...(t.report ? { report: true, marker: String(t.marker || t.q || '') } : {}),
         qAt: Number.isInteger(t.qAt) ? t.qAt : -1,
@@ -1180,15 +1181,35 @@ function currentTurn(create, typed = false) {
 const can = (what) => S.can.includes(what);
 
 /**
- * The names of the files a message shared into the conversation on the PC
- * (`files`: chat/shares.rs; the files and pictures stay on the PC): at most
- * 24, each a short string. Pure.
+ * The files a message shared into the conversation on the PC (`files`, their
+ * sizes `fileSizes`: chat/shares.rs; the files and pictures stay on the PC):
+ * at most 24, each `{name, bytes}` — `files` may hold those already (a thread
+ * kept in this tab, or an older one's names). Pure.
  */
-function sharedNames(files) {
-  return (Array.isArray(files) ? files : [])
-    .filter((f) => typeof f === 'string' && f.trim())
-    .slice(0, 24)
-    .map((f) => f.trim().slice(0, 120));
+function sharedFiles(files, sizes = []) {
+  const out = [];
+  (Array.isArray(files) ? files : []).forEach((f, i) => {
+    const name = typeof f === 'string' ? f : typeof f?.name === 'string' ? f.name : '';
+    if (!name.trim()) return;
+    const bytes = Number(typeof f === 'string' ? (Array.isArray(sizes) ? sizes[i] : 0) : f.bytes) || 0;
+    out.push({ name: name.trim().slice(0, 120), bytes: Math.max(0, Math.floor(bytes)) });
+  });
+  return out.slice(0, 24);
+}
+
+/**
+ * **Each file once** (16 Nov 2026, the PC's rule: one chip a file a turn):
+ * `a`'s files, then `b`'s not named already — an agent's report's file its
+ * answer shares too shows once. Pure.
+ */
+function eachFileOnce(a, b) {
+  const seen = new Set();
+  return [...(a || []), ...(b || [])].filter((f) => {
+    const k = String(f?.name || '').toLowerCase();
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 /**
@@ -1228,7 +1249,7 @@ function turnsOf(messages, more = false) {
       // An agent's report (Yap Code): never the person's own bubble; its
       // first line as a quiet note above the answer that follows it (a
       // report card in a Code chat, Remote Control on).
-      turns.push({ ...blank, q: String(m.text).split('\n')[0], report: true, marker: m.text, files: sharedNames(m.files), qAt: at[i] });
+      turns.push({ ...blank, q: String(m.text).split('\n')[0], report: true, marker: m.text, files: sharedFiles(m.files, m.fileSizes), qAt: at[i] });
     } else if (m.role === 'user') {
       // (An edited question's versions: ‹ k/n › under its bubble; ✎ where the PC says it may be edited from here.)
       turns.push({ ...blank, q: m.text, typed: !m.voice, pictures: Math.max(0, Number(m.pictures) || 0), qAt: at[i], qv: versionOf(m.version), edit: chatTime(m.edit) });
@@ -1238,7 +1259,7 @@ function turnsOf(messages, more = false) {
       t.a = m.text;
       t.answerId = typeof m.id === 'string' ? m.id : '';
       t.aAt = at[i];
-      t.files = [...(t.files || []), ...sharedNames(m.files)];
+      t.files = eachFileOnce(t.files, sharedFiles(m.files, m.fileSizes));
       // (An answer's versions — an older Retry's: ‹ k/n › under it — and its time in Chat.)
       t.av = versionOf(m.version);
       t.aTs = chatTime(m.ts);
@@ -2130,7 +2151,30 @@ const COPY = ['M9 9.5A1.5 1.5 0 0 1 10.5 8h8A1.5 1.5 0 0 1 20 9.5v9a1.5 1.5 0 0 
 const COPIED = ['M5 12.5l4.5 4.5L19 7.5'];
 const SPEAKER = ['M4 9.5h3.5L12 5.5v13l-4.5-4H4z', 'M15.5 9a4 4 0 0 1 0 6', 'M18 6.5a7.5 7.5 0 0 1 0 11'];
 const PHOTO = ['M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z', 'M5 17l4.5-4.5 3 3L15 13l4 4'];
-const FILE = ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z', 'M14 3v5h5'];
+
+/**
+ * **An answer's files as chips** (16 Nov 2026, the PC's file chips: core/fileChip.js): each a small box — its type
+ * badge coloured by its family (link.css `--yap-file-*`), its name cut in the middle so its ending shows, its size —
+ * then "On your PC" (they stay there: nothing opens on the phone).
+ */
+function fileChips(files) {
+  const names = files.map((f) => f.name).join(', ');
+  const row = h('div', { class: 'afiles', role: 'group', 'aria-label': `Shared on your PC: ${names}`, testid: 'answer-files' });
+  for (const f of files) {
+    const { head, tail } = nameParts(f.name);
+    const size = f.bytes > 0 ? fileSize(f.bytes) : '';
+    const chip = h(
+      'span',
+      { class: `fchip fam-${familyOf(f)}`, title: `${f.name} · on your PC`, testid: 'answer-file' },
+      h('span', { class: 'fc-badge', 'aria-hidden': 'true' }, badgeOf(f)),
+      h('span', { class: 'fc-name' }, h('span', { class: 'fc-head' }, head), h('span', { class: 'fc-tail' }, tail)),
+    );
+    if (size) chip.appendChild(h('span', { class: 'fc-size' }, size));
+    row.appendChild(chip);
+  }
+  row.appendChild(h('span', { class: 'fc-where', 'aria-hidden': 'true' }, 'On your PC'));
+  return row;
+}
 
 /** An answer's words on the clipboard (the Copy under it). */
 async function copyAnswer(t, b) {
@@ -2299,14 +2343,9 @@ function renderConvo() {
       else a.appendChild(renderAnswer(t.a.trim()));
       li.appendChild(a);
     }
-    // The files it shared into the conversation on the PC: their names.
-    if (t.files?.length) {
-      const f = document.createElement('p');
-      f.className = 'afiles';
-      f.dataset.testid = 'answer-files';
-      f.append(icon('', FILE), document.createTextNode(`Shared on your PC: ${t.files.join(', ')}`));
-      li.appendChild(f);
-    }
+    // The files it shared into the conversation on the PC: a chip each, as the PC's (its type, its name, its
+    // size), in a row that wraps; they stay on the PC, so nothing opens here.
+    if (t.files?.length) li.appendChild(fileChips(t.files));
     // Its agents' pills (the agents this answer started, or passed work to).
     const mine = coding && t.aAt >= 0 ? pills.get(t.aAt) : null;
     if (mine?.length) li.appendChild(pillsRow(mine));

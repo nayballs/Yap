@@ -113,25 +113,63 @@ test("an agent's report in a chat is a note, never the person's own bubble", asy
   await expect(page.getByTestId('answer').last()).toHaveText('Done: I added a watering schedule to notes.md.');
 });
 
-test('the files an answer shared on the PC are listed by name under it', async ({ page }) => {
+test('the files an answer shared on the PC are chips under it: type, name and size, each once', async ({ page }) => {
   // share_files on the PC (chat/shares.rs): the pictures and files stay
-  // there; the phone gets their names (link/chats.rs), an agent's report's too.
+  // there; the phone gets their names and sizes (link/chats.rs), an agent's
+  // report's too — a file the report made and the answer shares is one chip
+  // (16 Nov 2026, as the PC's). An older PC sends names alone: no size.
   const threads = {
     45: {
       title: 'Garden concepts',
       messages: [
         { role: 'user', text: 'Show me the concept pictures' },
-        { role: 'assistant', text: 'Here they are.', id: 'chat:45:1', files: ['concept.png', 'beds.png', 'notes.md'] },
+        { role: 'user', kind: 'agentReport', text: "The agent in garden-planner: it's done.", files: ['bed-plan.md'], fileSizes: [2048] },
+        { role: 'assistant', text: 'Here they are.', id: 'chat:45:2', files: ['concept.png', 'Bed-Plan.md', 'yield-by-season-and-bed-2027.xlsx'], fileSizes: [52_000, 2048, 18_400] },
+      ],
+    },
+    46: {
+      title: 'Seed list',
+      messages: [
+        { role: 'user', text: 'Send me the seed list' },
+        { role: 'assistant', text: 'There it is.', id: 'chat:46:1', files: ['seeds.csv'] },
       ],
     },
   };
-  const pc = await mockPc(page, { threads, recents: [{ id: 45, title: 'Garden concepts', ts: 1_730_000_000 }] });
+  const pc = await mockPc(page, {
+    threads,
+    recents: [
+      { id: 45, title: 'Garden concepts', ts: 1_730_000_000 },
+      { id: 46, title: 'Seed list', ts: 1_729_000_000 },
+    ],
+  });
   await open(page);
   await ready(page, pc);
   await page.getByTestId('menu').click();
   await recents(page).filter({ hasText: 'Garden concepts' }).click();
   await expect(page.getByTestId('answer')).toHaveText('Here they are.');
-  await expect(page.getByTestId('answer-files')).toHaveText('Shared on your PC: concept.png, beds.png, notes.md');
+  const files = page.getByTestId('answer-files');
+  await expect(files).toHaveAttribute('aria-label', 'Shared on your PC: bed-plan.md, concept.png, yield-by-season-and-bed-2027.xlsx');
+  const chips = files.getByTestId('answer-file');
+  await expect(chips).toHaveCount(3);
+  await expect(chips.nth(0)).toHaveText('MDbed-plan.md2.0 KB');
+  await expect(chips.nth(1)).toHaveText('PNGconcept.png51 KB');
+  await expect(chips.nth(1)).toHaveClass(/fam-picture/);
+  await expect(chips.nth(2)).toHaveClass(/fam-sheet/);
+  await expect(chips.nth(2).locator('.fc-badge')).toHaveText('XLSX');
+  await expect(files.locator('.fc-where')).toHaveText('On your PC');
+  // The badge's letters on its own wash of its family's colour; the chips side by side while they fit.
+  const look = await chips.nth(0).evaluate((el) => {
+    const b = getComputedStyle(el.querySelector('.fc-badge'));
+    return { colour: b.color, wash: b.backgroundColor };
+  });
+  expect(look.colour).not.toBe(look.wash);
+  const [a, b] = await Promise.all([chips.nth(0).boundingBox(), chips.nth(1).boundingBox()]);
+  expect(Math.abs(a.y - b.y)).toBeLessThan(2);
+  // An older PC's names alone: the chip without a size.
+  await page.getByTestId('menu').click();
+  await recents(page).filter({ hasText: 'Seed list' }).click();
+  await expect(page.getByTestId('answer')).toHaveText('There it is.');
+  await expect(page.getByTestId('answer-file')).toHaveText('CSVseeds.csv');
 });
 
 test('+ New chat: the thread empties, the next question starts one, and the PC says which', async ({ page }) => {

@@ -139,6 +139,9 @@ body {
   --yap-syn-type: #17757d;
   --yap-syn-attr: #86600f;
   --yap-syn-meta: #a86a1c;
+  /* A message Claude has read: its ✓✓ in WhatsApp's read blue (#53bdeb, as dark has it), a little deeper on the
+     light page so the ticks read there (3.1:1 on --yap-s1; #53bdeb is 2.0:1) */
+  --yap-tick-read: #2196d3;
   --yap-code: #2a7684;
   --yap-code-line: rgba(42, 118, 132, 0.55);
   --yap-code-ring: rgba(42, 118, 132, 0.12);
@@ -166,6 +169,19 @@ body {
   --yap-ctx-other: #a39d91;
   /* a pull request's state (the summary's Changes): merged violet, as GitHub's */
   --yap-pr-merged: #7b5cc4;
+  /* A file chip's type badge, by the file's family (views/chat/fileChip.js `familyOf`: FileChip.svelte, the
+     phone's own copy in phone/web/page/link.css): documents blue, PDFs red, spreadsheets green, slides orange,
+     pictures violet, code teal, archives amber, sound and video pink, the rest a quiet grey. Each reads at 4.5:1
+     or better as the badge's letters on its own wash. */
+  --yap-file-doc: #2c64b4;
+  --yap-file-pdf: #b8352d;
+  --yap-file-sheet: #18703c;
+  --yap-file-slides: #a6461a;
+  --yap-file-picture: #7352ba;
+  --yap-file-code: #146d74;
+  --yap-file-archive: #7a5a0a;
+  --yap-file-media: #a83e73;
+  --yap-file-text: #69645a;
 
   /* Chat's status dots (core/chatStatus.js, views/chat/StatusDot.svelte):
      working pulses in the side's own accent (Yap's on Chat, the Code teal
@@ -596,6 +612,8 @@ body {
   --yap-syn-type: #74cdd2;
   --yap-syn-attr: #dcc089;
   --yap-syn-meta: #e2b36e;
+  /* ✓✓ read: WhatsApp's own read blue (8.2:1 on --yap-s1) */
+  --yap-tick-read: #53bdeb;
   --yap-code: #6cc0cc;
   --yap-code-line: rgba(108, 192, 204, 0.5);
   --yap-code-ring: rgba(108, 192, 204, 0.1);
@@ -615,6 +633,15 @@ body {
   --yap-ctx-free: #34312b;
   --yap-ctx-other: #a39f96;
   --yap-pr-merged: #a98ce8;
+  --yap-file-doc: #79acf5;
+  --yap-file-pdf: #f08580;
+  --yap-file-sheet: #5fcf8f;
+  --yap-file-slides: #f29560;
+  --yap-file-picture: #b9a2f2;
+  --yap-file-code: #6fcfd4;
+  --yap-file-archive: #e0b552;
+  --yap-file-media: #ef93bf;
+  --yap-file-text: #aaa59b;
   /* Chat's status dots: the warning's ring and a blue for the dark surfaces */
   --yap-status-needs-ring: rgba(220, 160, 60, 0.26);
   --yap-status-new: #6ea6ff;

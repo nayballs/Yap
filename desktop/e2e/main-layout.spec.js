@@ -754,7 +754,8 @@ test('a wide thread reads in one centred 768 px column, the composer on it; a na
   // Every bubble, the answer's line and the code label within it.
   const out = await main.evaluate(() => {
     const c = document.querySelector('[data-testid="chat-column"]').getBoundingClientRect();
-    return [...document.querySelectorAll('.cbubble, .msgsin > *')].filter((e) => {
+    // (A message's parts sit in a box-less group, .chatmsg: its children are the thread's rows.)
+    return [...document.querySelectorAll('.cbubble, .msgsin > *, .msgsin > .chatmsg > *')].filter((e) => {
       const r = e.getBoundingClientRect();
       return r.width && (r.left < c.left - 0.5 || r.right > c.right + 0.5);
     }).length;

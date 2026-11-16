@@ -8,13 +8,13 @@
   // auto-save); app.css has the tokens.
   //
   //   cfg: Settings' config $state (`theme`, `readingFont`, `readingSize`,
-  //        `motion`). Auto-save does the saving.
+  //        `motion`, `messageActions`). Auto-save does the saving.
   import { onMount } from 'svelte';
   import Group from '../ui/Group.svelte';
   import Row from '../ui/Row.svelte';
   import Select from '../ui/Select.svelte';
   import Segmented from '../ui/Segmented.svelte';
-  import { READING_FONTS, READING_FONT_DESC, READING_SIZES, MOTION_OPTIONS, THEME_OPTIONS } from '../core/appearance.js';
+  import { READING_FONTS, READING_FONT_DESC, READING_SIZES, MOTION_OPTIONS, THEME_OPTIONS, MESSAGE_ACTIONS_OPTIONS } from '../core/appearance.js';
 
   let { cfg } = $props();
 
@@ -82,6 +82,16 @@
       </p>
       <figcaption>Chats, notes and meeting notes read like this. Buttons and menus keep Yap’s font.</figcaption>
     </figure>
+  </Row>
+  <!-- The rows under Chat's messages (ChatMessage.svelte): on hover as the Claude app's, or always. -->
+  <Row
+    label="Message actions"
+    desc={cfg.messageActions === 'always'
+      ? 'Copy, Fork and the rest always show under each message in Chat'
+      : 'Copy, Fork and the rest show under a message in Chat when you point at it or tab to it'}
+    setting="message-actions"
+  >
+    <Segmented bind:value={cfg.messageActions} options={MESSAGE_ACTIONS_OPTIONS} label="Message actions" />
   </Row>
   <Row label="Motion" desc={motionDesc} setting="motion">
     <Segmented bind:value={cfg.motion} options={MOTION_OPTIONS} label="Motion" />

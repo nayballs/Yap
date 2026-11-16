@@ -751,6 +751,15 @@ pub struct YapConfig {
     /// stay).
     #[serde(default = "default_motion")]
     pub motion: String,
+    /// Settings → General → Appearance → Message actions: the rows under
+    /// Chat's messages (Copy, Fork from here, Rewind, Pin as chapter, Read
+    /// aloud and the time) — "hover" (on hovering the message or its
+    /// keyboard focus, as the Claude app's) or "always". A Code chat's ✓ / ✓✓
+    /// shows either way. Every window sets `data-message-actions` from it
+    /// (`desktop/src/lib/core/appearance.js`). A new field: an older Yap drops
+    /// it on its next save and the rows go back to "hover", nothing else.
+    #[serde(default = "default_message_actions")]
+    pub message_actions: String,
     /// Which key auto-submit presses after pasting: "enter", "ctrlEnter",
     /// or "shiftEnter".
     #[serde(default = "default_auto_submit_key")]
@@ -1522,6 +1531,9 @@ fn default_reading_size() -> String {
 fn default_motion() -> String {
     "system".into()
 }
+fn default_message_actions() -> String {
+    "hover".into()
+}
 fn default_meeting_max_minutes() -> u32 {
     120
 }
@@ -1703,6 +1715,7 @@ impl Default for YapConfig {
             reading_font: default_reading_font(),
             reading_size: default_reading_size(),
             motion: default_motion(),
+            message_actions: default_message_actions(),
             auto_submit_key: default_auto_submit_key(),
             update_checks_enabled: true,
             debug_logging: false,

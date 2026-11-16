@@ -263,7 +263,11 @@
   reading_font ("default" Figtree | "sans" Geist | "serif" Literata |
   "system" Segoe UI | "dyslexic" OpenDyslexic, default) + reading_size
   ("small" | "default" | "large" | "larger", default) + motion ("system" |
-  "reduced", system), spoken replies (`voice/tts.rs`): speak_replies (off), speak_when ("voice" |
+  "reduced", system) + message_actions (`messageActions`, 2026-11-16:
+  Message actions, the rows under Chat's messages — "hover", the default,
+  as the Claude app's, or "always"; `data-message-actions` on `<html>`. A
+  new field, no migration: an older Yap drops it on its next save and the
+  rows go back to hover), spoken replies (`voice/tts.rs`): speak_replies (off), speak_when ("voice" |
   "always", voice), spoken_length (how much of an answer is read out by
   itself: "short" | "30s" | "1m" | "2m" | "whole", 1m;
   `assistant::SpokenLength`), talk_back_hands_free (true; only while speak_replies is

@@ -32,7 +32,7 @@
   // Code chat each turn's to-do card under its pill (AgentTodoCard), and a
   // running agent's permission prompts for this chat — each in a small chunk.
   import { agents, agentById } from '../../stores/agents.svelte.js';
-  import { pillsByAnswer, pillsByQuestion, answeredAfter, directLine, plainReport, agentOfReport, reportFolder, messageTurn, notesAfter, turnsOf, turnParts, cardPart } from '../../core/agents.js';
+  import { pillsByAnswer, pillsByQuestion, answeredAfter, directLine, plainReport, agentOfReport, reportFolder, messageTurn, notesAfter, turnsOf, turnParts, cardPart, todoAtFoot } from '../../core/agents.js';
   import { agentLogs } from '../../stores/agentLogs.svelte.js';
   import { threadViewOf } from './threadView.svelte.js';
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
@@ -42,6 +42,7 @@
   // an answer: under its question, above the answer's turn), and the floating contents (ChatChapters, its own chunk)
   // to jump between them.
   import { chaptersOf } from './chapters.js';
+  import { chippedElsewhere } from './fileChip.js';
   // What the chat made (chat/made.rs): its visuals and its kept pages' cards, each in the answer to its question.
   import { made, followMade, onMade, placeMade, promptFromVisual } from './made.svelte.js';
   // The rows' times ("12 minutes ago") move on while the thread is shown.
@@ -51,8 +52,6 @@
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
   const chapters = $derived(chaptersOf(chat.messages));
   const chapterAt = $derived(new Map(chapters.map((c) => [`${c.at}:${c.below ? 'below' : 'above'}`, c])));
-  // The person's latest message: its row (✓✓ and its time, Copy…) always shown, as the Claude app shows it.
-  const lastAsk = $derived(chat.messages.findLastIndex((m) => m.role === 'user' && !m.kind));
   // **Visuals** (chat/made.rs, 15 Nov 2026): read with the chat, heard as they're made; each shows in the
   // answer to its question (above its words), or under the question's work while there's no answer yet.
   followMade();
@@ -79,6 +78,9 @@
   // words has no line of its own and no "Agent done" line — its answer is all there is, as in Claude Code's app.
   /** A report's marker with nothing to say (its turn a plain reply). */
   const quietReport = (m) => plainReport(m, agentOfReport(agents.list, m.id, chat.activeId, reportFolder(m.text)));
+  // **One chip per file per turn** (16 Nov 2026): a report's file the turn's answer shares is its name in the
+  // report's line, its chip under the answer (fileChip.js).
+  const chippedAway = $derived(chippedElsewhere(chat.messages));
   const asks = $derived(chat.activeId == null ? [] : agents.approvals.filter((a) => a.conversation === chat.activeId));
   // Answered from a paired phone (Remote Control): "Allowed from Office phone".
   // **The plans a turn sent back with comments** (Plan mode's review, PlanHistory.svelte): its `plansBefore`, and
@@ -106,6 +108,12 @@
     for (const [i, notes] of turnNotes) for (const id of notes) out.set(id, [...(out.get(id) || []), ...directPills.get(i).map((p) => ({ p, i, notes }))]);
     return out;
   });
+  // **The live to-do list at the thread's foot** (16 Nov 2026, as the Claude app keeps its plan): while a direct
+  // turn works, its list is the last thing in the thread, under the latest message, words or work line and just above
+  // the message box, moving down as the thread grows (part of the thread, never floating over it). Once the turn
+  // ends it's the record at the end of its work (AgentWork); a message read mid-turn keeps the plan as it stood
+  // above it ("Plan from before your last message"). (An agent Chat sent out keeps its card under its pill.)
+  const footTodos = $derived([...directPills].flatMap(([i, ps]) => ps.filter((p) => todoAtFoot(p, agentLogs.by[p.id] || [], turnNotes.get(i) || []))));
   /** How Claude's work shows in this chat (its ⋯ → Transcript view). */
   const view = $derived(threadViewOf(chat.activeId));
   // **An ask-first card goes with the work it's about** (15 Nov 2026, as the Claude app lays a turn out): under
@@ -412,7 +420,7 @@
           {#if m.kind === 'agentReport'}
             {#if !quietReport(m)}
               {#await import('./AgentReportCard.svelte') then { default: AgentReportCard }}
-                <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} {room} onpicture={openShared} quiet={!!code?.current} />
+                <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} {room} onpicture={openShared} quiet={!!code?.current} elsewhere={chippedAway.get(i) ?? null} />
               {/await}
             {/if}
           {:else}
@@ -443,7 +451,6 @@
               onkept={openKept}
               branch={m.id && !m.streaming ? branchOf(i) : null}
               answer={m.role === 'assistant' ? answerFor(m, i) : null}
-              latestAsk={i === lastAsk}
               editing={m.role === 'user' && chat.editing?.id === m.id ? chat.editing : null}
               onedited={(words) => chat.saveEdit(m, words)}
               oneditcancel={() => chat.cancelEdit()}
@@ -464,7 +471,8 @@
                 <AgentPills agents={lines} onopen={openAgent} quiet />
               {/await}
             {/if}
-            <!-- (Its to-do list is AgentWork's: at its top, or as it stood above a message it read.) -->
+            <!-- (Its to-do list: at the thread's foot while it works, below; then AgentWork's, at the end of its work —
+                 and as it stood, above a message it read.) -->
             {#each directPills.get(i) as p (`work:${p.id}:${p.turn ?? 1}`)}
               {@const here = cardsIn(p, turnNotes.get(i) || [], null)}
               {#await import('./AgentWork.svelte') then { default: AgentWork }}
@@ -578,6 +586,12 @@
         {#each chat.queued as q (q.qid)}
           <!-- Sent while Claude works: waiting for it (chatState's queue), as in Claude Code's own app. -->
           <QueuedMessage {q} oncancel={chat.cancelQueued} onsend={chat.sendQueuedNow} />
+        {/each}
+        {#each footTodos as p (`foot:${p.id}:${p.turn ?? 1}`)}
+          <!-- The live to-do list: the thread's last thing while the turn works, just above the message box. -->
+          {#await import('./AgentTodoCard.svelte') then { default: AgentTodoCard }}
+            <div class="todofoot" data-testid="chat-todo-foot"><AgentTodoCard agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} foot /></div>
+          {/await}
         {/each}
       </div>
     </div>
@@ -893,6 +907,13 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+  /* The live to-do list at the foot: the column's whole width, as the Claude app's plan card, a little clear of the
+     work above it. */
+  .todofoot {
+    align-self: stretch;
+    display: flex;
+    margin-top: 4px;
   }
   /* Scrolled up: a small round "↓" over the thread's foot, a pill with
      "New messages" when something came (as Claude's app and Slack have it). */

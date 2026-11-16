@@ -29,6 +29,8 @@ const LINK_SHARED: &[(&str, &str)] = &[
     // (An answer's time in words, as the PC's row under it says it: "12 minutes ago".)
     ("core/whenSaid.js", "../src/lib/core/whenSaid.js"),
     ("core/pageConfirm.js", "../src/lib/views/chat/pageConfirm.js"),
+    // (A file chip's badge, its colour's family, its name cut in the middle and its size, as the PC's chips say them.)
+    ("core/fileChip.js", "../src/lib/views/chat/fileChip.js"),
     ("providers/openai.svg", "../src/assets/providers/openai.svg"),
     ("providers/openai-oss.svg", "../src/assets/providers/openai-oss.svg"),
     ("providers/claude.svg", "../src/assets/providers/claude.svg"),

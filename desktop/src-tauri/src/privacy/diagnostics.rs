@@ -99,6 +99,7 @@ const COPY: &[&str] = &[
     "readingFont",
     "readingSize",
     "motion",
+    "messageActions",
     "autoSubmitKey",
     "updateChecksEnabled",
     "debugLogging",

@@ -737,6 +737,31 @@ pub async fn chat_file_preview(conversation: u64, path: String) -> Result<Option
     .map_err(|e| e.to_string())?
 }
 
+/// **A shared file's path** for a view beside the chat (the sheet view's
+/// `Src::Shared`): one shared in conversation `conversation`, still there.
+pub(crate) fn shared_path(conversation: u64, path: &str) -> Result<PathBuf, String> {
+    checked(conversation, path)
+}
+
+/// **A shared file, read for its view beside the chat** (16 Nov 2026: a file
+/// chip's click, `FileTab.svelte`), as a Code chat's file is read
+/// (`agents::files::read_file`: at most 1 MB and 20,000 lines; one that isn't
+/// text said so) — only a file shared in that conversation, still there. Its
+/// `rel` is its full path with `/`, for the view's name and folder.
+#[tauri::command]
+pub async fn chat_file_read(conversation: u64, path: String) -> Result<crate::agents::files::FileView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = checked(conversation, &path)?;
+        let abs = local::plain(&p);
+        let file = crate::agents::files::FileRef { rel: abs.replace('\\', "/"), abs, line: None };
+        let view = crate::agents::files::read_file(file).map_err(|r| r.words().to_string())?;
+        tracing::info!(kind = kind_of(&p), bytes = view.size, binary = view.binary, "Chat: a shared file shown beside the chat");
+        Ok(view)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---- an agent's report --------------------------------------------------------------------------
 
 /// **What an agent's turn shows on its report card** (`chat/turn/report.rs`):

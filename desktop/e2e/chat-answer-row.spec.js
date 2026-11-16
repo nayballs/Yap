@@ -5,7 +5,9 @@
 //   model — never 👍 / 👎 or ↻ Retry (taken out the same day). Under the person's message, on hover: Copy and Edit.
 //   Each button's tooltip as the app's: its name, and what it does. Light and dark.
 // - Their size: the Claude app's own, measured with Yap beside it on one screen (24 px squares, 16.5 px icons, the time
-//   13.5 px), in step with the reading size from there. The latest message's row always shown, as the app's.
+//   13.5 px), in step with the reading size from there.
+// - On hover, as the app's: every row (the latest's too) shows on hovering its message or on a keyboard focus in it,
+//   and always with Settings → Appearance → Message actions → Always show.
 // - Copy copies the answer as text; Read aloud reads it (■ to stop).
 // - Fork from here: a new chat with the conversation up to that answer, opened; the original as it was.
 // - Pin as chapter: the answer's turn starts a chapter, named by Chat's model as its own chapters are — a divider
@@ -16,7 +18,7 @@
 // The model is the local fake (support/fake-llm.js), scripted answer by answer. Every detail is fictional.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, setConfig } from './support/fixtures.js';
+import { test as base, expect, openView, setConfig, openSettings, closeSettings, expectStore } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { launchYap } from './support/yap.js';
 
@@ -138,10 +140,9 @@ test('its size is the Claude app’s, measured beside it on one screen: 24 px sq
   // At the default reading size: the Claude app's own (a screenshot of Yap and the app side by side, one Windows scale).
   let m = await measure('chat-answer-actions');
   expect(m).toMatchObject({ text: 12.5, square: 24, wide: 24, icon: 16.5, when: 13.5 });
-  // The person's message row: the same squares (Copy, Edit), always shown under the latest message.
+  // The person's message row: the same squares (Copy, Edit).
   const u = await measure('chat-message-actions');
   expect([u.square, u.icon]).toEqual([24, 16.5]);
-  await expect(thread(main).getByTestId('chat-message-actions').last().locator('.reveal')).toHaveCSS('opacity', '1');
   // Larger reading: in step with it.
   await setConfig(yap, main, { readingSize: 'larger' });
   await expect.poll(async () => (await measure('chat-answer-actions')).text).toBeGreaterThan(12.5);
@@ -151,6 +152,67 @@ test('its size is the Claude app’s, measured beside it on one screen: 24 px sq
   expect(m.icon).toBeCloseTo(16.5 * k, 0);
   expect(m.when).toBeCloseTo(13.5 * k, 0);
   await setConfig(yap, main, { readingSize: 'default' });
+});
+
+test('on hover, as the Claude app’s: a row shows on hovering its message or a keyboard focus in it, the latest’s too; always with Message actions → Always show', async ({ yap, main, fakeLlm, shot }) => {
+  await freshChat(main);
+  await ask(main, fakeLlm, 'Do I need a map for the ridge path?', 'Yes, and a compass.');
+  await ask(main, fakeLlm, 'Is the summit busy at dawn?', 'Rarely before eight.');
+  const shown = (row) => row.locator('.reveal').first();
+  const urows = thread(main).getByTestId('chat-message-actions');
+  // Pointing elsewhere (the message box): no row shows, the latest's neither.
+  await box(main).hover();
+  for (const row of [rows(main).first(), rows(main).last(), urows.first(), urows.last()]) await expect(shown(row)).toHaveCSS('opacity', '0');
+  await shot(main, '06-rows-at-rest');
+  // Hovering the latest answer: its row, no other.
+  await answers(main).last().hover();
+  await expect(shown(rows(main).last())).toHaveCSS('opacity', '1');
+  await expect(shown(rows(main).first())).toHaveCSS('opacity', '0');
+  await expect(shown(urows.last())).toHaveCSS('opacity', '0');
+  // …and from the bubble down to its row, the row stays (the pointer crosses the gap between them).
+  await rows(main).last().getByTestId('chat-answer-copy').hover();
+  await expect(shown(rows(main).last())).toHaveCSS('opacity', '1');
+  await shot(main, '07-answer-row-hovered');
+  // Hovering a question: its Copy and Edit.
+  await questions(main).first().hover();
+  await expect(shown(urows.first())).toHaveCSS('opacity', '1');
+  await expect(shown(rows(main).last())).toHaveCSS('opacity', '0');
+  // The keyboard: Tab from the answer reaches its Copy, and its row shows while the pointer's elsewhere.
+  await box(main).hover();
+  await answers(main).first().focus();
+  await main.keyboard.press('Tab');
+  await expect(rows(main).first().getByTestId('chat-answer-copy')).toBeFocused();
+  await expect(shown(rows(main).first())).toHaveCSS('opacity', '1');
+  await expect(shown(rows(main).last())).toHaveCSS('opacity', '0');
+  await main.keyboard.press('Shift+Tab');
+  await expect(answers(main).first()).toBeFocused();
+  await expect(shown(rows(main).first())).toHaveCSS('opacity', '1');
+  // A click's focus (selecting the answer's words) leaves it at rest once the pointer goes.
+  await answers(main).last().click();
+  await box(main).hover();
+  await expect(shown(rows(main).last())).toHaveCSS('opacity', '0');
+
+  // Settings → General → Appearance → Message actions → Always show: every row shows, hovered or not.
+  const dialog = await openSettings(main, 'General');
+  const group = dialog.getByRole('group', { name: 'Appearance' });
+  const choice = group.getByRole('tablist', { name: 'Message actions' });
+  await expect(choice.getByRole('tab', { name: 'Show on hover', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await choice.getByRole('tab', { name: 'Always show', exact: true }).click();
+  await expectStore(yap, 'config.json', (c) => c.messageActions === 'always', 'Always show to be saved');
+  await expect(dialog.locator('[data-setting="message-actions"]')).toContainText('always show under each message');
+  await shot(main, '08-message-actions-setting');
+  await closeSettings(main);
+  await box(main).hover();
+  await expect.poll(() => main.evaluate(() => document.documentElement.dataset.messageActions)).toBe('always');
+  for (const row of [rows(main).first(), rows(main).last(), urows.first(), urows.last()]) await expect(shown(row)).toHaveCSS('opacity', '1');
+  await shot(main, '09-rows-always');
+  await theme(yap, main, 'dark');
+  await shot(main, '10-rows-always-dark');
+  await theme(yap, main, 'light');
+  // Back to Show on hover.
+  await setConfig(yap, main, { messageActions: 'hover' });
+  await expect.poll(() => main.evaluate(() => document.documentElement.dataset.messageActions ?? '')).toBe('');
+  await expect(shown(rows(main).last())).toHaveCSS('opacity', '0');
 });
 
 test('Fork from here under an answer: a new chat up to that answer, opened; the original as it was', async ({ yap, main, fakeLlm, shot }) => {
@@ -187,9 +249,9 @@ test('Pin as chapter: a title above the answer and in the contents, the pin fill
   await expect(pin).toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 });
   const divider = thread(main).getByTestId('chat-chapter');
   await expect(divider).toHaveText('Trip budget');
-  // Under its question, above the answer.
-  expect(await divider.evaluate((d) => d.nextElementSibling?.classList.contains('assistant'))).toBe(true);
-  expect(await divider.evaluate((d) => d.previousElementSibling?.matches('[data-testid="chat-message-actions"]'))).toBe(true);
+  // Under its question, above the answer (each message's parts in one box-less group, .chatmsg).
+  expect(await divider.evaluate((d) => !!d.nextElementSibling?.querySelector('.cbubble.assistant'))).toBe(true);
+  expect(await divider.evaluate((d) => d.previousElementSibling?.querySelector('.cbubble.user')?.innerText.trim())).toBe('How much should we budget a day?');
   // In the contents, after the chat's start.
   await main.getByTestId('chat-chapters').hover();
   await expect(main.getByTestId('chat-chapters-item')).toHaveText(['Trip budget']);

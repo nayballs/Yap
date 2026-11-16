@@ -62,9 +62,10 @@ fn capped(text: &str) -> String {
 pub const MAX_FILES: usize = 24;
 
 /// The names of the files a message shared (`chat/shares.rs`), at most
-/// [`MAX_FILES`]. Pure.
-fn shared_names(m: &crate::chat::chats::ChatMessage) -> Vec<String> {
-    m.files.iter().flat_map(|s| s.items.iter()).map(|i| i.name.trim().to_string()).filter(|n| !n.is_empty()).take(MAX_FILES).collect()
+/// [`MAX_FILES`], and each one's size in the same order (the page's file
+/// chips say it). Pure.
+fn shared_files(m: &crate::chat::chats::ChatMessage) -> (Vec<String>, Vec<u64>) {
+    m.files.iter().flat_map(|s| s.items.iter()).filter(|i| !i.name.trim().is_empty()).take(MAX_FILES).map(|i| (i.name.trim().to_string(), i.bytes)).unzip()
 }
 
 /// **Message `index` of `c` as the phone shows it**: a question's own words
@@ -77,6 +78,7 @@ fn shared_names(m: &crate::chat::chats::ChatMessage) -> Vec<String> {
 pub fn message(c: &Conversation, index: usize) -> Option<ThreadMessage> {
     let m = c.messages.get(index)?;
     let version = version_of(c, index);
+    let (files, file_sizes) = shared_files(m);
     match m.role.as_str() {
         "user" => Some(ThreadMessage {
             role: "user",
@@ -85,7 +87,8 @@ pub fn message(c: &Conversation, index: usize) -> Option<ThreadMessage> {
             voice: m.voice,
             pictures: m.images.len(),
             kind: m.kind.clone(),
-            files: shared_names(m),
+            files,
+            file_sizes,
             version,
             ts: m.ts,
             // (✎ and its time: `thread`, which knows whether it's a Code chat.)
@@ -95,7 +98,8 @@ pub fn message(c: &Conversation, index: usize) -> Option<ThreadMessage> {
             role: "assistant",
             text: capped(m.text.trim()),
             id: Some(format!("chat:{}:{index}", c.id)),
-            files: shared_names(m),
+            files,
+            file_sizes,
             version,
             ts: m.ts,
             ..Default::default()
@@ -193,6 +197,24 @@ mod tests {
     }
 
     #[test]
+    fn a_messages_shared_files_go_by_name_and_size() {
+        use crate::chat::shares::{Share, SharedFile};
+        let file = |name: &str, bytes| SharedFile { name: name.into(), path: format!("C:\\Garden\\{name}"), bytes, ..Default::default() };
+        let mut c = conv(8, "Bed plan", 100);
+        let mut a = said("assistant", "Here it is.");
+        a.files = vec![Share { items: vec![file("plan.md", 2048), file("  ", 5), file("beds.csv", 31)], ..Default::default() }];
+        c.messages = vec![said("user", "Send the plan"), a];
+        let m = message(&c, 1).unwrap();
+        assert_eq!(m.files, ["plan.md", "beds.csv"], "a nameless one left out");
+        assert_eq!(m.file_sizes, [2048, 31], "each name's size, in its order");
+        let json = serde_json::to_value(&m).unwrap();
+        assert_eq!(json["fileSizes"], serde_json::json!([2048, 31]));
+        // None shared: neither key.
+        let q = serde_json::to_value(message(&c, 0).unwrap()).unwrap();
+        assert!(q.get("files").is_none() && q.get("fileSizes").is_none());
+    }
+
+    #[test]
     fn a_thread_is_its_latest_words_with_answer_ids() {
         let mut c = conv(7, "Garden plan", 100);
         let mut q = said("user", "What grows in shade?\n\n[Text read from the screenshot on this PC, sent instead of the picture]\nFerns 4.99");
@@ -203,7 +225,7 @@ mod tests {
         assert_eq!(title, "Garden plan");
         assert!(!more);
         assert_eq!(messages.len(), 4, "only questions and answers");
-        assert_eq!(messages[0], ThreadMessage { role: "user", text: "What grows in shade?".into(), id: None, voice: true, pictures: 2, kind: String::new(), files: Vec::new(), version: None, ts: 0, edit: 0 });
+        assert_eq!(messages[0], ThreadMessage { role: "user", text: "What grows in shade?".into(), id: None, voice: true, pictures: 2, kind: String::new(), files: Vec::new(), file_sizes: Vec::new(), version: None, ts: 0, edit: 0 });
         assert_eq!(messages[1].id.as_deref(), Some("chat:7:1"), "its place in Chat");
         assert_eq!(messages[3].id.as_deref(), Some("chat:7:4"));
         // The latest only, each message capped.

@@ -14,12 +14,18 @@
   // - **Copy path**: its full path. **Open in <editor>**: the editor Settings → Yap Code chose, else the first found, at
   //   the line (`code_file_open_editor`, agents/editors.rs; started directly, never
   //   through a shell or the file's own default app, which could run it).
+  //
+  // **A file shared into the chat** (16 Nov 2026: its chip's click, sharedOpen.js; any chat, `doc.file.shared`): read
+  // by `chat_file_read` (chat/shares.rs: only a file shared in that conversation, read the same way), its folder
+  // as Windows writes it, and **Open in its app** (`chat_file_open`: a Markdown file in Yap's own window, never one
+  // that would run a program) where Open in <editor> would be.
   import { invoke } from '@tauri-apps/api/core';
   import { tick, untrack } from 'svelte';
   import { colourLines, languageOf, loadColours } from '../../core/codeColours.js';
   import { copyText } from '../../core/itemMenus.js';
   import { toast } from '../../ui/toast.svelte.js';
   import { editorLabel } from './fileOpen.svelte.js';
+  import { appLabel } from './sharedOpen.js';
 
   /** `doc`: the panel's state (`doc.file`: `{rel, line, seq}`); `conversationId`: the Code chat. */
   let { doc, narrow = false, conversationId = null } = $props();
@@ -39,7 +45,7 @@
     const mine = ++reading;
     loading = true;
     try {
-      const v = await invoke('code_file_read', { conversation: conv, path: rel });
+      const v = await invoke(file?.shared ? 'chat_file_read' : 'code_file_read', { conversation: conv, path: rel });
       if (mine !== reading) return;
       view = v;
       error = '';
@@ -80,7 +86,10 @@
   const tokens = $derived(colours && lines.length ? colourLines(colours, lines.join('\n'), languageOf(view?.rel)) : null);
   const digits = $derived(String(lines.length || 1).length);
   const name = $derived((file?.rel || '').split('/').pop());
-  const folder = $derived((file?.rel || '').split('/').slice(0, -1).join('/'));
+  const folder = $derived((file?.rel || '').split('/').slice(0, -1).join(file?.shared ? '\\' : '/'));
+  // A shared file's own app ("Open in its app"; a Markdown file's own window), or '' for one that would run a program.
+  const shared = $derived(!!file?.shared);
+  const inApp = $derived(shared ? appLabel({ path: file.rel, opens: file.opens }) : '');
   const size = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} bytes`);
   const facts = $derived(
     view
@@ -89,6 +98,14 @@
         : `${lines.length.toLocaleString('en-GB')} ${lines.length === 1 ? 'line' : 'lines'} · ${size(view.size)}${view.truncated ? ' · only its start is shown' : ''}`
       : '',
   );
+
+  async function openInItsApp() {
+    try {
+      await invoke('chat_file_open', { conversation: conversationId, path: file.rel });
+    } catch (e) {
+      toast({ title: "Couldn't open it", description: String(e?.message ?? e), variant: 'destructive' });
+    }
+  }
 
   async function openInEditor() {
     try {
@@ -113,10 +130,19 @@
       <button type="button" class="fbtn" onclick={() => copyText(view?.abs || file?.rel || '', 'Path copied')} aria-label="Copy path" title="Copy path" data-testid="chat-file-copy-path">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
       </button>
-      <button type="button" class="fbtn wide" onclick={openInEditor} aria-label={editorLabel()} title={`${editorLabel()}${file?.line ? ` at line ${file.line}` : ''}`} data-testid="chat-file-open-editor" disabled={!view}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
-        <span class="flabel">{editorLabel()}</span>
-      </button>
+      {#if shared}
+        {#if inApp}
+          <button type="button" class="fbtn wide" onclick={openInItsApp} aria-label={inApp} title={inApp} data-testid="chat-file-open-app">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
+            <span class="flabel">{inApp}</span>
+          </button>
+        {/if}
+      {:else}
+        <button type="button" class="fbtn wide" onclick={openInEditor} aria-label={editorLabel()} title={`${editorLabel()}${file?.line ? ` at line ${file.line}` : ''}`} data-testid="chat-file-open-editor" disabled={!view}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
+          <span class="flabel">{editorLabel()}</span>
+        </button>
+      {/if}
       {#if !narrow}
         <button
           type="button"
@@ -140,7 +166,9 @@
   {#if error}
     <p class="fnote" role="alert" data-testid="chat-file-error">{error}</p>
   {:else if view?.binary}
-    <p class="fnote" data-testid="chat-file-binary">This file isn't text, so Yap doesn't show it here. Open in editor shows it in your editor.</p>
+    <p class="fnote" data-testid="chat-file-binary">
+      This file isn't text, so Yap doesn't show it here.{#if !shared}{' '}Open in editor shows it in your editor.{:else if inApp}{' '}{inApp} shows it.{/if}
+    </p>
   {:else if view}
     <!-- (A box that scrolls takes the keyboard's focus, so its arrows can scroll it.) -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
