@@ -149,8 +149,8 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   workspace's. With `--spoken` too (16 Nov 2026): dropped first, then asked out loud
   with Chat in view, which takes them as a typed question does (as do `pictures` in a
   feature script's spoken `ask`).
-- `--style <name>` (15 Nov 2026): the chat's style picked from Style under the message
-  box first, by its name in the menu (`Concise`, one of the person's own…; `chat/styles.rs`);
+- `--style <name>` (15 Nov 2026): the chat's style picked from the message box's + menu (Style ›; under the
+  box until 16 Nov 2026) first, by its name in the menu (`Concise`, one of the person's own…; `chat/styles.rs`);
   `--incognito`: the new chat's ghost turned on first (`chat/incognito.rs`); `--project
   <name>`: a new chat started from that project's page, the project made first if there's
   none (`--project-instructions` sets its instructions; `--project-files <path>[,<path>…]`
@@ -159,7 +159,7 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   in view instead of pressing its New chat — with `--spoken`, the Voice Assistant's new
   chat starts in it. A feature script's `ask` step takes `style`, `incognito`,
   `project`, `projectInstructions`, `projectFiles` (a list) and `projectPage` too.
-- `--research` (16 Nov 2026): Research under the message box switched on first
+- `--research` (16 Nov 2026): Research switched on first from the message box's + menu (under the box until 16 Nov 2026)
   (`chat/research.rs`; refused when it can't be, its tooltip saying why — waited on up to
   5 s: the chip asks Yap whether Chat's model can research before it turns on, and read
   at once it said "can't" though it came on a moment later). Its plan is a

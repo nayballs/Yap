@@ -16,6 +16,7 @@
   import { tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import Group from '../ui/Group.svelte';
+  import Row from '../ui/Row.svelte';
   import Input from '../ui/Input.svelte';
   import Textarea from '../ui/Textarea.svelte';
   import Button from '../ui/Button.svelte';
@@ -38,6 +39,42 @@
   ];
 
   const groups = $derived(skillGroups(skills.list));
+
+  // **Chat styles** (chat/styles.rs): the style new chats start with, and Create & edit styles… (Chat's own dialog,
+  // its own chunk). Settings search finds it as "Chat styles".
+  let newChatStyle = $state('Normal');
+  let StylesDialog = $state(null);
+  let stylesOpen = $state(false);
+  async function readNewChatStyle() {
+    try {
+      const [out, id] = await Promise.all([invoke('chat_styles'), invoke('chat_style_of', { conversation: null })]);
+      newChatStyle = [...(out?.builtins || []), ...(out?.styles || [])].find((s) => s.id === id)?.name || 'Normal';
+    } catch {
+      /* keep */
+    }
+  }
+  readNewChatStyle();
+  async function openStyles() {
+    if (!StylesDialog) StylesDialog = (await import('../views/chat/StylesDialog.svelte')).default;
+    stylesOpen = true;
+  }
+  /** Chat's box reads its style and the list again (one made, changed or deleted here; new chats' changed). */
+  const tellChat = () => window.dispatchEvent(new CustomEvent('yap-chat-styles-changed'));
+  function stylesClosed() {
+    stylesOpen = false;
+    readNewChatStyle();
+    tellChat();
+  }
+  async function useForNewChats(id) {
+    try {
+      await invoke('chat_style_set', { conversation: null, style: id });
+      tellChat();
+      await readNewChatStyle();
+      toast({ title: `New chats start in ${newChatStyle}`, variant: 'success' });
+    } catch (e) {
+      toast({ title: "Couldn't change the style", description: String(e), variant: 'destructive' });
+    }
+  }
 
   // One of Yap's opened to read its instructions.
   let reading = $state(null);
@@ -249,6 +286,18 @@
     {#each groups.more as s (s.id)}{@render yaps(s)}{/each}
   </div>
 </Group>
+
+<!-- **Chat styles** (chat/styles.rs, 16 Nov 2026): how Chat's answers are written. Picked per chat from the message
+     box's + menu (Style ›); made and changed here too, in the same dialog. "Use" here: the style new chats start with. -->
+<Group title="Chat styles" id="settings-chat-styles">
+  <Row label="Chat styles" desc={`How Chat's answers are written: Normal, Concise, Explanatory, Formal or your own. New chats start in ${newChatStyle}; pick one for a chat from + → Style in its message box.`} setting="chat-styles">
+    <Button variant="secondary" size="sm" onclick={openStyles}>Create & edit styles…</Button>
+  </Row>
+</Group>
+
+{#if StylesDialog && stylesOpen}
+  <StylesDialog onclose={stylesClosed} onpick={useForNewChats} />
+{/if}
 
 {#snippet form()}
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

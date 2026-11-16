@@ -224,6 +224,115 @@ test('a new chat: the mark and the greeting, the box right under it in the middl
   await setClock(main, null);
 });
 
+test('the + menu, the Claude app’s shape: icon rows, Skills ›, Research, Style ›; the keyboard; Ctrl+U; only the model under the box', async ({ yap, main, shot }) => {
+  await main.setViewportSize({ width: 1440, height: 900 });
+  await setClock(main, at(18, 14, 5));
+  await newChat(main);
+  // Windows' file picker never opens in a test run: the test's own picks nothing and counts (chatState `pickFiles`).
+  await main.evaluate(() => {
+    window.__pickerOpens = 0;
+    window.__yapTestPickFiles = async () => {
+      window.__pickerOpens += 1;
+      return [];
+    };
+  });
+  const pickerOpens = () => main.evaluate(() => window.__pickerOpens);
+  const plus = main.getByRole('button', { name: 'Chat options' });
+  const menu = main.getByTestId('chat-plus-menu');
+  // Under the box: the model only (Style and Research went into the menu).
+  const foot = main.locator('section.thread > .composer .composerfoot');
+  await expect(foot.getByRole('button', { name: /^Style/ })).toHaveCount(0);
+  await expect(foot.getByRole('button', { name: 'Research' })).toHaveCount(0);
+  await expect(main.getByTestId('chat-box-modes')).toHaveCount(0);
+
+  // Enter on + opens it at its first row; the rows top to bottom, an icon each.
+  await plus.focus();
+  await main.keyboard.press('Enter');
+  await expect(menu).toBeVisible();
+  const rows = menu.locator('[data-mi="top"]');
+  await expect(rows.first()).toBeFocused();
+  expect((await rows.allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim())).toEqual([
+    'Upload or add files Ctrl+U',
+    expect.stringMatching(/^Take a screenshot/),
+    'Skills',
+    'Research',
+    'Style Normal',
+    'Voice replies',
+    'Voice settings…',
+  ]);
+  expect(await rows.evaluateAll((els) => els.every((e) => e.querySelector(':scope > svg')))).toBe(true);
+  // On the start screen it opens downwards, as the app's does.
+  const boxRect = await rect(composer(main).locator('.inputbar'));
+  expect((await rect(menu)).top).toBeGreaterThan(boxRect.top + boxRect.height / 2);
+  await shot(main, '08-plus-menu-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '09-plus-menu-dark');
+  await theme(yap, main, 'light');
+
+  // ↓ ↓ ↓ to Research, ↓ to Style, → opens it on its first style, ← back, Esc closes, + has the focus again.
+  for (let i = 0; i < 4; i += 1) await main.keyboard.press('ArrowDown');
+  await expect(main.getByTestId('chat-plus-style')).toBeFocused();
+  await main.keyboard.press('ArrowRight');
+  const styles = main.getByTestId('chat-plus-style-menu');
+  await expect(styles.getByRole('menuitemradio', { name: 'Normal' })).toBeFocused();
+  await expect(styles.getByRole('menuitemradio', { name: 'Normal' })).toHaveAttribute('aria-checked', 'true');
+  await shot(main, '10-plus-style-submenu-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '11-plus-style-submenu-dark');
+  await theme(yap, main, 'light');
+  await main.keyboard.press('ArrowDown');
+  await expect(styles.getByRole('menuitemradio', { name: 'Concise' })).toBeFocused();
+  await main.keyboard.press('ArrowLeft');
+  await expect(styles).toHaveCount(0);
+  await expect(main.getByTestId('chat-plus-style')).toBeFocused();
+  await main.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(plus).toBeFocused();
+  // ↑ on + opens it at its last row.
+  await main.keyboard.press('ArrowUp');
+  await expect(rows.last()).toBeFocused();
+  await main.keyboard.press('Escape');
+
+  // A Style picked with the keyboard: Space on Concise; its chip in the box, × back to Normal.
+  await plus.focus();
+  await main.keyboard.press(' ');
+  for (let i = 0; i < 4; i += 1) await main.keyboard.press('ArrowDown');
+  await main.keyboard.press('ArrowRight');
+  await main.keyboard.press('ArrowDown');
+  await main.keyboard.press('Enter');
+  await expect(menu).toHaveCount(0);
+  const styleChip = main.getByTestId('chat-style-on');
+  await expect(styleChip).toContainText('Concise');
+  await shot(main, '12-style-chip-in-the-box-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '13-style-chip-in-the-box-dark');
+  await theme(yap, main, 'light');
+  await styleChip.getByRole('button', { name: /back to Normal/ }).click();
+  await expect(styleChip).toHaveCount(0);
+
+  // Skills ›: the "/" menu's list; a pick goes in the box, its words to follow.
+  await plus.click();
+  await main.getByTestId('chat-plus-skills').click();
+  const skillsMenu = main.getByTestId('chat-plus-skills-menu');
+  await expect(skillsMenu.getByRole('menuitem', { name: /\/standup/ })).toBeVisible();
+  await expect(skillsMenu.getByRole('menuitem', { name: 'More Skills…' })).toBeVisible();
+  await skillsMenu.getByRole('menuitem', { name: /\/standup/ }).click();
+  await expect(box(main)).toHaveValue('/standup ');
+  await expect(box(main)).toBeFocused();
+  await box(main).fill('');
+
+  // Upload or add files: from the menu, and Ctrl+U in the chat.
+  const before = await pickerOpens();
+  await plus.click();
+  await menu.getByRole('button', { name: 'Upload or add files' }).click();
+  await expect.poll(pickerOpens).toBe(before + 1);
+  await box(main).focus();
+  await main.keyboard.press('Control+u');
+  await expect.poll(pickerOpens).toBe(before + 2);
+  await main.evaluate(() => delete window.__yapTestPickFiles);
+  await setClock(main, null);
+});
+
 test('the first message sends the box down to its place: a gentle move, none with reduced motion', async ({ yap, main, fakeLlm, shot }) => {
   await main.setViewportSize({ width: 1440, height: 900 });
   await setClock(main, at(18, 14, 5));
