@@ -61,10 +61,57 @@ fn is_unspoken(c: char) -> bool {
     )
 }
 
+/// The first of the characters a formula is kept as while the markdown
+/// rules run ([`mask`]): Unicode's supplementary private use area, which no
+/// text has.
+const MASK: u32 = 0xF_0000;
+
+/// Each formula in `line` (`maths::find`, as Chat draws them) as one
+/// private-use character, so no markdown rule reaches inside it — `$x_1 +
+/// y_1$`'s underscores, `$[0, 1]$`'s brackets, `$a*b*c$`'s stars stay —
+/// and the formulas, to put back ([`unmask`]).
+fn mask(line: &str) -> (String, Vec<String>) {
+    let found = super::maths::find(line);
+    if found.is_empty() {
+        return (line.to_string(), Vec::new());
+    }
+    let mut out = String::with_capacity(line.len());
+    let mut kept = Vec::new();
+    let mut last = 0;
+    for f in found.into_iter().take(0xFFFD) {
+        out.push_str(&line[last..f.range.start]);
+        out.push(char::from_u32(MASK + kept.len() as u32).unwrap_or(' '));
+        kept.push(line[f.range.clone()].to_string());
+        last = f.range.end;
+    }
+    out.push_str(&line[last..]);
+    (out, kept)
+}
+
+fn unmask(s: &str, kept: &[String]) -> String {
+    if kept.is_empty() {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len() + kept.iter().map(String::len).sum::<usize>());
+    for c in s.chars() {
+        match (c as u32).checked_sub(MASK).and_then(|k| kept.get(k as usize)) {
+            Some(f) => out.push_str(f),
+            None => out.push(c),
+        }
+    }
+    out
+}
+
 /// One line's inline markdown out: images by their description, links by
 /// their text, bare URLs by their domain, code by its text, emphasis marks,
-/// HTML tags and emoji gone, arrows read as "to".
+/// HTML tags and emoji gone, arrows read as "to". Maths stays as written
+/// (`normalize::for_speech` says it; the reading card draws it).
 pub(super) fn inline_text(line: &str) -> String {
+    let (masked, kept) = mask(line);
+    unmask(&inline_marks(&masked), &kept)
+}
+
+fn inline_marks(line: &str) -> String {
     let s = IMAGE.replace_all(line, "$1");
     // A link whose text is its address: say the domain.
     let s = LINK.replace_all(&s, |c: &regex::Captures| {
@@ -109,6 +156,8 @@ pub fn speakable_blocks(md: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut in_code = false;
     let mut paragraph = String::new();
+    // Inside display maths on lines of its own: the `$$` or `\]` that ends it.
+    let mut in_maths: Option<&str> = None;
     let flush = |paragraph: &mut String, out: &mut Vec<String>| {
         let text = std::mem::take(paragraph);
         let text = text.trim();
@@ -117,6 +166,37 @@ pub fn speakable_blocks(md: &str) -> Vec<String> {
         }
     };
     for raw in md.lines() {
+        // Display maths over lines of its own (`$$` or `\[` to a line ending
+        // `$$` / `\]`, as Chat draws it): its lines as written, in the
+        // paragraph they belong to (so the Voice Assistant's short answer
+        // keeps "The formula:" with its formula) — a `|x|` or a `- b` in it
+        // is no table or list.
+        if let Some(close) = in_maths {
+            if raw.trim().is_empty() {
+                in_maths = None;
+                flush(&mut paragraph, &mut out);
+                continue;
+            }
+            paragraph.push(' ');
+            paragraph.push_str(raw.trim());
+            if raw.trim_end().ends_with(close) {
+                in_maths = None;
+            }
+            continue;
+        }
+        if !in_code {
+            let t = raw.trim();
+            if let Some(&(open, close)) = [("$$", "$$"), ("\\[", "\\]")].iter().find(|(o, _)| t.starts_with(o)) {
+                if !t[open.len()..].contains(close) {
+                    if !paragraph.is_empty() {
+                        paragraph.push(' ');
+                    }
+                    paragraph.push_str(t);
+                    in_maths = Some(close);
+                    continue;
+                }
+            }
+        }
         if FENCE.is_match(raw) {
             if !in_code {
                 flush(&mut paragraph, &mut out);
@@ -192,9 +272,12 @@ pub fn sentences(text: &str) -> Vec<String> {
     let text = text.trim();
     let mut out = Vec::new();
     let mut start = 0;
+    // Never inside a formula (a read-aloud's sentence keeps its maths).
+    let formulas = super::maths::find(text);
+    let inside = |i: usize| formulas.iter().any(|f| i > f.range.start && i < f.range.end);
     let mut iter = text.char_indices().peekable();
     while let Some((i, c)) = iter.next() {
-        if !matches!(c, '.' | '?' | '!' | '…') {
+        if !matches!(c, '.' | '?' | '!' | '…') || inside(i) {
             continue;
         }
         let mut single_dot = c == '.';
@@ -236,15 +319,21 @@ fn cut_long(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = s.trim();
     while rest.chars().count() > LONG_SENTENCE {
-        let limit = rest.char_indices().nth(LONG_SENTENCE).map_or(rest.len(), |(i, _)| i);
+        let mut limit = rest.char_indices().nth(LONG_SENTENCE).map_or(rest.len(), |(i, _)| i);
+        let floor = rest.char_indices().nth(60).map_or(0, |(i, _)| i);
+        // Never inside a formula: before it, or after it when it's long.
+        let formulas = super::maths::find(rest);
+        if let Some(f) = formulas.iter().find(|f| limit > f.range.start && limit < f.range.end) {
+            limit = if f.range.start > floor { f.range.start } else { f.range.end };
+        }
         let head = &rest[..limit];
-        let floor = head.char_indices().nth(60).map_or(0, |(i, _)| i);
+        let outside = |i: usize| !formulas.iter().any(|f| i > f.range.start && i < f.range.end);
         let cut = [", ", "; ", " – ", " — ", ": "]
             .iter()
-            .filter_map(|p| head.rfind(p).map(|i| i + p.trim_end().len()))
+            .filter_map(|p| head.match_indices(p).map(|(i, _)| i + p.trim_end().len()).filter(|&i| outside(i)).last())
             .filter(|&i| i > floor)
             .max()
-            .or_else(|| head.rfind(' ').filter(|&i| i > floor))
+            .or_else(|| head.match_indices(' ').map(|(i, _)| i).rfind(|&i| outside(i) && i > floor))
             .unwrap_or(limit);
         out.push(rest[..cut].trim().to_string());
         rest = rest[cut..].trim_start();
@@ -404,6 +493,51 @@ mod tests {
         assert_eq!(brief(md, 2), "Gale is on the beach west of the crash site. Pull him out of the portal.");
         assert_eq!(brief("- Only a list [1]", 2), "Only a list.");
         assert_eq!(brief("", 2), "");
+    }
+
+    #[test]
+    fn maths_is_said_in_words_and_kept_whole_for_the_card() {
+        // Spoken: words, never "dollar" or "backslash".
+        assert_eq!(
+            utterances("The area of a circle is $A = \\pi r^2$, where $r$ is the radius."),
+            vec!["The area of a circle is A equals pi r squared, where r is the radius."]
+        );
+        assert_eq!(utterances("It costs $5 and $10 at most."), vec!["It costs five dollars and ten dollars at most."]);
+        // Opus's answer (Yap Lab, 16 Nov 2026): display maths, then Unicode maths as plain text.
+        let opus = "The area of a circle is:\n\n$$A = \\pi r^2$$\n\n- **A** is the area\n- **r** is the radius\n\n**From the diameter:** the radius is half the diameter (r = d/2), so the formula becomes A = πd²/4.\n\n**Example:** a circle with radius 5 cm has an area of π × 5² = 25π ≈ 78.54 cm².";
+        assert_eq!(
+            utterances(opus),
+            vec![
+                "The area of a circle is:",
+                "A equals pi r squared.",
+                "A is the area.",
+                "r is the radius.",
+                "From the diameter: the radius is half the diameter (r equals d over two), so the formula becomes A equals pi d squared over four.",
+                "Example: a circle with radius five centimetres has an area of pi times five squared equals twenty-five pi is approximately seventy-eight point five four square centimetres.",
+            ]
+        );
+        // The markdown rules never reach inside a formula: underscores,
+        // stars, brackets and a citation-looking [1] stay for the card.
+        assert_eq!(inline_text("**Sum** $x_1 + y_1$ and $a*b*c$ on $[0, 1]$ or $v[1]$"), "Sum $x_1 + y_1$ and $a*b*c$ on $[0, 1]$ or $v[1]$");
+        assert_eq!(utterances("So $x_1 + x_2 = 3$."), vec!["So x sub one plus x sub two equals three."]);
+        // Display maths on lines of its own: its lines as written, in its
+        // paragraph (the `|x|` is no table row, the `- 1` no list item), a
+        // breath after it when words follow.
+        let md = "The formula:\n$$\n|x| = \\sqrt{x^2}\n- 1\n$$\nThat's all.";
+        assert_eq!(speakable_blocks(md), vec!["The formula: $$ |x| = \\sqrt{x^2} - 1 $$ That's all."]);
+        assert_eq!(utterances(md), vec!["The formula: the absolute value of x equals the square root of x squared minus one, That's all."]);
+        assert_eq!(brief("The formula:\n$$\nA = \\pi r^2\n$$\n\n## More\nText.", 2), "The formula: $$ A = \\pi r^2 $$.");
+        assert_eq!(speakable_blocks("$$ E = mc^2 $$"), vec!["$$ E = mc^2 $$."]);
+        assert_eq!(speakable_blocks("\\[\nx = 1\n\\]"), vec!["\\[ x = 1 \\]."]);
+        assert_eq!(speakable_blocks("$$\nx = 1\n\nNot closed."), vec!["$$ x = 1.", "Not closed."]);
+        // In a code block it's code.
+        assert_eq!(speakable_blocks("```\n$$\n```\nok"), vec!["(code block)", "ok."]);
+        // A sentence is never cut inside a formula.
+        assert_eq!(sentences("We get $x = 1. 5$ here. Then more."), vec!["We get $x = 1. 5$ here.", "Then more."]);
+        let long = format!("{} $${}$$ end.", "word ".repeat(30).trim(), "a, b, ".repeat(40));
+        for s in sentences(&long) {
+            assert_eq!(s.matches("$$").count() % 2, 0, "{s}");
+        }
     }
 
     #[test]

@@ -417,6 +417,55 @@ pub fn align(shown: &str, shown_spans: &[Span], said: &str, said_spans: &[Span])
     out
 }
 
+/// [`align`] for a shown sentence with maths in it (`maths.rs`): its
+/// formulas are said in words that look nothing like their TeX ("$\frac{a}
+/// {b}$" → "a over b"), so the said words are matched to `written` — the
+/// shown text with each formula written out, `formulas` saying where each
+/// went (`(shown, written)` character ranges, `maths::in_words_mapped`) —
+/// and from there to the shown words exactly: a formula's words only ever
+/// to the shown words inside it (so the reading card lights the formula
+/// while they're said), every other word to itself. A formula with no
+/// shown word in it (`$+$`) gives its words to the word before. Pure.
+pub fn align_maths(
+    shown: &str,
+    shown_spans: &[Span],
+    written: &str,
+    formulas: &[super::maths::Placed],
+    said: &str,
+    said_spans: &[Span],
+) -> Vec<Option<usize>> {
+    let written_spans = words(written);
+    // Each written word's shown word.
+    let mut to_shown: Vec<Option<usize>> = vec![None; written_spans.len()];
+    for (shown_range, written_range) in formulas {
+        let inside: Vec<usize> = (0..shown_spans.len()).filter(|&i| shown_range.contains(&shown_spans[i].0)).collect();
+        let own: Vec<usize> = (0..written_spans.len()).filter(|&j| written_range.contains(&written_spans[j].0)).collect();
+        if inside.is_empty() {
+            let before = (0..shown_spans.len()).rev().find(|&i| shown_spans[i].0 < shown_range.start);
+            let near = before.or_else(|| (0..shown_spans.len()).find(|&i| shown_spans[i].0 >= shown_range.end));
+            own.iter().for_each(|&j| to_shown[j] = near);
+            continue;
+        }
+        // Inside: the same words pair up ("A", "pi"), the rest spread.
+        let inside_spans: Vec<Span> = inside.iter().map(|&i| shown_spans[i]).collect();
+        let own_spans: Vec<Span> = own.iter().map(|&j| written_spans[j]).collect();
+        for (k, m) in align(shown, &inside_spans, written, &own_spans).into_iter().enumerate() {
+            to_shown[own[k]] = Some(inside[m.unwrap_or(0)]);
+        }
+    }
+    for (j, &(a, _)) in written_spans.iter().enumerate() {
+        if formulas.iter().any(|(_, w)| w.contains(&a)) {
+            continue;
+        }
+        // Outside every formula the text is the same: shift by what the
+        // formulas before it changed in length.
+        let shift: isize = formulas.iter().filter(|(_, w)| w.end <= a).map(|(s, w)| s.len() as isize - w.len() as isize).sum();
+        let at = (a as isize + shift).max(0) as usize;
+        to_shown[j] = shown_spans.iter().position(|&(s, e)| s <= at && at < e.max(s + 1));
+    }
+    align(written, &written_spans, said, said_spans).into_iter().map(|m| m.and_then(|w| to_shown.get(w).copied().flatten())).collect()
+}
+
 /// The shown words' starts, from the said words' starts and [`align`]'s
 /// map: a shown word starts when the first said word of its starts; the
 /// list goes forwards in time (a word that would start before the one
@@ -604,6 +653,60 @@ mod tests {
         // Said words before anything matches go nowhere (no shown word before).
         let m = align("Friday", &words("Friday"), "on Friday", &words("on Friday"));
         assert_eq!(m, vec![None, Some(0)]);
+    }
+
+    /// Which shown word each said word lights, by the shown word's text, for
+    /// a sentence with maths in it (as the speaker records it).
+    fn lit_by(shown: &str, v: crate::voice::tts::maths::Variety) -> (Vec<String>, Vec<String>) {
+        let said = crate::voice::tts::normalize::for_speech(&crate::voice::tts::text::inline_text(shown));
+        let (written, formulas) = crate::voice::tts::maths::in_words_mapped(shown, v);
+        let (ss, ps) = (words(shown), words(&said));
+        let map = align_maths(shown, &ss, &written, &formulas, &said, &ps);
+        let sc: Vec<char> = shown.chars().collect();
+        let pc: Vec<char> = said.chars().collect();
+        let said_words = ps.iter().map(|&s| slice(&pc, s)).collect();
+        (said_words, map.iter().map(|m| m.map(|i| slice(&sc, ss[i])).unwrap_or_default()).collect())
+    }
+
+    #[test]
+    fn a_formulas_words_light_the_formula_and_nothing_else() {
+        use crate::voice::tts::maths::Variety::British;
+        // The circle: "pi r squared" lights $A = \pi r^2$'s words only;
+        // the "r" after it is its own.
+        let (said, lit) = lit_by("The area is $A = \\pi r^2$, where $r$ is the radius.", British);
+        assert_eq!(said, ["The", "area", "is", "A", "equals", "pi", "r", "squared", "where", "r", "is", "the", "radius"]);
+        assert_eq!(lit, ["The", "area", "is", "A", "A", "pi", "r^2", "r^2", "where", "r", "is", "the", "radius"]);
+        // Said words that also appear outside ("a", "over", "b", "to"):
+        // never lent to the words round the formula.
+        let (said, lit) = lit_by("Divide $a$ by $b$ to get $\\frac{a}{b}$ as a ratio.", British);
+        assert_eq!(said, ["Divide", "a", "by", "b", "to", "get", "a", "over", "b", "as", "a", "ratio"]);
+        assert_eq!(lit, ["Divide", "a", "by", "b", "to", "get", "frac{a}{b", "frac{a}{b", "frac{a}{b", "as", "a", "ratio"]);
+        let (_, lit) = lit_by("Here $x^n$ means x to the n.", British);
+        assert_eq!(lit, ["Here", "x^n", "x^n", "x^n", "x^n", "means", "x", "to", "the", "n"]);
+        // Numbers outside keep their own rule ("£12" → "twelve pounds").
+        let (said, lit) = lit_by("It costs £12, so $2x = 12$.", British);
+        assert_eq!(said, ["It", "costs", "twelve", "pounds", "so", "two", "x", "equals", "twelve"]);
+        assert_eq!(lit, ["It", "costs", "12", "12", "so", "2x", "2x", "12", "12"]);
+        // A formula with no word on the card ($+$): the word before.
+        let (said, lit) = lit_by("Add them $+$ now.", British);
+        assert_eq!(said, ["Add", "them", "plus", "now"]);
+        assert_eq!(lit, ["Add", "them", "them", "now"]);
+        // Display maths, and a formula whose word runs on past it.
+        let (said, lit) = lit_by("$$\\sum_{i=1}^{n} i$$ and the $x$-axis.", British);
+        assert_eq!(said[..4], ["the", "sum", "from", "i"]);
+        assert!(lit[..said.len() - 3].iter().all(|w| w.contains("sum") || w == "i"), "{lit:?}");
+        assert_eq!(lit[said.len() - 3..], ["and", "the", "x$-axis"]);
+        // Starts stay in order, every shown word of the formula lit in turn.
+        let shown = "So $\\sqrt{2} \\approx 1.41$ here.";
+        let said = crate::voice::tts::normalize::for_speech(shown);
+        let (written, formulas) = crate::voice::tts::maths::in_words_mapped(shown, British);
+        let (ss, ps) = (words(shown), words(&said));
+        let map = align_maths(shown, &ss, &written, &formulas, &said, &ps);
+        let starts: Vec<Duration> = (0..ps.len()).map(|j| ms(j as u64 * 100)).collect();
+        let got = shown_starts(&map, &starts);
+        assert!(got.windows(2).all(|w| w[0].0 < w[1].0 && w[0].1 <= w[1].1), "{got:?}");
+        assert_eq!(got.first().map(|g| g.0), Some(0));
+        assert_eq!(got.last().map(|g| g.0), Some(ss.len() - 1));
     }
 
     #[test]

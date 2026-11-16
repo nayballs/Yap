@@ -200,7 +200,14 @@ impl Track {
             None => (marks::estimate(said, &said_spans, Duration::ZERO, length), marks::Timing::Estimate),
         };
         let shown_spans = marks::words(shown);
-        let map = marks::align(shown, &shown_spans, said, &said_spans);
+        // Maths in it: its formulas are said in words, matched to the shown
+        // formula as a whole (the reading card lights it while they're said).
+        let (written, formulas) = super::maths::in_words_mapped(shown, super::maths::variety());
+        let map = if formulas.is_empty() {
+            marks::align(shown, &shown_spans, said, &said_spans)
+        } else {
+            marks::align_maths(shown, &shown_spans, &written, &formulas, said, &said_spans)
+        };
         let starts = marks::shown_starts(&map, &said_starts);
         let mut made = self.made.lock().unwrap_or_else(|p| p.into_inner());
         // Only the sentences round the voice are worth keeping.
@@ -539,6 +546,8 @@ pub fn init(app: &tauri::AppHandle) {
     let cfg = crate::config::load();
     set_volume(cfg.tts_volume);
     crate::voice::duck::sync(&cfg);
+    // Maths in the region's words (Settings → About you → Region).
+    super::maths::sync(&cfg);
     let _ = APP.set(app.clone());
     let app = app.clone();
     let _ = SPEAKER.set(Speaker::new(
@@ -1223,6 +1232,31 @@ mod tests {
             made.starts,
             vec![(0, Duration::ZERO), (1, Duration::from_millis(150)), (2, Duration::from_millis(400)), (3, Duration::from_millis(550))]
         );
+        r.speaker.stop();
+    }
+
+    #[test]
+    fn a_formula_is_said_in_words_and_timed_on_its_own_words() {
+        let r = rig();
+        // Shown: the formula as written; said: "pi r squared".
+        let track = Track::new(vec!["The area is $\\pi r^2$ here.".into()]);
+        let play = Arc::new(SimPlayback::default());
+        r.speaker.speak(read_job(&track, 0, Arc::new(Timed), 1.0), sim(&play)).unwrap();
+        let start = Instant::now();
+        while track.made(0).is_none() {
+            assert!(start.elapsed() < Duration::from_secs(2));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(said_text("The area is $\\pi r^2$ here."), "The area is pi r squared here.");
+        let made = track.made(0).unwrap();
+        assert_eq!(made.timing, marks::Timing::Engine);
+        // Shown words: The, area, is, pi (of "$\pi"), r^2 (of "r^2$"), here.
+        // "pi" starts 12 characters into what was said, "r" 15; "squared"
+        // (17) is still the formula's last word; "here" 25.
+        let ms = Duration::from_millis;
+        assert_eq!(made.starts, vec![(0, ms(0)), (1, ms(200)), (2, ms(450)), (3, ms(600)), (4, ms(750)), (5, ms(1_250))]);
+        // While "squared" is said, the lit word is the formula's.
+        assert_eq!(marks::word_at(&made.starts, ms(1_000)), Some(4));
         r.speaker.stop();
     }
 

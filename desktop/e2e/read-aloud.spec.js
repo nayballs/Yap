@@ -257,6 +257,55 @@ test('a Chat answer read aloud shows the same card, and the shortcut in Yap read
   await setConfig(yap, main, { readHotkey: '' });
 });
 
+test('maths is said in words, the formula lit as one while they are said, in the Region\'s words', async ({ yap, main }) => {
+  // voice/tts/maths.rs: the card draws the formula (KaTeX), the voice is
+  // given words — never "dollar" or "backslash".
+  await setConfig(yap, main, { ttsRate: 1, regionCountry: '' });
+  const answer = 'The area of a circle is $A = \\pi r^2$, where $r$ is the radius. Half of it is $\\frac{1}{2} \\pi r^2 \\le A$.';
+  await yap.invoke('read_aloud_text', { text: answer, messageId: 'chat:42:1', markdown: true, source: 'chat' });
+  const c = card(yap);
+  await expect(c).toBeVisible();
+  const [said] = await spoken(yap);
+  expect(said.sentences).toEqual([
+    'The area of a circle is A equals pi r squared, where r is the radius.',
+    'Half of it is one half pi r squared is less than or equal to A.',
+  ]);
+  expect(said.text).not.toMatch(/[$\\^_{}]/);
+  // The card keeps the formula, drawn, and lights it as one while its
+  // words are said (and only then: before it, a word of its own is lit).
+  const text = c.locator('.text');
+  const formula = text.locator('.w.md-math[data-drawn="true"]').first();
+  await expect(formula).toBeVisible();
+  await expect(formula.locator('.katex annotation')).toHaveText('A = \\pi r^2');
+  const inFormula = (await formula.getAttribute('data-w')).split(' ').map(Number);
+  await expect.poll(() => formula.evaluate((el) => el.classList.contains('now')), { timeout: 10_000, intervals: [30] }).toBe(true);
+  await yap.invoke('read_aloud_action', { action: 'pause' });
+  expect(inFormula).toContain((await state(yap)).word);
+  expect(await text.locator('.w.now').count()).toBe(1);
+  await yap.invoke('read_aloud_action', { action: 'stop' });
+  await expect(c).toHaveCount(0);
+
+  // A spoken reply (Chat's voice replies, the Voice Assistant): the same words.
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  await yap.invoke('tts_speak', { text: 'Solve $x^2 - 5x + 6 = 0$: so $x = 2$ or $x = 3$, and $\\sqrt{x}$ for $x \\ge 0$. It costs $5 and $10.', messageId: 'chat:42:2' });
+  await expect.poll(async () => (await spoken(yap)).map((s) => s.text)).toEqual([
+    'Solve x squared minus five x plus six equals zero: so x equals two or x equals three, and the square root of x for x is greater than or equal to zero. It costs five dollars and ten dollars.',
+  ]);
+  await yap.invoke('tts_stop');
+
+  // The Region's words where they differ: American English.
+  await setConfig(yap, main, { regionCountry: 'US' });
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  await yap.invoke('tts_speak', { text: 'It is $-3$, then $\\frac{3}{4}$ and $(a+b)^2$.', messageId: 'chat:42:3' });
+  await expect.poll(async () => (await spoken(yap)).map((s) => s.text)).toEqual(['It is negative three, then three fourths and the quantity a plus b, squared.']);
+  await yap.invoke('tts_stop');
+  await setConfig(yap, main, { regionCountry: '' });
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  await yap.invoke('tts_speak', { text: 'It is $-3$, then $\\frac{3}{4}$ and $(a+b)^2$.', messageId: 'chat:42:4' });
+  await expect.poll(async () => (await spoken(yap)).map((s) => s.text)).toEqual(['It is minus three, then three quarters and a plus b, all squared.']);
+  await yap.invoke('tts_stop');
+});
+
 test('Settings: the Read aloud shortcut on Shortcuts and on Voice Assistant, never clashing', async ({ yap, main, shot }) => {
   const dialog = await openSettings(main, 'Shortcuts');
   const row = dialog.locator('[data-setting="shortcut-read"]');

@@ -3,7 +3,8 @@
 //! says "twelve thousand four hundred pounds" for "£12,400" (the research
 //! measured Kokoro saying "pound twelve thousand four hundred" without it).
 //! UK style: "the eighteenth of October", "two thirty p.m.", "one hundred
-//! and five".
+//! and five". Maths goes first (`maths.rs`: "$\pi r^2$" → "pi r squared",
+//! in the Region's words).
 //!
 //! Conservative on purpose: a wrong expansion is worse than none, so every
 //! rule needs a clear pattern (a currency sign, a month name, am/pm, a known
@@ -202,6 +203,7 @@ re!(
     UNIT,
     r"\b(\d+(?:,\d{3})*(?:\.\d+)?)\s?(km/h|km|kg|cm|mm|ml|mph|kph|kWh|kW|GHz|MHz|kHz|Hz|GB|MB|KB|TB|ms|°C|°F)(\b|$|[^\w])"
 );
+re!(AREA, r"\b(\d+(?:,\d{3})*(?:\.\d+)?)\s?(mm|cm|km|m|ft)([²³])");
 re!(ALNUM_LETTER_DIGIT, r"\b([A-Z])(\d{1,2})\b");
 re!(ALNUM_DIGIT_LETTERS, r"\b(\d{1,3})([A-Z]{1,2})\b");
 re!(NUMBER, r"(^|[^\w.])(-)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+)");
@@ -341,8 +343,25 @@ fn year_context(before: &str) -> bool {
 }
 
 /// Text written for the eye, made ready to say. See the module docs.
+/// Maths first (`maths.rs`: "$\pi r^2$" → "pi r squared"), so no rule here
+/// reads a formula's `$` as money.
 pub fn for_speech(text: &str) -> String {
-    let s = EMAIL.replace_all(text, |c: &Captures| {
+    let v = super::maths::variety();
+    let text = super::maths::in_words(text, v);
+    // "78.5 cm²": square centimetres, before plain-text maths says "c m squared".
+    let text = AREA.replace_all(&text, |c: &Captures| {
+        let n = &c[1];
+        let one = n == "1";
+        let unit = match &c[2] {
+            "m" => if one { "metre" } else { "metres" },
+            "ft" => if one { "foot" } else { "feet" },
+            u => unit_words(u, one),
+        };
+        format!("{n} {} {unit}", if &c[3] == "²" { "square" } else { "cubic" })
+    });
+    // Maths written as plain text ("A = πd²/4"): in words.
+    let text = super::maths::plain_in_words(&text, v);
+    let s = EMAIL.replace_all(&text, |c: &Captures| {
         let local = c[1].replace('.', " dot ").replace('_', " underscore ");
         format!("{local} at {}", c[2].to_ascii_lowercase().replace('.', " dot "))
     });
@@ -684,7 +703,11 @@ mod tests {
         assert_eq!(for_speech("-3 degrees"), "minus three degrees");
         assert_eq!(for_speech("the Q3 budget"), "the Q three budget");
         assert_eq!(for_speech("a 4K screen"), "a four K screen");
-        assert_eq!(for_speech("2 + 2 × 3"), "two plus two by three");
+        // Arithmetic is maths (`maths.rs`); a size alone stays "by".
+        assert_eq!(for_speech("2 + 2 × 3"), "two plus two times three");
+        assert_eq!(for_speech("a 3 × 4 grid"), "a three by four grid");
+        assert_eq!(for_speech("about 78.54 cm² of glass"), "about seventy-eight point five four square centimetres of glass");
+        assert_eq!(for_speech("a 2 m³ tank"), "a two cubic metres tank");
     }
 
     #[test]
