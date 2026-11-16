@@ -152,7 +152,6 @@ const folderOf = (yap, conversation) => yap.invoke('code_chat_workspace_get', { 
 const askAloud = (yap, text) => yap.invoke('e2e_assistant_ask', { text, listenMs: 0 });
 const box = (main) => main.getByRole('textbox', { name: 'Message' });
 const codeEmpty = (main) => main.getByTestId('chat-code-empty');
-const CHAT_GREETING = 'Ask about your notes, transcripts, or anything else';
 /** The workspace group a conversation's row is listed under (the Code side's list is flat: headers, then rows). */
 const groupOfRow = (main, id) =>
   main.evaluate((want) => {
@@ -528,9 +527,8 @@ test('an empty code chat greets you as the Code side, its prompts fill the box; 
   await expect(empty.locator('.path')).toHaveAttribute('title', GARDEN);
   await expect(empty).toContainText(CODE_INTRO);
   await expect(empty.getByTestId('chat-code-prompt')).toHaveText(CODE_PROMPTS);
-  // Never Chat's greeting here.
-  await expect(main.getByText(CHAT_GREETING)).toHaveCount(0);
-  await expect(main.getByRole('button', { name: 'Ask across your meetings' })).toHaveCount(0);
+  // Never Chat's start screen here.
+  await expect(main.getByTestId('chat-start')).toHaveCount(0);
   // Claude Code here is this build's stand-in, signed in: nothing to say.
   await expect(main.getByTestId('chat-code-claude')).toHaveCount(0);
   await shot(main, '16-empty-code-chat-light');
@@ -572,13 +570,12 @@ test('an empty code chat greets you as the Code side, its prompts fill the box; 
   await expect(hint.getByRole('button', { name: 'Install Claude Code' })).toBeVisible();
   await script(yap, ECHO, 'echo');
 
-  // The Chat side: Chat's greeting, exactly as ever.
+  // The Chat side: Chat's own start screen (its greeting by the time of day, chat-start.spec.js).
   await toSide(main, 'Chat');
   await main.getByRole('button', { name: 'New chat' }).click();
   await expect(codeEmpty(main)).toHaveCount(0);
-  await expect(main.getByText(CHAT_GREETING)).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Ask across your meetings' })).toBeVisible();
-  await expect(main.locator('.empty')).toContainText('for answers that cite the moment they come from.');
+  await expect(main.getByTestId('chat-start')).toBeVisible();
+  await expect(main.getByTestId('chat-greeting')).not.toBeEmpty();
   await shot(main, '18-chat-side-greeting-light');
 });
 

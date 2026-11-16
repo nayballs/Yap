@@ -783,6 +783,13 @@ test('a slow agent: its live line, the running list, “1 agent working” on th
   const line = yap.overlay.getByTestId('bar-agents');
   await expect(line).toHaveText('1 agent working');
   await shot(yap.overlay, '08-bar-agents-running');
+  // Yap's own window in front under it (the main window maximised, its message box at the screen's foot): it steps
+  // aside, never touching the box (16 Nov 2026); back once that window isn't there.
+  await yap.invoke('bar_simulate', { overYap: true });
+  await expect.poll(async () => (await yap.invoke('bar_status')).overYap).toBe(true);
+  await expect(line).toHaveCount(0);
+  await yap.invoke('bar_simulate', { overYap: false });
+  await expect(line).toHaveText('1 agent working');
 
   // The running list above the conversations (the panel closed: the list is back).
   await tab(main).getByRole('button', { name: 'Close the panel' }).click();

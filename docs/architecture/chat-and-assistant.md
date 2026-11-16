@@ -4202,7 +4202,8 @@ panel narrows to 450; it covers only below that.
 **The readable column** (2026-11-07): in a wide thread the messages and the
 composer sit on one centred column at most `--yap-thread-width` wide
 (app.css: 768 px, the Claude app's and ChatGPT's 48rem, × the Text size so
-a line keeps its length) — the activity line, cards, agent pills and prompts
+a line keeps its length; a plain chat's is `--yap-chat-width`, 600 px, since
+16 Nov 2026: [Chat's start screen](#chats-start-screen-2026-11-16)) — the activity line, cards, agent pills and prompts
 and the composer's Code label with them (ChatThread's `.msgsin`, Composer's
 `.composer`). The scroller stays the thread's whole width (its scrollbar at
 the thread's edge); the composer, the scope line and "↓" are moved by half
@@ -4282,8 +4283,8 @@ and its Undo, Preview / Source, find, copy, light and dark).
   chats.json and fold into one line under it that opens to them — above
   it until 31 Oct 2026, `ChatSteps.svelte`; a question from
   the Meetings view's Ask bar arrives through `chatRequest` and is sent with
-  `scope: 'meetings'`, as is one in a chat started with **Ask across your
-  meetings** on the empty thread; such a chat says "Asking across your
+  `scope: 'meetings'`, as is a Skill's in a new chat (the empty thread's
+  **Ask across your meetings** went with its start screen, 16 Nov 2026); such a chat says "Asking across your
   meetings and notes" over its thread, its `[1]` pills and its **From your
   meetings** row open the cited moment in Notes — `chatState.openSource` →
   ControlPanel's `openNoteAt`; [search.md](./search.md)). Answers render as markdown — headings, lists,
@@ -4501,8 +4502,9 @@ and its Undo, Preview / Source, find, copy, light and dark).
   the question (before it listens itself): when the conversation it reads for
   "asked" already has the answer after the question, the wait ends there
   (2026-10-31; before, it said "Thinking" with ■ for good).
-  An empty chat says "Or press F8 in any app to ask out loud…", or offers
-  **Set an assistant shortcut** (→ Settings `voice#assistant-shortcut`).
+  The mic in a plain chat's box names the shortcut in its tooltip ("Dictate.
+  Or press F8 in any app to ask out loud"; an empty chat said so in a line
+  until its start screen, 16 Nov 2026).
   **Streamed answers** (`chat/stream.rs`, `streaming.js`; 2026-10-22): `send`
   calls `chat_send` through `streamCall` (a Tauri `Channel` as `onStream`,
   a `turnId`); the answer's bubble appears with its first words and
@@ -5139,6 +5141,63 @@ several lines, and so is Yap's now (`Composer.svelte`):
   with both lines in the thread and to the model, a long paste at its cap,
   scrolling), and every spec that types into the box.
 
+## Chat's start screen (2026-11-16)
+
+The maintainer's call, after the Claude app's new-chat screen: plain Chat's empty
+thread was a meeting-flavoured page (Ask across your meetings, three one-tap
+prompts, "Or type / for Skills…", "Or press 9 in any app…") over a box that
+read as one long bar. Now (`ChatThread.svelte`, `ChatView.svelte`,
+`Composer.svelte`, `core/greeting.js`; Code chats as they were):
+
+- **The greeting**: Yap's mark (`assets/yap-logo.svg`) and a line by the
+  local time in the display serif (`--yap-font-display`, 34 px × the Text
+  size step), centred: "Morning, Sam" (07:00–11:59), "Afternoon, Sam",
+  "Evening, Sam" (18:00–22:59) with the name About you gives (`aboutName`,
+  read with the voice settings, again on every config save; one line, at
+  most 40 characters cut at a word), "Good morning" and so on without one.
+  The odd hours have a small warm set, never about sleep: late (23:00–04:59)
+  "Burning the midnight oil, Sam?", "Still up, Sam?", "Night owl mode, Sam",
+  "The quiet hours, Sam"; very early (05:00–06:59) "Early start, Sam",
+  "First light, Sam", "Ahead of the day, Sam". A weekend morning or
+  afternoon is "Happy Saturday, Sam" about one day in three. The line is
+  picked by a hash of the day and the band (`seedOf`; after midnight the
+  night is still the evening before's), so it never changes between
+  renders; the band is followed while the screen shows (a minute's tick).
+  The e2e suite and Yap Lab put a time of their own in the clock's place
+  (`window.__yapTestClock` in ms, then a `yap-test-clock` event; null: the
+  real time).
+- **The box in the middle**: the greeting sits at the foot of the thread's
+  upper part and the box right under it, the room shared 1 : 1.25 so the
+  box is a little above the middle (`.hello` and ChatView's `.startgap`).
+  The first message sends it down to its place at the foot: its top read
+  just before the thread replaces the start screen (`$effect.pre`, only for
+  a message being sent), then a 320 ms move down (Web Animations, a
+  transform), none with Motion → Reduced (`motionMs`). Opening another chat
+  never moves it.
+- **Gone**: Ask across your meetings (the Meetings view's Ask bar and a
+  Skill still ask across the meetings: such a new chat says "Asking across
+  your meetings and notes" under the greeting), the one-tap prompts (still
+  over the Meetings view's Ask bar), "Or type / for Skills…" ("/" still
+  opens the menu) and the Voice Assistant's line: **the mic's tooltip** names
+  its shortcut instead ("Dictate. Or press F23 in any app to ask out loud";
+  no shortcut: "Dictate your message"). What Chat needs with no AI model
+  stays, under the greeting. An incognito new chat has the ghost and
+  "Incognito chat" in the greeting's place, its line under it.
+- **The box, the Claude app's proportions**: in a plain chat (start screen
+  and thread alike) two rows — the words, room for a second line (46 px),
+  then + on the left and Think, the mic and Send on the right; under it the
+  model, Style and Research as before. "How can I help you today?" on the
+  start screen, "Reply…" after. The messages and the box share a column of
+  their own, `--yap-chat-width` (app.css: 600 px × the Text size), measured
+  from the Claude app's new-chat screen: its box 3.7 times as wide as its
+  placeholder in the box's own type, and about 0.16 as tall as wide. A Code
+  chat and the projects' pages keep `--yap-thread-width` (768 px) and the
+  one-row box; a plain chat that becomes a Code chat (an agent sent) takes
+  the Code chat's box then, once.
+- e2e: `chat-start.spec.js` (the greeting's lines, the layout measured, the
+  move frame by frame and none with reduced motion, a late night, light and
+  dark), `voice-assistant.spec.js` (the mic's tooltip).
+
 ## Ctrl+Enter queues a message for after the answer (2026-11-15)
 
 The Claude app's box says "Enter to send, Ctrl+Enter to queue for later"
@@ -5332,15 +5391,15 @@ copyable. Yap's, in `chat/skills.rs`:
   window's (Settings' menus': `--yap-s2`, `--yap-s3` for the highlight)
   elsewhere; light and dark from the tokens. A sent "/command words" runs
   it (`splitCommand`, `skillFor`, shown or not); in Chat the question is
-  saved as typed. Chat's empty thread says "Or type / for Skills, like
-  /standup or /decisions."
+  saved as typed. (Chat's empty thread said "Or type / for Skills, like
+  /standup or /decisions." until its start screen, 16 Nov 2026.)
 - **One-tap prompts** (`promptChips`): the first three of the built-ins
   shown with a `chip` — **Prepare for my next meeting** (/prep, only with a
   calendar connected: without one it could only ask which meeting), **Write
   my stand-up**, **List my open to-dos**, **What did we decide?** (/decisions
-  on the last meeting) — on Chat's empty thread ("Try asking") and over the
-  Meetings view's Ask bar; a tap sends the Skill's `question` as that Skill
-  (`runPrompt` / `chatRequest {skill}`), an empty chat asked across the
+  on the last meeting) — over the Meetings view's Ask bar ("Try asking"; on
+  Chat's empty thread too until its start screen, 16 Nov 2026); a tap sends the Skill's `question` as that Skill
+  (`chatRequest {skill}`), an empty chat asked across the
   meetings from then on. A prompt's Skill switched off takes the prompt
   with it. (Coach me and Write a weekly recap were prompts until 31 Oct
   2026; their Skills are in More Skills now.) The Meetings view's cycling
@@ -6447,7 +6506,7 @@ isn't saved to the history and that memory neither uses nor learns from.
 
 - **Starting one**: a new chat on Chat's side (never a Code chat) has a
   ghost at the thread's top right (`ChatView.svelte`, `chat-incognito`,
-  `aria-pressed`). On, the empty thread says what it means ("It isn't
+  `aria-pressed`). On, the start screen says what it means (the ghost and "Incognito chat" in the greeting's place; "It isn't
   saved to your chats, and memory isn't used or updated. It's gone when you
   leave it.") and a ring goes round the thread (`--yap-fg-80`); its first
   question goes with `incognito: true` (`chat_send`), and the conversation

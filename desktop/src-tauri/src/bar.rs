@@ -387,6 +387,9 @@ struct State {
     meeting: bool,
     /// What's fullscreen on the bar's monitor (whatever the setting).
     fullscreen: Fullscreen,
+    /// One of Yap's own windows is in front under "1 agent working"'s place
+    /// (`overlay::yap_under_chip`): the chip steps aside.
+    over_yap: bool,
     /// What the window was last told to be.
     shown: bool,
     /// The page's interactive rects.
@@ -440,6 +443,7 @@ impl Default for State {
             reading: false,
             meeting: false,
             fullscreen: Fullscreen::None,
+            over_yap: false,
             shown: false,
             regions: Vec::new(),
             interactive: false,
@@ -627,6 +631,10 @@ pub struct Status {
     /// A phone connected with Remote Control on (its name): the bar's small
     /// phone mark beside "1 agent working" (`link.rs` `remote_phone`).
     phone: Option<String>,
+    /// One of Yap's own windows is in front under "1 agent working"'s place (16 Nov
+    /// 2026: the main window maximised, the chip clipped its message box's edge): the
+    /// chip steps aside — Chat says what's at work itself.
+    over_yap: bool,
 }
 
 pub fn status() -> Status {
@@ -668,6 +676,7 @@ pub fn status() -> Status {
         agents,
         chats,
         phone,
+        over_yap: s.over_yap,
     }
 }
 
@@ -881,14 +890,15 @@ fn check_fullscreen(app: &AppHandle) {
     if crate::shell::e2e::active() {
         return;
     }
-    let (wanted, screen, before) = {
+    let (wanted, enabled, screen, edge, before, over_before) = {
         let s = lock();
-        (s.hide_fullscreen && s.enabled, s.placed, s.fullscreen)
+        (s.hide_fullscreen && s.enabled, s.enabled, s.placed, s.edge, s.fullscreen, s.over_yap)
     };
     let foreign = overlay::win::foreign_foreground();
+    // The window in front, read once (only while the bar is on and placed).
+    let front = if enabled && screen.is_some() { overlay::win::front() } else { None };
     let fullscreen = match (wanted, screen) {
         (true, Some(screen)) => {
-            let front = overlay::win::front();
             // Exclusive mode or a slideshow is asked about only when the
             // window in front covers the bar's monitor (cheaper, and a game
             // on another monitor leaves this one's bar alone).
@@ -898,15 +908,20 @@ fn check_fullscreen(app: &AppHandle) {
         }
         _ => Fullscreen::None,
     };
+    // "1 agent working" steps aside over Yap's own window (never over the bar itself, activated after all).
+    let over_yap = screen.is_some_and(|screen| !overlay::win::bar_in_front() && overlay::yap_under_chip(front.as_ref(), &screen, edge));
     {
         let mut s = lock();
         s.fullscreen = fullscreen;
+        s.over_yap = over_yap;
         if foreign != 0 {
             s.prev_front = foreign;
         }
     }
     if fullscreen != before {
         tracing::info!(fullscreen = fullscreen.as_str(), "bar: fullscreen");
+    }
+    if fullscreen != before || over_yap != over_before {
         emit(app);
     }
 }
@@ -1647,7 +1662,8 @@ pub async fn bar_card_action(app: AppHandle, id: String, action: String) -> Resu
 
 /// Debug builds only (the e2e suite): pretend the cursor is on a region
 /// (`pointer`: a region id, or "away"), that an app is fullscreen
-/// (`fullscreen`: "none" | "borderless" | "exclusive"), that Esc was
+/// (`fullscreen`: "none" | "borderless" | "exclusive"), that one of Yap's
+/// own windows is in front under "1 agent working" (`overYap`), that Esc was
 /// pressed, or put up a demo card (`card`: "call" | "update" | "info" |
 /// "answer" — the Voice Assistant's, with maths, a diagram and a picture —
 /// | "markdown" — a notice whose body is a model's words, with maths).
@@ -1658,6 +1674,7 @@ pub async fn bar_simulate(
     app: AppHandle,
     pointer: Option<String>,
     fullscreen: Option<String>,
+    over_yap: Option<bool>,
     escape: Option<bool>,
     card: Option<String>,
 ) -> Result<(), String> {
@@ -1671,6 +1688,10 @@ pub async fn bar_simulate(
     if let Some(kind) = fullscreen {
         lock().fullscreen = Fullscreen::from_name(&kind);
         apply(&app);
+        emit(&app);
+    }
+    if let Some(on) = over_yap {
+        lock().over_yap = on;
         emit(&app);
     }
     if escape == Some(true) {
