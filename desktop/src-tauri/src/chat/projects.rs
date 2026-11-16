@@ -11,25 +11,35 @@
 //!   same way. Deleting a project keeps its chats (they leave it) and
 //!   deletes its files' copies.
 //! - **Its files**: read with the same rules as a question's attachments
-//!   (`chat/attachments.rs` `read`: text, code, Markdown, a PDF's or a Word
-//!   document's text, read on this PC; anything else said plainly), their
-//!   copy and their text kept in `<data>/projects/<project>/`. At most
-//!   [`MAX_FILES`] a project.
+//!   (`chat/attachments.rs` `read`: text, code, Markdown, a PDF's text (its
+//!   scans read with OCR), a Word document's, a presentation's, a
+//!   spreadsheet's cells (up to [`SHEET_TOKENS`] here, not a question's
+//!   40,000), read on this PC; anything else said plainly), their copy and
+//!   their text kept in `<data>/projects/<project>/`. At most [`MAX_FILES`]
+//!   a project.
 //! - **In every chat of the project** ([`prompt_block`]): one block in the
 //!   system prompt — the project's name, its instructions and its files'
 //!   text in a `<documents>` block, as attachments go — stable from turn to
 //!   turn (a model re-uses its cache), before the chat's style and About
-//!   you. Sized to the model ([`knowledge_budget`]): the files take at most
-//!   half its context; those that don't fit are named, with a line saying
-//!   so (never cut mid-file). The fixed part a question must fit beside
-//!   counts it (`fit::Parts::texts`). On your Claude plan, the session's own
-//!   prompt has it; a question asked out loud into the chat too.
+//!   you. **Whole while the files fit** in half of what one request to the
+//!   chat's model carries (`knowledge::Room::whole`); **else searched in
+//!   parts** (`knowledge.rs`, `parts.rs`, 16 Nov 2026, the Claude app's
+//!   project knowledge): the block lists the files and their parts, each
+//!   question gets the parts that match it in its own context, and the model
+//!   reads more with `read_project_file` / `search_project_files`. The fixed
+//!   part a question must fit beside counts the block (`fit::Parts::texts`).
+//!   On your Claude plan, the session's own prompt has it (the parts with the
+//!   question, the tools over its run endpoint); a question asked out loud
+//!   into the chat too.
 //! - **Where it lives**: `projects.json` in Yap's data folder, a file of
 //!   its own (an older Yap never reads or writes it): the projects and each
 //!   chat's project by id; fields a newer Yap adds are kept. A deleted
 //!   chat's place goes with it.
 //!
 //! The log says counts, sizes and tokens, never names or text.
+
+pub mod knowledge;
+pub mod parts;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -49,6 +59,9 @@ pub const INSTRUCTIONS_MAX: usize = 8_000;
 pub const MAX_FILES: usize = 50;
 /// Projects, at most.
 pub const MAX_PROJECTS: usize = 100;
+/// A spreadsheet's text in a project, at most this many tokens (a question's
+/// is cut to 40,000, `attachments/sheet.rs`): a big one is searched in parts.
+pub const SHEET_TOKENS: u64 = 250_000;
 /// The folder under Yap's data folder.
 pub const FOLDER: &str = "projects";
 
@@ -208,16 +221,9 @@ pub fn file_text(project: &str, file: &str) -> Option<String> {
 
 // ---- the prompt ---------------------------------------------------------------------------------
 
-/// **How much of a model's context a project's files may take**: half of
-/// it (the rest: the chat, the question, the answer). Pure.
-pub fn knowledge_budget(context: u64) -> u64 {
-    context / 2
-}
-
-/// **The block** for project `p`, its files' texts given (`None`: gone)
-/// and at most `budget` tokens of them (files that don't fit are named,
-/// never cut). Pure.
-pub fn block_of(p: &Project, texts: &[(ProjectFile, Option<String>)], budget: u64) -> String {
+/// The block's start: the project's name, what it's for, its instructions.
+/// Pure.
+fn head(p: &Project) -> String {
     let mut out = format!("This chat is in the user's project \"{}\".", p.name.trim());
     if !p.description.trim().is_empty() {
         out.push_str(&format!(" It's for: {}", p.description.trim()));
@@ -225,6 +231,14 @@ pub fn block_of(p: &Project, texts: &[(ProjectFile, Option<String>)], budget: u6
     if !p.instructions.trim().is_empty() {
         out.push_str(&format!("\nThe project's instructions (follow them in every answer in this chat):\n<project_instructions>\n{}\n</project_instructions>", p.instructions.trim()));
     }
+    out
+}
+
+/// **The block** for project `p`, its files' texts given (`None`: gone)
+/// and at most `budget` tokens of them (files that don't fit are named,
+/// never cut): the files whole. Pure.
+pub fn block_of(p: &Project, texts: &[(ProjectFile, Option<String>)], budget: u64) -> String {
+    let mut out = head(p);
     let mut left = budget;
     let mut kept: Vec<(&ProjectFile, &str)> = Vec::new();
     let mut out_of_room: Vec<&str> = Vec::new();
@@ -279,13 +293,29 @@ pub fn of_conversation(conv: Option<u64>) -> Option<Project> {
     })
 }
 
-/// **The project block for conversation `conv`'s system prompt**, sized
-/// to a model of `context` tokens; `None` when it's in none. Reads the
-/// files' texts.
-pub fn prompt_block(conv: Option<u64>, context: u64) -> Option<String> {
-    let p = of_conversation(conv)?;
+/// Project `id`, as it is now.
+pub fn of(id: &str) -> Option<Project> {
+    with_store(|s| s.project(id).cloned())
+}
+
+/// **Project `p`'s block for a model with `room`**: its files whole while
+/// they fit (`knowledge::Room::whole`), else the list of their parts
+/// (`knowledge::index_block`; `tools`: the model may read more with the
+/// project's tools). Reads the files.
+pub fn block_for(p: &Project, room: knowledge::Room, tools: bool) -> String {
+    if knowledge::searched(p, room) {
+        return format!("{}{}", head(p), knowledge::index_block(p, tools, room.list()));
+    }
     let texts: Vec<(ProjectFile, Option<String>)> = p.files.iter().map(|f| (f.clone(), file_text(&p.id, &f.id))).collect();
-    Some(block_of(&p, &texts, knowledge_budget(context)))
+    block_of(p, &texts, room.whole())
+}
+
+/// **The project block for conversation `conv`'s system prompt**, sized
+/// to a model with `room` ([`block_for`]); `None` when it's in none. Reads
+/// the files' texts.
+pub fn prompt_block(conv: Option<u64>, room: knowledge::Room, tools: bool) -> Option<String> {
+    let p = of_conversation(conv)?;
+    Some(block_for(&p, room, tools))
 }
 
 /// **A new chat was made** (`turn_conversation`): it's in the project its
@@ -380,6 +410,25 @@ pub fn project_get(id: String) -> Result<Value, String> {
     })
 }
 
+/// **How Chat's model reads a project's files** (its page's line under
+/// Files): `{tokens, room, searched, model}` — their tokens, what may go
+/// whole to Chat's model now (`knowledge::Room::whole`), whether they're
+/// searched in parts, and the model's name. Chat's model not set up: its
+/// tokens alone.
+#[tauri::command]
+pub async fn project_knowledge(id: String) -> Result<Value, String> {
+    let p = of(&id).ok_or("That project isn't there any more.")?;
+    let tokens = knowledge::total(&p);
+    let cfg = crate::config::load();
+    let Ok((base_url, _, model, provider, _, _)) = crate::chat::turn::resolve_chat_endpoint(&cfg) else {
+        return Ok(json!({ "tokens": tokens, "room": Value::Null, "searched": false, "model": Value::Null }));
+    };
+    let (context, _) = crate::chat::budget::context_window(&cfg, &provider, &model, &base_url).await;
+    let room = knowledge::Room::new(context, crate::chat::budget::request_cap(&provider, &model));
+    let label = crate::chat::budget::model_label(&provider, &model, &crate::ai::local_llm::active_model_display(&cfg));
+    Ok(json!({ "tokens": tokens, "room": room.whole(), "searched": knowledge::searched(&p, room), "model": label }))
+}
+
 /// **A new project**: its name and what it's for.
 #[tauri::command]
 pub fn project_create(name: String, description: Option<String>) -> Result<Project, String> {
@@ -439,17 +488,19 @@ pub fn project_update(id: String, name: Option<String>, description: Option<Stri
 #[tauri::command]
 pub fn project_delete(id: String) -> Result<(), String> {
     let gone = with_store(|s| {
-        let before = s.projects.len();
+        let p = s.projects.iter().find(|p| p.id == id).cloned()?;
         s.projects.retain(|p| p.id != id);
-        if s.projects.len() == before {
-            return false;
-        }
         s.chats.retain(|_, v| *v != id);
         write(s);
-        true
+        Some(p)
     });
-    if gone && is_project_id(&id) {
+    if let (Some(p), true) = (gone, is_project_id(&id)) {
         let _ = std::fs::remove_dir_all(dir().join(&id));
+        // Its parts, and their meaning in the search index, go too.
+        for f in &p.files {
+            knowledge::forget(&f.id);
+        }
+        crate::search::removed();
         tracing::info!("Chat: a project deleted");
     }
     Ok(SAVER.check()?)
@@ -476,7 +527,8 @@ pub fn add_bytes(project: &str, name: &str, bytes: Vec<u8>) -> Result<ProjectFil
     }
     let size = bytes.len() as u64;
     let copy = bytes.clone();
-    let read = crate::chat::attachments::read(name, bytes)?;
+    // (A spreadsheet's cells up to [`SHEET_TOKENS`]: a big one is searched in parts.)
+    let read = crate::chat::attachments::sheet::with_most(SHEET_TOKENS, || crate::chat::attachments::read(name, bytes))?;
     let f = ProjectFile {
         id: new_file_id(),
         name: name.to_string(),
@@ -509,6 +561,9 @@ pub fn add_bytes(project: &str, name: &str, bytes: Vec<u8>) -> Result<ProjectFil
         return Err("That project isn't there any more.".to_string());
     }
     tracing::info!(kind = f.kind, bytes = f.bytes, tokens = f.tokens, "Chat: a file added to a project");
+    // A big project's parts are read by meaning in the background (search by
+    // meaning on: `search/index.rs`).
+    crate::search::changed();
     Ok(f)
 }
 
@@ -575,6 +630,8 @@ pub fn project_file_remove(id: String, file: String) -> Result<(), String> {
     });
     if had {
         remove_files(&id, std::slice::from_ref(&file));
+        knowledge::forget(&file);
+        crate::search::removed();
     }
     Ok(SAVER.check()?)
 }
@@ -636,7 +693,6 @@ mod tests {
         assert!(!b.contains("…"), "a file that doesn't fit is never cut into: {b}");
         // No instructions, no files: the name alone.
         assert_eq!(block_of(&Project { name: "Bare".into(), ..Default::default() }, &[], 100), "This chat is in the user's project \"Bare\".");
-        assert_eq!(knowledge_budget(200_000), 100_000);
     }
 
     #[test]
@@ -667,11 +723,12 @@ mod tests {
         project_file_remove(p.id.clone(), rules.id.clone()).unwrap();
         // A chat joins it; its block has the file; deleting the chat takes it out.
         chat_project_set(5, Some(p.id.clone())).unwrap();
-        let b = prompt_block(Some(5), 10_000).unwrap();
+        let room = knowledge::Room::new(10_000, None);
+        let b = prompt_block(Some(5), room, true).unwrap();
         assert!(b.contains("Use metric units.") && b.contains("Beans in May."), "{b}");
-        assert_eq!(prompt_block(Some(6), 10_000), None);
+        assert_eq!(prompt_block(Some(6), room, true), None);
         chats_deleted(&[5]);
-        assert_eq!(prompt_block(Some(5), 10_000), None);
+        assert_eq!(prompt_block(Some(5), room, true), None);
         // A file taken out goes from the disk too.
         project_file_remove(p.id.clone(), f.id.clone()).unwrap();
         assert_eq!(file_text(&p.id, &f.id), None);

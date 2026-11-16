@@ -535,6 +535,7 @@ pub fn run() {
             chat::styles::chat_style_write,
             chat::projects::projects_list,
             chat::projects::project_get,
+            chat::projects::project_knowledge,
             chat::projects::project_create,
             chat::projects::project_update,
             chat::projects::project_delete,

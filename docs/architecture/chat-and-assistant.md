@@ -1984,7 +1984,10 @@ one side.
   memory, gone when left ([below](#incognito-chats-2026-11-15)).
 - **`chat/projects.rs`** — **Projects** (15 Nov 2026): a named group of
   chats sharing instructions and files every chat in it gets; its page in
-  the thread's place ([below](#projects-2026-11-15)).
+  the thread's place ([below](#projects-2026-11-15)). A big one's files are
+  searched in parts (16 Nov 2026): `projects/parts.rs` cuts them,
+  `projects/knowledge.rs` decides, ranks, writes the blocks and runs its
+  tools ([below](#big-projects-searched-in-parts-2026-11-16)).
 - **`chat/styles.rs`** — **Styles** (15 Nov 2026): how a chat's answers are
   written (Normal, Concise, Explanatory, Formal, your own), picked from the
   composer's Style chip, a block in the system prompt
@@ -4556,8 +4559,10 @@ already takes (`chat/attachments.rs`, `views/chat/FileChip.svelte`,
   `pdf-extract` on lopdf, page by page under `[Page n]` lines, in its own
   thread so a panic or a 60-second read is "couldn't read", never a crash
   or a hang; never uploaded to be read), a **Word document's** text
-  (`word.rs`: the `.docx` zip's `word/document.xml`, a paragraph a line;
-  `.docm`/`.dotx` too), and since 16 Nov 2026:
+  (`word.rs`: the `.docx` zip's `word/document.xml`, a paragraph a line, a
+  heading after Markdown's `#`s since 16 Nov 2026 — its Heading 1–6 or Title
+  style, or outline level, by `word/styles.xml`, whose built-in names stay
+  English in any Word; `.docm`/`.dotx` too), and since 16 Nov 2026:
   - **A PDF's scanned pages, read with OCR** (`scan.rs`): a page with no
     text is drawn by Windows' own PDF renderer (`Windows.Data.Pdf`, from an
     in-memory stream: never written anywhere) as big as the OCR engine
@@ -4737,7 +4742,8 @@ the page: `views/chat/SheetTab.svelte` + `sheetView.js`.
 - **Sized to the model**: the text is cut to the room the model has left
   for the question (the page's `limits.questionMax` less what's in the box,
   sent as `chat_files_add`'s `budget`; between 1,500 and 40,000 tokens; a
-  project's file 40,000), shared between the sheets — the small ones whole,
+  project's file 250,000 since 16 Nov 2026, `sheet::with_most`: a big one is
+  searched in parts), shared between the sheets — the small ones whole,
   the rest evenly — a cut sheet keeping its first rows and its last three
   (its totals), with a plain note: "(Rows 202–19,998 aren't here: 19,797
   rows left out to fit the model; the sheet's last rows follow. Ask for a
@@ -6695,14 +6701,16 @@ never an incognito chat.
 - **In the prompt** (`prompt::chat_blocks`, before the chat's style, just
   before About you): "This chat is in the user's project "…". It's for: …",
   its instructions in `<project_instructions>`, and its files' text in a
-  `<documents>` block as attachments go — stable from turn to turn. **Sized
-  to the model** (`knowledge_budget`: half its context): files that don't
-  fit are named ("didn't fit in this model's memory: …"), never cut; a file
-  gone from the disk is a line. The fixed part a question must fit beside
-  counts it (`fit::Parts::texts`, with the model's context), so a chat in a
-  big project leaves out older messages as it must. On your Claude plan the
-  session's prompt has it; the small web pipeline's too. **Asked out loud**
-  (16 Nov 2026) with a project's page or its new chat in view, the Voice
+  `<documents>` block as attachments go — stable from turn to turn. **Whole
+  while the files fit** in half of one request to the chat's model
+  (`knowledge::Room::whole`: `budget::budget`'s request, its context less the
+  answer's room, within a plan's tokens a minute and a model's cheaper
+  rate); **else searched in parts** ([below](#big-projects-searched-in-parts-2026-11-16)).
+  A file gone from the disk is a line. The fixed part a question must fit
+  beside counts the block (`fit::Parts::texts`, with the model's room), so a
+  chat in a big project leaves out older messages as it must. On your Claude
+  plan the session's prompt has it; the small web pipeline's too. **Asked out
+  loud** (16 Nov 2026) with a project's page or its new chat in view, the Voice
   Assistant's new chat is in it too (`assistant::new_in_project`; the page
   reports it in `chat_view_state`'s `project`, and gives way to the chat).
 - **Kept** in `projects.json` ([config-and-data.md](./config-and-data.md)),
@@ -6712,8 +6720,99 @@ never an incognito chat.
 - Tests: `cargo test chat::projects`; `chat-projects.spec.js` (a project
   made, its instructions saved, a Markdown file read and a broken spreadsheet
   refused (a whole one is read: `chat-sheets.spec.js`), a new chat in it carrying its block, another chat moved in from
-  its ⋯, its page listing both, deleted with its chats kept; asked out loud on its page and in its new chat; light and
-  dark).
+  its ⋯, its page listing both, deleted with its chats kept; asked out loud on its page and in its new
+  chat; a big project searched in parts; light and dark).
+
+### Big projects, searched in parts (2026-11-16)
+
+The Claude app's project knowledge, from Anthropic's help pages: once a
+project's files come near what the model can read, it searches them and
+reads only what a question needs. Yap does the same
+(`chat/projects/knowledge.rs`, `chat/projects/parts.rs`):
+
+- **Small projects still go whole**, byte for byte as before. **A project
+  goes in parts** when its files' tokens are over half of one request to
+  the chat's model (`knowledge::searched`; an 8K model's half is about
+  3.5K, a 200K Claude's about 96K). Decided per turn, by the model asked:
+  the same project goes whole to Claude and in parts to the on-device 4B.
+- **The parts** (`parts::split`, pure): about 700 tokens each (at most
+  1,100; a smaller section goes on into the next), from the text the
+  attachments' readers made, by its kind — a PDF by its `[Page n]` lines
+  (a scanned page's OCR'd text too; a long page goes on as "[Page n,
+  continued]"), a presentation by its slides, a spreadsheet by its sheets'
+  rows (each part starting with the sheet's line and the table's head, so
+  "C7" still reads; its formulas a part of their own), Markdown by its
+  headings (never inside a code fence), a Word document by its paragraphs
+  (its heading styles now come through as `#`, `word.rs`), code by blank
+  lines. Each part knows **where it is**: "pages 12–13", "slides 3–5",
+  "sheet "Orders", rows 2–180", "lines 40–120", and the section it's in
+  (a heading's path, "Leave › Annual leave"; in a PDF or an older `.doc`, a
+  line that looks like a heading, never a running head or footer). A
+  project's spreadsheet is read up to 250,000 tokens (a question's is cut
+  to 40,000: `sheet::with_most`). The parts are made once a file (its text
+  never changes), kept in memory for 64 files.
+- **The system prompt** (stable from turn to turn: the model's cache)
+  says the files are too long to send whole, lists them with their parts
+  (`<project_files>`: "- staff-handbook.pdf (a PDF, 60 pages: …): 40 parts:
+  1 pages 1–2, "Welcome"; 2 …"; past 1,500 tokens, each file's count and
+  range), and how to cite ("(staff-handbook.pdf, page 12)"). A model with
+  tools is told to read what it wasn't given rather than guess.
+- **Each question** gets the parts that match it in its own context
+  (`Prompt::project_parts`): "From the project's files, the parts that
+  match this question:" and a `<documents>` block, each part's `<source>`
+  its file's (`attachments::source`) then "part 12 of 40, pages 23–24,
+  "4.1 Annual leave"". At most a tenth of a request (1,000 to 16,000
+  tokens, `Room::parts`), 12 parts, and two thirds of the room the turn has
+  left beside its system prompt, context, tools and question (the budget),
+  so the history keeps some. A follow-up of two words or fewer ("and sick
+  pay?") is searched with the question before it too. Nothing matching is
+  said ("no part matches this question's words"). On your Claude plan they
+  go with the question as the context does.
+- **Ranking** (`knowledge::rank`): the meetings' hybrid ranking
+  (`search/rank.rs`): BM25 over each part's words, its file's name and
+  section as its title, and — **only when search by meaning is on and its
+  model is on this PC** — each part's meaning: the search index's
+  background pass reads a big project's parts too (`index.rs` `Library`'s
+  `projects`, keyed as passages are; never in a dictation's way), and a
+  question waits for its own vector at most 1.5 s (`MEMORY_WAIT`), never
+  for a download. Without it, keywords alone. A part under 30% of the
+  best one's score isn't sent. A deleted file's or project's vectors are
+  dropped (`search::removed`).
+- **The model reads more**: `read_project_file` (a file by its name —
+  any case, a few letters off — and a part by its number; its result has
+  the part, its source and the next part's place) and
+  `search_project_files` (words across the files, or one file: the four
+  best parts). Read only, offered while the chat's project is searched
+  (`Gates::project_files`, set where the turn is measured:
+  `Gates::with_project`; never shed by `fit.rs`), in the tool loop and over
+  your Claude plan's run endpoint (`RunSpec::with_projects`,
+  `claude_live/rpc.rs`; the prompt and question name them
+  `mcp__yap__read_project_file`, `knowledge::claude_code_names`).
+- **The chat says which parts were used**: a chip each, first under the
+  answer ("Used from the project: staff-handbook.pdf, pages 23–24"), the
+  tools' too ("Read from the project: …", "Searched the project's files:
+  "…""), folded into the steps line ("Used 2 parts of the project's files,
+  read another part": `chatSteps.js`). The page sends them at once
+  (`Event::Chips`); the tool loop starts with them (`Extra::project_chips`),
+  the plan's stream too (`ToChat::lead`), and the answer keeps them
+  (`finish.rs` `with_first`).
+- **A side question** (Ctrl+;, no tools): the list of parts and the parts
+  that match the side question (`knowledge::for_side`).
+- **The project's page** says how Chat's model reads the files, under them
+  (`project_knowledge`, `projectLines.js` `knowledgeLine`): "About 130K
+  tokens: too much to send Claude Opus 5.5 whole with every question, so
+  each question gets the parts of these files that match it", or "…: every chat here reads them
+  whole".
+- **Privacy**: the log has counts, tokens and parts, never names or words.
+- **Not done**: a part's meaning is read only with search by meaning on
+  (keywords otherwise); a project's parts aren't cited as numbered sources
+  with a pill that opens the file at the page (the answer names them in its
+  words); parts aren't re-split for a model's size (one size for all).
+- Tests: `cargo test chat::projects` (`parts.rs`: every reader's parts and
+  places, sections, running heads, sizes; `knowledge.rs`: whole or in parts
+  by the model's room, the ranking by words and by meaning, follow-ups, the
+  room, the blocks, the tools); `claude_live` (the plan's run lists and runs
+  them); `word.rs` (heading styles); `chat-projects.spec.js`.
 
 ## Auto-archive (2026-11-15)
 

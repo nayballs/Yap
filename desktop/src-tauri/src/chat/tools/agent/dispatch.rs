@@ -38,6 +38,9 @@ pub(super) enum Source {
     Chats,
     /// `search_notes`: Ask across meetings' search.
     NotesSearch,
+    /// `read_project_file`, `search_project_files`: a big project's files
+    /// (`chat/projects/knowledge.rs`).
+    Project,
     /// `check_calendar` (`tools/calendar.rs`).
     Calendar,
     /// `open_app`, `list_apps` (`apps.rs`).
@@ -80,6 +83,8 @@ impl Source {
             Source::Chats
         } else if name == "search_notes" {
             Source::NotesSearch
+        } else if extra.project && crate::chat::projects::knowledge::NAMES.contains(&name) {
+            Source::Project
         } else if extra.calendar.is_some() && name == crate::chat::tools::calendar::NAME {
             Source::Calendar
         } else if open_apps && crate::apps::TOOL_NAMES.contains(&name) {
@@ -290,6 +295,8 @@ impl Loop<'_> {
             Source::Chats => search_chats(&args, self.extra.conversation).await,
             // Ask across meetings' search: passages, by meaning too.
             Source::NotesSearch => crate::chat::tools::notes::search_notes_tool(&args).await,
+            // A big project's files: a part by its number, or a search.
+            Source::Project => crate::chat::projects::knowledge::execute(name, &args, self.extra.conversation).await,
             Source::Calendar => {
                 // (Named only while the calendar's offered, `Source::of`.)
                 let Some(cal) = self.extra.calendar else { return execute(name, &args) };
@@ -388,6 +395,11 @@ mod tests {
         assert_eq!(Source::of("search_notes", false, &none, false, false), Source::NotesSearch);
         assert_eq!(Source::of("edit_note", true, &memory, false, true), Source::Notes);
         assert_eq!(Source::of("create_document", true, &memory, false, true), Source::Notes);
+        // A big project's tools while it's searched in parts.
+        let project = Extra { project: true, ..Default::default() };
+        assert_eq!(Source::of("read_project_file", false, &project, false, false), Source::Project);
+        assert_eq!(Source::of("search_project_files", true, &project, false, false), Source::Project);
+        assert_eq!(Source::of("read_project_file", false, &none, false, false), Source::Notes);
         // Apps while they're offered.
         assert_eq!(Source::of("open_app", false, &none, false, true), Source::Apps);
         assert_eq!(Source::of("open_app", false, &none, false, false), Source::Notes);

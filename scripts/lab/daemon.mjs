@@ -715,6 +715,17 @@ async function newChatInProject(project) {
   let p = ((await invoke('projects_list')) || []).find((x) => x.name === name);
   if (!p) p = await invoke('project_create', { name, description: null });
   if (project.instructions) await invoke('project_update', { id: p.id, instructions: String(project.instructions) });
+  // Its files (`--project-files`), each added once (by its name), as its page's Add files… adds them.
+  if (project.files?.length) {
+    const paths = project.files.map((f) => path.resolve(String(f)));
+    for (const f of paths) if (!fs.existsSync(f)) throw new Error(`No file at ${f}`);
+    const have = new Set(((await invoke('project_get', { id: p.id }))?.project?.files || []).map((f) => f.name));
+    const add = paths.filter((f) => !have.has(path.basename(f)));
+    if (add.length) {
+      const out = await invoke('project_files_add', { id: p.id, paths: add });
+      if (out?.skipped?.length) throw new Error(`Yap didn't add ${out.skipped.map((s) => `${s.name} (${s.why})`).join(', ')}`);
+    }
+  }
   const m = main();
   await m.getByRole('button', { name: 'Projects', exact: true }).click({ timeout: 10_000 });
   await m.getByTestId('chat-projects').getByRole('button', { name }).first().click({ timeout: 10_000 });
@@ -723,6 +734,12 @@ async function newChatInProject(project) {
     return;
   }
   await m.getByRole('button', { name: `New chat in ${name}` }).click({ timeout: 10_000 });
+}
+
+/** `--project-files a,b` (or a script step's list): the paths, or null. */
+function projectFiles(v) {
+  if (Array.isArray(v)) return v.map(String).filter(Boolean);
+  return typeof v === 'string' && v.trim() ? v.split(',').map((s) => s.trim()).filter(Boolean) : null;
 }
 
 /** Style under the message box (chat/styles.rs): the one named `name` (any case), as the person picks it. */
@@ -1819,7 +1836,7 @@ const COMMANDS = {
     const text = how === 'retry' ? String(a.text ?? '').trim() || 'Retry' : a.text;
     // `--retry --feedback long,untrue [--note "…"]`: 👎 with those reasons (and a line), then its card's Retry with this note.
     const feedback = how === 'retry' && (a.feedback || a.note) ? feedbackOf(a.feedback, a.note) : null;
-    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', away: !!a.away && !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, research: !!a.research && how === 'ask', project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null, page: !!a['project-page'] } : null, feedback, ...shotsFor(a) });
+    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', away: !!a.away && !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, research: !!a.research && how === 'ask', project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null, files: projectFiles(a['project-files']), page: !!a['project-page'] } : null, feedback, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
   wait: async (a) => {

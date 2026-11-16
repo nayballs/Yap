@@ -524,6 +524,9 @@ pub fn yap_chip(name: &str, input: &Value) -> String {
         "list_folders" => "Looked at your folders".into(),
         "search_memory" => format!("Searched Yap's memory: \"{}\"", q("query")),
         "check_calendar" => "Checked your calendar".into(),
+        // A big project's files (chat/projects/knowledge.rs): its own result says which part.
+        "read_project_file" => format!("Read from the project: {}", q("file")),
+        "search_project_files" => format!("Searched the project's files: \u{201c}{}\u{201d}", q("query")),
         other => format!("Used {other}"),
     }
 }

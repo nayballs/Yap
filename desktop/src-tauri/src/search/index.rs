@@ -169,11 +169,14 @@ fn prepared_in<T>(
     out
 }
 
-/// Every chat, its memory and its notes' passages, as the index reads them.
+/// Every chat, its memory and its notes' passages, as the index reads them
+/// — and a big project's files' parts (chat/projects/knowledge.rs: their
+/// keys and what the model reads of them; searched there, never here).
 pub struct Library {
     pub notes: Vec<Arc<Vec<Prepared>>>,
     pub chats: Vec<Arc<Vec<Prepared>>>,
     pub memory: Vec<Arc<Vec<Prepared>>>,
+    pub projects: Vec<(Key, String)>,
     /// Each item, by kind and id (for the sweep).
     pub ids: Vec<(Kind, u64)>,
 }
@@ -187,12 +190,18 @@ impl Library {
         let memory = prepared_memory(&items);
         ids.extend(chat_ids);
         ids.extend(items.iter().map(|i| (Kind::Memory, i.id)));
-        Library { notes, chats, memory, ids }
+        let projects = crate::chat::projects::knowledge::passages();
+        Library { notes, chats, memory, projects, ids }
     }
 
     /// Every passage: the notes', then memory's, then the chats'.
     pub fn passages(&self) -> impl Iterator<Item = &Prepared> {
         self.notes.iter().chain(&self.memory).chain(&self.chats).flat_map(|v| v.iter())
+    }
+
+    /// Every key the index keeps: the passages', then the projects' parts'.
+    fn keys(&self) -> HashSet<Key> {
+        self.passages().map(|p| p.key).chain(self.projects.iter().map(|(k, _)| *k)).collect()
     }
 
     /// The items with at least one passage, of each kind: (notes, chats, memory).
@@ -244,7 +253,7 @@ fn sweep(library: &Library) {
     if crate::notes::unread() || crate::chat::chats::unread() || crate::memory::unread() {
         return;
     }
-    let keep: HashSet<Key> = library.passages().map(|p| p.key).collect();
+    let keep: HashSet<Key> = library.keys();
     let dead = with_store(|s| s.dead_share(&keep));
     if dead > 0.0 {
         match with_store(|s| s.compact(&keep)) {
@@ -542,10 +551,11 @@ async fn pass(app: &AppHandle) -> Result<bool, String> {
         }
     }
     let library = Library::now();
-    let all: Vec<&Prepared> = library.passages().collect();
-    let keep: HashSet<Key> = all.iter().map(|p| p.key).collect();
+    // (A project's parts read after the library's own passages.)
+    let all: Vec<(Key, &str)> = library.passages().map(|p| (p.key, p.embedded.as_str())).chain(library.projects.iter().map(|(k, t)| (*k, t.as_str()))).collect();
+    let keep: HashSet<Key> = all.iter().map(|(k, _)| *k).collect();
     let mut queued = HashSet::new();
-    let missing: Vec<&Prepared> = with_store(|s| all.iter().copied().filter(|p| !s.has(&p.key) && queued.insert(p.key)).collect());
+    let missing: Vec<(Key, &str)> = with_store(|s| all.iter().copied().filter(|(k, _)| !s.has(k) && queued.insert(*k)).collect());
     let total = keep.len();
     let counts = counts_of(&library);
     set_counts(total, total - missing.len(), Some(counts));
@@ -571,13 +581,13 @@ async fn pass(app: &AppHandle) -> Result<bool, String> {
             }
             let size = if embedder::runs_on() == Some("gpu") { BATCH_GPU } else { BATCH_CPU };
             let group = &missing[i..(i + size).min(missing.len())];
-            let texts: Vec<String> = group.iter().map(|p| p.embedded.clone()).collect();
+            let texts: Vec<String> = group.iter().map(|(_, t)| t.to_string()).collect();
             // A dictation starting drops the batch (read again after it).
             let Some(result) = crate::meetings::summary::unless_busy(embedder::embed(&texts), || busy(app)).await else {
                 continue;
             };
             let vectors = result?;
-            let items: Vec<(Key, Vec<f32>)> = group.iter().map(|p| p.key).zip(vectors).collect();
+            let items: Vec<(Key, Vec<f32>)> = group.iter().map(|(k, _)| *k).zip(vectors).collect();
             with_store(|s| s.add(&items)).map_err(|e| format!("couldn't save the search index: {e}"))?;
             done += group.len();
             i += group.len();

@@ -335,11 +335,14 @@ struct ToChat<'a> {
     /// The turn's pages so far (each search's, each read's).
     sources: Vec<crate::chat::chats::Source>,
     marks: Option<crate::integrations::claude_live::turn::Marks>,
+    /// The chips that come first (a big project's parts sent with the
+    /// question, chat/projects/knowledge.rs).
+    lead: Vec<String>,
 }
 
 impl<'a> ToChat<'a> {
-    fn new(sink: Option<&'a dyn Sink>, marks: Option<crate::integrations::claude_live::turn::Marks>) -> ToChat<'a> {
-        ToChat { step: sink.map(|s| Step::new(s, true)), sink, cites: map::Cites::default(), sources: Vec::new(), marks }
+    fn new(sink: Option<&'a dyn Sink>, marks: Option<crate::integrations::claude_live::turn::Marks>, lead: Vec<String>) -> ToChat<'a> {
+        ToChat { step: sink.map(|s| Step::new(s, true)), sink, cites: map::Cites::default(), sources: Vec::new(), marks, lead }
     }
 
     /// What one of Yap's tools showed for the turn (a card, an agent's tab),
@@ -412,7 +415,8 @@ impl map::Out for ToChat<'_> {
             m.found(sources);
         }
         if let Some(sink) = self.sink {
-            sink.send(crate::chat::stream::Event::Chips { chips: chips.to_vec(), sources: sources.to_vec(), web });
+            let all: Vec<String> = self.lead.iter().cloned().chain(chips.iter().filter(|c| !self.lead.contains(c)).cloned()).collect();
+            sink.send(crate::chat::stream::Event::Chips { chips: all, sources: sources.to_vec(), web });
         }
     }
 }
@@ -468,10 +472,11 @@ fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude
         s.push_str(&cards_lines(cards));
     }
     // This chat's own blocks: its project and its style (chat/projects.rs,
-    // chat/styles.rs), as Chat's own prompt has them.
+    // chat/styles.rs), as Chat's own prompt has them (a big project's tools by
+    // Claude Code's names).
     if !built.chat_blocks.is_empty() {
         s.push_str("\n\n");
-        s.push_str(&built.chat_blocks);
+        s.push_str(&crate::chat::projects::knowledge::claude_code_names(&built.chat_blocks));
     }
     s.push_str("\n\n");
     s.push_str(crate::chat::chats::CONTEXT_NOTE);
@@ -646,6 +651,8 @@ fn start(
     eyes: crate::integrations::claude_live::eyes::Eyes,
     connectors: Option<crate::integrations::claude_live::connectors::Listed>,
     cards: crate::chat::cards::Cards,
+    // A big project's tools (chat/projects/knowledge.rs): its files searched in parts.
+    projects: bool,
     code: Option<&std::path::Path>,
     print: u64,
     resume: Option<&str>,
@@ -655,7 +662,7 @@ fn start(
     incognito: bool,
 ) -> Result<(Arc<sessions::Warm>, bool), String> {
     use crate::integrations::claude_live::{register_run, RunSpec, Tools};
-    let run = register_run(RunSpec::new("Chat", Tools::Chat).with_agents(agents).with_memory(code.is_none() && !incognito).with_eyes(eyes).with_connectors(connectors).with_cards(cards))?;
+    let run = register_run(RunSpec::new("Chat", Tools::Chat).with_agents(agents).with_memory(code.is_none() && !incognito).with_eyes(eyes).with_connectors(connectors).with_cards(cards).with_projects(projects && code.is_none()))?;
     let conversation = match resume {
         Some(id) => Conversation::Resume(id.to_string()),
         None => Conversation::fresh(),
@@ -878,7 +885,8 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
     // The question, its context (a question asked away from Chat told it
     // has no screen or panel) and its screenshots.
     let mut context = across_lines(t.meetings, t.skill.as_ref());
-    context.extend(built.prompt.context.iter().cloned());
+    // (A big project's tools by Claude Code's names.)
+    context.extend(built.prompt.context.iter().map(|c| crate::chat::projects::knowledge::claude_code_names(c)));
     if research.is_none() {
         context.extend(away_line(eyes, this_turn, t.gates.screen_takes).map(str::to_string));
     }
@@ -919,7 +927,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
                     (Some(_), None) => None,
                     (None, _) => Some(0.0),
                 };
-                start(conv.id, &model, effort, &system, web, agents, eyes, connectors.clone(), cards, workspace.as_deref(), print, resume.as_deref(), total_before, built.incognito)?
+                start(conv.id, &model, effort, &system, web, agents, eyes, connectors.clone(), cards, t.gates.project_files, workspace.as_deref(), print, resume.as_deref(), total_before, built.incognito)?
             }
         };
         // One turn at a time on it: a turn still answering (stopped, or
@@ -968,7 +976,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
             Some(q) => Some(q),
             None => watch.map(|w| w as &dyn Sink),
         };
-        let mut out = ToChat::new(sink, run_turn.as_ref().map(|r| r.marks()));
+        let mut out = ToChat::new(sink, run_turn.as_ref().map(|r| r.marks()), built.project_chips.clone());
         let mut ended = read_turn(&mut rx, &mut mapper, &mut out, t.stop, run_turn.as_mut().map(|r| &mut r.events), research).await;
         // A research past a cap: its turn stopped, its usage counted, and the
         // report asked for on the same session (no cap: it may only write).
@@ -1299,7 +1307,7 @@ mod tests {
         let turn = slot_turn(&slot);
         let n = turn.number();
         // No watcher (an evaluation): the run still hears.
-        let mut out = ToChat::new(None, Some(turn.marks()));
+        let mut out = ToChat::new(None, Some(turn.marks()), Vec::new());
         let mut mapper = Mapper::new();
         let feed = |m: &mut Mapper, out: &mut ToChat<'_>, l: &str| {
             m.feed(&parse_line(l).unwrap(), out);

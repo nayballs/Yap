@@ -18,18 +18,23 @@ const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meeti
 const DOC_CHIP =
   /^(Started "|Wrote the report “|(Re)?[Ww]rote (\d+ sections|"[^"]*") in "|Added "[^"]*" to "|Didn't (re)?write "|"[^"]*" is already written in "|Couldn't (start a document|rewrite a section)|Read (the document|what changed in) "|Changed (a table in|a part of) "|Added to "|Took a part out of "|Moved a part of "|Made \d+ changes in "|Didn't (change|restore) "|Couldn't (change|restore) ("|a document)|Looked at the history of "|Restored version \d+ of "|"[^"]*" is already as version )/;
 
+// A big project's files (chat/projects/knowledge.rs): a document's mark, never the web's.
+const PROJECT_CHIP = /^((Used|Read) from the project: |Searched the project's files)/;
+
 /** A chip's mark: 'guard' | 'web' | 'calendar' | 'doc' | 'tool'. */
 export const chipKind = (t) =>
   // (What Yap never does on a page, and a click the person said no to, too.)
   /: (not after reading the web|not after a connector's result|Yap never types .+|sign in yourself in the panel|you said no|no answer in time|couldn't ask you|it needs your OK in Chat)$/.test(t)
     ? 'guard'
-    : WEB_CHIP.test(t)
-      ? 'web'
-      : CALENDAR_CHIP.test(t)
-        ? 'calendar'
-        : DOC_CHIP.test(t)
-          ? 'doc'
-          : 'tool';
+    : PROJECT_CHIP.test(t)
+      ? 'doc'
+      : WEB_CHIP.test(t)
+        ? 'web'
+        : CALENDAR_CHIP.test(t)
+          ? 'calendar'
+          : DOC_CHIP.test(t)
+            ? 'doc'
+            : 'tool';
 
 const n1 = (n, one, many) => (n === 1 ? one : many.replace('{n}', String(n)));
 const times = (n, what) => (n === 1 ? what : `${what} ${n} times`);
@@ -38,6 +43,11 @@ const times = (n, what) => (n === 1 ? what : `${what} ${n} times`);
 // The first that matches wins; a step that didn't go through ("Couldn't…",
 // "Didn't…", the safety rule) is counted apart.
 const STEPS = [
+  // A big project's files (chat/projects/knowledge.rs): the parts sent with
+  // the question, those the model read, its searches.
+  [/^Used from the project: /, 'projectUsed'],
+  [/^Read from the project: /, 'projectRead'],
+  [/^Searched the project's files/, 'projectSearched'],
   // Yap's free web sources don't cover it (web/sources.rs): nothing was
   // searched, by design — not a step that failed.
   [/^Didn't search the web for "/, 'notSearched'],
@@ -102,6 +112,9 @@ const STEPS = [
 ];
 
 const SAY = {
+  projectUsed: (n) => n1(n, "used a part of the project's files", "used {n} parts of the project's files"),
+  projectRead: (n) => n1(n, 'read another part', 'read {n} more parts'),
+  projectSearched: (n) => times(n, "searched the project's files"),
   web: (n) => times(n, 'searched the web'),
   research: () => 'researched it',
   researchCap: () => 'stopped at the research limit',

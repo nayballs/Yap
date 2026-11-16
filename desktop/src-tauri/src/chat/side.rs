@@ -259,7 +259,10 @@ async fn ask(app: Option<&AppHandle>, conversation_id: u64, question: &str, sink
     let chat_blocks = if folder.is_some() {
         String::new()
     } else {
-        let project = if conv.incognito { None } else { crate::chat::projects::prompt_block(Some(conv.id), context) };
+        // (A big project's: its list of parts, and those that match the side
+        // question — it has no tools to read more: chat/projects/knowledge.rs.)
+        let room = crate::chat::projects::knowledge::Room::new(context, budget::request_cap(&provider, &model));
+        let project = if conv.incognito { None } else { crate::chat::projects::knowledge::for_side(conv.id, question, room).await };
         [project, crate::chat::styles::prompt_block(Some(conv.id))].into_iter().flatten().collect::<Vec<_>>().join("\n\n")
     };
     let parts = Parts { persona: &persona, about: &about, memory_you: &memory_you, chat_blocks: &chat_blocks, code: folder.as_ref().map(|f| f.name.as_str()), answering: &answering };

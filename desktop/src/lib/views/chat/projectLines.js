@@ -3,7 +3,7 @@
 
 import { ocrLine } from './chatFiles.js';
 
-const KINDS = { pdf: 'PDF', word: 'Word', powerpoint: 'PowerPoint', markdown: 'Markdown', code: 'Code', text: 'Text' };
+const KINDS = { pdf: 'PDF', word: 'Word', powerpoint: 'PowerPoint', sheet: 'Spreadsheet', markdown: 'Markdown', code: 'Code', text: 'Text' };
 
 /** "PDF", "Markdown"… for a project file's `kind`; a scanned PDF's "PDF, 2 pages read with OCR". */
 export function kindLabel(f) {
@@ -19,6 +19,21 @@ export function sizeLabel(f) {
   const t = Number(f?.tokens) || 0;
   const tokens = t >= 1000 ? `about ${Math.round(t / 1000)}K tokens` : `${t} tokens`;
   return `${size} · ${tokens}`;
+}
+
+/**
+ * **How Chat's model reads the files** (`project_knowledge`, chat/projects/knowledge.rs):
+ * whole while they fit, else the parts that match each question. '' with no files.
+ */
+export function knowledgeLine(k, files) {
+  if (!files || !k) return '';
+  const t = Number(k.tokens) || 0;
+  const about = t >= 1000 ? `About ${Math.round(t / 1000)}K tokens` : `About ${t} tokens`;
+  if (k.searched) {
+    const model = k.model || "Chat's model";
+    return `${about}: too much to send ${model} whole with every question, so each question gets the parts of these files that match it.`;
+  }
+  return `${about}: every chat here reads them whole.`;
 }
 
 /** "Today", "Yesterday", "3 days ago", "12 Oct" for a time in milliseconds. */

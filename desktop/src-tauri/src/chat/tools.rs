@@ -326,6 +326,13 @@ pub struct Extra<'a> {
     /// widget shown in the answer itself — a strong model, with a thread to
     /// show it in (`made::offered`).
     pub visuals: bool,
+    /// **A big project's tools** (`chat/projects/knowledge.rs`):
+    /// `read_project_file` and `search_project_files`, while the chat's
+    /// project is searched in parts ([`Extra::conversation`]'s).
+    pub project: bool,
+    /// The chips of the project's parts sent with the question: the tool
+    /// loop's chips start with them.
+    pub project_chips: &'a [String],
     /// **A research turn** (chat/research.rs): its caps and clock. Only the
     /// web's tools and the notes' reads run (`research::allows`), Yap's
     /// `read_page` beside a provider's own search too (the report cites

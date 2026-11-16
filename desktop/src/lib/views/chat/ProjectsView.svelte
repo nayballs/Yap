@@ -12,7 +12,7 @@
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { toast } from '../../ui/toast.svelte.js';
-  import { kindLabel, sizeLabel, whenLabel } from './projectLines.js';
+  import { kindLabel, knowledgeLine, sizeLabel, whenLabel } from './projectLines.js';
 
   let { chat } = $props();
 
@@ -29,6 +29,8 @@
   let deleteOpen = $state(false);
   let deleting = $state(false);
   let headEl = $state(null);
+  // How Chat's model reads the files: whole, or the parts that match each question.
+  let knowledge = $state(null);
 
   const projectId = $derived(typeof chat.page === 'object' && chat.page ? chat.page.project : null);
   const chatsHere = $derived(current ? chat.conversations.filter((c) => current.chats.includes(c.id)) : []);
@@ -45,6 +47,12 @@
       current = await invoke('project_get', { id });
       instructions = current.project.instructions || '';
       instructionsSaved = true;
+      knowledge = null;
+      invoke('project_knowledge', { id })
+        .then((k) => {
+          if (current?.project?.id === id) knowledge = k;
+        })
+        .catch(() => {});
     } catch (e) {
       toast({ title: "Couldn't open the project", description: String(e), variant: 'destructive' });
       chat.openProjects();
@@ -259,8 +267,9 @@
               </li>
             {/each}
           </ul>
+          {#if knowledgeLine(knowledge, p.files.length)}<p class="reads" data-testid="project-knowledge">{knowledgeLine(knowledge, p.files.length)}</p>{/if}
         {:else}
-          <p class="none">Text, Markdown, code, PDFs (scans too), Word documents and PowerPoint presentations: every chat here reads them.</p>
+          <p class="none">Text, Markdown, code, PDFs (scans too), Word documents, PowerPoint presentations and spreadsheets: every chat here reads them.</p>
         {/if}
       </aside>
     </div>
@@ -476,6 +485,13 @@
     min-height: 16px;
     margin: 4px 0 0;
     font-size: 11.5px;
+    color: var(--yap-muted);
+  }
+  /* How Chat's model reads the files (whole, or the parts that match each question). */
+  .reads {
+    margin: 8px 0 0;
+    font-size: 12px;
+    line-height: 17px;
     color: var(--yap-muted);
   }
   .fhead {

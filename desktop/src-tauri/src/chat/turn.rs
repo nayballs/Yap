@@ -762,6 +762,14 @@ pub(crate) struct FixedParts {
     pub question_max: u64,
 }
 
+/// **The room a project's files are sized to** for `provider`'s `model` of
+/// `context` tokens (chat/projects/knowledge.rs): its context, each request
+/// held to its plan's tokens a minute and its cheaper rate
+/// (`budget::request_cap`), as the history is.
+pub(super) fn knowledge_room(context: u64, provider: &str, model: &str) -> crate::chat::projects::knowledge::Room {
+    crate::chat::projects::knowledge::Room::new(context, crate::chat::budget::request_cap(provider, model))
+}
+
 /// [`FixedParts`] for a question typed in Chat to `ep`'s model of `context`
 /// tokens (`known`: it said so) in `conversation` (a Code chat's: no
 /// memory, its agents kept), each request held to `cap`.
@@ -770,9 +778,12 @@ async fn fixed_parts(cfg: &YapConfig, ep: &Endpoint, conversation: Option<u64>, 
     let code = crate::agents::code_chat::folder_of(conversation).is_some();
     // A Code chat's picture files without the web (pictures/local.rs).
     gates.files = gates.files_gate(ep, None, false, true, code);
+    // A big project's files, searched in parts: as a turn measures them.
+    let knowledge = knowledge_room(context, &ep.provider, &ep.model);
+    let gates = gates.with_project(conversation, knowledge, code);
     let profile = crate::ai::about_you::profile(cfg);
     let connectors = gates.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, None, context, conversation)).flatten();
-    let parts = fit::Parts { persona: &ep.persona, profile: &profile, now: crate::ai::eval::now(), code, connectors: connectors.as_ref(), conversation, context };
+    let parts = fit::Parts { persona: &ep.persona, profile: &profile, now: crate::ai::eval::now(), code, connectors: connectors.as_ref(), conversation, knowledge };
     let room = fit::Room { context, known, kind: crate::chat::budget::Kind::Chat, tools: gates.tools, cap };
     let keep = || fit::keeps("", None, code, &[]);
     let fixed = fit::fit(gates, &parts, counter, room, 0, keep).await.fixed();

@@ -193,11 +193,23 @@ pub struct RunSpec {
     /// that [`RunSpec::reads`]) has the box and chapters too
     /// (`Cards::for_code_session`, 15 Nov 2026); never an agent Chat sent out.
     pub cards: crate::chat::cards::Cards,
+    /// **A big project's tools** (`chat/projects/knowledge.rs`, 16 Nov 2026):
+    /// `read_project_file` and `search_project_files`, for a plan chat whose
+    /// project's files are searched in parts. Listed for the whole session
+    /// (its system prompt, in the fingerprint, says so); each call reads the
+    /// project of the turn's conversation. Never an agent's run.
+    pub projects: bool,
 }
 
 impl RunSpec {
     pub fn new(label: impl Into<String>, tools: Tools) -> RunSpec {
-        RunSpec { label: label.into(), tools, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), connectors: None, reads: false, cards: crate::chat::cards::Cards::default() }
+        RunSpec { label: label.into(), tools, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), connectors: None, reads: false, cards: crate::chat::cards::Cards::default(), projects: false }
+    }
+
+    /// The same, with a big project's tools (`on`).
+    pub fn with_projects(mut self, on: bool) -> RunSpec {
+        self.projects = on;
+        self
     }
 
     /// The same, with the cards in the thread a Chat run's turns may use.
@@ -253,6 +265,8 @@ pub struct RunHandle {
     servers: bool,
     /// The cards in the thread ([`RunSpec::cards`], a Chat run's).
     cards: crate::chat::cards::Cards,
+    /// A big project's tools ([`RunSpec::projects`], a Chat run's).
+    projects: bool,
     /// The chat turn its calls belong to ([`RunHandle::begin_turn`]).
     turn: Arc<turn::Slot>,
 }
@@ -326,6 +340,7 @@ impl RunHandle {
             .chain(self.cards.names())
             .filter(|n| *n != approve::NAME)
             .chain(if self.servers { crate::chat::pages::preview::NAMES } else { &[] }.iter().copied())
+            .chain(if self.projects { crate::chat::projects::knowledge::NAMES } else { &[] }.iter().copied())
             .map(str::to_string)
             .chain(self.connectors.iter().cloned())
             .map(|n| format!("mcp__{SERVER}__{n}"))

@@ -355,8 +355,9 @@ pub(super) struct Parts<'a> {
     pub(super) code: bool,
     pub(super) connectors: Option<&'a crate::chat::tools::connectors::Turn>,
     pub(super) conversation: Option<u64>,
-    /// The model's context (a project's files are sized to it).
-    pub(super) context: u64,
+    /// The model's room a project's files are sized to: whole, or a big
+    /// one's list of parts (chat/projects/knowledge.rs).
+    pub(super) knowledge: crate::chat::projects::knowledge::Room,
 }
 
 impl Parts<'_> {
@@ -371,7 +372,7 @@ impl Parts<'_> {
                 Some(id) => crate::chat::chats::is_incognito(id),
                 None => crate::chat::incognito::new_chat(),
             };
-            let blocks = super::prompt::chat_blocks(self.conversation, self.context, incognito);
+            let blocks = super::prompt::chat_blocks(self.conversation, self.knowledge, incognito, g.tools);
             if !blocks.is_empty() {
                 stable.push_str("\n\n");
                 stable.push_str(&blocks);
@@ -509,6 +510,7 @@ mod tests {
             share_tools: true,
             cards: Default::default(),
             visuals: false,
+            project_files: false,
         }
     }
 
@@ -579,7 +581,7 @@ mod tests {
         let counter = Counter::estimate_only();
         let cards = Gates { cards: crate::chat::cards::Cards::for_turn(true, false, None, true, false), agents: false, ..small_model() };
         let hi = estimate("hi") + crate::chat::budget::MESSAGE_OVERHEAD;
-        let small = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), context: 8192 };
+        let small = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), knowledge: crate::chat::projects::knowledge::Room::new(8192, None) };
         let at_8k = room(8_192);
         assert!(run(as_is(cards, &small, &counter)).gates.cards.any());
         let fitted = run(fit(cards, &small, &counter, at_8k, hi, || keeps("hi", None, false, &[])));
@@ -590,12 +592,12 @@ mod tests {
             assert!(!after.names.iter().any(|n| n == gone) && !names(&after.prompt, gone), "{gone}");
         }
         // A model with room keeps them, and everything else, as before.
-        let big = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), context: 200_000 };
+        let big = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), knowledge: crate::chat::projects::knowledge::Room::new(200_000, None) };
         let fitted = run(fit(cards, &big, &counter, room(200_000), hi, || keeps("hi", None, false, &[])));
         assert!(fitted.shed.is_empty(), "{:?}", fitted.shed.names());
         assert!(fitted.gates.cards.any());
         // A spoken question on a 32K model: its history is capped first, so the cards cost it nothing and stay.
-        let mid = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), context: 32_768 };
+        let mid = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), knowledge: crate::chat::projects::knowledge::Room::new(32_768, None) };
         let spoken = Room { context: 32_768, known: true, kind: Kind::Assistant, tools: true, cap: None };
         let fitted = run(fit(cards, &mid, &counter, spoken, hi, || keeps("hi", None, false, &[])));
         assert!(fitted.gates.cards.any(), "{:?}", fitted.shed.names());
@@ -607,7 +609,7 @@ mod tests {
         // an 8K model's budget has for them and the history: "hi" refused.
         let profile = crate::ai::about_you::Profile::default();
         let persona = persona();
-        let parts = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), context: 8192 };
+        let parts = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), knowledge: crate::chat::projects::knowledge::Room::new(8192, None) };
         let (counter, at_8k) = (Counter::estimate_only(), room(8_192));
         let hi = estimate("hi") + crate::chat::budget::MESSAGE_OVERHEAD;
         let whole = run(as_is(small_model(), &parts, &counter));
@@ -635,7 +637,7 @@ mod tests {
     fn a_model_with_room_gets_every_tool_and_the_prompt_as_before() {
         let profile = crate::ai::about_you::Profile::default();
         let persona = persona();
-        let parts = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), context: 8192 };
+        let parts = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: false, connectors: None, conversation: Some(7), knowledge: crate::chat::projects::knowledge::Room::new(8192, None) };
         let counter = Counter::estimate_only();
         // Claude's 200K, GPT-5's 128K (also on a plan's tokens a minute
         // that leaves room), Gemini's 1M, the on-device model at 32K.
@@ -710,7 +712,7 @@ mod tests {
     fn a_code_chat_keeps_its_agents_and_goes_without_others() {
         let profile = crate::ai::about_you::Profile::default();
         let persona = persona();
-        let parts = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: true, connectors: None, conversation: Some(7), context: 8192 };
+        let parts = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: true, connectors: None, conversation: Some(7), knowledge: crate::chat::projects::knowledge::Room::new(8192, None) };
         let (counter, at_8k) = (Counter::estimate_only(), room(8_192));
         let question = estimate("Fix the failing test in the parser") + crate::chat::budget::MESSAGE_OVERHEAD;
         let fitted = run(fit(Gates { act: true, ..small_model() }, &parts, &counter, at_8k, question, || keeps("Fix the failing test in the parser", None, true, &[])));
@@ -729,7 +731,7 @@ mod tests {
         let profile = crate::ai::about_you::Profile::default();
         let persona = persona();
         for code in [false, true] {
-            let parts = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code, connectors: None, conversation: Some(7), context: 8192 };
+            let parts = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code, connectors: None, conversation: Some(7), knowledge: crate::chat::projects::knowledge::Room::new(8192, None) };
             let files = Gates { web_on: false, pictures: Gate::Off, act: false, files: Gate::Look, ..strong_model() };
             for g in [strong_model(), small_model(), Gates { act: true, ..small_model() }, files] {
                 let all = seen(&g, &parts).names;
@@ -794,7 +796,7 @@ mod tests {
         // A Code chat on an 8K model: others go, its picture files stay.
         let profile = crate::ai::about_you::Profile::default();
         let persona = persona();
-        let parts = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: true, connectors: None, conversation: Some(7), context: 8192 };
+        let parts = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: true, connectors: None, conversation: Some(7), knowledge: crate::chat::projects::knowledge::Room::new(8192, None) };
         let (counter, at_8k) = (Counter::estimate_only(), room(8_192));
         let asked = "Show me the concept picture the agent made";
         let question = estimate(asked) + crate::chat::budget::MESSAGE_OVERHEAD;

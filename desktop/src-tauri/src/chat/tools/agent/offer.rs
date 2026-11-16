@@ -57,6 +57,12 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
     if let (Some(all), Some(memory_tools)) = (tools.as_array_mut(), memory_definitions(extra).as_array()) {
         all.extend(memory_tools.iter().cloned());
     }
+    // A big project's files, searched in parts (chat/projects/knowledge.rs): read only.
+    if extra.project {
+        if let (Some(all), Some(project)) = (tools.as_array_mut(), crate::chat::projects::knowledge::definitions().as_array()) {
+            all.extend(project.iter().cloned());
+        }
+    }
     // The calendar (a calendar is connected): read-only, like the notes.
     if extra.calendar.is_some() {
         if let (Some(all), Some(cal)) = (tools.as_array_mut(), crate::chat::tools::calendar::definitions().as_array()) {

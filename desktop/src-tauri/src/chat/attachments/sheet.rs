@@ -30,6 +30,8 @@ const LAST_ROWS: usize = 3;
 
 thread_local! {
     static BUDGET: Slot<Option<u64>> = const { Slot::new(None) };
+    /// The most a read may take ([`TOKENS`], or a project's: [`with_most`]).
+    static MOST: Slot<u64> = const { Slot::new(TOKENS) };
 }
 
 /// Run `f` with `budget` tokens the room for a spreadsheet's text (the
@@ -41,9 +43,20 @@ pub fn with_budget<T>(budget: Option<u64>, f: impl FnOnce() -> T) -> T {
     out
 }
 
+/// Run `f` with `most` tokens the room for a spreadsheet's text, past
+/// [`TOKENS`]: a project's file (`chat/projects.rs`), whose big files are
+/// searched in parts rather than sent whole.
+pub fn with_most<T>(most: u64, f: impl FnOnce() -> T) -> T {
+    let before = MOST.with(|m| m.replace(most.max(LEAST)));
+    let out = with_budget(Some(most), f);
+    MOST.with(|m| m.set(before));
+    out
+}
+
 /// The tokens this read may take. Pure but for the room set.
 pub fn budget() -> u64 {
-    BUDGET.with(|b| b.get()).map(|b| b.clamp(LEAST, TOKENS)).unwrap_or(TOKENS)
+    let most = MOST.with(Slot::get);
+    BUDGET.with(|b| b.get()).map(|b| b.clamp(LEAST, most)).unwrap_or(most)
 }
 
 /// **The text of a spreadsheet** called `name`, or why it can't be read (a

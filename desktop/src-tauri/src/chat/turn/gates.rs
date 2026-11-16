@@ -104,6 +104,13 @@ pub(super) struct Gates {
     /// across the meetings (`made::offered`). Off only in a turn fitted to a
     /// small context (`fit.rs` `Family::Visuals`).
     pub visuals: bool,
+    /// **A big project's tools** (chat/projects/knowledge.rs, 16 Nov 2026):
+    /// `read_project_file` and `search_project_files`, for a model that calls
+    /// tools in a chat whose project's files are searched in parts (too big
+    /// to go whole to this model: [`Gates::with_project`]). Never a Code
+    /// chat's or an incognito chat's (in no project). Never shed (`fit.rs`):
+    /// it's how the model reads the files.
+    pub project_files: bool,
 }
 
 /// What [`Gates::for_turn`] reads of this PC: Yap Code offered
@@ -195,7 +202,7 @@ impl Gates {
         // (A new document's outline is shown first where a question could be asked: chat/cards/outline.rs.)
         let cards = crate::chat::cards::Cards::for_turn(tools, meetings, scope, chat_in_view, (here.phone)()).with_outline(cfg.chat_outline_review);
         let visuals = crate::chat::made::offered(tools, strong, scope, meetings, chat_in_view);
-        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, screen_takes, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true, cards, visuals };
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, screen_takes, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true, cards, visuals, project_files: false };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();
         }
@@ -269,8 +276,22 @@ impl Gates {
             share: crate::chat::shares::Offer::of(self.pictures, self.files, self.share_tools && self.tools),
             cards: self.cards,
             visuals: self.visuals && self.tools,
+            project: self.project_files && self.tools,
+            project_chips: &[],
             research: None,
         }
+    }
+
+    /// **These gates in `conversation`** (`None`: the new chat being made),
+    /// for a model with `room`: a big project's tools while its files are
+    /// searched in parts (`projects::knowledge::searched`), for a model that
+    /// calls tools; never in a Code chat (`code`) or an incognito chat.
+    pub(super) fn with_project(self, conversation: Option<u64>, room: crate::chat::projects::knowledge::Room, code: bool) -> Gates {
+        let incognito = match conversation {
+            Some(id) => crate::chat::chats::is_incognito(id),
+            None => crate::chat::incognito::new_chat(),
+        };
+        Gates { project_files: self.tools && !code && !incognito && crate::chat::projects::knowledge::searched_for(conversation, room), ..self }
     }
 
     /// **The picture files' gate** (chat/pictures/local.rs) for a turn whose

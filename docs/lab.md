@@ -125,7 +125,7 @@ It reads the model file and writes nothing of Yap's. Stop the server when you're
 `start` on the plan, then `stop`: is Claude Code on this PC and signed in, as Yap sees
 it? Asks the model nothing.
 
-### `ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry [--feedback <reasons>] [--note <line>]] [--edit] [--style <name>] [--research] [--incognito] [--project <name> [--project-instructions <text>] [--project-page]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
+### `ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry [--feedback <reasons>] [--note <line>]] [--edit] [--style <name>] [--research] [--incognito] [--project <name> [--project-instructions <text>] [--project-page] [--project-files <path>[,<path>…]]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
 
 Puts a question to Chat and waits until the turn ends (answered, stopped or failed),
 **or a card waits for the person**, or `--timeout` seconds pass.
@@ -152,11 +152,12 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   box first, by its name in the menu (`Concise`, one of the person's own…; `chat/styles.rs`);
   `--incognito`: the new chat's ghost turned on first (`chat/incognito.rs`); `--project
   <name>`: a new chat started from that project's page, the project made first if there's
-  none (`--project-instructions` sets its instructions; `chat/projects.rs`);
-  `--project-page` (16 Nov 2026) leaves the project's page in view instead of pressing
-  its New chat — with `--spoken`, the Voice Assistant's new chat starts in it. A feature
-  script's `ask` step takes `style`, `incognito`, `project`, `projectInstructions` and
-  `projectPage` too.
+  none (`--project-instructions` sets its instructions; `--project-files <path>[,<path>…]`
+  adds files on this PC, each once by its name, as its page's Add files… does — absolute
+  paths; `chat/projects.rs`); `--project-page` (16 Nov 2026) leaves the project's page
+  in view instead of pressing its New chat — with `--spoken`, the Voice Assistant's new
+  chat starts in it. A feature script's `ask` step takes `style`, `incognito`,
+  `project`, `projectInstructions`, `projectFiles` (a list) and `projectPage` too.
 - `--research` (16 Nov 2026): Research under the message box switched on first
   (`chat/research.rs`; refused when it can't be, its tooltip saying why). Its plan is a
   card (`kind: "outline"`, its `outline` the plan): `answer confirm:<n> allow` clicks
