@@ -239,9 +239,12 @@
     cursor: pointer;
   }
   .fbtn.wide {
+    flex: 0 0 auto;
     padding: 0 8px;
     border-color: var(--yap-paper-rule);
     color: var(--yap-paper-text-2);
+    /* "Open in IntelliJ IDEA Community" stays one line: the file's name gives way instead. */
+    white-space: nowrap;
   }
   .fbtn:hover:not(:disabled) {
     background: var(--yap-paper-s2);
