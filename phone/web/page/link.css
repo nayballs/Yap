@@ -1757,6 +1757,80 @@ main {
   stroke-linecap: round;
 }
 
+/* ✎ Edit: the strip over the text box while your question is in it to
+   change (the Claude and ChatGPT apps' "Editing" line), its ✕ a thumb's
+   size; the bubble being edited is marked in the thread (.q.being-edited). */
+.editing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 2px;
+  padding: 0 0 0 12px;
+  border-bottom: 1px solid var(--yap-border-subtle);
+  color: var(--yap-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.editing[hidden] {
+  display: none;
+}
+.editing .pencil {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: var(--yap-primary);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.editing-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editing-x {
+  flex: 0 0 auto;
+  width: 2.75rem;
+  height: 2.75rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--yap-r-full);
+  background: transparent;
+  color: var(--yap-muted);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.editing-x svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+.editing-x:active {
+  color: var(--yap-fg);
+  background: var(--yap-s3);
+}
+@media (hover: hover) {
+  .editing-x:hover {
+    color: var(--yap-fg);
+    background: var(--yap-s3);
+  }
+}
+/* The question being edited: its bubble outlined in the primary colour, as the box's words are its. */
+.q.being-edited {
+  box-shadow: inset 0 0 0 1.5px var(--yap-primary);
+}
+/* ✎ pressed while its question is in the box. */
+.qfoot .footbtn.on {
+  color: var(--yap-primary);
+}
+
 /* Chat's line when its model can't read the pictures (Composer.svelte's
    vision line): the reason, then another model, their text instead. */
 .vision {

@@ -6084,7 +6084,10 @@ keeps its screenshots (`Conversation::every_message`: `image_ids`,
 the same versions, the version shown being this one — one a conversation,
 the last switch winning wherever it was made. A phone's ‹ › is `switch_branch`
 (`link/session.rs` `show_version`), its ↻ in a plain chat `begin_retry` with
-the question asked the phone's way under `turn::again`; a change here
+the question asked the phone's way under `turn::again`, its ✎ in a plain
+chat `begin_edit` with the new words asked the phone's way (the question
+named by its place and its time in Chat; kept unless it ended in an error,
+as an edit here is); a change here
 (`chat_branch`, `chat_retry`, an edit's end) tells the phones
 (`link::versions_changed`), and one there tells this view
 (`yap-chat-versions` → `chatState.onVersions`, the chat open read again).
