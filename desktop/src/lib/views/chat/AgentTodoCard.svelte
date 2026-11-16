@@ -5,7 +5,9 @@
   // circle for done (dimmed), a turning circle for the one in progress
   // (bright, with the line the agent is on under it), an empty dashed circle
   // for the rest. Live while the turn works; once it ends it stays as its
-  // record, folded to "7 to-dos · all done" with ▸ to open. No list, no
+  // record, folded to "7 to-dos · all done" with ▸ to open, one still in
+  // progress then stopped (16 Nov 2026: a pause mark, never turning once
+  // nothing works on it; agents/steps.rs `TODO_STOPPED`). No list, no
   // card. ChatThread loads it (its own small chunk) only in Code chats.
   //
   // **The plan from before a message** (15 Nov 2026, as Claude Code's app
@@ -33,6 +35,12 @@
   /** The person's own fold (null: open while it works, folded once it ends). */
   let mine = $state(null);
   const open = $derived(mine ?? turnLive);
+  /**
+   * **Stopped** (16 Nov 2026): Rust keeps one still in progress when its turn ended as "stopped"
+   * (agents/steps.rs `TODO_STOPPED`); one in progress on the turn's own list once the turn is over (one saved before)
+   * reads the same. (A plan as it stood before a message keeps its own: in progress then.)
+   */
+  const stoppedNow = (t) => t.status === 'stopped' || (list == null && t.status === 'in_progress' && !turnLive);
   /** Under the one in progress: the line the agent is on (never the item's own words again). */
   const under = (t) => {
     if (!live) return '';
@@ -66,20 +74,24 @@
       <ul class="items" data-testid="chat-agent-todo-items">
         {#each todos as t, i (i)}
           {@const sub = t.status === 'in_progress' ? under(t) : ''}
-          <li class="item st-{t.status}" data-status={t.status}>
+          <!-- (One in progress once its turn is over, or Rust's "stopped", is stopped: never turning.) -->
+          {@const status = stoppedNow(t) ? 'stopped' : t.status}
+          <li class="item st-{status}" data-status={status}>
             <span class="circle" aria-hidden="true">
-              {#if t.status === 'completed'}
+              {#if status === 'completed'}
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 8.3 2.3 2.3 4.7-5" /></svg>
-              {:else if t.status === 'in_progress' && live}
+              {:else if status === 'in_progress' && live}
                 <span class="spin"></span>
-              {:else if t.status === 'in_progress'}
+              {:else if status === 'in_progress'}
                 <span class="dots">⋯</span>
+              {:else if status === 'stopped'}
+                <svg class="paused" viewBox="0 0 16 16" fill="currentColor"><rect x="5" y="4.5" width="2" height="7" rx="0.6" /><rect x="9" y="4.5" width="2" height="7" rx="0.6" /></svg>
               {/if}
             </span>
             <span class="words">
               <span class="text">{t.content}</span>
               {#if sub}<span class="sub" data-testid="chat-agent-todo-now">{sub}</span>{/if}
-              <span class="sr-only">{t.status === 'completed' ? ', done' : t.status === 'in_progress' ? ', in progress' : ', to do'}</span>
+              <span class="sr-only">{status === 'completed' ? ', done' : status === 'in_progress' ? ', in progress' : status === 'stopped' ? ', stopped' : ', to do'}</span>
             </span>
           </li>
         {/each}
@@ -213,6 +225,15 @@
     font-size: 11px;
     line-height: 1;
   }
+  /* Stopped (its turn ended with it in progress): still, muted, never turning. */
+  .st-stopped .circle {
+    border: 1.5px solid var(--yap-muted);
+    color: var(--yap-muted);
+  }
+  .paused {
+    width: 10px;
+    height: 10px;
+  }
   .words {
     display: flex;
     flex-direction: column;
@@ -228,7 +249,8 @@
     color: var(--yap-fg);
     font-weight: 600;
   }
-  .st-pending .text {
+  .st-pending .text,
+  .st-stopped .text {
     color: var(--yap-fg-80);
   }
   .sub {

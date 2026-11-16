@@ -69,7 +69,15 @@
   // Claude Code's app pages a turn's. (The Agent panel's rows open the
   // panel's picture tab: `onview`.)
   //
+  // **Waiting for its background work** (16 Nov 2026, agents/runner/
+  // background.rs): its answer is in and a helper or a command it left
+  // running hasn't reported back, so the lead stays, its line saying what
+  // it waits for ("Waiting for background work (1 helper)"); what comes back
+  // is the rest of its answer. Waited 45 minutes, it asks under the lead
+  // whether to keep waiting (`agent_keep_waiting`) or stop it (`agent_stop`).
+  //
   // Its own small chunk (ChatThread and AgentPanel import it lazily).
+  import { invoke } from '@tauri-apps/api/core';
   import { workOf, workSummary, turnsOf, turnEnd, groupPictures, shownStepPicture, turnParts, turnPictures, todosIn, thoughtFor, THOUGHT_NOT_SENT } from '../../core/agents.js';
   import { isLive } from '../../core/agentNow.js';
   import { renderMarkdown } from '../../core/markdown.js';
@@ -190,6 +198,23 @@
     else onview?.(shownStepPicture(p, agent?.folder));
   }
   const hasCard = $derived(liveCard || !!beforeList?.length);
+
+  // ---- Waiting for its background work: asked whether to keep waiting
+  /** Waited long enough that the person is asked (Rust's `waiting.ask`): here, at the lead. */
+  const waitAsk = $derived(lead && working && agent?.waiting?.ask ? agent.waiting : null);
+  const waitedMins = $derived(waitAsk ? Math.max(1, Math.round((now - (Number(waitAsk.since) || now)) / 60)) : 0);
+  let answering = $state(false);
+  async function keepWaiting(stop) {
+    if (answering || !agent?.id) return;
+    answering = true;
+    try {
+      await invoke(stop ? 'agent_stop' : 'agent_keep_waiting', { id: agent.id });
+    } catch {
+      /* it ended meanwhile: its record says so */
+    } finally {
+      answering = false;
+    }
+  }
 </script>
 
 {#if items.length || saying || hasCard}
@@ -200,6 +225,9 @@
     {#each items as it, i (i)}
       {#if it.kind === 'said'}
         <div class="wsaid" data-testid="chat-agent-work-said" use:colourCode use:codeCopy use:markdownVisuals use:fileLinks={codeFiles}>{@html renderMarkdown(it.text)}</div>
+      {:else if it.kind === 'notice'}
+        <!-- A quiet line of Yap's own: background work from before that Claude Code says stopped. -->
+        <div class="wnotice" data-testid="chat-agent-work-notice">{it.text}</div>
       {:else if it.kind === 'thought'}
         <!-- Its thinking (the Thinking and Verbose views): quieter than its words, with how long it took. Words
              Claude Code didn't send (Opus 5.5, Sonnet 5.5): its time alone, and the first such line says why. -->
@@ -243,6 +271,16 @@
         <CrewAvatar character={leadName} prop="lead" pose="working" size={0.5} label="Claude is working" testid="chat-lead" />
         <span class="wtext">{saying ? 'Writing' : line || 'Thinking'}</span>
         {#if clock}<span class="wclock" data-testid="chat-lead-clock">{clock}</span>{/if}
+      </div>
+    {/if}
+    {#if waitAsk}
+      <!-- Waited long for its background work: keep waiting, or stop it (never stopped unasked). -->
+      <div class="wwait" role="group" aria-label="Background work" data-testid="chat-agent-wait-ask">
+        <span class="wwaittext">Still waiting for background work{waitAsk.what ? ` (${waitAsk.what})` : ''} after {waitedMins === 1 ? '1 minute' : `${waitedMins} minutes`}.</span>
+        <span class="wwaitbtns">
+          <button type="button" class="wbtn primary" disabled={answering} onclick={() => keepWaiting(false)} data-testid="chat-agent-wait-keep">Keep waiting</button>
+          <button type="button" class="wbtn" disabled={answering} onclick={() => keepWaiting(true)} data-testid="chat-agent-wait-stop">Stop it</button>
+        </span>
       </div>
     {/if}
     {#if beforeList?.length}
@@ -422,6 +460,65 @@
     padding: 2px 0;
     color: var(--yap-muted);
     font-size: 12px;
+  }
+  /* A quiet line of Yap's own (background work from before, stopped). */
+  .wnotice {
+    color: var(--yap-muted);
+    font-size: 12px;
+    font-style: italic;
+  }
+  /* Waited long for its background work: keep waiting, or stop it (PageConfirm's card, quieter). */
+  .wwait {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    max-width: min(520px, 100%);
+    margin: 2px 0;
+    padding: 8px 12px;
+    border: 1px solid var(--yap-primary-line);
+    border-radius: 10px;
+    background: var(--yap-paper);
+    color: var(--yap-paper-ink);
+    font-size: 13px;
+  }
+  .wwaittext {
+    min-width: 0;
+  }
+  .wwaitbtns {
+    display: flex;
+    gap: 8px;
+  }
+  .wbtn {
+    height: 28px;
+    padding: 0 12px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 999px;
+    background: var(--yap-paper);
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .wbtn.primary {
+    border-color: var(--yap-primary-line);
+    background: var(--yap-primary);
+    color: var(--yap-primary-fg);
+  }
+  .wbtn:hover {
+    background: var(--yap-paper-s2);
+  }
+  .wbtn.primary:hover {
+    background: var(--yap-primary-hover);
+  }
+  .wbtn:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .wbtn:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
   }
   .spin {
     flex: 0 0 auto;

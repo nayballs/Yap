@@ -1024,6 +1024,19 @@ fn forward_stderr(child: &mut Child) {
     }
 }
 
+/// **The stand-in for a test** (any module's): this test binary as
+/// `fake-claude` playing `script`, and the variable that says so — libtest
+/// stops reading options at `--`, so Claude Code's arguments after it are
+/// only filters that match no test, and `--exact` runs just the stand-in
+/// (`tests::fake_claude_stand_in`).
+#[cfg(test)]
+pub(crate) fn stand_in(script: &Path) -> (Program, Vec<(String, String)>) {
+    let name = format!("{}::tests::fake_claude_stand_in", module_path!().split_once("::").map_or("", |(_, m)| m));
+    let prefix = vec![name, "--exact".into(), "--nocapture".into(), "--quiet".into(), "--test-threads=1".into(), "--".into()];
+    let program = Program::new(std::env::current_exe().unwrap()).with_prefix(prefix);
+    (program, vec![("YAP_FAKE_CLAUDE_STAND_IN".into(), script.display().to_string())])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1382,17 +1395,7 @@ mod tests {
 
     // ---- Round trips against the fake ----
 
-    /// This test binary as `fake-claude`: libtest stops reading options at
-    /// `--`, so Claude Code's arguments after it are only filters that match
-    /// no test, and `--exact` runs just [`fake_claude_stand_in`].
-    fn stand_in(script: &Path) -> (Program, Vec<(String, String)>) {
-        let name = format!("{}::fake_claude_stand_in", module_path!().split_once("::").map_or("", |(_, m)| m));
-        let prefix = vec![name, "--exact".into(), "--nocapture".into(), "--quiet".into(), "--test-threads=1".into(), "--".into()];
-        let program = Program::new(std::env::current_exe().unwrap()).with_prefix(prefix);
-        (program, vec![("YAP_FAKE_CLAUDE_STAND_IN".into(), script.display().to_string())])
-    }
-
-    /// The stand-in itself (a no-op in a normal test run).
+    /// The stand-in itself (a no-op in a normal test run): [`super::stand_in`].
     #[test]
     fn fake_claude_stand_in() {
         let Some(script) = std::env::var_os("YAP_FAKE_CLAUDE_STAND_IN") else { return };

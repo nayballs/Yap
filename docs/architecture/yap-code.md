@@ -521,6 +521,19 @@ workspace, word for word, and no model of Chat's is asked.
     phone never goes this way as one: it's the Voice Assistant's, below.
   - **Asked out loud from another app** stays Chat's model's: it may look
     at the window in front and answers there (`Message.away`).
+- **A spoken message in parts is one message** (16 Nov 2026: a dictated
+  message sometimes arrived split mid-sentence, each part a turn and a
+  process of its own). A turn whose message was spoken (`report::
+  asked_by_voice`, never a phone's) waits for more words as Claude Code
+  starts (`runner::hold_for_more`): what comes within 2.5 seconds of the
+  last part, 6 at most, goes with it as one message — the person's words
+  one after another, nothing of Yap's (an agent's brief still says
+  "Also: …"), each part ticked ✓✓ Read as it goes. Claude Code's own start
+  takes most of that, so it costs about a second; a typed message never
+  waits.
+- **Work it leaves in the background is waited for**, its answer what came
+  back: [Background work and Claude Code's own
+  turns](#background-work-and-claude-codes-own-turns-16-nov-2026).
 - **When** (`direct::applies`, pure): "Work directly in Code chats" on
   (Settings → Yap Code, `agentsDirect`, on by default), Yap Code on with
   Claude Code on the PC, a Code chat whose model is on the plan, a message
@@ -715,7 +728,12 @@ workspace, word for word, and no model of Chat's is asked.
   step's picture paged across the turn's, the transcript view's Thinking
   and Verbose from the chat's ⋯, its thinking in its log; a chapter and a
   next-step box from its session, kept with its answer, a button its next
-  message). The e2e base config has
+  message; a helper in the background waited for — "Waiting for background
+  work (1 helper)", the turn at work, then what came back its one answer,
+  what it said before in its work — and the next message on a session
+  resumed after a task stopped, Claude Code's empty turn of its own about
+  it 0.1 s in and the work past 15 s, its answer whole and the stopped task
+  one quiet line). The e2e base config has
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 
@@ -1563,6 +1581,16 @@ and each call runs the tool loop's own code and rules.
   told its input is over and exits (ended after 15 s if it doesn't). Done,
   failed, or done with a question (`consent::asks`: its last sentence a
   question) are reported in its chat; stopped and interrupted agents aren't.
+  Only a result that answers a message Yap wrote counts, and work it left
+  running in the background is waited for first: [Background work and
+  Claude Code's own turns](#background-work-and-claude-codes-own-turns-16-nov-2026).
+- **Its system prompt says how background work behaves here**
+  (`runner::BACKGROUND_PROMPT`, `--append-system-prompt-file` on every run):
+  it outlives the reply and Yap waits for it, the person may write
+  meanwhile, it's stopped if they stop it (asked after 45 minutes) or quit
+  Yap, a CronCreate job isn't waited for, and a dev server or watcher keeps
+  the reply open until it's stopped. Before, Claude couldn't know Yap ended
+  its process with each reply.
 - **A message for an agent** (`message_agent`, the tab's "Tell the agent…", a Code
   chat's follow-up): a turn of its own ([Turns](#turns-one-agent-per-code-chat),
   `runner::follow_up`), its own process (`--resume`), checkpoint and report:
@@ -1592,6 +1620,101 @@ and each call runs the tool loop's own code and rules.
   that allows no breakaway keeps it (logged).
 - **Quitting Yap** ends the running agents with it (Yap's kill-on-close job) and
   marks them, and the queued ones, interrupted (`runner::shutdown`).
+
+## Background work and Claude Code's own turns (16 Nov 2026)
+
+From a Code chat whose Claude kept losing the helper it had started in the
+background to research something, and whose next replies were cut off 3
+seconds in and reported by Yap instead of Claude. Both came from how the runner
+decided a turn was over. Checked on the real Claude Code 2.1.296 signed in
+(Haiku, its stream-json only; `ai/claude_code/events.rs` has the shapes and
+`fixtures/2.1.296/real-background-*.jsonl` the recordings, their words and
+ids made up):
+
+- **What Claude Code does.** A call with `run_in_background` (a helper,
+  `Agent` / `Task`; a command, `Bash` / `PowerShell`) is a task of its own:
+  `system/task_started` (`is_backgrounded`, the call's `tool_use_id`,
+  `task_type` `local_agent` / `local_bash`; a helper's own commands are
+  tasks too, `owned_by_subagent`), `system/background_tasks_changed` (every
+  task still in the background), then `task_updated` and
+  `task_notification` (`completed`, or `stopped`). The process stays up for
+  them, **even with its input closed**, and when one ends it starts a turn
+  of its own on it: the model reads the notice and answers, and that
+  result says `origin: {kind: "task-notification"}`. A notice that comes
+  while a turn works joins it at its next tool call's end (one result).
+  `ScheduleWakeup`'s turn has no origin: `command_lifecycle` `started` and
+  `completed` bracket it, and its call's record says when it's due
+  (`scheduledFor`). Monitor isn't among 2.1.296's tools in a `-p` run.
+- **What went wrong.** Yap closed the input at the answer and ended the
+  process 15 seconds later (`EXIT_GRACE`), the work with it. On the next
+  message Claude Code, resumed, said the task `stopped` and — before it
+  read the new message — ended a turn of its own with no model call:
+  `subtype` "success", `is_error` false, `num_turns` 0, `result` "", no
+  `terminal_reason`, `total_cost_usd` 0, `origin` task-notification, 0.1
+  to 3 s in. Yap took it for the answer (with no echo yet, `Live::unread`
+  counted results), closed the input and ended the process 15 s later,
+  mid-work: the reply cut off, the report Yap's own.
+- **Only an answer to Yap's message ends a turn** (`Follow::take_result`):
+  a turn of Claude Code's own (`TurnResult::own_turn`, or a wake-up's while
+  its `command_lifecycle` runs) never counts as a message's answer
+  (`Live::results`), and one with no model call and no words
+  (`TurnResult::empty`) — Claude Code's own, or any before the turn's first
+  message was even echoed back — is nothing at all ("Agents: a turn of
+  Claude Code's own with nothing in it…" in the log).
+- **Work left in the background is waited for** (`runner/background.rs`
+  `Background`): a start is the session's own call asking for it, made a
+  task by Claude Code (`task_started` naming that call, backgrounded, not a
+  helper's own); an end is its `task_notification` or the background list no
+  longer naming it; a wake-up is due when its record says and done when
+  Claude Code's own turn starts (one 5 minutes past due with none is let
+  go). A Claude Code that says nothing of its tasks has none here: nothing
+  waits, as before.
+  - **Answered with work still out** (`After::Background`), the input stays
+    open and `EXIT_GRACE` doesn't apply; the turn stays at work (■ in the
+    box, "Claude is working" on the bar) and the lead's line says what for:
+    **"Waiting for background work (1 helper)"** (`Background::line`:
+    helpers, commands, other tasks, wake-ups). A helper's own steps
+    meanwhile are its row's, never the lead's line. A background helper's
+    Agent panel row stays at work after its call came back ("Async agent
+    launched…" is no report), and is back with Claude Code's words about it
+    (the notice's `summary`) at its end.
+  - **It reports back**: Claude Code's own turn on it is the rest of the
+    answer. The turn's words are from there on (`Follow::split_at`, as for
+    a message read after an answer): what Claude said before it waited
+    stays in its work, as it was shown meanwhile, and what came back is
+    the chat's answer and the turn's one report (read aloud for a spoken
+    question). More still out: it waits again. All back, its own turn's
+    result ends the turn; nothing at all from Claude Code for 20 seconds
+    (`DRAIN_GRACE`), and the input ends anyway.
+  - **A message meanwhile goes in at once** (`queue_state` "taking" while
+    `Live::waiting`): a note, as one reaches a working turn, which Claude
+    Code answers then as a turn of its own in the same process; the turn
+    then waits on.
+  - **After 45 minutes** (`BACKGROUND_ASK`) the person is asked, under the
+    lead (`AgentWork.svelte`): "Still waiting for background work (1
+    helper) after 45 minutes." **Keep waiting** (`agent_keep_waiting`: as
+    long again) or **Stop it** (`agent_stop`: the process and its work
+    end, its answer reported as it was). Never stopped unasked.
+  - The page reads the wait with the agent (`Agent::waiting`: what, since
+    when, `ask`; set on the copies it reads, as `active` is, never saved),
+    told by `yap-agent`'s `changed: "waiting"`.
+- **A task an earlier process left, that Claude Code says stopped**, is one
+  quiet line in the turn's work: "Background work from before was stopped
+  before it finished" (`yap-agent`'s `notice`, `core/agents.js` `workOf`'s
+  `notice` item).
+- **A to-do still in progress when its turn ends is stopped**
+  (`steps::TODO_STOPPED`, the turn's saved list): a pause mark, never
+  turning, in the thread's card, the Agent panel, its row's view and the
+  phone. (One helper's step kept turning once nothing worked on it.)
+- **Not done: keeping the process warm between messages** (as a plan chat
+  keeps its own, `ai/claude_plan/sessions.rs` `WARM_FOR`). Work in the
+  background belongs to the turn that started it, and its answer has to
+  reach the chat even if the person never writes again, so a turn has to
+  follow its process past its answer either way; and each turn is a
+  process with its own Mode, model, effort, phone cap, read-only tools and
+  Rewind branch fixed as it starts, where one process across messages
+  would need each switched live, and two on one session can't run at once.
+  Waiting inside the turn fixes the loss with neither.
 
 ## The Agent tab
 
@@ -3025,7 +3148,8 @@ Rust (`desktop/src-tauri/src/`):
   daily sweep), `shutdown`.
 - `agents/store.rs` (`agents.json`, each agent's folder) · `workspaces.rs` (the
   workspaces, which folder an agent means) · `modes.rs` (the Mode; pure) ·
-  `runner.rs` (the runs) · `steps.rs` + `steps/command.rs` (each step in
+  `runner.rs` (the runs; `runner/background.rs` the work a turn left in the
+  background, waited for; pure) · `steps.rs` + `steps/command.rs` (each step in
   plain words, the to-do list; pure) · `diff.rs` (an edit's diff; pure) ·
   `output.rs` (what a command printed, its start and its end; pure) ·
   `pictures.rs` (a picture a step's answer carried, kept with the agent) ·
@@ -3060,7 +3184,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 
 | Event | Payload |
 |---|---|
-| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, thought?, todos?, now?, diff?, call?, under?, helper?, report?, picture?, read?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `helper` ("back", "failed") with the `call` of a hand-over whose helper has come back (an event of its own, no step), `report` what it came back with (2026-11-15: its `Task` call's answer, at most 4,000 characters, for its own view in the Agent panel; never to a phone); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `read` the id of a message Claude Code has just read (with its "Read your note" step: the queue's ✓✓); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `thought` its thinking, a thinking block of its own message (2026-11-15; never to a phone); `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished; 2026-11-14: `rewound` a Rewind): the pages read it again |
+| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, notice?, thought?, todos?, now?, diff?, call?, under?, helper?, report?, picture?, read?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `helper` ("back", "failed") with the `call` of a hand-over whose helper has come back (an event of its own, no step), `report` what it came back with (2026-11-15: its `Task` call's answer, at most 4,000 characters, for its own view in the Agent panel; never to a phone); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `read` the id of a message Claude Code has just read (with its "Read your note" step: the queue's ✓✓); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `thought` its thinking, a thinking block of its own message (2026-11-15; never to a phone); `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished; 2026-11-14: `rewound` a Rewind; 2026-11-16: `waiting` what its turn waits for in the background): the pages read it again; `notice` a quiet line of Yap's own in its work (2026-11-16: background work from before that Claude Code says stopped); a `todos` item's status `stopped` once its turn ended with it in progress |
 | `yap-agent-saying` | `{id, turn, text}` — the message agent `id`'s turn is writing now, all of it so far: many times a second, to the page only (never logged, never to a phone); let go when a `yap-agent` event has its `said`, its `text`, a `step`, or a status that's over |
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
@@ -3080,9 +3204,10 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 
 | Command | Does |
 |---|---|
-| `agent_list` | every agent, newest first (each with `active`: the runner has it now) |
+| `agent_list` | every agent, newest first (each with `active`: the runner has it now; `waiting` `{what, since, ask}`: its answer in, the background work its turn waits for) |
 | `agent_get {id}` | `{agent, log}`: the agent (with `active`) and its `yap-agent` events (none once swept) |
 | `agent_stop {id}` / `agent_continue {id}` | Stop; Continue a stopped, interrupted or failed one |
+| `agent_keep_waiting {id}` | (16 Nov 2026) keep waiting for its background work, asked after 45 minutes: as long again; refused when it isn't asking |
 | `agent_rewind {conversation, index, files}` | Rewind: back to before the person's message `index` (one that started a turn of the chat's own); `files` puts back the files those turns changed: `{text, turns, restored, deleted, problems}`; refused while it works, or past a turn from before `endUuid` |
 | `agent_fork {conversation, index}` | Fork from here: a new Code chat up to and including that message's turn; its id |
 | `agent_queue {conversation}` | where that Code chat's own session is, for the message box's queue: `taking` (a call of its own out: a message goes now), `writing` (it waits) or `idle` |
@@ -3163,7 +3288,19 @@ app: `{with, name, program, args, commandLine, rel, line}`, nothing started).
   in their languages, `sizing` kept with the queued turn, the guide and the
   enum in the tools, Continue and a go-ahead keeping the chat's pick, two
   requests in one turn taking the bigger, Yap's own go-ahead carrying
-  nothing of the model's.
+  nothing of the model's. Background work and Claude Code's own turns (16
+  Nov 2026): its task events and results parsed from the recordings
+  (`events.rs`), the tracker (`runner/background.rs`: a helper and a
+  command waited for till each is back, a helper's own command and a
+  foreground one never, a failed call, the words, a wake-up and one long
+  past due), a turn of Claude Code's own with nothing in it never the
+  answer, answered with work out it waits — its line, a helper's steps
+  never the line's, its row back with the notice's words, the answer from
+  what came back on —, the 45-minute ask and Keep waiting, a to-do left in
+  progress stopped (`runner`), and both recordings played by the stand-in
+  through the runner's own following (`the_stand_in_resumed_after_a_stopped_task_and_with_a_helper_in_the_background`:
+  the empty turn leaves the input open, the waits, the process ending by
+  itself).
 - **E2E** ([`docs/e2e-tests.md`](../e2e-tests.md)): the scripted fake AI calls
   `start_agent`, and Claude Code is the build's own stand-in (`yap.exe
   fake-claude <script>`, switched per turn with `e2e_claude_script`), whose

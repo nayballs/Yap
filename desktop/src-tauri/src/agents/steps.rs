@@ -51,12 +51,18 @@ pub struct Seen {
 #[serde(default, rename_all = "camelCase")]
 pub struct Todo {
     pub content: String,
-    /// "pending", "in_progress" or "completed" (Claude Code's own words).
+    /// "pending", "in_progress" or "completed" (Claude Code's own words) —
+    /// or Yap's [`TODO_STOPPED`] for one still in progress when its turn ended.
     pub status: String,
     /// The line while it's in progress ("Running the tests").
     #[serde(skip_serializing_if = "String::is_empty")]
     pub active_form: String,
 }
+
+/// **A to-do still in progress when its turn ended** (16 Nov 2026,
+/// `runner.rs`): kept as stopped, so the thread's card never shows it
+/// turning once nothing works on it.
+pub const TODO_STOPPED: &str = "stopped";
 
 /// A `TodoWrite`'s list from its `input` (`None` when it has none): an
 /// unknown status is "pending".

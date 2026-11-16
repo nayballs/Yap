@@ -57,9 +57,9 @@
     <ul class="todolist">
       {#each todos as t, i (i)}
         <li class="todo" class:done={t.status === 'completed'} class:doing={t.status === 'in_progress'} data-status={t.status}>
-          <span class="tmark" aria-hidden="true">{t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '●' : '○'}</span>
+          <span class="tmark" aria-hidden="true">{t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '●' : t.status === 'stopped' ? '‖' : '○'}</span>
           <span class="ttext">{t.content}</span>
-          <span class="sr-only">{t.status === 'completed' ? ', done' : t.status === 'in_progress' ? ', in progress' : ', to do'}</span>
+          <span class="sr-only">{t.status === 'completed' ? ', done' : t.status === 'in_progress' ? ', in progress' : t.status === 'stopped' ? ', stopped' : ', to do'}</span>
         </li>
       {/each}
     </ul>

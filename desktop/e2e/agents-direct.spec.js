@@ -147,6 +147,45 @@ const SLOWISH = [
   { _wait_user: true },
 ];
 
+// ---- Work Claude leaves in the background (16 Nov 2026, agents/runner/background.rs), in Claude Code 2.1.296's own shapes ----
+const HELPER_STARTED = "I've asked a helper to compare the seed suppliers.";
+const HELPER_BACK = 'The helper is back: Hedgerow is cheapest.';
+/** A helper in the background (`run_in_background`): the call back at once, its answer, then — the helper back — Claude
+ * Code's own turn on what came back (`origin` task-notification). Waited for: before, the process was ended 15 s on. */
+const BACKGROUND_HELPER = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  said('h1', [{ type: 'tool_use', id: 'toolu_bg', name: 'Agent', input: { description: 'Compare seed suppliers', prompt: 'Which supplier is cheapest?', run_in_background: true } }]),
+  { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'a1', task_type: 'local_agent' }], session_id: '{{session_id}}' },
+  { type: 'system', subtype: 'task_started', task_id: 'a1', tool_use_id: 'toolu_bg', description: 'Compare seed suppliers', is_backgrounded: true, task_type: 'local_agent', session_id: '{{session_id}}' },
+  toolResult('toolu_bg', 'Async agent launched successfully.'),
+  said('h2', [{ type: 'text', text: HELPER_STARTED }], 'end_turn'),
+  result(HELPER_STARTED, 0.01),
+  { _sleep_ms: 5000 },
+  { type: 'system', subtype: 'task_notification', task_id: 'a1', tool_use_id: 'toolu_bg', status: 'completed', output_file: '', summary: 'Hedgerow is cheapest.', session_id: '{{session_id}}' },
+  { type: 'system', subtype: 'background_tasks_changed', tasks: [], session_id: '{{session_id}}' },
+  said('h3', [{ type: 'text', text: HELPER_BACK }], 'end_turn'),
+  { ...result(HELPER_BACK, 0.02), num_turns: 1, origin: { kind: 'task-notification' } },
+  { _wait_user: true },
+];
+/** Resumed after background work of its was ended: Claude Code says the task stopped and ends a turn of its own with no
+ * model call before it reads the message — then works on it longer than Yap's 15 s grace once a turn's input ends. */
+const RESUMED_AFTER_STOP = [
+  { type: 'system', subtype: 'task_notification', task_id: 'a0', tool_use_id: 'toolu_old', status: 'stopped', output_file: '', summary: "Background agent didn't finish before the previous session ended", session_id: '{{session_id}}' },
+  init(),
+  { type: 'result', subtype: 'success', is_error: false, num_turns: 0, result: '', session_id: '{{session_id}}', total_cost_usd: 0, usage: {}, permission_denials: [], origin: { kind: 'task-notification' } },
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  said('r1', [{ type: 'tool_use', id: 'toolu_r', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }]),
+  { _sleep_ms: 17000 },
+  toolResult('toolu_r', 'Draft notes'),
+  said('r2', [{ type: 'text', text: 'Answer to: {{user_text}}' }], 'end_turn'),
+  result('Answer to: {{user_text}}', 0.01),
+  { _wait_user: true },
+];
+
 /** Reads a file for a while (a tool call out), answers, then answers the next message as a turn of its own. */
 const READS_THEN_ANSWERS = [
   ...SLOWISH.slice(0, 6),
@@ -972,6 +1011,58 @@ test('a message while it works is handed to it at once: the same turn, one answe
   // (A tool call was out: it went at once, never queued — and shows it was read.)
   await expect(queuedBubble(main)).toHaveCount(0);
   await expect(ticksOf(main)).toHaveAttribute('data-state', 'read');
+});
+
+// 16 Nov 2026, from a Code chat whose Claude lost its research helper at every reply's end, and whose next reply was cut
+// off 3 s in by Claude Code's own empty turn about the stopped helper (agents/runner.rs `take_result`, runner/background.rs).
+test('work Claude leaves in the background is waited for: its answer, “Waiting for background work”, then what came back; a stopped task never cuts the next answer off', async ({ yap, main, shot }) => {
+  test.setTimeout(120_000);
+  await script(yap, BACKGROUND_HELPER, 'background-helper');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Which seed supplier is cheapest?');
+  const agent = await newAgent(yap, before);
+  // Its answer is in, and it waits for the helper: the lead's line says so, the turn still at work.
+  await expect(thread(main).getByTestId('chat-agent-work')).toContainText('Waiting for background work (1 helper)', { timeout: 20_000 });
+  await expect(thread(main).getByTestId('chat-agent-work')).toContainText(HELPER_STARTED);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id)?.waiting?.what).toBe('1 helper');
+  expect((await agents(yap)).find((j) => j.id === agent.id).status).toBe('running');
+  await shot(main, '130-background-waiting');
+  // Back: Claude Code's own turn on it is the rest of the answer — one turn, its answer what came back (what Claude said
+  // before it waited stays in its work, as shown meanwhile), never shown twice.
+  const done = await ended(yap, agent.id, 40_000);
+  expect(done.turnList.map((t) => [t.n, t.status])).toEqual([[1, 'done']]);
+  expect(done.waiting).toBeUndefined();
+  const messages = await messagesOf(yap, done.conversation, 3);
+  expect(messages.at(-1).text).toBe(HELPER_BACK);
+  await expect.poll(() => laidOut(main)).toEqual(['you', 'work', 'answer']);
+  await expect(thread(main).getByTestId('chat-agent-work-said')).toHaveText([HELPER_STARTED]);
+  await expect(thread(main).locator('.cbubble.assistant', { hasText: HELPER_BACK })).toHaveCount(1);
+  await shot(main, '131-background-back');
+
+  // The next message, on a session resumed after a task of its stopped: Claude Code's empty turn of its own about it
+  // comes 0.1 s in and isn't the answer — the input stays open while it works on past 15 s, and its answer is whole.
+  await script(yap, RESUMED_AFTER_STOP, 'resumed-after-stop');
+  await send(main, 'Now read notes.md.');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id)?.turnList?.length, { timeout: 20_000 }).toBe(2);
+  const second = await (async () => {
+    await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id)?.turnList?.[1]?.status, { timeout: 60_000 }).toMatch(/^(done|failed|stopped)$/);
+    return (await agents(yap)).find((j) => j.id === agent.id);
+  })();
+  expect(second.turnList[1].status).toBe('done');
+  const all = await messagesOf(yap, done.conversation, 6);
+  expect(all.at(-1).text).toBe('Answer to: Now read notes.md.');
+  // The stopped task: one quiet line in that turn's work.
+  await expect(thread(main).getByTestId('chat-agent-work-notice')).toHaveText('Background work from before was stopped before it finished');
+  await shot(main, '132-background-stopped-line');
+});
+
+test('core/agents.js: a quiet line of Yap’s own is an item of its own in the work, never a step of a stretch', () => {
+  const ev = (o) => ({ id: 'a1', status: 'running', turn: 1, ts: 1, ...o });
+  const items = workOf([ev({ notice: 'Background work from before was stopped before it finished' }), ev({ step: 'Reading notes.md', call: 'c1' })]);
+  expect(items.map((x) => x.kind)).toEqual(['notice', 'work']);
+  expect(items[0].text).toBe('Background work from before was stopped before it finished');
+  expect(items[1].steps.map((s) => s.step)).toEqual(['Reading notes.md']);
 });
 
 // 15 Nov 2026, the Claude app's Code tab side by side with a Code chat: its work and words in order — several folded

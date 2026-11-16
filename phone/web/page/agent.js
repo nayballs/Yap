@@ -461,9 +461,9 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
               h(
                 'li',
                 { class: `todo ${td.status}`, data: { status: td.status } },
-                h('span', { class: 'tmark', 'aria-hidden': 'true', text: td.status === 'completed' ? '✓' : td.status === 'in_progress' ? '●' : '○' }),
+                h('span', { class: 'tmark', 'aria-hidden': 'true', text: td.status === 'completed' ? '✓' : td.status === 'in_progress' ? '●' : td.status === 'stopped' ? '‖' : '○' }),
                 h('span', { class: 'ttext', text: td.status === 'in_progress' && td.activeForm ? td.activeForm : td.content }),
-                h('span', { class: 'vh', text: td.status === 'completed' ? ', done' : td.status === 'in_progress' ? ', in progress' : ', to do' }),
+                h('span', { class: 'vh', text: td.status === 'completed' ? ', done' : td.status === 'in_progress' ? ', in progress' : td.status === 'stopped' ? ', stopped' : ', to do' }),
               ),
             ),
           ),

@@ -51,7 +51,21 @@
 //!   one ends.
 //! - **A turn ends** once every message written to it has been taken in
 //!   and answered ([`Live::unread`]): the process is told its input is over
-//!   and exits.
+//!   and exits. **Only a result that answers a message Yap wrote counts**
+//!   (16 Nov 2026, [`Follow::take_result`]): a turn Claude Code starts by
+//!   itself on a background task's end says so (`TurnResult::own_turn`), and
+//!   one with no model call and no words before Yap's message was read is a
+//!   resumed session noting a stopped task (`TurnResult::empty`) — taken for
+//!   the answer, it ended the person's turn 3 seconds in and cut the real one
+//!   off.
+//! - **Work it leaves running waits** (16 Nov 2026, `runner/background.rs`):
+//!   a helper or a command with `run_in_background`, a wake-up. With its
+//!   answer in, the process and its input stay open ("Waiting for background
+//!   work (1 helper)") until that work reports back and Claude Code's own
+//!   turn on it ends — the turn's continuation, its words the turn's report.
+//!   A message meanwhile goes in as a note; after [`BACKGROUND_ASK`] the
+//!   person is asked whether to keep waiting or stop it. Before, the process
+//!   was ended 15 seconds after the answer, the work with it.
 //! - **Allowing a plan means go ahead** (2026-11-07): a Plan-mode turn whose
 //!   ExitPlanMode prompt the person allowed ([`plan_allowed`]: the card's
 //!   Go ahead, in the thread or on the bar) ends as a plan and its next
@@ -88,6 +102,9 @@ use super::modes::{self, Mode};
 use super::pictures;
 use super::steps;
 use super::store::{self, Denial, Agent, ProblemNote, Status};
+
+mod background;
+use background::Background;
 
 /// The app event every change of an agent goes out as.
 pub const EVENT: &str = "yap-agent";
@@ -174,8 +191,30 @@ pub const ENTER_PLAN: &str = "EnterPlanMode";
 pub const READ_ONLY_LINE: &str = "This is read only: don't change, create or delete any files (your file-editing tools are switched off for it). Read, search and run only commands that look (ls, git log, grep), never ones that change anything. Don't make a plan to approve either. When you're done, finish with a short summary of what you found.";
 /// How long a stopped agent gets to end its turn before it's ended.
 const STOP_GRACE: Duration = Duration::from_secs(8);
-/// How long an agent whose input is over gets to exit by itself.
+/// How long an agent whose input is over gets to exit by itself (never
+/// while work it left running in the background hasn't reported back:
+/// Claude Code stays up for it, then ends by itself).
 const EXIT_GRACE: Duration = Duration::from_secs(15);
+/// **How long a turn waits for its background work by itself** (16 Nov
+/// 2026): then the person is asked whether to keep waiting (as long again)
+/// or stop it — never stopped unasked.
+pub const BACKGROUND_ASK: Duration = Duration::from_secs(45 * 60);
+/// Its background work all back, and nothing from Claude Code for this long
+/// (no turn of its own on it): the turn's input ends.
+const DRAIN_GRACE: Duration = Duration::from_secs(20);
+/// **A spoken message's turn waits this long for more words** (16 Nov 2026:
+/// a dictated message sometimes arrives in two parts, each a turn of its
+/// own): what comes within it, since the last part, goes with it as one
+/// message. Claude Code starts meanwhile, so most of it costs nothing.
+const SPOKEN_HOLD: Duration = Duration::from_millis(2_500);
+/// …at most this long in all.
+const SPOKEN_HOLD_MOST: Duration = Duration::from_secs(6);
+
+/// **What every run of an agent is told of background work** (16 Nov 2026,
+/// appended to Claude Code's own system prompt): Claude couldn't know that
+/// Yap ended its process with each reply, so it kept starting helpers that
+/// died. Now they're waited for, and it's told how.
+pub const BACKGROUND_PROMPT: &str = "You're running inside Yap, which shows your replies to the user in its chat. Work you start in the background (a helper or a command with run_in_background, a ScheduleWakeup) keeps running after your reply ends: Yap keeps this session open and shows the user it's waiting, until that work reports back and you've answered what it came back with, which the user sees as the rest of your reply. They can write to you meanwhile. It's stopped if the user stops it (after 45 minutes Yap asks them whether to keep waiting) or quits Yap. Yap doesn't wait for a scheduled job (CronCreate): it ends with the session once nothing else runs. Something that never ends by itself, such as a dev server or a watcher, keeps your reply open until it's stopped, so stop it once you're done with it.";
 
 /// **One change of an agent**, as the page hears it (`yap-agent`) and its log
 /// keeps it.
@@ -203,6 +242,11 @@ pub struct AgentEvent {
     /// tab's steps each).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub said: Option<String>,
+    /// **A quiet line of Yap's own in its work** (16 Nov 2026): background
+    /// work from an earlier process that Claude Code says stopped
+    /// (`background::STOPPED_EARLIER`). Never a step.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
     /// **Its thinking** (15 Nov 2026): a thinking block of its own message,
     /// as Claude Code's stream hands it over (a helper's never), at most
     /// [`THOUGHT_CHARS`]. Shown only in a Code chat's Thinking and Verbose
@@ -498,9 +542,20 @@ struct Live {
     /// next turn.
     started: bool,
     /// Words for this turn that came while it started (sent with its first),
-    /// and their screenshots.
+    /// their screenshots and the messages they were (read with it).
     extra: Vec<String>,
     extra_shots: Vec<String>,
+    extra_ids: Vec<String>,
+    /// When the latest of them came (a spoken message's turn waits a moment
+    /// for more: [`SPOKEN_HOLD`]).
+    last_words: Option<Instant>,
+    /// **Its answer is in and it waits for its background work**
+    /// (`runner/background.rs`): what, since when, and whether the person is
+    /// asked to keep waiting. A message now goes to it at once
+    /// ([`queue_state`] "taking").
+    waiting: Option<store::Waiting>,
+    /// The person said keep waiting: the wait starts again.
+    keep_waiting: bool,
     /// A request for its next turn, waiting for this one to end.
     pending: Option<Ask>,
     /// The person stopped it (when).
@@ -517,7 +572,28 @@ struct Live {
 
 impl Live {
     fn new(folder: String) -> Live {
-        Live { session: None, sent: 0, results: 0, written: Vec::new(), taken: 0, notes: Vec::new(), input_over: false, started: false, extra: Vec::new(), extra_shots: Vec::new(), pending: None, stopping: None, plan_allowed: false, folder, tools_out: 0 }
+        Live {
+            session: None,
+            sent: 0,
+            results: 0,
+            written: Vec::new(),
+            taken: 0,
+            notes: Vec::new(),
+            input_over: false,
+            started: false,
+            extra: Vec::new(),
+            extra_shots: Vec::new(),
+            extra_ids: Vec::new(),
+            // (Its message came now: its turn is starting.)
+            last_words: Some(Instant::now()),
+            waiting: None,
+            keep_waiting: false,
+            pending: None,
+            stopping: None,
+            plan_allowed: false,
+            folder,
+            tools_out: 0,
+        }
     }
 
     /// How many messages written to it Claude Code hasn't taken in yet:
@@ -1120,6 +1196,24 @@ pub(crate) fn start_line(direct: bool) -> &'static str {
     }
 }
 
+/// **A spoken message's turn waits for more words** (16 Nov 2026): until
+/// [`SPOKEN_HOLD`] has passed since its last part came (`Live::last_words`),
+/// [`SPOKEN_HOLD_MOST`] at most, or the person stops it. What comes
+/// meanwhile is taken as its turn starts (`follow_up`: `At::Starting`).
+async fn hold_for_more(id: &str) {
+    let began = Instant::now();
+    loop {
+        let last = with_state(|s| s.live.get(id).filter(|l| l.stopping.is_none()).map(|l| l.last_words.unwrap_or(began)));
+        let Some(last) = last else { return };
+        let until = (last + SPOKEN_HOLD).min(began + SPOKEN_HOLD_MOST);
+        let now = Instant::now();
+        if now >= until {
+            return;
+        }
+        tokio::time::sleep(until - now).await;
+    }
+}
+
 /// `text`, then `end` after a blank line when there is one.
 fn ended(text: &str, end: &str) -> String {
     if end.is_empty() {
@@ -1253,6 +1347,8 @@ pub fn agent_spec(
     spec.conversation = conversation;
     // Each message echoed back as it's taken in: which notes it has read.
     spec.replay_user_messages = true;
+    // How background work behaves here: it's waited for (runner/background.rs).
+    spec.append_system_prompt = Some(BACKGROUND_PROMPT.to_string());
     spec
 }
 
@@ -1381,18 +1477,31 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         Err(e) => return failed_early(id, n, e, None),
     };
     let session = Arc::new(session);
+    // **A spoken message waits a moment for more words** (16 Nov 2026: a
+    // dictated message sometimes came in two parts a few seconds apart, each
+    // a turn and a process of its own): what comes within SPOKEN_HOLD of the
+    // last part goes with it as one message. Claude Code starts meanwhile.
+    let spoken = direct && phone.is_none() && crate::chat::turn::asked_by_voice(&agent, n, false, |c, i| crate::chat::chats::get(c).and_then(|c| c.messages.get(i).map(|m| m.voice)));
+    if spoken {
+        hold_for_more(id).await;
+    }
     // The person stopped it while it started: ended now. Words for this
     // turn that came meanwhile go with its first message.
-    let (stopped_early, extra, extra_shots) = with_state(|s| match s.live.get_mut(id) {
+    let (stopped_early, extra, extra_shots, extra_ids) = with_state(|s| match s.live.get_mut(id) {
         Some(l) => {
             l.session = Some(Arc::clone(&session));
             l.started = true;
             l.sent = 1;
-            (l.stopping.is_some(), std::mem::take(&mut l.extra), std::mem::take(&mut l.extra_shots))
+            (l.stopping.is_some(), std::mem::take(&mut l.extra), std::mem::take(&mut l.extra_shots), std::mem::take(&mut l.extra_ids))
         }
-        None => (true, Vec::new(), Vec::new()),
+        None => (true, Vec::new(), Vec::new(), Vec::new()),
     });
-    let mut first = std::iter::once(opening(&agent, message.as_deref(), read_only, direct)).chain(extra.iter().map(|t| format!("Also: {t}"))).collect::<Vec<_>>().join("\n\n");
+    // (The person's own words in a Code chat as they are: one message after another, nothing of Yap's.)
+    let also = |t: &String| if direct { t.clone() } else { format!("Also: {t}") };
+    let mut first = std::iter::once(opening(&agent, message.as_deref(), read_only, direct)).chain(extra.iter().map(also)).collect::<Vec<_>>().join("\n\n");
+    if !extra.is_empty() {
+        tracing::info!(id, turn = n, more = extra.len(), by_voice = spoken, "Agents: words that came as its turn started go with its message");
+    }
     // A rewound or forked chat Claude Code couldn't branch: the conversation kept so far first, as text.
     if let Some(seed) = &seed {
         first = format!("{seed}\n\n{first}");
@@ -1424,6 +1533,12 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
                 l.written = vec![first.clone()];
             }
         });
+        // The messages that went with it are read with it (✓✓ under each).
+        if let Some(agent) = store::get(id).filter(|_| !extra_ids.is_empty()) {
+            for read in extra_ids {
+                emit(&AgentEvent { read: Some(read), ..AgentEvent::at(&agent, n) });
+            }
+        }
     }
     let now = store::now_secs();
     let Some(agent) = store::update(id, |j| {
@@ -1635,6 +1750,42 @@ struct Follow {
     web_calls: HashMap<String, Option<String>>,
     /// The pages they found, numbered as found.
     found: Vec<crate::chat::chats::Source>,
+    /// **Its own work in the background** (`runner/background.rs`): what the
+    /// turn waits for once its answer is in.
+    bg: Background,
+    /// Every message written has its answer (the turn's reply is over).
+    answered: bool,
+    /// When it began waiting for its background work, and when the person
+    /// was asked whether to keep waiting ([`BACKGROUND_ASK`]).
+    waiting_since: Option<Instant>,
+    asked_at: Option<Instant>,
+    /// …the wait's start as the page reads it (unix seconds).
+    waiting_since_secs: u64,
+    /// Its background work all reported back (since when): Claude Code's
+    /// own turn on it comes next.
+    drained_at: Option<Instant>,
+    /// When Claude Code last said anything.
+    last_event: Instant,
+    /// A turn Claude Code started by itself is running (`command_lifecycle`:
+    /// a wake-up's), so its result is its own.
+    woken: bool,
+}
+
+/// **What a result means for the turn** ([`Follow::take_result`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum After {
+    /// Not the turn's answer (a turn of Claude Code's own with nothing in
+    /// it): nothing changes.
+    Nothing,
+    /// A message written to it isn't read yet: it starts on it now.
+    Note,
+    /// Answered, with its own work still in the background: its input stays
+    /// open till that's back.
+    Background,
+    /// Over: its input ends.
+    End,
+    /// Over, stopped by the person with a message unread: ended now.
+    Kill,
 }
 
 /// An Edit, MultiEdit or Write call waiting for its result: its diff goes
@@ -1738,6 +1889,14 @@ impl Follow {
             marks: None,
             web_calls: HashMap::new(),
             found: Vec::new(),
+            bg: Background::default(),
+            answered: false,
+            waiting_since: None,
+            asked_at: None,
+            waiting_since_secs: 0,
+            drained_at: None,
+            last_event: Instant::now(),
+            woken: false,
         }
     }
 
@@ -1836,13 +1995,15 @@ impl Follow {
 
     /// A tool call: its line, its file or command; a `TodoWrite` its list.
     fn on_tool(&mut self, id: &str, name: &str, input: &serde_json::Value) {
-        // One of its own calls out now (the queue: `queue_state`).
+        // One of its own calls out now (the queue: `queue_state`) — and one
+        // that asks for the background, noted (what the turn waits for).
         if self.under.is_none() {
             with_state(|s| {
                 if let Some(l) = s.live.get_mut(&self.id) {
                     l.tools_out += 1;
                 }
             });
+            self.bg.on_call(id, name, input);
         }
         if backed_up_tool(name) {
             self.edits.insert(id.to_string());
@@ -1895,8 +2056,13 @@ impl Follow {
         }
         let mut known = false;
         let n = self.n;
+        // While it waits for its background work, a helper's steps are the
+        // helper's own (its row's): the turn's line stays what it waits for.
+        let keeps_line = self.waiting_since.is_some() && self.under.is_some();
         let Some(agent) = store::touch(&self.id, |j| {
-            j.step = seen.step.clone();
+            if !keeps_line {
+                j.step = seen.step.clone();
+            }
             if let Some(f) = &seen.file {
                 known = j.files.contains(f);
                 if !known {
@@ -1918,12 +2084,15 @@ impl Follow {
         if let (Some(file), "Edit" | "MultiEdit" | "Write") = (&seen.file, name) {
             self.changes.insert(id.to_string(), Change { tool: name.to_string(), input: input.clone(), file: file.clone(), known });
         }
-        self.line = seen.step.clone();
+        if !keeps_line {
+            self.line = seen.step.clone();
+        }
         let call = Some(id.to_string()).filter(|c| !c.is_empty());
         if seen.command.is_some() {
             self.commands.insert(id.to_string());
         }
-        emit(&AgentEvent { step: Some(seen.step), file: seen.file, command: seen.command, about: seen.about, done: seen.done, range: seen.range, call, under: self.under.clone(), ..self.event(&agent) });
+        let now = keeps_line.then(|| self.line.clone()).filter(|l| !l.is_empty());
+        emit(&AgentEvent { step: Some(seen.step), file: seen.file, command: seen.command, about: seen.about, done: seen.done, range: seen.range, call, under: self.under.clone(), now, ..self.event(&agent) });
     }
 
     /// **A tool call's answer carried pictures** (a picture file read, a
@@ -1968,16 +2137,63 @@ impl Follow {
         if self.commands.remove(id) {
             self.output_of(id, text, is_error);
         }
+        // (A call that failed started nothing in the background; a wake-up's record says when it's due.)
+        self.bg.on_call_back(id, is_error, result);
         // A helper is back: said, so its entry in the Agent panel stops working — with what it came back with.
-        if self.helpers.remove(id) {
+        // One in the background is at work still: its task's end says it's back (`on_task`).
+        if self.helpers.remove(id) && !self.bg.runs_call(id) {
             if let Some(agent) = store::get(&self.id) {
                 let report = Some(clipped(&helper_words(text, result), REPORT_CHARS)).filter(|r| !r.is_empty());
                 emit(&AgentEvent { call: Some(id.to_string()), helper: Some(if is_error { "failed" } else { "back" }.to_string()), report, ..self.event(&agent) });
             }
         }
-        if self.open.is_empty() {
+        // (While it idles waiting for its background work, the line is the wait's.)
+        if self.open.is_empty() && !self.idle_waiting() {
             if let Some(line) = steps::doing_now(&self.todos) {
                 self.now(line);
+            }
+        }
+    }
+
+    /// **One of Claude Code's task events** (`runner/background.rs`): its own
+    /// work in the background begins or ends. A helper's end says it's back
+    /// (its Agent panel row, with what it came back with); a task an earlier
+    /// process left that Claude Code says stopped is a quiet line of the
+    /// turn's; and waiting on the work, the line says what's left — or, all
+    /// back, Claude Code's own turn on it is next.
+    fn on_task(&mut self, t: &crate::ai::claude_code::events::Task) {
+        if self.bg.stopped_before(t) {
+            tracing::info!(id = %self.id, turn = self.n, "Agents: Claude Code says a background task from before stopped");
+            if let Some(agent) = store::get(&self.id) {
+                emit(&AgentEvent { notice: Some(background::STOPPED_EARLIER.into()), ..self.event(&agent) });
+            }
+        }
+        let ended = self.bg.on_task(t);
+        // (Started while it idles waiting: one more to wait for.)
+        if matches!(t, crate::ai::claude_code::events::Task::Started { background: true, by_helper: false, .. }) && self.idle_waiting() {
+            self.wait_for_background();
+        }
+        if ended.is_empty() {
+            return;
+        }
+        for e in &ended {
+            tracing::info!(id = %self.id, turn = self.n, kind = ?e.kind, status = %e.status, left = self.bg.pending(), "Agents: its background work reported back");
+            if e.kind == background::Kind::Helper && !e.call.is_empty() {
+                if let Some(agent) = store::get(&self.id) {
+                    let report = Some(clipped(e.summary.trim(), REPORT_CHARS)).filter(|r| !r.is_empty());
+                    let back = if matches!(e.status.as_str(), "" | "completed") { "back" } else { "failed" };
+                    emit(&AgentEvent { call: Some(e.call.clone()), helper: Some(back.to_string()), report, ..self.event(&agent) });
+                }
+            }
+        }
+        // Waiting on it: Claude Code starts a turn of its own on what came back (a message now waits for it).
+        if self.waiting_since.is_some() {
+            set_waiting(&self.id, None);
+            if self.bg.pending() {
+                self.now(self.bg.line());
+            } else {
+                self.drained_at = Some(Instant::now());
+                self.now(start_line(true).to_string());
             }
         }
     }
@@ -2082,7 +2298,23 @@ impl Follow {
 
     /// One event of Claude Code's.
     fn on(&mut self, ev: Event, session: &Session) {
+        self.last_event = Instant::now();
         match ev {
+            // Its own work in the background, begun or ended (runner/background.rs).
+            Event::Task(t) => self.on_task(&t),
+            // A turn Claude Code starts by itself: a wake-up it scheduled.
+            Event::Lifecycle(l) => {
+                self.bg.on_lifecycle(l.started);
+                // (Its result answers no message of Yap's: `take_result`.)
+                self.woken = l.started;
+                if l.started && self.waiting_since.is_some() {
+                    set_waiting(&self.id, None);
+                    if !self.bg.pending() {
+                        self.drained_at = Some(Instant::now());
+                    }
+                    self.now(start_line(true).to_string());
+                }
+            }
             Event::Init(init) => {
                 if !init.session_id.is_empty() {
                     // (A branch — Rewind, Fork from here — is made: the session is its own now.)
@@ -2263,9 +2495,85 @@ impl Follow {
         }
     }
 
-    /// A turn's result: its words, cost and denials kept; once every message
-    /// written has been taken in, its input ends.
+    /// **A turn's result**: what it means for the process ([`Follow::take_result`]).
     fn on_result(&mut self, r: &TurnResult, session: &Session) {
+        match self.take_result(r) {
+            After::Nothing | After::Background => {}
+            After::Note => self.unread_since = Some(Instant::now()),
+            After::End => self.end_input(session, false),
+            After::Kill => self.end_input(session, true),
+        }
+    }
+
+    /// **The turn's input ends** (`kill`: and the process with it, now).
+    fn end_input(&mut self, session: &Session, kill: bool) {
+        with_state(|s| {
+            if let Some(l) = s.live.get_mut(&self.id) {
+                l.input_over = true;
+            }
+        });
+        set_waiting(&self.id, None);
+        self.waiting_since = None;
+        self.drained_at = None;
+        if kill {
+            session.kill();
+        } else {
+            session.end();
+        }
+        self.input_over_at = Some(Instant::now());
+    }
+
+    /// **It waits for its background work** (its answer is in): its input
+    /// stays open, its line says what for, and the page and the queue know
+    /// ([`set_waiting`]: a message now goes to it at once).
+    fn wait_for_background(&mut self) {
+        if self.waiting_since.is_none() {
+            tracing::info!(id = %self.id, turn = self.n, what = %self.bg.what(), "Agents: its answer is in; waiting for its background work");
+            self.waiting_since = Some(Instant::now());
+            self.waiting_since_secs = store::now_secs();
+        }
+        self.drained_at = None;
+        let ask = self.asked_at.is_some();
+        set_waiting(&self.id, Some(store::Waiting { what: self.bg.what(), since: self.waiting_since_secs, ask }));
+        self.now(self.bg.line());
+    }
+
+    /// **It idles, waiting for its background work** (its answer in, nothing
+    /// being written: `Live::waiting`).
+    fn idle_waiting(&self) -> bool {
+        with_state(|s| s.live.get(&self.id).is_some_and(|l| l.waiting.is_some()))
+    }
+
+    /// **A turn's result, taken**: its words, cost and denials kept, and
+    /// what it means for the turn ([`After`]).
+    ///
+    /// **Only an answer to a message Yap wrote can end it** (16 Nov 2026,
+    /// checked on 2.1.296): a turn Claude Code started by itself on a
+    /// background task's end (`own_turn`) is the turn's continuation — its
+    /// words join the turn's, and it never counts as a message's answer —
+    /// and one with no model call and no words (`empty`), Claude Code's own
+    /// or before Yap's first message was even read (a resumed session noting
+    /// a task that stopped), is nothing at all. Answered, with its own work
+    /// still in the background, the turn waits for it.
+    fn take_result(&mut self, r: &TurnResult) -> After {
+        // (A wake-up's turn, started by Claude Code itself, says no origin: its `command_lifecycle` does.)
+        let own = r.own_turn() || self.woken;
+        // (It echoes each message as it takes it in: none yet, the turn's first is still to be read.)
+        let first_unread = with_state(|s| s.live.get(&self.id).is_some_and(|l| !l.written.is_empty() && l.taken == 0));
+        if r.empty() && (own || first_unread) {
+            tracing::info!(id = %self.id, turn = self.n, own, "Agents: a turn of Claude Code's own with nothing in it (a background task's end noted), not this turn's answer");
+            if self.answered && self.waiting_since.is_some() {
+                // Waiting: more still out, it waits on; all back with nothing to say of it, nothing more is coming.
+                if self.bg.pending() {
+                    self.wait_for_background();
+                    return After::Background;
+                }
+                if self.drained_at.is_some() {
+                    return After::End;
+                }
+            }
+            return After::Nothing;
+        }
         let stopping = with_state(|s| s.live.get(&self.id).is_some_and(|l| l.stopping.is_some()));
         let text = if r.text.trim().is_empty() { self.last_text.clone() } else { r.text.trim().to_string() };
         let outcome = outcome_of(r, stopping, self.problem.as_ref());
@@ -2318,6 +2626,12 @@ impl Follow {
         });
         // Its words so far: this result's after any before it.
         if !text.is_empty() && self.said.last() != Some(&text) {
+            // A turn of Claude Code's own on what its background work came back with: the rest of the answer, which
+            // the turn's words are from here on — what it said before stays in its work, as it was shown while it
+            // waited (as a message read after an answer splits them: `on_taken`).
+            if own && self.outcome.is_some() && !self.said.is_empty() {
+                self.split_at = Some(self.said.len());
+            }
             self.said.push(text.clone());
         }
         // (A message read after an answer had ended: the turn's words are from it on — what came before
@@ -2326,34 +2640,33 @@ impl Follow {
         // Over once every message written has been taken in (this result
         // covers them) — or the person stopped it. A note still unread:
         // Claude Code starts on it now, a turn of its own in this process.
-        let (done, unread) = with_state(|s| match s.live.get_mut(&self.id) {
+        // (A turn of Claude Code's own answers none of them.)
+        let (stopping, unread) = with_state(|s| match s.live.get_mut(&self.id) {
             Some(l) => {
-                l.results += 1;
-                let unread = l.unread();
-                let done = unread == 0 || l.stopping.is_some();
-                if done {
-                    l.input_over = true;
+                if !own {
+                    l.results += 1;
                 }
-                (done, unread)
+                (l.stopping.is_some(), l.unread())
             }
             None => (true, 0),
         });
-        tracing::info!(id = %self.id, outcome = outcome.word(), last = done, unread, "Agents: a turn's result");
+        self.answered = unread == 0;
+        let after = match () {
+            // Stopped with a note unread: never let it start on that note (Continue sends it).
+            _ if stopping && unread > 0 => After::Kill,
+            _ if stopping => After::End,
+            _ if unread > 0 => After::Note,
+            _ if self.bg.pending() => After::Background,
+            _ => After::End,
+        };
+        tracing::info!(id = %self.id, outcome = outcome.word(), last = after == After::End || after == After::Kill, unread, own, waits = after == After::Background, "Agents: a turn's result");
         if let Some(agent) = agent {
             emit(&AgentEvent { text: Some(text), cost: Some(cost), usage, ..self.event(&agent) });
         }
-        if done {
-            // Stopped with a note unread: never let it start on that note
-            // (Continue sends it).
-            if unread > 0 {
-                session.kill();
-            } else {
-                session.end();
-            }
-            self.input_over_at = Some(Instant::now());
-        } else {
-            self.unread_since = Some(Instant::now());
+        if after == After::Background {
+            self.wait_for_background();
         }
+        after
     }
 
     /// Every half second: a permission card waiting, a stop taking too
@@ -2392,10 +2705,16 @@ impl Follow {
                 emit(&AgentEvent { step, now, ..self.event(&agent) });
             }
         }
-        let stopping = with_state(|s| s.live.get(&self.id).and_then(|l| l.stopping));
-        if stopping.is_some_and(|at| at.elapsed() > STOP_GRACE) || self.input_over_at.is_some_and(|at| at.elapsed() > EXIT_GRACE) {
+        let (stopping, keep) = with_state(|s| match s.live.get_mut(&self.id) {
+            Some(l) => (l.stopping, std::mem::take(&mut l.keep_waiting)),
+            None => (None, false),
+        });
+        // (Its input over, it exits by itself — but not before work it left in the background is back: Claude
+        // Code stays up for that, then ends.)
+        if stopping.is_some_and(|at| at.elapsed() > STOP_GRACE) || self.input_over_at.is_some_and(|at| at.elapsed() > EXIT_GRACE && !self.bg.pending()) {
             session.kill();
         }
+        self.background_tick(session, keep);
         // A note it hadn't read when its turn ended, and no sign of it
         // starting on it: its input ends, and the note goes back to Yap
         // (its next turn: `notes_unread`).
@@ -2416,6 +2735,66 @@ impl Follow {
         }
         // A prompt waiting with no Yap window in front: on the Yap bar too.
         super::approve_card::sync();
+    }
+
+    /// **Waiting for its background work, every half second**: the person
+    /// said keep waiting (`keep`: the wait starts again); waited
+    /// [`BACKGROUND_ASK`], they're asked whether to keep waiting or stop it
+    /// (never stopped unasked); a wake-up long past due is let go; and its
+    /// work all back with nothing from Claude Code for [`DRAIN_GRACE`], its
+    /// input ends.
+    fn background_tick(&mut self, session: &Session, keep: bool) {
+        if self.input_over_at.is_some() {
+            return;
+        }
+        let waits = self.idle_waiting();
+        let now_ms = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+        if self.bg.expire(now_ms) && self.waiting_since.is_some() {
+            tracing::info!(id = %self.id, turn = self.n, "Agents: a wake-up long past due, let go");
+            if self.bg.pending() {
+                if waits {
+                    self.wait_for_background();
+                }
+            } else {
+                self.drained_at = Some(Instant::now());
+            }
+        }
+        if keep && self.asked_at.is_some() {
+            tracing::info!(id = %self.id, turn = self.n, "Agents: the person keeps waiting for its background work");
+            self.asked_at = None;
+            self.waiting_since = Some(Instant::now());
+            self.waiting_since_secs = store::now_secs();
+            if waits {
+                self.wait_for_background();
+            }
+        }
+        self.ask_if_long(waits);
+        if self.drained_at.is_some_and(|at| at.elapsed() > DRAIN_GRACE) && self.last_event.elapsed() > DRAIN_GRACE && self.answered && !self.bg.pending() {
+            tracing::info!(id = %self.id, turn = self.n, "Agents: its background work is back and Claude Code said nothing more; ending its input");
+            self.end_input(session, false);
+        }
+    }
+
+    /// **Waited [`BACKGROUND_ASK`] for its background work**: the person is
+    /// asked whether to keep waiting or stop it, once a wait (`waits`: its
+    /// answer in, nothing being written — else at the next one).
+    fn ask_if_long(&mut self, waits: bool) {
+        let Some(since) = self.waiting_since.filter(|_| self.asked_at.is_none() && self.bg.pending()) else { return };
+        if since.elapsed() <= BACKGROUND_ASK {
+            return;
+        }
+        tracing::info!(id = %self.id, turn = self.n, minutes = since.elapsed().as_secs() / 60, "Agents: waited long for its background work; asking the person");
+        self.asked_at = Some(Instant::now());
+        if waits {
+            self.wait_for_background();
+        }
+    }
+
+    /// **A turn's to-do list as it ended**: an item still in progress is
+    /// stopped (16 Nov 2026: one a helper was on kept turning in the thread
+    /// once nothing worked on it). `None`: nothing to change. Pure.
+    fn todos_at_end(todos: &[steps::Todo]) -> Option<Vec<steps::Todo>> {
+        todos.iter().any(|t| t.status == "in_progress").then(|| todos.iter().map(|t| if t.status == "in_progress" { steps::Todo { status: steps::TODO_STOPPED.to_string(), ..t.clone() } } else { t.clone() }).collect())
     }
 
     /// The process is gone: the turn's end, saved and said.
@@ -2443,6 +2822,9 @@ impl Follow {
         let asks = status == Status::Done && !plan_allowed && !self.direct && super::consent::asks(&text);
         let n = self.n;
         let now = store::now_secs();
+        let mut stopped_todos = None;
+        // (Nothing waits any more: its process is gone.)
+        set_waiting(&self.id, None);
         let agent = store::update(&self.id, |j| {
             j.status = status;
             j.ended_ts = now;
@@ -2466,15 +2848,20 @@ impl Follow {
                 t.plan_allowed = plan_allowed;
                 t.plan_unused = false;
                 t.asks = asks;
+                // A to-do still in progress: stopped now, never turning on.
+                stopped_todos = Follow::todos_at_end(&t.todos);
+                if let Some(left) = &stopped_todos {
+                    t.todos = left.clone();
+                }
             }
         });
-        tracing::info!(id = %self.id, turn = n, status = status.word(), plan, plan_allowed, asks, "Agents: ended");
+        tracing::info!(id = %self.id, turn = n, status = status.word(), plan, plan_allowed, asks, todos_stopped = stopped_todos.is_some(), "Agents: ended");
         if let Some(agent) = agent {
             // Its turn's own words (never an earlier turn's).
             let note = agent.turn_list.iter().find(|t| t.n == n);
             let said = note.map(|t| t.text.clone()).unwrap_or_else(|| agent.text.clone());
             let usage = note.and_then(|t| t.usage.clone());
-            emit(&AgentEvent { text: Some(said).filter(|t| !t.is_empty()).or(error), cost: Some(agent.cost), problem: agent.problem.clone(), usage, ..AgentEvent::at(&agent, n) });
+            emit(&AgentEvent { text: Some(said).filter(|t| !t.is_empty()).or(error), cost: Some(agent.cost), problem: agent.problem.clone(), usage, todos: stopped_todos, ..AgentEvent::at(&agent, n) });
         }
         // Its prompts ended with its run: their card on the bar goes.
         super::approve_card::sync();
@@ -2824,11 +3211,52 @@ pub fn queue_state(conversation: u64) -> &'static str {
     with_state(|s| {
         let working = ids.iter().filter_map(|id| s.live.get(id)).find(|l| l.started && !l.input_over && l.stopping.is_none());
         match working {
-            Some(l) if l.tools_out > 0 => "taking",
+            // (Its answer in, waiting for its background work: nothing being written, so a message goes in now.)
+            Some(l) if l.tools_out > 0 || l.waiting.is_some() => "taking",
             Some(_) => "writing",
             None => "idle",
         }
     })
+}
+
+/// **What agent `id`'s turn waits for** (`Live::waiting`), told to every
+/// page when it changes (they read it with the agent: [`waiting`]).
+fn set_waiting(id: &str, waiting: Option<store::Waiting>) {
+    let changed = with_state(|s| match s.live.get_mut(id) {
+        Some(l) if l.waiting != waiting => {
+            l.waiting = waiting;
+            true
+        }
+        _ => false,
+    });
+    if changed {
+        if let Some(agent) = store::get(id) {
+            told_changed(&agent, "waiting");
+        }
+    }
+}
+
+/// **The background work agent `id`'s turn waits for** (its answer in), if
+/// it waits: the page's copy of it ([`store::Agent::waiting`]).
+pub fn waiting(id: &str) -> Option<store::Waiting> {
+    with_state(|s| s.live.get(id).and_then(|l| l.waiting.clone()))
+}
+
+/// **Keep waiting** for agent `id`'s background work: asked once it had
+/// waited [`BACKGROUND_ASK`], the person said keep waiting — the wait starts
+/// again. Refused when it isn't asking.
+pub fn keep_waiting(id: &str) -> Result<Agent, String> {
+    let asked = with_state(|s| match s.live.get_mut(id) {
+        Some(l) if l.waiting.as_ref().is_some_and(|w| w.ask) => {
+            l.keep_waiting = true;
+            true
+        }
+        _ => false,
+    });
+    if !asked {
+        return Err("It isn't waiting for anything now.".into());
+    }
+    store::get(id).ok_or_else(|| "There's no such agent.".into())
 }
 
 /// **A follow-up for agent `id`** (its Code chat's next request, `message_agent`,
@@ -2861,8 +3289,9 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
         Starting,
         /// Waiting for a slot (its first turn: `true`).
         InQueue(bool),
-        /// Working: handed to its Claude Code now.
-        Passing(Arc<Session>),
+        /// Working: handed to its Claude Code now (`true`: its answer was in,
+        /// waiting for its background work).
+        Passing(Arc<Session>, bool),
         /// Working: its next turn (the first request waiting: `true`).
         Working(bool),
         Not,
@@ -2874,6 +3303,8 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
             if !l.started && l.stopping.is_none() && joins {
                 l.extra.push(text.clone());
                 add_shots(&mut l.extra_shots, &ask.shots);
+                l.extra_ids.extend(ask.message_id.clone());
+                l.last_words = Some(Instant::now());
                 return At::Starting;
             }
             // Its first message written, its input still open, nobody
@@ -2884,7 +3315,9 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
                 l.sent += 1;
                 l.written.push(note.clone());
                 l.notes.push(ask.clone());
-                return At::Passing(session);
+                // (Waiting for its background work: it answers this now, a turn of Claude Code's in this process.)
+                let was_waiting = l.waiting.take().is_some();
+                return At::Passing(session, was_waiting);
             }
             let first = l.pending.is_none();
             match &mut l.pending {
@@ -2930,7 +3363,13 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
             tracing::info!(id, "Agents: a follow-up for the turn waiting for a slot");
             Ok((agent, FollowedUp::Added))
         }
-        At::Passing(session) => {
+        At::Passing(session, was_waiting) => {
+            // (It answers this now: the page's "waiting" goes till its answer is in.)
+            if was_waiting {
+                if let Some(agent) = store::get(id) {
+                    told_changed(&agent, "waiting");
+                }
+            }
             // Its screenshots with it. (The note's words stay exactly as
             // counted above: Claude Code's echo of them is how Yap knows
             // it took the note in — so one gone since isn't said here.)
@@ -3327,6 +3766,9 @@ mod tests {
             assert!(!a.iter().any(|x| x == never), "{never} in {a:?}");
         }
         assert_eq!((spec.mcp_config, spec.settings), (Some(mcp.clone()), Some(hooks.clone())));
+        // Told how background work behaves here (appended to Claude Code's own prompt, never in place of it).
+        assert_eq!((spec.append_system_prompt.as_deref(), spec.system_prompt.as_deref()), (Some(BACKGROUND_PROMPT), None));
+        assert!(BACKGROUND_PROMPT.contains("run_in_background") && BACKGROUND_PROMPT.contains("45 minutes"));
         // The run key in its environment, which its files name; its to-do list on, as TodoWrite; Claude Code's own
         // file checkpoints on (Rewind's files).
         assert_eq!(spec.env[..1], key[..]);
@@ -3669,7 +4111,7 @@ mod tests {
         assert_eq!(v["status"], "running");
         assert_eq!(v["conversation"], 3);
         assert_eq!(v["step"], "Reading notes.md");
-        for absent in ["file", "command", "about", "said", "todos", "now", "diff", "call", "under", "helper", "report", "done", "range", "output", "picture", "text", "cost", "problem"] {
+        for absent in ["file", "command", "about", "said", "notice", "todos", "now", "diff", "call", "under", "helper", "report", "done", "range", "output", "picture", "text", "cost", "problem"] {
             assert!(v.get(absent).is_none(), "{absent}");
         }
         // A diff and a to-do list, as the tab reads them.
@@ -4101,5 +4543,197 @@ mod tests {
         let v = serde_json::to_value(AgentEvent { changed: Some("finished".into()), ..AgentEvent::at(&j, 1) }).unwrap();
         assert_eq!(v["changed"], "finished");
         assert!(serde_json::to_value(AgentEvent::at(&j, 1)).unwrap().get("changed").is_none());
+    }
+
+    // ---- Results that answer no message of Yap's, and work left in the background (16 Nov 2026) ----
+
+    /// An agent at work in the runner, its first message `first` written (what `turn` does before following it).
+    fn at_work(first: &str) -> (String, PathBuf) {
+        let id = store::new_id();
+        let folder = PathBuf::from(format!(r"D:\Projects\seed-tracker-{id}"));
+        store::insert(Agent { id: id.clone(), folder: "seed-tracker".into(), path: folder.to_string_lossy().into_owned(), status: Status::Running, started_ts: 5, turn_list: vec![store::TurnNote { n: 1, status: Status::Running, started_ts: 5, direct: true, ..Default::default() }], ..Default::default() });
+        with_state(|s| {
+            let mut l = Live::new(workspaces::norm(&folder.to_string_lossy()));
+            l.started = true;
+            l.sent = 1;
+            l.written = vec![first.to_string()];
+            s.live.insert(id.clone(), l);
+        });
+        (id, folder)
+    }
+
+    fn answer(text: &str, own: bool) -> TurnResult {
+        TurnResult { subtype: "success".into(), text: text.into(), num_turns: 2, terminal_reason: Some("completed".into()), origin: own.then(|| "task-notification".into()), ..Default::default() }
+    }
+
+    /// **A resumed session's turn of its own with nothing in it** (2.1.296,
+    /// as recorded: a stopped background task noted before it read the new
+    /// message) — never the turn's answer; the answer after it is.
+    #[test]
+    fn a_result_that_answers_no_message_of_yaps_never_ends_the_turn() {
+        let (id, folder) = at_work("How many files are there?");
+        let agent = store::get(&id).unwrap();
+        let mut follow = Follow::new(&agent, 1, folder, Mode::Auto, 200_000, None);
+        let stray = TurnResult { subtype: "success".into(), num_turns: 0, origin: Some("task-notification".into()), ..Default::default() };
+        assert_eq!(follow.take_result(&stray), After::Nothing);
+        // Without its origin too: no model call, no words, and the message not read yet.
+        assert_eq!(follow.take_result(&TurnResult { origin: None, ..stray.clone() }), After::Nothing);
+        assert!(follow.outcome.is_none() && !follow.answered);
+        // An error before it read the message is no "nothing": it says what went wrong.
+        let failed = TurnResult { is_error: true, terminal_reason: Some("api_error".into()), text: "Not logged in".into(), ..Default::default() };
+        assert!(!failed.empty());
+        // Read (its echo), then answered: over.
+        follow.on_taken("How many files are there?");
+        assert_eq!(follow.take_result(&answer("Two files.", false)), After::End);
+        assert_eq!(follow.outcome.as_ref().map(|(s, t)| (*s, t.as_str())), Some((Status::Done, "Two files.")));
+        test_live(&id, None);
+    }
+
+    /// **Answered, with a helper and a command still in the background**: it
+    /// waits — its line says for what, a message now goes straight in — and
+    /// a background helper's row stays at work till its task's end says it's
+    /// back. Claude Code's own turn on what came back is the rest of the
+    /// answer, and ends it.
+    #[test]
+    fn answered_with_work_in_the_background_it_waits_till_that_reports_back() {
+        use crate::ai::claude_code::events::Task;
+        use serde_json::json;
+        let (id, folder) = at_work("Compare the seed suppliers.");
+        let agent = store::get(&id).unwrap();
+        let mut follow = Follow::new(&agent, 1, folder, Mode::Auto, 200_000, None);
+        follow.on_taken("Compare the seed suppliers.");
+        follow.on_tool("toolu_helper", "Agent", &json!({ "description": "Compare seed suppliers", "run_in_background": true }));
+        follow.on_task(&Task::Started { task_id: "a1".into(), tool_use_id: "toolu_helper".into(), task_type: "local_agent".into(), background: true, by_helper: false });
+        follow.on_tool_result("toolu_helper", false, "Async agent launched successfully.", None);
+        follow.on_tool("toolu_build", "PowerShell", &json!({ "command": "npm run build", "run_in_background": true }));
+        follow.on_task(&Task::Started { task_id: "b1".into(), tool_use_id: "toolu_build".into(), task_type: "local_bash".into(), background: true, by_helper: false });
+        follow.on_tool_result("toolu_build", false, "Command running in background with ID: b1.", None);
+        let helpers = |id: &str| store::log_read(id).iter().filter_map(|e| Some((e.get("helper")?.as_str()?.to_string(), e.get("report").and_then(|r| r.as_str()).unwrap_or("").to_string()))).collect::<Vec<_>>();
+        assert!(helpers(&id).is_empty(), "launched isn't back");
+        assert_eq!(follow.take_result(&answer("I've asked a helper to compare them.", false)), After::Background);
+        assert!(follow.answered && follow.waiting_since.is_some());
+        assert_eq!(waiting(&id).map(|w| (w.what, w.ask)), Some(("1 helper, 1 command".to_string(), false)));
+        assert_eq!(store::get(&id).unwrap().step, "Waiting for background work (1 helper, 1 command)");
+        // A helper's own steps meanwhile: its row's, the line stays the wait's.
+        follow.under = Some("toolu_helper".into());
+        follow.on_tool("toolu_h1", "Read", &json!({ "file_path": "suppliers.md" }));
+        follow.under = None;
+        assert_eq!(store::get(&id).unwrap().step, "Waiting for background work (1 helper, 1 command)");
+        // The helper back: with what it came back with.
+        follow.on_task(&Task::Notice { task_id: "a1".into(), tool_use_id: "toolu_helper".into(), status: "completed".into(), summary: "Hedgerow is cheapest.".into() });
+        assert_eq!(helpers(&id), [("back".to_string(), "Hedgerow is cheapest.".to_string())]);
+        // Claude Code's own turn on it, with the command still out: the rest of the answer, still waiting.
+        assert!(waiting(&id).is_none(), "it's answering now");
+        assert_eq!(follow.take_result(&answer("Hedgerow is cheapest.", true)), After::Background);
+        assert_eq!(waiting(&id).map(|w| w.what), Some("1 command".to_string()));
+        assert_eq!(follow.outcome.as_ref().map(|(_, t)| t.as_str()), Some("Hedgerow is cheapest."), "the answer from what came back on (what it said before is its work's)");
+        // The command gone from Claude Code's list: all back; its own turn on it ends the turn, its words the answer.
+        follow.on_task(&Task::Background { tasks: vec![] });
+        assert!(follow.drained_at.is_some() && !follow.bg.pending());
+        assert_eq!(follow.take_result(&answer("The build passed.", true)), After::End);
+        let (status, words) = follow.outcome.clone().unwrap();
+        assert_eq!((status, words.as_str()), (Status::Done, "The build passed."));
+        assert_eq!(follow.said, ["I've asked a helper to compare them.", "Hedgerow is cheapest.", "The build passed."]);
+        // Its own turns answered no message of Yap's.
+        assert_eq!(with_state(|s| s.live.get(&id).map(|l| l.results)), Some(1));
+        test_live(&id, None);
+    }
+
+    /// **Waited long**: the person is asked; keep waiting starts the wait
+    /// again. A to-do still in progress when a turn ends is stopped.
+    #[test]
+    fn a_long_wait_asks_the_person_and_a_turns_unfinished_to_do_is_stopped() {
+        use crate::ai::claude_code::events::Task;
+        use serde_json::json;
+        let (id, folder) = at_work("Run the long tests.");
+        let agent = store::get(&id).unwrap();
+        let mut follow = Follow::new(&agent, 1, folder, Mode::Auto, 200_000, None);
+        follow.on_taken("Run the long tests.");
+        follow.on_tool("toolu_t", "Bash", &json!({ "command": "npm test", "run_in_background": "true" }));
+        follow.on_task(&Task::Started { task_id: "b1".into(), tool_use_id: "toolu_t".into(), task_type: "local_bash".into(), background: true, by_helper: false });
+        assert_eq!(follow.take_result(&answer("They're running.", false)), After::Background);
+        assert!(keep_waiting(&id).is_err(), "nobody was asked yet");
+        // Not yet; then past the wait: asked, once.
+        let asked = |id: &str| waiting(id).is_some_and(|w| w.ask);
+        follow.ask_if_long(true);
+        assert!(!asked(&id));
+        follow.waiting_since = Some(Instant::now() - BACKGROUND_ASK - Duration::from_secs(1));
+        follow.ask_if_long(true);
+        assert!(asked(&id) && follow.asked_at.is_some());
+        assert!(keep_waiting(&id).is_ok());
+        assert!(with_state(|s| s.live.get(&id).is_some_and(|l| l.keep_waiting)));
+        // A to-do left in progress: stopped at the turn's end; one done, or none in progress, unchanged.
+        let todo = |status: &str| steps::Todo { content: "Run the tests".into(), status: status.into(), active_form: "Running the tests".into() };
+        let left = Follow::todos_at_end(&[todo("completed"), todo("in_progress"), todo("pending")]).unwrap();
+        assert_eq!(left.iter().map(|t| t.status.as_str()).collect::<Vec<_>>(), ["completed", steps::TODO_STOPPED, "pending"]);
+        assert!(Follow::todos_at_end(&[todo("completed"), todo("pending")]).is_none());
+        test_live(&id, None);
+    }
+
+    /// **Played by the stand-in** (`fake-claude`, Claude Code 2.1.296's own
+    /// lines as recorded): resumed after its background command was ended,
+    /// its turn of its own with nothing in it leaves the input open, and the
+    /// real answer ends the turn — with the stopped task one quiet line. With
+    /// a helper in the background, it waits after its answer and ends on its
+    /// own turn on what came back; the process then exits by itself.
+    #[tokio::test]
+    async fn the_stand_in_resumed_after_a_stopped_task_and_with_a_helper_in_the_background() {
+        use crate::ai::claude_code::session::{stand_in, Spec};
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ai/claude_code/fixtures/2.1.296");
+        async fn play(script: &std::path::Path, first: &str, resume: bool) -> (String, Follow, Option<i32>, Vec<(bool, bool)>) {
+            let (id, _) = at_work(first);
+            let dir = std::env::temp_dir().join(format!("yap-runner-{id}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            let (program, env) = stand_in(script);
+            let mut spec = Spec::new(&dir, Pay::Plan);
+            spec.env = env;
+            spec.replay_user_messages = true;
+            if resume {
+                spec.conversation = Conversation::Resume(session::new_session_id());
+            }
+            let (session, mut rx) = Session::start_with(&program, spec).unwrap();
+            let session = Arc::new(session);
+            with_state(|s| s.live.get_mut(&id).unwrap().session = Some(Arc::clone(&session)));
+            session.send_user(first, &[]).unwrap();
+            let agent = store::get(&id).unwrap();
+            let mut follow = Follow::new(&agent, 1, dir.clone(), Mode::Auto, 200_000, None);
+            // After each result: (its input over, waiting for background work).
+            let mut after = Vec::new();
+            let code = loop {
+                match tokio::time::timeout(Duration::from_secs(30), rx.recv()).await.expect("the stand-in in time") {
+                    Some(Event::Exited(code)) => break code,
+                    None => break None,
+                    Some(ev) => {
+                        let result = matches!(ev, Event::Result(_));
+                        follow.on(ev, &session);
+                        if result {
+                            after.push((follow.input_over_at.is_some(), waiting(&id).is_some()));
+                        }
+                    }
+                }
+            };
+            let _ = std::fs::remove_dir_all(&dir);
+            (id, follow, code, after)
+        }
+
+        // Resumed: the turn of its own with nothing in it, then the answer.
+        let (id, follow, code, after) = play(&fixtures.join("real-background-resumed.jsonl"), "How many files are there?", true).await;
+        assert_eq!(after, [(false, false), (true, false)], "the empty turn left its input open; the answer ended it");
+        assert_eq!(follow.outcome.as_ref().map(|(s, t)| (*s, t.as_str())), Some((Status::Done, "Two files: notes.md and planting-plan.md.")));
+        assert_eq!(code, Some(0), "its input closed: it ends by itself");
+        assert!(store::log_read(&id).iter().any(|e| e["notice"] == background::STOPPED_EARLIER), "the stopped task said once");
+        test_live(&id, None);
+
+        // A helper in the background: answered, waited for, its own turn on what came back the rest.
+        let (id, follow, code, after) = play(&fixtures.join("real-background-helper.jsonl"), "Which seed supplier is cheapest?", false).await;
+        assert_eq!(after, [(false, true), (true, false)]);
+        assert_eq!(
+            follow.outcome.as_ref().map(|(_, t)| t.as_str()),
+            Some("The helper is back: Hedgerow is cheapest, at 1.95 a pack.")
+        );
+        assert_eq!(code, Some(0));
+        let back: Vec<String> = store::log_read(&id).iter().filter_map(|e| e.get("report").and_then(|r| r.as_str()).map(str::to_string)).collect();
+        assert_eq!(back, ["Hedgerow is cheapest at 1.95 a pack."], "the helper's row: back with what it said, once");
+        test_live(&id, None);
     }
 }

@@ -300,6 +300,10 @@ export function timelineOf(log, final = '') {
  * whose words Claude Code didn't send (Opus 5.5, Sonnet 5.5: `text` '') is
  * its time alone, and one straight after another such is the same line, its
  * time added. Without it, thinking is no item and never splits a stretch.
+ *
+ * A quiet line of Yap's own (the log's `notice`, 16 Nov 2026: background
+ * work from before that Claude Code says stopped) is `{kind: 'notice', text,
+ * ts}`, in its place.
  */
 export function workOf(log, final = '', live = false, { thinking = false } = {}) {
   const out = [];
@@ -326,6 +330,12 @@ export function workOf(log, final = '', live = false, { thinking = false } = {})
     // What its command printed: on that step too.
     if (e?.output && typeof e.output.text === 'string') {
       addOutput(everyStep(out), e.call, e.output);
+      continue;
+    }
+    // A quiet line of Yap's own (16 Nov 2026: background work from before that Claude Code says stopped).
+    if (typeof e?.notice === 'string' && e.notice.trim()) {
+      group = null;
+      out.push({ kind: 'notice', text: e.notice.trim(), ts: Number(e.ts) || 0 });
       continue;
     }
     const said = saidOf(e);

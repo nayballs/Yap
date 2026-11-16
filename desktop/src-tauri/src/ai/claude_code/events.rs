@@ -27,6 +27,23 @@
 //!   per model call ([`StreamKind::MessageStart`], [`StreamKind::MessageDelta`]),
 //!   where a `result`'s `usage` is summed over the turn's calls; the
 //!   `result`'s `modelUsage` says each model's context window.
+//! - **Work that outlives a turn** (checked on 2.1.296 signed in, Haiku, 16
+//!   Nov 2026; [`Task`]): a call with `run_in_background` (a command, a
+//!   helper) is a task of Claude Code's — `system/task_started`
+//!   (`is_backgrounded`, its call's `tool_use_id`, `task_type` `local_bash`
+//!   or `local_agent`; a helper's own commands say `owned_by_subagent`),
+//!   `system/background_tasks_changed` (every task still in the background,
+//!   listed again at each change), then `task_updated` and
+//!   `task_notification` (its `status`: `completed`, or `stopped` when the
+//!   process it ran in had gone). The process stays up while one runs, even
+//!   with stdin closed, and when it ends Claude Code starts a turn of its own:
+//!   its `result` says `origin: {kind: "task-notification"}`
+//!   ([`TurnResult::own_turn`]). Resumed with a task still noted as running
+//!   in an ended process, it says it `stopped` and ends such a turn with no
+//!   model call before it reads the new message: `num_turns` 0, `result`
+//!   "", no `terminal_reason` ([`TurnResult::empty`]). A `ScheduleWakeup`'s
+//!   turn has no origin: `command_lifecycle` `started` / `completed` around
+//!   it ([`Lifecycle`]).
 
 use serde::Serialize;
 use serde_json::Value;
@@ -44,6 +61,13 @@ pub enum Event {
     PermissionDenied(PermissionDenied),
     /// `system/hook_started` / `hook_progress` / `hook_response`.
     Hook(Hook),
+    /// `system/task_started` / `task_updated` / `task_notification` /
+    /// `background_tasks_changed`: Claude Code's own tasks (a command or a
+    /// helper it runs, in the background or not).
+    Task(Task),
+    /// `command_lifecycle`: a turn Claude Code starts by itself, its
+    /// `started` and `completed` (a wake-up it scheduled).
+    Lifecycle(Lifecycle),
     /// `stream_event`: the model's words as they're written.
     Stream(Stream),
     /// `assistant`: a whole message (text, thinking, tool calls).
@@ -101,6 +125,37 @@ pub struct McpServer {
 pub struct SystemStatus {
     pub status: Option<String>,
     pub permission_mode: Option<String>,
+}
+
+/// **One of Claude Code's own tasks** (a command or a helper it runs), as
+/// 2.1.296 says it (16 Nov 2026).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Task {
+    /// `task_started`.
+    Started {
+        task_id: String,
+        /// The call that started it.
+        tool_use_id: String,
+        /// `local_bash`, `local_agent`, … (or a newer one).
+        task_type: String,
+        /// `is_backgrounded`: it goes on past its call (and its turn).
+        background: bool,
+        /// `owned_by_subagent`: a helper's own, not the session's.
+        by_helper: bool,
+    },
+    /// `task_updated`: `patch.status` when it says one.
+    Updated { task_id: String, status: Option<String> },
+    /// `task_notification`: it ended (`completed`, `stopped`, …), with
+    /// Claude Code's words about it (a helper's: what it came back with).
+    Notice { task_id: String, tool_use_id: String, status: String, summary: String },
+    /// `background_tasks_changed`: the tasks in the background now (ids).
+    Background { tasks: Vec<String> },
+}
+
+/// `command_lifecycle`: `started` (true) or `completed`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lifecycle {
+    pub started: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -301,6 +356,10 @@ pub struct TurnResult {
     /// far** (the span `total_cost_usd` covers), while `usage` is this
     /// turn's own.
     pub model_usage: Vec<ModelUse>,
+    /// `origin.kind`: what started the turn when it wasn't a message written
+    /// to it — `task-notification` for one Claude Code started on a task's
+    /// end ([`TurnResult::own_turn`]). None for a message's.
+    pub origin: Option<String>,
 }
 
 /// One model's line of a result's `modelUsage`.
@@ -331,6 +390,20 @@ impl TurnResult {
     /// Stopped by an interrupt, not finished.
     pub fn interrupted(&self) -> bool {
         self.terminal_reason.as_deref().is_some_and(|r| r.starts_with("aborted"))
+    }
+
+    /// **A turn Claude Code started by itself** on a task's end (`origin`
+    /// `task-notification`, 2.1.296): never the answer to a message written
+    /// to it.
+    pub fn own_turn(&self) -> bool {
+        self.origin.as_deref() == Some("task-notification")
+    }
+
+    /// **No model call and no words**: `num_turns` 0, `result` "", not an
+    /// error — what Claude Code ends a turn of its own with when it only
+    /// noted a task's end (a resumed session's `stopped` task, 2.1.296).
+    pub fn empty(&self) -> bool {
+        self.num_turns == 0 && !self.is_error && self.text.trim().is_empty()
     }
 
     /// Its `modelUsage` covers more than this turn: earlier turns of the
@@ -576,8 +649,29 @@ pub fn from_value(v: Value) -> Event {
                 exit_code: v.get("exit_code").and_then(Value::as_i64),
                 output: str_of(&v, "output").to_string(),
             })),
+            "task_started" => Some(Event::Task(Task::Started {
+                task_id: str_of(&v, "task_id").to_string(),
+                tool_use_id: str_of(&v, "tool_use_id").to_string(),
+                task_type: str_of(&v, "task_type").to_string(),
+                background: v.get("is_backgrounded").and_then(Value::as_bool).unwrap_or(false),
+                by_helper: v.get("owned_by_subagent").and_then(Value::as_bool).unwrap_or(false),
+            })),
+            "task_updated" => Some(Event::Task(Task::Updated {
+                task_id: str_of(&v, "task_id").to_string(),
+                status: v.get("patch").and_then(|p| opt_str(p, "status")),
+            })),
+            "task_notification" => Some(Event::Task(Task::Notice {
+                task_id: str_of(&v, "task_id").to_string(),
+                tool_use_id: str_of(&v, "tool_use_id").to_string(),
+                status: str_of(&v, "status").to_string(),
+                summary: str_of(&v, "summary").to_string(),
+            })),
+            "background_tasks_changed" => Some(Event::Task(Task::Background {
+                tasks: v.get("tasks").and_then(Value::as_array).map(|a| a.iter().map(|t| str_of(t, "task_id").to_string()).filter(|t| !t.is_empty()).collect()).unwrap_or_default(),
+            })),
             _ => None,
         },
+        "command_lifecycle" => Some(Event::Lifecycle(Lifecycle { started: str_of(&v, "state") == "started" })),
         "stream_event" => v.get("event").filter(|e| e.is_object()).map(|e| {
             Event::Stream(Stream { parent_tool_use_id: opt_str(&v, "parent_tool_use_id"), kind: stream_kind(e) })
         }),
@@ -726,6 +820,7 @@ fn result(v: &Value) -> TurnResult {
                     .collect()
             })
             .unwrap_or_default(),
+        origin: v.get("origin").and_then(|o| opt_str(o, "kind")),
     }
 }
 
@@ -1324,6 +1419,58 @@ pub(crate) mod tests {
         let progress = events.iter().find_map(|e| if let Event::ToolProgress(p) = e { Some(p.clone()) } else { None }).unwrap();
         assert!(progress.heartbeat);
         assert_eq!(progress.tool_name, "WebSearch");
+    }
+
+    /// Work that outlives a turn (2.1.296, signed in, 16 Nov 2026): a helper
+    /// in the background is a task — started, listed, its end said — and the
+    /// turn Claude Code starts on its end says so in its result.
+    #[test]
+    fn a_background_helper_is_a_task_and_its_end_starts_a_turn_of_claude_codes_own() {
+        let events = fixture("real-background-helper.jsonl");
+        let tasks: Vec<&Task> = events.iter().filter_map(|e| if let Event::Task(t) = e { Some(t) } else { None }).collect();
+        assert_eq!(
+            tasks[0],
+            &Task::Background { tasks: vec!["a4f1c9e27b3d50816".into()] },
+        );
+        assert_eq!(
+            tasks[1],
+            &Task::Started { task_id: "a4f1c9e27b3d50816".into(), tool_use_id: "toolu_01SeedHelper".into(), task_type: "local_agent".into(), background: true, by_helper: false },
+        );
+        // The helper's own command: a task too, its own, never in the background.
+        assert!(matches!(tasks[2], Task::Started { background: false, by_helper: true, .. }));
+        assert!(tasks.contains(&&Task::Updated { task_id: "a4f1c9e27b3d50816".into(), status: Some("completed".into()) }));
+        assert!(tasks.contains(&&Task::Notice {
+            task_id: "a4f1c9e27b3d50816".into(),
+            tool_use_id: "toolu_01SeedHelper".into(),
+            status: "completed".into(),
+            summary: "Hedgerow is cheapest at 1.95 a pack.".into()
+        }));
+        assert_eq!(tasks.last(), Some(&&Task::Background { tasks: vec![] }));
+        let results: Vec<&TurnResult> = events.iter().filter_map(|e| if let Event::Result(r) = e { Some(r) } else { None }).collect();
+        // The answer to the message, then Claude Code's own turn on the helper's end.
+        assert_eq!((results[0].own_turn(), results[0].origin.as_deref()), (false, None));
+        assert_eq!((results[1].own_turn(), results[1].num_turns, results[1].empty()), (true, 1, false));
+        assert_eq!(results[1].text, "The helper is back: Hedgerow is cheapest, at 1.95 a pack.");
+        // A wake-up's turn is bracketed.
+        assert!(matches!(parse_line(r#"{"type":"command_lifecycle","command_uuid":"c1","state":"started","session_id":"s"}"#), Some(Event::Lifecycle(Lifecycle { started: true }))));
+        assert!(matches!(parse_line(r#"{"type":"command_lifecycle","command_uuid":"c1","state":"completed","session_id":"s"}"#), Some(Event::Lifecycle(Lifecycle { started: false }))));
+    }
+
+    /// Resumed after the process a background command ran in was ended: the
+    /// task stopped, and a turn of Claude Code's own with no model call and
+    /// no words, before it reads the new message — never its answer.
+    #[test]
+    fn a_resumed_sessions_stopped_task_and_its_empty_turn_of_its_own() {
+        let events = fixture("real-background-resumed.jsonl");
+        assert!(matches!(&events[0], Event::Task(Task::Notice { status, tool_use_id, .. }) if status == "stopped" && tool_use_id == "toolu_01OldBackgroundSleep"));
+        let results: Vec<&TurnResult> = events.iter().filter_map(|e| if let Event::Result(r) = e { Some(r) } else { None }).collect();
+        assert_eq!(results.len(), 2);
+        assert!(results[0].own_turn() && results[0].empty());
+        assert_eq!((results[0].subtype.as_str(), results[0].is_error, results[0].terminal_reason.as_deref()), ("success", false, None));
+        assert!(!results[1].own_turn() && !results[1].empty());
+        assert_eq!(results[1].text, "Two files: notes.md and planting-plan.md.");
+        // An error with no turn is never "empty": it says what went wrong.
+        assert!(!TurnResult { is_error: true, ..Default::default() }.empty());
     }
 
     #[test]

@@ -22,9 +22,10 @@ pub struct AgentWithLog {
 
 /// An agent as the page reads it: `active` when the runner has it now (so a
 /// row whose record says it's at work, but that nothing runs, can be moved
-/// to Finished).
+/// to Finished), and the background work its turn waits for (`waiting`).
 fn as_read(mut agent: Agent) -> Agent {
     agent.active = runner::active(&agent.id);
+    agent.waiting = runner::waiting(&agent.id);
     agent
 }
 
@@ -72,6 +73,15 @@ pub async fn agent_fork(conversation: u64, index: usize) -> Result<u64, String> 
 #[tauri::command]
 pub async fn agent_stop(id: String) -> Result<Agent, String> {
     runner::stop(&id).map(as_read)
+}
+
+/// **Keep waiting** for the background work an agent's turn waits for (16
+/// Nov 2026): asked once it had waited `runner::BACKGROUND_ASK`, the person
+/// said keep waiting — asked again after as long again. Stop is
+/// [`agent_stop`].
+#[tauri::command]
+pub async fn agent_keep_waiting(id: String) -> Result<Agent, String> {
+    runner::keep_waiting(&id).map(as_read)
 }
 
 /// Continue a stopped, interrupted or failed agent.
