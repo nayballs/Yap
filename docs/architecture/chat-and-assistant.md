@@ -6001,7 +6001,8 @@ its word count said). The note is read from the stored mark before the
 answer is set aside (`retry_note_at`). The question stays as the person
 asked it and is never saved again. **↻ on an answer marked 👎 is the same
 Retry with its note** (its label and the right-click menu say "Retry with
-your note"): the person said what was wrong, so a Retry uses it. In a Code
+your note"): the person said what was wrong, so a Retry uses it — the
+phone's ↻ too (`link/session.rs` `retry`). In a Code
 chat, Retry is Claude Code's own Rewind as ever ("Retry with your note?"
 asked first), and the note goes after the message to the session
 (`feedback::for_session` in `turn.rs` `sent_directly`); the message is
