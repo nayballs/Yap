@@ -35,6 +35,57 @@ export async function plainSide(main) {
 /** The workspace picker, wherever it's open. */
 export const workspaceMenu = (main) => main.getByTestId('chat-workspace-menu');
 
+/** Once `loc` stays where it is on screen for a moment (a turn's working line going, the thread settling). */
+export async function settled(loc) {
+  let last = '';
+  await expect
+    .poll(
+      async () => {
+        const box = JSON.stringify(await loc.boundingBox());
+        const same = box === last;
+        last = box;
+        return same;
+      },
+      { intervals: [300] },
+    )
+    .toBe(true);
+}
+
+/**
+ * **A file link's ⋯ clear of its link** (ui/fileLinks.js `moreSpot`, 16 Nov 2026): the pointer on `link`, its ⋯
+ * comes up and covers no line of it — every line's start, middle and end are still the link's to click, its end
+ * most of all (a short link at the end of its line once had the ⋯ over it). What's measured, for the caller's
+ * own checks: where the ⋯ went (`at`), the link's line boxes and the ⋯'s.
+ */
+export async function moreClearOf(link) {
+  await settled(link);
+  await link.hover();
+  // (The ⋯ is put right after the link it's for.)
+  const more = link.locator('xpath=following-sibling::*[1][@data-testid="md-filelink-more"]');
+  await expect(more).toBeVisible();
+  await expect(more).toHaveAttribute('data-at', /^(after|below|above|before)$/);
+  const got = await link.evaluate((el) => {
+    const b = el.nextElementSibling;
+    const flat = (r) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    const lines = [...el.getClientRects()].filter((r) => r.width > 0.5).map(flat);
+    const box = flat(b.getBoundingClientRect());
+    const over = lines.some((r) => box.left < r.right - 0.5 && box.right > r.left + 0.5 && box.top < r.bottom - 0.5 && box.bottom > r.top + 0.5);
+    const mine = (x, y) => {
+      const t = document.elementFromPoint(x, y);
+      return !!t && (t === el || el.contains(t));
+    };
+    const hidden = [];
+    for (const r of lines) {
+      const y = (r.top + r.bottom) / 2;
+      for (const x of [r.left + 2, (r.left + r.right) / 2, r.right - 2]) if (!mine(x, y)) hidden.push([Math.round(x), Math.round(y)]);
+    }
+    return { at: b.dataset.at, lines, more: box, over, hidden };
+  });
+  expect(got.over, `the ⋯ (${got.at}) over its link`).toBe(false);
+  expect(got.hidden, 'points of the link something else is over').toEqual([]);
+  return got;
+}
+
 /**
  * **An agent's whole timeline** (its tab's other view, AgentTab.svelte): the
  * tab opens on its panel (AgentPanel.svelte, 2026-11-08), and a row's Open

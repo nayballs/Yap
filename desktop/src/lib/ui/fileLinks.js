@@ -28,6 +28,12 @@
 //   stop after the focused link (Shift+Tab back to it) and nothing moves in
 //   the words: it's out of their flow (`position: absolute` where it stands:
 //   app.css `.md-filemore`). It stays while its menu is open.
+//   **Never over its link** (16 Nov 2026: a short link at the end of its line
+//   had it over its end, so a click there opened the menu, not the file):
+//   placed by `moreSpot` in the first place clear of every line of the link
+//   that's in view — after its end on its last line (past the answer's edge
+//   if need be: nothing's there), else under its end, over it, or before its
+//   start.
 // - **Never markup**: the words are split into text nodes and an `a` made
 //   here, never set as HTML.
 //
@@ -283,7 +289,69 @@ function linker(node, files, find) {
 
 /** How long the ⋯ waits before it goes (ms): long enough to move the pointer onto it. */
 const MORE_GRACE_MS = 220;
+/** The room between the ⋯ and its link (px). */
+const MORE_GAP = 3;
 const SVG = 'http://www.w3.org/2000/svg';
+
+/**
+ * **Where a link's ⋯ goes** (its top-left, in the page's pixels; `at` says which place): the first place that
+ * covers no line of the link (`rects`: its line boxes, first to last) and is wholly in `room` (what shows of the
+ * thread), in this order — after the link's end on its last line, its middle on that line's; under its end;
+ * over its end; before its start on its first line. In none: the first of them that, pulled into the room, still
+ * covers no line of the link; else after its end as it is. `size` is the ⋯'s `{ w, h }`. Pure.
+ */
+export function moreSpot(rects, size, room, gap = MORE_GAP) {
+  const lines = [...(rects || [])].filter((r) => r && r.right - r.left > 0.5);
+  const { w, h } = size;
+  if (!lines.length) return null;
+  const first = lines[0];
+  const last = lines[lines.length - 1];
+  const mid = (r) => (r.top + r.bottom) / 2;
+  const tries = [
+    { at: 'after', x: last.right + gap, y: mid(last) - h / 2 },
+    { at: 'below', x: last.right - w, y: last.bottom + 1 },
+    { at: 'above', x: last.right - w, y: last.top - 1 - h },
+    { at: 'before', x: first.left - gap - w, y: mid(first) - h / 2 },
+  ];
+  // (Half a pixel of give: a line's box and the ⋯'s may touch.)
+  const clear = (s) => !lines.some((r) => s.x < r.right - 0.5 && s.x + w > r.left + 0.5 && s.y < r.bottom - 0.5 && s.y + h > r.top + 0.5);
+  const inside = (s) => s.x >= room.left - 0.5 && s.x + w <= room.right + 0.5 && s.y >= room.top - 0.5 && s.y + h <= room.bottom + 0.5;
+  for (const s of tries) if (clear(s) && inside(s)) return s;
+  const pull = (v, lo, hi) => (hi < lo ? lo : Math.min(Math.max(v, lo), hi));
+  for (const s of tries) {
+    const p = { at: s.at, x: pull(s.x, room.left, room.right - w), y: pull(s.y, room.top, room.bottom - h) };
+    if (clear(p)) return p;
+  }
+  return tries[0];
+}
+
+/**
+ * **What shows of the thread around a link's ⋯** (`b`, in `node`'s words): the window, cut by every box that clips
+ * it — the thread's scroller, and a box in the answer only if the ⋯'s containing block is in it (a table's
+ * sideways scroller isn't one: the ⋯ isn't clipped by it, nor scrolls it).
+ */
+function roomFor(b, node) {
+  const win = b.ownerDocument.defaultView;
+  let room = { left: 0, top: 0, right: win.innerWidth, bottom: win.innerHeight };
+  const holder = b.offsetParent;
+  let held = false;
+  for (let el = b.parentElement; el; el = el.parentElement) {
+    if (el === holder) held = true;
+    if (!held && el !== node && node.contains(el)) continue;
+    const s = win.getComputedStyle(el);
+    if (s.overflowX === 'visible' && s.overflowY === 'visible') continue;
+    const r = el.getBoundingClientRect();
+    const left = r.left + el.clientLeft;
+    const top = r.top + el.clientTop;
+    room = {
+      left: Math.max(room.left, left),
+      top: Math.max(room.top, top),
+      right: Math.min(room.right, left + el.clientWidth),
+      bottom: Math.min(room.bottom, top + el.clientHeight),
+    };
+  }
+  return room;
+}
 
 /**
  * **A file link's ⋯** (app.css `.md-filemore`): made the first time it's needed, put right after the link in
@@ -358,22 +426,23 @@ class MoreButton {
   }
 
   /**
-   * Over the words after the link (over the link's own end when the line has no room), its middle on the
-   * middle of the link's last line: where an out-of-flow box lands in a line depends on the font and the line's
-   * height, so it's measured.
+   * Moved from where it stands in the line (an out-of-flow box's place there depends on the font and the line's
+   * height, so it's measured) to `moreSpot`'s: after the link's end, over the words after it, or wherever else
+   * covers none of the link. Only `translate`: nothing in the words moves.
    */
   fit() {
     const b = this.el;
-    const rects = this.link?.getClientRects?.();
-    const last = rects?.length ? rects[rects.length - 1] : null;
-    b.classList.remove('md-filemore-in');
     b.style.translate = '';
-    if (!last) return;
-    const room = (this.node.closest('.cbubble') || this.node).getBoundingClientRect();
-    if (b.getBoundingClientRect().right > room.right - 1) b.classList.add('md-filemore-in');
+    delete b.dataset.at;
+    const rects = this.link?.getClientRects?.();
+    if (!rects?.length) return;
     const box = b.getBoundingClientRect();
-    const dy = Math.round((last.top + last.bottom) / 2 - (box.top + box.bottom) / 2);
-    if (dy) b.style.translate = `0 ${dy}px`;
+    const spot = moreSpot(rects, { w: box.width, h: box.height }, roomFor(b, this.node));
+    if (!spot) return;
+    b.dataset.at = spot.at;
+    const dx = Math.round(spot.x - box.left);
+    const dy = Math.round(spot.y - box.top);
+    if (dx || dy) b.style.translate = `${dx}px ${dy}px`;
   }
 
   /** Gone in a moment, unless the pointer or the focus is on it or its link, or its menu is up. */

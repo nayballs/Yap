@@ -319,7 +319,7 @@ shows it under "Shot “<name>”").
 {"ok":true,"shot":"…\\shots\\003\\agent-done-01-panel-light.png","window":"panel","shots":[{"file":"…\\shots\\003\\agent-done-01-panel-light.png","window":"panel","theme":"light","set":"named:agent-done","width":460,"height":808,"dpr":1},{"file":"…\\shots\\003\\agent-done-02-panel-dark.png","window":"panel","theme":"dark","set":"named:agent-done","width":460,"height":808,"dpr":1}]}
 ```
 
-### `probe --window main|thread|panel|page|bar [--css <selector>] [--text <words>]`
+### `probe --window main|thread|panel|page|bar [--css <selector>] [--text <words>] [--at end|start]`
 
 What's on screen, over CDP: how many elements match `--css` in that window and how
 many of them show; whether `--text` is in its visible words (`thread`: Chat's thread;
@@ -328,14 +328,17 @@ uses it. With `--css` (16 Nov 2026), whether something else is over the first ma
 that shows, at its centre (`covered`), and what (`over`: a toast's words, or the
 element on top) — a toast over the message box's Send, say. (Toasts never cover the
 message box since 16 Nov 2026, `ui/toastClear.js`, so `ask` clicks Send as the person
-does, closing nothing first.)
+does, closing nothing first.) `--at end` / `--at start` (16 Nov 2026): that check at
+the end of its last line (or the start of its first), 2 px in — a file link's ⋯ over
+its end, say. `--css` is the page's own CSS here (no Playwright `>>`): pick one link
+by its file, `.cbody .md-filelink[data-rel="TODO.md"]`.
 
 ```json
 {"ok":true,"window":"thread","found":true,"theme":"light","words":"THE END","has":true}
 {"ok":true,"window":"main","css":"button[aria-label=\"Send\"]","found":true,"theme":"light","count":1,"visible":1,"covered":false}
 ```
 
-### `click --window main|thread|panel|bar --css <selector> [--right|--hover]`
+### `click --window main|thread|panel|bar --css <selector> [--right|--hover] [--at end|start]`
 
 Clicks one of the test Yap's own buttons, as the person would (14 Nov 2026, for the
 message box's queue: a queued message's **Send now** — `[data-testid="chat-queued-send-now"]`
@@ -345,7 +348,9 @@ shows, in Yap's own windows only, never a page beside the chat. `--right` right-
 clicks nothing (16 Nov 2026: a file link's ⋯ comes up, `[data-testid="md-filelink-more"]`
 to click next; `shot` takes it). Playwright's own `:has-text("…")` picks a menu's item:
 `--css '[role="menuitem"]:has-text("Open in VS Code")'`. `--window bar` (16 Nov 2026): the Yap
-bar's own buttons, the reading card's ⏸ (`[aria-label="Pause"]`) or ⏭.
+bar's own buttons, the reading card's ⏸ (`[aria-label="Pause"]`) or ⏭. `--at end` / `--at start`
+(16 Nov 2026): clicked (or hovered) at the end of its last line, or the start of its first, 2 px
+in, not its middle — a short file link's very end, where its ⋯ once was.
 
 ```json
 {"ok":true,"window":"thread","css":"[data-testid=\"chat-queued-send-now\"]","clicked":true}
@@ -728,7 +733,7 @@ warn).
 | `pictures`, `files`, `documents`, `pagesShown`, `sources`, `questionImages`, `tools` | how many: a number, or `{ "min": 1, "max": 3 }` (`questionImages`: the screenshots kept with the question itself). |
 | `tool` | some call matches all of it (a list: each one does): `name`, `via`, `ok`, `refused`, `args` (`{ "tab": 1, "keys": "/enter/i", "ref": "*" }`: equal, a regex, or there at all), `argsHas` / `argsLack`, `result` / `resultNot` (words or a regex on the whole result), and `path` into the result's JSON (`"data.scroll.y"`) with `equals`, `gt`, `gte`, `lt`, `matches` or `notMatches`. The whole arguments and results: the turn's transcript. |
 | `agent` | an agent (from the last `wait agents`, else now) has `status`, `files` (a count), `folder`, `error` (`null`: none), `mode` (`bypassPermissions`…), `plan`, `readOnly` (its latest turn read only), `model` (its latest turn's: an id, a list, or `"/regex/"`), `effort` (a level, or a list: any of them); `count` how many must (one by default). The summary shows each agent's model, effort and why Chat sized it so (`sizing`). |
-| `selector` | `{ "window": "main", "css": "…" }` shows (`present: false`: doesn't; `count`: how many show), over CDP (`probe`). |
+| `selector` | `{ "window": "main", "css": "…" }` shows (`present: false`: doesn't; `count`: how many show), over CDP (`probe`). `covered: false` (16 Nov 2026): it shows and nothing else is over it, at its centre or `at` its `end` / `start` (`probe --at`). |
 | `visible` / `notVisible` | the thread's visible words have / haven't these. |
 | `result` | the turn's JSON at a `path` (a list: each) — a lab command's own fields, `"archived.length"`, `"run.state"`, `"page.policy"`, `"rows.0.state"` — with `equals`, `gt`, `gte`, `lt`, `lte`, `matches` or `notMatches` (none: there at all). |
 
@@ -750,6 +755,7 @@ warn).
 | `auto-archive` | any `start` | Auto-archive (16 Nov 2026; #125 had only its e2e spec) on the lab's own chats: two real chats made 40 days older one by one (`age --chat same`), the rule set to 30 days — the chat not shown archived, the one Chat shows kept; the notice in Yap's window and its Undo; the next run takes it again; then the other once another chat is shown, a day-old one kept. |
 | `code-chat-prs` | `start --yap-code on` (live) | A Code chat summary's Changes from the real `gh` (16 Nov 2026; #128): the lab's read-only `gh` on, the scratch workspace on a merged branch of Yap's repository (`set --git`, `--gh`), one short question, then `summary`: the branch's pull requests, merged, each `nayballs/Yap #N` with Archive; `gh` off, the quiet line. |
 | `code-chat-file-links` | `start --yap-code on` (live) | A Code chat's file links and Outputs, and Changes on a real pull request with cancelled checks (16 Nov 2026): the scratch workspace on `claude/lab-untested` (#146: two cancelled E2E shards, CodeQL's neutral) with the read-only `gh`; one change to `src/convert.js` asked in a Bypass Code chat; the answer's link hovered (`click --hover`), its ⋯ shown and clicked (the link's menu under it), Open in Yap from it; then the summary: the row "Checks cancelled · N of M passed", never "Checks failing"; the changed file's Outputs row with links opening in Notepad (Windows' own, so on every PC; the file view stays shut: `state`'s `filesOpened` has the command; an editor the PC hasn't opens in Yap instead, as the first pass found with VS Code) and under Windows' default app (a `.js`: shown in Yap instead, said so). Shots of the ⋯, its menu, the outputs' menu and the toast. |
+| `code-chat-link-dots` | `start --yap-code on` (live) | A file link's ⋯ never over its link (16 Nov 2026, `ui/fileLinks.js` `moreSpot`: a short link ending its line had the ⋯ over its end). In a Bypass Code chat on `lab-sandbox`: a new file with a long path written, the answer's short links (`TODO.md`, `src/convert.js`) and the long one that wraps each hovered — its ⋯ shows, nothing over the link's start or end (`covered: false`, `at`) — then a one-line answer ending in `README.md` at the answer's edge, hovered, and clicked at its very end (`click --at end`): the file view, no menu. Shots of each, light and dark. Passed 20 of 20 on Opus the day it was written. |
 | `kept-page-outside` | the default `start` | A kept page outside Yap (16 Nov 2026; #130): Chat's model keeps a tip calculator (`save_page`), then `kept save` (Windows' dialog answered by the lab: the suggested `.html` name, the toast, the file with the sandbox's policy and a title) and `kept open` (the copy test mode would have opened, run in the lab's own browser, light and dark; no console errors or policy refusals: soft). |
 | `outline-card` | any `start`: the plan (since 16 Nov 2026), `--model ondevice` or `--fake` | A new document's outline before the writing on a real model (16 Nov 2026; #129 was checked on `--fake` only): asked for a short guide, its `create_document` is a card first, nothing written; Edit's Go with a section renamed, one taken out and a note; the document made with those sections. Its `fake` steps make it pass on `--fake` too. |
 | `code-chat-retry` | `start --yap-code on` (live) | ↻ Retry and Edit in a Code chat that works directly (16 Nov 2026): the new answer read back — it came back empty before, Rewind having cut the thread where the old one was — with `branch` and the question it answered again. |

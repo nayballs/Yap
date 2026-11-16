@@ -352,6 +352,13 @@ describe('shots, the sheet and scripts', () => {
     assert.equal(probePasses(screen[0].want, { visible: 2 }), true);
     assert.equal(probePasses(screen[1].want, { visible: 1 }), false);
     assert.equal(probePasses(screen[2].want, { has: true }), true);
+    // Whether something's over it, at its end (a file link under its ⋯): probe's `covered`, with `at`.
+    const [end] = screenChecks({ selector: { window: 'thread', css: '.md-filelink', covered: false, at: 'end' } });
+    assert.deepEqual(end.args, { window: 'thread', css: '.md-filelink', at: 'end' });
+    assert.match(end.check, /not covered at its end/);
+    assert.equal(probePasses(end.want, { visible: 1, covered: false }), true);
+    assert.equal(probePasses(end.want, { visible: 1, covered: true }), false);
+    assert.equal(probePasses(end.want, { visible: 0 }), false);
     assert.equal(kindOf({ shot: 'x', window: 'panel' }), 'shot');
     assert.throws(() => kindOf({ click: 1 }), /A step is one of/);
   });

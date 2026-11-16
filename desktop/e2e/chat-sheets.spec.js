@@ -17,7 +17,7 @@ import { test as base, expect, openView, setConfig } from './support/fixtures.js
 import { startFakeLlm } from './support/fake-llm.js';
 import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
-import { newCodeChat, plainSide } from './support/code-chats.js';
+import { newCodeChat, plainSide, moreClearOf } from './support/code-chats.js';
 import { seedOrderXlsx, bigXlsx } from './support/xlsx.js';
 import { isSheetName, columnName, cellName, gridOf, indexAt, inView, blocksFor, spillOf, alignOf, styleCss, bordersCss, factsOf, mergeAt, shownNumber, spillNeeded } from '../src/lib/views/chat/sheetView.js';
 
@@ -283,9 +283,11 @@ test("a Code chat's workbook opens from Claude's answer and its Outputs, follows
   await expect(at(main, 'D6')).toHaveText('£17.00');
   await closePanel(main);
 
-  // A big sheet: its rows come as they scroll into view, the header frozen at the top. (Clicked at its start:
-  // a short link at the end of its line has its ⋯ over its end, ui/fileLinks.js.)
-  await answer.locator('.md-filelink', { hasText: 'beds.xlsx' }).click({ position: { x: 4, y: 6 } });
+  // A big sheet: its rows come as they scroll into view, the header frozen at the top. Its link is short and
+  // ends its line: its ⋯ comes up clear of it, its end still the link's (ui/fileLinks.js `moreSpot`).
+  const beds = answer.locator('.md-filelink', { hasText: 'beds.xlsx' });
+  await moreClearOf(beds);
+  await beds.click();
   await expect(view(main)).toHaveAttribute('data-name', 'beds.xlsx');
   await expect(view(main).getByTestId('chat-sheet-facts')).toHaveText('A1:E5000 · 4,999 formulas, calculated by Yap');
   await expect(at(main, 'E2')).toHaveText('36');
