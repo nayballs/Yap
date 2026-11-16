@@ -25,6 +25,7 @@ mod history;
 mod plan;
 mod prompt;
 mod report;
+mod research;
 mod run;
 mod small;
 
@@ -488,11 +489,21 @@ async fn answer_turn(
         sink: w,
         beside: beside.as_ref().map(|b| b as &dyn crate::chat::stream::Dictations),
     });
-    let answer = if t.ep.provider == crate::ai::claude_plan::PROVIDER {
+    // Research (chat/research.rs): the switch, or a plain ask — its plan
+    // first, then the loop, then the report as a document (research.rs);
+    // nothing to research (a greeting): answered as any turn.
+    let researched = if research::wanted(&t, &opened) {
+        Box::pin(research::answer(&t, &opened, &mut built, &fitted, &sizing, live, watch.as_ref())).await?
+    } else {
+        None
+    };
+    let answer = if let Some(answer) = researched {
+        answer
+    } else if t.ep.provider == crate::ai::claude_plan::PROVIDER {
         // Your Claude plan: the person's own Claude Code answers (plan.rs).
-        plan::answer(&t, &opened, &built, &fitted, watch.as_ref()).await?
+        plan::answer(&t, &opened, &built, &fitted, watch.as_ref(), None).await?
     } else if t.gates.tools {
-        run::with_tools(&t, &opened.conv, &built, &fitted, &sizing, live, watch.as_ref()).await?
+        run::with_tools(&t, &opened.conv, &built, &fitted, &sizing, live, watch.as_ref(), None).await?
     } else {
         // Small/local models: plain chat + eager RAG, or Yap's fixed web
         // pipeline when the question needs the web (small.rs).

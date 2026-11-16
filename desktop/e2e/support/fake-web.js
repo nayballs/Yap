@@ -99,6 +99,17 @@ const GALE_HTML = `<div class="mw-parser-output">
 <p>Gale is found on the beach west of the Nautiloid crash site, stuck in a rune circle. Pull him out to recruit him.</p>
 <h2>Relationships</h2><p>Gale can be romanced.</p></div>`;
 
+// Research (chat/research.rs): Wikipedia's articles on a keyboard layout, through Yap's free sources
+// with no key — two read, one only found (its citation must go).
+export const QWERTY_URL = 'https://en.wikipedia.org/wiki/QWERTY';
+export const SHOLES_URL = 'https://en.wikipedia.org/wiki/Sholes_and_Glidden_typewriter';
+export const DVORAK_URL = 'https://en.wikipedia.org/wiki/Dvorak_keyboard_layout';
+const RESEARCH_PAGES = [
+  { pageid: 31, title: 'QWERTY', url: QWERTY_URL, text: 'QWERTY is a keyboard layout for Latin-script alphabets, named after the first six letters on its top row. It was designed for the Sholes and Glidden typewriter and sold to E. Remington and Sons in 1873.' },
+  { pageid: 32, title: 'Sholes and Glidden typewriter', url: SHOLES_URL, text: 'The Sholes and Glidden typewriter was the first commercially successful typewriter. Christopher Latham Sholes patented its keyboard arrangement in 1878.' },
+  { pageid: 33, title: 'Dvorak keyboard layout', url: DVORAK_URL, text: 'The Dvorak keyboard layout was patented in 1936 as an alternative to QWERTY.' },
+];
+
 const PAGES = {
   'tips.example/calc': `<!doctype html><html><head><title>Calculator tricks</title></head><body>
     <nav>Home · Tips · About</nav>
@@ -159,6 +170,10 @@ export const LEVELING_URL = 'https://wiki.example.com/guide/leveling';
 export const RAIL_URL = 'https://rail.example.com/';
 export const RAIL_RESULTS_URL = 'https://rail.example.com/results?from=Kellbrook&to=Port+Ellis&when=Today';
 export const RAIL_SIGNIN_URL = 'https://rail.example.com/signin';
+for (const p of RESEARCH_PAGES) {
+  PAGES[p.url.replace('https://', '')] = `<!doctype html><html><head><title>${p.title} - Wikipedia</title></head><body><main><article><h1>${p.title}</h1><p>${p.text}</p><p>${p.text}</p></article></main></body></html>`;
+}
+
 PAGES['rail.example.com/'] = `<!doctype html><html><head><title>Example Rail</title></head><body><main><h1>Find a train</h1>
   <form action="results" method="get">
     <label for="from">From</label> <input id="from" name="from">
@@ -708,6 +723,15 @@ function wiki(host, q) {
     }
     if (action === 'parse' && q.get('pageid') === '118') {
       return { parse: { title: 'Gale', pageid: 118, text: GALE_HTML } };
+    }
+  }
+  if (host.endsWith('wikipedia.org') && action === 'query' && (/qwerty|typewriter|sholes|keyboard/i.test(q.get('gsrsearch') || '') || RESEARCH_PAGES.some((p) => String(p.pageid) === q.get('pageids')))) {
+    if (q.get('generator') === 'search') {
+      return { query: { pages: RESEARCH_PAGES.map((p, i) => ({ pageid: p.pageid, ns: 0, title: p.title, index: i + 1, fullurl: p.url })) } };
+    }
+    if (q.get('prop') === 'extracts') {
+      const p = RESEARCH_PAGES.find((r) => String(r.pageid) === q.get('pageids'));
+      return { query: { pages: [{ pageid: p.pageid, title: p.title, extract: p.text }] } };
     }
   }
   if (host.endsWith('wikipedia.org')) {

@@ -501,6 +501,26 @@ const COMMAND_SCREEN = 'You decide whether an instruction someone gave a writing
 // A style written from a description or a writing sample (chat/styles.rs `WRITE_PROMPT`):
 // "OK" unless a spec says otherwise (`reply('styleWrite', fn)`).
 const STYLE_WRITE = "You write a style for an AI assistant's answers";
+// A research's plan, before any search (chat/research.rs `PLAN_PROMPT`): a JSON plan of three parts from
+// the user's message, unless a spec says otherwise (`reply('researchPlan', fn)`, or a `plain` step).
+const RESEARCH_PLAN = "You plan web research for Yap's Research mode";
+
+/** The research plan's default: its title from the message, three parts. */
+function researchPlanReply(user) {
+  const asked = (/The user's message: (.*)$/m.exec(user)?.[1] ?? '').trim();
+  const topic = asked.replace(/^(?:please\s+|can you\s+)*research\s+/i, '').replace(/[.?!]+$/, '') || 'The topic';
+  const title = topic.charAt(0).toUpperCase() + topic.slice(1);
+  return JSON.stringify({
+    research: true,
+    title,
+    summary: `What the sources say about ${topic}.`,
+    sections: [
+      { key: 'Origins', intent: 'where it came from' },
+      { key: 'Why it stayed', intent: 'what kept it going' },
+      { key: 'Rivals', intent: 'what tried to replace it' },
+    ],
+  });
+}
 
 /** A side question's own line (chat/side.rs INSTRUCTIONS): kind "side", "A side answer to: …" unless a spec says otherwise. */
 export const SIDE_QUESTION = 'This is a side question.';
@@ -528,6 +548,7 @@ const KINDS = [
   [ASK_OR_EDIT, 'askOrEdit'],
   [COMMAND_SCREEN, 'commandScreen'],
   [STYLE_WRITE, 'styleWrite'],
+  [RESEARCH_PLAN, 'researchPlan'],
 ];
 
 /** The numbers of the `<passage n="…">` blocks a request gives (search/ask.rs's layout). */
@@ -1127,7 +1148,7 @@ export async function startFakeLlm() {
                 function: { name, arguments: JSON.stringify(typeof args === 'function' ? args(record) : args) },
               })),
             }
-          : { role: 'assistant', content: step.content };
+          : { role: 'assistant', content: typeof step.content === 'function' ? step.content(record) : step.content };
         // A step that thinks first (`reasoning`), as llama.cpp sends it apart.
         if (step.reasoning) message.reasoning_content = step.reasoning;
         // A step held until the spec lets it go (`gate`: a promise), so the
@@ -1161,6 +1182,7 @@ export async function startFakeLlm() {
         askOrEdit: () => '{"action": "answer"}',
         commandScreen: () => 'no',
         side: (user) => `A side answer to: ${user}`,
+        researchPlan: researchPlanReply,
       };
       // (The system prompt too: a Skill's name is in it.)
       const content = (replies.get(kind) ?? answer[kind] ?? (() => 'OK'))(user, system);

@@ -125,7 +125,7 @@ It reads the model file and writes nothing of Yap's. Stop the server when you're
 `start` on the plan, then `stop`: is Claude Code on this PC and signed in, as Yap sees
 it? Asks the model nothing.
 
-### `ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry] [--edit] [--style <name>] [--incognito] [--project <name> [--project-instructions <text>] [--project-page]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
+### `ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry] [--edit] [--style <name>] [--research] [--incognito] [--project <name> [--project-instructions <text>] [--project-page]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
 
 Puts a question to Chat and waits until the turn ends (answered, stopped or failed),
 **or a card waits for the person**, or `--timeout` seconds pass.
@@ -157,6 +157,11 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   its New chat — with `--spoken`, the Voice Assistant's new chat starts in it. A feature
   script's `ask` step takes `style`, `incognito`, `project`, `projectInstructions` and
   `projectPage` too.
+- `--research` (16 Nov 2026): Research under the message box switched on first
+  (`chat/research.rs`; refused when it can't be, its tooltip saying why). Its plan is a
+  card (`kind: "outline"`, its `outline` the plan): `answer confirm:<n> allow` clicks
+  **Start research**, `edit` changes it, as a document's outline. A plain "research …"
+  researches without the switch. A feature script's `ask` step takes `research` too.
 - `--while`: typed and sent in the chat shown **while a turn still goes**, as the person
   would mid-answer (14 Nov 2026, the message box's queue), with no turn of the lab's
   own: returns at once; the queued bubble, its ✓✓ and the answers show in the thread

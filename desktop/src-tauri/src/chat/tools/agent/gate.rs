@@ -14,6 +14,12 @@ use crate::chat::tools::{refused_after_outside, Extra, Seen};
 /// rewritten only in this chat's own documents). `Some`: the call doesn't
 /// run, and this is its result; `None`: it runs ([`super::dispatch`]).
 pub(super) fn gate(name: &str, args: &Value, hold_web: bool, seen: Seen, extra: &Extra<'_>) -> Option<Value> {
+    // A research turn runs the web's tools and the notes' reads, nothing
+    // else (chat/research.rs): its report is its answer, made a document by Yap.
+    if extra.research.is_some() && !crate::chat::research::allows(name) {
+        tracing::info!(tool = %name, "Chat: a tool that doesn't run in a research turn; refused");
+        return Some(crate::chat::research::refusal(name));
+    }
     if hold_web && (crate::web::TOOL_NAMES.contains(&name) || name == crate::chat::pictures::FIND) {
         tracing::info!(tool = %name, "Chat: a new document's outline comes before any search; refused");
         crate::ai::eval::post_fix("outline_first");
@@ -50,6 +56,23 @@ mod tests {
         // Not the web's tools: no hold.
         assert_eq!(gate("search_notes", &json!({}), true, NONE, &extra), None);
         assert_eq!(gate("web_search", &json!({}), false, NONE, &extra), None);
+    }
+
+    #[test]
+    fn a_research_turn_runs_the_webs_tools_and_the_notes_reads_only() {
+        let research = Extra { research: Some(crate::chat::research::Budget::start(crate::chat::research::Caps::USUAL)), strong: true, ..Default::default() };
+        for name in ["web_search", "read_page", "search_notes", "get_note"] {
+            assert_eq!(gate(name, &json!({}), false, WEB, &research), None, "{name}");
+        }
+        // An app, the clipboard, memory, a note, a document, an agent, a click: refused, before the web too.
+        for name in ["open_app", "copy_to_clipboard", "remember", "forget", "create_note", "create_document", "start_agent", "browser_click"] {
+            for seen in [NONE, WEB] {
+                let r = gate(name, &json!({}), false, seen, &research).expect(name);
+                assert!(r["error"].as_str().unwrap().contains("doesn't run in a research turn"), "{r}");
+            }
+        }
+        // Not a research turn: as ever.
+        assert_eq!(gate("create_note", &json!({}), false, NONE, &Extra::default()), None);
     }
 
     #[test]

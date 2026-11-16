@@ -326,6 +326,12 @@ pub struct Extra<'a> {
     /// widget shown in the answer itself — a strong model, with a thread to
     /// show it in (`made::offered`).
     pub visuals: bool,
+    /// **A research turn** (chat/research.rs): its caps and clock. Only the
+    /// web's tools and the notes' reads run (`research::allows`), Yap's
+    /// `read_page` beside a provider's own search too (the report cites
+    /// only the pages read), more steps ([`crate::chat::research::STEPS`]),
+    /// and past its time the report with no tools.
+    pub research: Option<crate::chat::research::Budget>,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).

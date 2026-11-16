@@ -201,6 +201,12 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   (`pages::view::load_url`); its requests are the page's own (a browser's),
   not Yap's, so they aren't in the network receipts. Every link button opens
   in the browser Settings → General → Links chose (`shell/browsers.rs`).
+  **A research turn** (`Turn::research`, 16 Nov 2026: chat-and-assistant.md,
+  "Research"): the caps' reach (20 searches, up to 12 reads), Claude's own
+  web tools the deeper ones and dropped once a cap or the time or tokens
+  are spent, `read_page` beside a provider's own search too (the report
+  cites only pages read), and every search and read past a cap refused
+  with "write the report now".
   **`Turn`**: only
   links the person gave (their messages, `links_in`), a search this turn
   returned (`allowed`) or an earlier answer's sources (an earlier search
