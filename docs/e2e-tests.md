@@ -165,11 +165,16 @@ into shards instead (below). What lets several run side by side on one PC:
   listener wants its fixed port (`127.0.0.1:51439`), so the three specs that
   sign in (`connectors-signin`, `connectors-discover`, `connectors`) are the
   `solo` project in `playwright.config.js`: one at a time, beside the rest.
-  A new spec that needs such a thing (a fixed port, a real screen position)
-  goes on that list.
+  A new spec that needs such a thing (a fixed port) goes on that list.
+- **The one real screen**: every test Yap's bar is a topmost window at the
+  same spot above the taskbar, so bar.spec's checks from outside the app
+  (which window a click at the pill reaches, `WindowFromPoint`) can meet
+  another test Yap's bar that is open at that moment (it did once in three
+  runs, 16 Nov; its retry passed). Your own Yap's bar could always do the
+  same. Running bar.spec alone would need it after everything else.
 - **One retry, as on CI**: a test that fails is run once more on a fresh
   test Yap; one that passes then is listed as **flaky** in the summary
-  (read those too: meeting-crash, chat-browse's tabs and the bar's menu
+  (read those too: meeting-crash, chat-browse's tabs, the bar's menu and brief's Reset
   failed now and then on 16 Nov, one test Yap at a time too). `--retries=0`
   for none.
 - **Files a stand-in is still writing**: the fake Claude and fake MCP
