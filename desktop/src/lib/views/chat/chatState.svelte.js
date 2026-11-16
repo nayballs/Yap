@@ -1833,6 +1833,22 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     return true;
   }
 
+  /**
+   * **A phone switched a version, or retried an answer** (`yap-chat-versions`, Yap Link: link.rs): one version shown a
+   * conversation, the same on every screen — the chat open here reads it again (after its own answer, when it's
+   * sending: `reloadActive`). Reading aloud stops and an edit closes: their words may be in the version set aside.
+   */
+  function onVersions(p) {
+    const id = p?.conversationId;
+    if (id == null || id !== activeId) return;
+    if (!sending) {
+      stopReading();
+      editing = null;
+    }
+    reloadActive();
+    contextStamp += 1;
+  }
+
   /** **‹ ›**: the message at `at` shows its version `place`, what was shown from there kept as a version. */
   async function switchBranch(at, place) {
     const id = activeId;
@@ -2565,6 +2581,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     cancelEdit,
     saveEdit,
     switchBranch,
+    onVersions,
     get editing() { return editing; },
     get forks() { return forks; },
     agentEvent,

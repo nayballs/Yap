@@ -256,6 +256,42 @@ afresh. A rename in Chat on the PC (`title`) shows in the header and the
 drawer. A PC from before the drawer (no `"chats"` in `ready.can`): no ☰,
 and nothing about a conversation is sent.
 
+## Retry and versions (16 Nov 2026)
+
+Retry's and Edit's versions (Chat's ‹ 1/2 ›, `chat/chats/branches.rs` on
+the PC) show here as **whichever version is shown**: a thread's message
+with versions carries `version {at, shown, count}`, drawn as **‹ 2/3 ›** —
+under an edited question's bubble at its right edge, and first under a
+retried answer, before Copy, ▶ and ↻ (the PC's order). ‹ at the first
+version and › at the last are asleep. A tap sends `show_version {chat, at,
+place}` and the PC answers with the thread as it is then: **there is one
+version shown a conversation, the PC's** — ‹ › here switches it on the PC
+too, and the last switch wins wherever it was made (`link.md`, "Retry and
+versions on the phone"). When another screen switches it (the PC's ‹ ›,
+another phone's) or retries or edits there, every phone hears `versions
+{chat}` and the page showing that chat asks for its thread again
+(`open_chat`, without letting anything go) — at once, or, while a question
+of its own is under way there (asked, answered, said, Talk's words on
+their way), once that's over (`threadAgain`). ▶ being said stops first (its
+words may be in the version set aside). The PC's refusal (an answer being
+written there: "Wait for the answer being written, or stop it first.") is
+said as an error and the version shown stays.
+
+**↻ Retry** under an answer the PC says may be asked again (`retry` on
+the thread's message or the checked `answer`: just after the person's own
+question, never in a Code chat — there Retry is Claude Code's Rewind, the
+PC's only) sends `retry {id}`: the answer is written afresh where it was,
+what followed it leaves the thread (it went with the old version), Chat's
+activity line meanwhile, answered **on screen** as a typed question is (▶
+to hear it). The new answer in, the PC's `versions` brings the thread
+again with its ‹ 2/2 ›. The PC saying no (`error`, then `state idle`), or
+its model unable to read the question's pictures (`cant_read`: said as an
+error here, nothing put in the composer), puts the answer and what
+followed back as they were. ‹ › and ↻ sleep while something's under way
+(woken by `render()`, not a redraw of the thread). A PC from before (no
+`"versions"` / `"retry"` in `ready.can`): neither shown, whatever a thread
+carries. Kept with the thread in `sessionStorage` (`qv`, `av`, `retry`).
+
 ## Pictures (2026-11-03)
 
 **+** in the composer card opens a small menu: **Take photo** (`<input
@@ -767,6 +803,19 @@ npm run test:link
   words does: the fake mic's steady tone isn't speech for hands-free talk to
   end on), the answer's voice in sentences with pauses (`sentences`: where
   the media player cuts its pieces).
+  `versions.spec.js` — Retry and versions: ‹ 2/2 › under an edited
+  question and ‹ 3/3 › first under a retried answer (the foot's order, the
+  ends asleep), ‹ › as `show_version` and the PC's thread after it, its
+  refusal said with the version kept; `versions` from the PC asking for the
+  thread at once, not for another chat, and while a typed question is
+  answered only once it's over; ↻ as `retry {id}` (what followed leaves,
+  the activity line, ‹ › asleep, the new answer on screen, nothing said,
+  then `versions` and the new ‹ k/n ›); ↻ refused (the answer and what
+  followed back, why said, awake again); ‹ › while ▶ is said (`interrupt`
+  first); a PC from before showing neither. `versions-screens.spec.js` —
+  screenshots light and dark at 360 × 780 and 390 × 844
+  (`versions-thread-*`, `versions-retrying-*`, `versions-retried-*`), 44 px
+  targets, nothing sideways.
   **The Code side** (Remote Control), against a PC mocked from
   `core/codeWire.js`'s own examples (`support/code-pc.js`: every message the
   PC sends is the wire's example of its type with the test's changes, and
@@ -865,7 +914,7 @@ npm run test:link
   build, no window on screen.
 - **In Firefox too** (the `firefox` project, when Playwright's own Firefox is
   installed: `npx playwright install firefox`; `YAP_LINK_FIREFOX=0` leaves it
-  out): `link-page`, `sound`, `mic-open`, `typing`, `picker`, `chats`, `pictures`, `words`, `pairing`, `handsfree` and the Code side's (`code-drawer`, `code-thread`, `agent-view`, `approve`), with Firefox's fake mic
+  out): `link-page`, `sound`, `mic-open`, `typing`, `picker`, `chats`, `pictures`, `words`, `pairing`, `handsfree`, `versions` and the Code side's (`code-drawer`, `code-thread`, `agent-view`, `approve`), with Firefox's fake mic
   (`media.navigator.streams.fake`, `media.navigator.permission.disabled`, its
   tone at 440 Hz) and its output muted (`media.volume_scale`); hands-free
   talk hears speech made in the page (`speechMic`: its quiet a room's, never
