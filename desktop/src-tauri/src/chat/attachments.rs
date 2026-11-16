@@ -476,6 +476,106 @@ pub fn taken(ids: &[String]) -> Result<Vec<Attachment>, String> {
     Ok(out)
 }
 
+// ---- the box's files, for a question asked out loud ---------------------------------------------
+
+/// **The files waiting in Chat's box**, as the page has them (16 Nov 2026:
+/// `chat_files_waiting`, said each time they change; none while Chat shows
+/// a Projects page or is closed): what a question asked out loud with that
+/// box in view takes, as a typed one does (`assistant::box_files_go`,
+/// [`take_waiting`]). Ids only, in the box's order; the files are
+/// [`ADDED`]'s. Not saved: a restart starts with an empty box.
+static WAITING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// The page event (`{taken: [id]}` or `{back: [Attachment]}`): files a
+/// spoken question took out of the box, or gave back when no answer came.
+pub const WAITING_EVENT: &str = "yap-chat-files";
+
+fn waiting() -> std::sync::MutexGuard<'static, Vec<String>> {
+    WAITING.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The box's files now: each a file's id ([`is_id`]), at most [`MAX_FILES`],
+/// each once. Pure.
+pub fn box_ids(ids: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(ids.len().min(MAX_FILES));
+    for id in ids {
+        if out.len() < MAX_FILES && is_id(&id) && !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    out
+}
+
+/// Files a question that took them gave back (`back`), first in the box
+/// (they were there before anything added since), then what's there now
+/// (`have`) less them. Pure.
+pub fn box_with(back: &[String], have: Vec<String>) -> Vec<String> {
+    box_ids(back.iter().cloned().chain(have).collect())
+}
+
+/// How many files wait in the box.
+pub fn waiting_count() -> usize {
+    waiting().len()
+}
+
+/// A typed question sent these (`chat_send`): out of the box at once, so a
+/// spoken question in the moment before the page says so can't take them
+/// too (as `documents::quote_sent` does for the quote).
+pub fn sent_from_box(ids: &[String]) {
+    if !ids.is_empty() {
+        waiting().retain(|id| !ids.contains(id));
+    }
+}
+
+/// Chat closed (its page's box goes with it): nothing waits.
+pub fn box_closed() {
+    waiting().clear();
+}
+
+/// **The box's files, taken for a question asked out loud**: out of the box
+/// (the page's chips go: [`WAITING_EVENT`]), each still there — one gone
+/// meanwhile is left out, as a screenshot the sweep removed is. Their
+/// order is the box's.
+pub fn take_waiting(app: &tauri::AppHandle) -> Vec<Attachment> {
+    let ids = std::mem::take(&mut *waiting());
+    if ids.is_empty() {
+        return Vec::new();
+    }
+    let known: Vec<Attachment> = {
+        let mut map = added();
+        ids.iter().filter_map(|id| map.map().get(id).cloned()).collect()
+    };
+    let files: Vec<Attachment> = known.into_iter().filter(|a| exists(&a.id)).collect();
+    tracing::info!(files = files.len(), tokens = tokens_of(&files), "Chat: a spoken question takes the files in the box");
+    use tauri::Emitter;
+    let _ = app.emit(WAITING_EVENT, json!({ "taken": ids }));
+    files
+}
+
+/// A spoken question that took the box's files got no answer: back in the
+/// box, first (the page's chips come back: [`WAITING_EVENT`]).
+pub fn put_back_waiting(app: &tauri::AppHandle, files: Vec<Attachment>) {
+    if files.is_empty() {
+        return;
+    }
+    let back: Vec<String> = files.iter().map(|f| f.id.clone()).collect();
+    {
+        let mut w = waiting();
+        let have = std::mem::take(&mut *w);
+        *w = box_with(&back, have);
+    }
+    use tauri::Emitter;
+    let _ = app.emit(WAITING_EVENT, json!({ "back": files }));
+}
+
+/// **The files waiting in Chat's box**, as the page has them now (each time
+/// they change): a question asked out loud with the box in view takes them
+/// ([`take_waiting`]). An empty list: none (or the box isn't shown).
+#[tauri::command]
+pub fn chat_files_waiting(ids: Vec<String>) {
+    *waiting() = box_ids(ids);
+}
+
 // ---- the turn's files ---------------------------------------------------------------------------
 
 tokio::task_local! {

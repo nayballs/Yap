@@ -553,6 +553,8 @@
       // A long chat's older messages were summarised (chat/compact.rs).
       listen('yap-chat-summary', (e) => chat.onSummary(e.payload)),
       listen('yap-chat-images-deleted', chat.reloadActive),
+      // A phone switched a version or retried an answer (Yap Link): one version shown, here too.
+      listen('yap-chat-versions', (e) => chat.onVersions(e.payload)),
       // Chats auto-archived, or brought back by its Undo (chat/auto_archive.rs).
       listen('yap-chats-archived', () => chat.refreshList()),
       // The document beside the chat, changed in another window or by Chat's
@@ -563,6 +565,8 @@
       // The quote over the box, taken by a question asked out loud (or
       // given back: no answer came).
       listen('yap-chat-quote', (e) => chat.onQuote(e.payload)),
+      // …and the files in the box (chat/attachments.rs).
+      listen('yap-chat-files', (e) => chat.onBoxFiles(e.payload)),
       // Words selected on a page beside the chat, asked about (its menu).
       listen('yap-page-quote', (e) => chat.onPageQuote(e.payload)),
       // A question asked with the assistant shortcut, live (and its card's
