@@ -285,7 +285,10 @@ re-exported by the module, except `local_llm`'s, which callers name
   `run_fake_claude`) is the tests' stand-in for Claude Code
   ([ai-models.md](./ai-models.md#the-stand-in-fakers-debug-builds)); **`yap.exe
   fake-gh <script.json> …`** (`run_fake_gh`) the stand-in for GitHub's `gh`
-  ([build-and-test.md](./build-and-test.md#claude-code-in-tests-2026-11-07)).
+  ([build-and-test.md](./build-and-test.md#claude-code-in-tests-2026-11-07));
+  **`yap.exe lab-gh <gh.exe> …`** (`run_lab_gh`, 16 Nov 2026) Yap Lab's
+  read-only `gh`: `gh pr list` / `gh pr view` on Yap's own repository, nothing
+  else (`agents/prs/lab.rs`).
 - **GitHub's `gh`** (2026-11-15, `agents/prs.rs`): a Code chat's summary runs
   the person's own `gh pr list` in the workspace, in the kill-on-close job, no
   window, killed after 20 s (`cli::run_captured_at`, as Claude Code's short

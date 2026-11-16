@@ -15,9 +15,9 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { REPO, buildFresh, labConfig, onOff, parseArgs, parseModel, parseSize } from './options.mjs';
+import { REPO, buildFresh, inWorktree, labConfig, minutesFrom, onOff, parseArgs, parseModel, parseSize, targetDir } from './options.mjs';
 import { coloursIn, drawPng, meanLuma, pngSize, readPng, stitch } from './png.mjs';
-import { checkTurn, kindOf, probePasses, resultObject, screenChecks } from './script.mjs';
+import { checkTurn, kindOf, probePasses, resultObject, screenChecks, valueHolds } from './script.mjs';
 import { pageCuts, PAGE_MAX } from './sheet.mjs';
 
 describe('a tall sheet in pages', () => {
@@ -34,7 +34,7 @@ describe('a tall sheet in pages', () => {
 import { SEGMENT, TILE, parseTurns, placeShot, sheetHtml } from './sheet.mjs';
 import { shotNames, themesOf } from './shots.mjs';
 import { fillArgs, refIn, templated } from './fake.mjs';
-import { cardsOf, conversationOf, cut, endOf, planCommentsOf, summarize, toolsOf } from './turns.mjs';
+import { branchFrom, cardsOf, conversationOf, cut, endOf, planCommentsOf, routineEnd, summarize, toolsOf } from './turns.mjs';
 
 // ---------------------------------------------------------------- pure
 
@@ -69,6 +69,19 @@ describe('options', () => {
     assert.equal(plan.agentsPay, 'plan');
     assert.equal(plan.memoryLearnChats, false);
     assert.equal(plan.postProcessEnabled, false);
+    // Where the build goes: one's own when named; the main checkout's kept cache never from a worktree.
+    if (process.platform === 'win32') {
+      const yes = () => true;
+      assert.equal(targetDir({}, yes, () => false), 'E:\\Builds\\yap-lab');
+      assert.throws(() => targetDir({}, yes, () => true), /git worktree: set YAP_LAB_TARGET_DIR/);
+      assert.equal(targetDir({ YAP_LAB_TARGET_DIR: 'E:\\Builds\\yap\\task\\lab' }, yes, () => true), 'E:\\Builds\\yap\\task\\lab');
+    }
+    assert.equal(inWorktree('C:\\nowhere', () => ({ isFile: () => true })), true);
+    assert.equal(inWorktree('C:\\nowhere', () => ({ isFile: () => false })), false);
+    assert.equal(inWorktree('C:\\nowhere', () => undefined), false);
+    // A meeting's summary on Chat's own model, never a provider the lab didn't pick.
+    assert.deepEqual(plan.llmScopes.noteFormatting, plan.llmScopes.chat);
+    assert.equal(labConfig({ model: parseModel('ondevice') }).llmScopes.noteFormatting.provider, 'ondevice');
     assert.throws(() => labConfig({ model: parseModel('anthropic:claude-haiku-5-5') }), /YAP_LAB_ANTHROPIC_KEY/);
     const api = labConfig({ model: parseModel('anthropic:claude-haiku-5-5'), key: 'sk-ant-lab-test', effort: 'high' });
     assert.equal(api.ppApiKeys.anthropic, 'sk-ant-lab-test');
@@ -355,6 +368,55 @@ function lab(...args) {
     throw new Error(`lab ${args[0]} printed no JSON (exit ${r.status}): ${r.stdout}\n${r.stderr}`);
   }
 }
+describe('the lab’s own turns (16 Nov 2026)', () => {
+  test('a Retry or an Edit starts at the person’s last message, so a Code chat’s rewound thread still has its answer', () => {
+    const conv = { messages: [{ role: 'user', text: 'Rename x' }, { role: 'assistant', text: 'Done.' }, { role: 'user', text: 'And y?' }, { role: 'assistant', text: 'Renamed y.' }] };
+    assert.deepEqual(branchFrom(conv), { index: 2, text: 'And y?' });
+    assert.equal(branchFrom({ messages: [] }), null);
+    // A Code chat's report is a "user" message of its own kind: never the person's (Lab, 16 Nov 2026).
+    assert.deepEqual(branchFrom({ messages: [{ role: 'user', text: 'Say PELICAN' }, { role: 'user', kind: 'agentReport', text: 'The agent in lab-sandbox: it’s done.' }, { role: 'assistant', text: 'PELICAN' }] }), { index: 0, text: 'Say PELICAN' });
+    // Rewound and asked again: no longer than before — its length finds nothing, the message's place finds the answer.
+    const after = { messages: [...conv.messages.slice(0, 3), { role: 'assistant', text: 'Renamed y to total.' }] };
+    const t = { n: 4, question: 'And y?', status: 'answered', startedAt: 0, endedAt: 1, askedAt: 4 };
+    assert.equal(summarize({ turn: t, items: [], conv: after }).answer, '');
+    assert.equal(summarize({ turn: { ...t, askedAt: branchFrom(conv).index }, items: [], conv: after }).answer, 'Renamed y to total.');
+  });
+  test('a routine’s run: the newest of that routine since it was asked for, over once done, failed or skipped', () => {
+    const listing = {
+      runs: [
+        { id: 3, routine: 'r1', queued: 1000, state: 'running' },
+        { id: 2, routine: 'r1', queued: 900, state: 'done' },
+        { id: 1, routine: 'r2', queued: 1000, state: 'done' },
+      ],
+    };
+    assert.deepEqual(routineEnd(listing, { id: 'r1', after: 950 }), { done: false, status: 'running', error: null, run: listing.runs[0] });
+    assert.equal(routineEnd(listing, { id: 'r3', after: 0 }).run, null);
+    listing.runs[0].state = 'done';
+    assert.equal(routineEnd(listing, { id: 'r1', after: 950 }).status, 'answered');
+    listing.runs[0] = { ...listing.runs[0], state: 'skipped', why: 'Missed at 09:00' };
+    assert.deepEqual(routineEnd(listing, { id: 'r1', after: 950 }).error, 'Missed at 09:00');
+    assert.equal(routineEnd(listing, { id: 'r1', after: 950 }).status, 'failed');
+  });
+  test('a routine’s time: the next whole minute at least that far on; its switches take no value', () => {
+    assert.equal(minutesFrom(new Date(2026, 10, 16, 14, 31, 40), 1), '14:33');
+    assert.equal(minutesFrom(new Date(2026, 10, 16, 14, 31, 0), 2), '14:33');
+    assert.equal(minutesFrom(new Date(2026, 10, 16, 23, 59, 30), 2), '00:02');
+    assert.throws(() => minutesFrom(new Date(), 0), /1 to 720/);
+    assert.deepEqual(parseArgs(['new', '--skill', 'fact', '--after-meeting', '--with-note', '--away']), { _: ['new'], skill: 'fact', 'after-meeting': true, 'with-note': true, away: true });
+  });
+  test('an expect on a lab command’s own fields: its JSON at a path', () => {
+    const result = { turn: 3, kind: 'lab', status: 'answered', archived: [4, 5], notice: "Archived 2 chats you hadn't used in 30 days", page: { policy: true, bytes: 1800 }, run: { state: 'done' } };
+    const checks = checkTurn({ result: [{ path: 'archived.length', equals: 2 }, { path: 'notice', matches: '/Archived 2 chats/' }, { path: 'page.policy', equals: true }, { path: 'page.bytes', gte: 1000 }, { path: 'run.state', equals: 'done' }, { path: 'undone' }] }, { result });
+    assert.deepEqual(checks.map((c) => c.pass), [true, true, true, true, true, false]);
+    assert.match(checks.at(-1).detail, /not there/);
+    assert.equal(valueHolds({ lt: 3 }, 2), true);
+    assert.equal(valueHolds({ notMatches: 'Install' }, 'Install GitHub’s gh'), false);
+    // A lab step with a note is a lab step (a note alone is a note).
+    assert.equal(kindOf({ lab: ['age', '40'], note: 'older' }), 'lab');
+    assert.equal(kindOf({ note: 'just words' }), 'note');
+  });
+});
+
 describe('the fake AI’s placeholders', () => {
   // A request as the fake AI records it: the turn's tool results so far.
   const request = {

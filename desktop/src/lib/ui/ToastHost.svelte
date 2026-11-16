@@ -11,9 +11,18 @@
   // determinate progress bar, a busy spinner in the chip, and a "What's new"
   // toggle that unfolds release notes in the card. Mounted once in
   // ControlPanel.
+  //
+  // The unfolded notes are markdown rendered as Chat renders it, their maths,
+  // diagrams and pictures drawn (ui/markdownVisuals.js: KaTeX and mermaid in
+  // chunks of their own, loaded the first time one shows) on the card's dark
+  // colours, whatever the app's theme.
   import { toastStore, dismiss, pauseToast, resumeToast } from './toast.svelte.js';
   import { renderMarkdown } from '../core/markdown.js';
+  import { markdownVisuals } from './markdownVisuals.js';
   import BriefView from '../components/BriefView.svelte';
+
+  // The card is dark in both themes: so are its diagrams.
+  const visuals = { theme: () => 'dark' };
 
   let copiedId = $state(null);
   // Toasts whose `expand` notes are unfolded.
@@ -137,7 +146,7 @@
         {/if}
         {#if t.expand?.markdown && expanded.includes(t.id)}
           <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/core/markdown.js). -->
-          <div class="notes">{@html renderMarkdown(t.expand.markdown)}</div>
+          <div class="notes" use:markdownVisuals={visuals}>{@html renderMarkdown(t.expand.markdown)}</div>
         {:else if t.expand?.brief && expanded.includes(t.id)}
           <!-- A meeting's pre-meeting brief (calendar.svelte.js), its sources linked. -->
           <div class="briefbox"><BriefView brief={t.expand.brief} tone="dark" compact /></div>
@@ -378,6 +387,12 @@
     line-height: 1.5;
     color: rgba(255, 255, 255, 0.72);
     user-select: text;
+    /* Its scrollbars (and a wide diagram's or formula's) on the dark card. */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  }
+  .notes :global(:is(.md-diagram-view, .md-math-display, pre)) {
+    scrollbar-width: thin;
   }
   .notes :global(:is(h2, h3, h4, h5)) {
     margin: 6px 0 2px;
@@ -398,6 +413,53 @@
   }
   .notes :global(:last-child) {
     margin-bottom: 0;
+  }
+  /* What ui/markdownVisuals.js draws, on the card's dark colours (app.css
+     gives them the app's, which may be light). */
+  .notes :global(.md-math-display) {
+    margin: 6px 0;
+  }
+  .notes :global(.md-diagram[data-drawn='true']:not(.md-diagram-code)) {
+    padding: 8px 28px 8px 8px;
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .notes :global(.md-diagram-switch),
+  .notes :global(.md-diagram.md-diagram-code > .md-diagram-switch) {
+    top: 3px;
+    right: 3px;
+    color: rgba(255, 255, 255, 0.55);
+  }
+  .notes :global(.md-diagram-switch:hover) {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+  .notes :global(pre.md-code) {
+    margin: 0 0 6px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    white-space: pre-wrap;
+  }
+  .notes :global(.md-imgbox) {
+    width: 150px;
+    height: 96px;
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.8);
+  }
+  .notes :global(.md-imgbox:hover) {
+    border-color: rgba(255, 255, 255, 0.25);
+    color: #fff;
+  }
+  .notes :global(.md-imghost) {
+    color: rgba(255, 255, 255, 0.5);
+  }
+  .notes :global(img.md-img) {
+    max-height: 200px;
+  }
+  .notes :global(a.md-link) {
+    color: rgba(255, 255, 255, 0.9);
   }
   .briefbox {
     margin-top: 10px;

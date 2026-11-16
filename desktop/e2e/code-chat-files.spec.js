@@ -647,6 +647,8 @@ test('the summary after the Claude app: context by category from /context, the b
   await expect(main.getByText('Chat archived')).toBeVisible();
   await yap.invoke('chat_archive', { ids: [conversation], archived: false });
   await yap.invoke('e2e_gh_script', { script: null });
+  // Yap Lab's read-only gh (agents/prs/lab.rs) is a live lab's only: the suite never reaches the person's own gh.
+  await expect(yap.invoke('e2e_gh_lab', { on: true })).rejects.toThrow(/live Yap Lab/);
 });
 
 test('a file a command made is in Outputs and opens as a sheet; Files changed says a command made or changed it; Rewind leaves it, as the Claude app', async ({ yap, main, shot }) => {

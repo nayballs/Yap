@@ -11,6 +11,9 @@
 // - KaTeX's sheet and fonts load from its chunk; a diagram with maths in a
 //   node and on an edge still draws (that maths left blank), light and dark.
 // - A note's summary (the Notes view): the same maths and diagram.
+// - The editor's page (16 Nov 2026): a picture in My thoughts shows as its
+//   "Show image" box, its text hidden; a click fetches it and shows it; a
+//   click on it shows its text to edit; the note stays exactly as written.
 //
 // The conversation and the note are seeded; nothing leaves the PC: the web is
 // a local fake (support/fake-web.js, through the debug-only YAP_WEB_STANDIN).
@@ -96,6 +99,9 @@ const CHATS = {
   ],
 };
 
+// A note with a picture in it (the editor shows the picture, its text kept as written).
+const PICTURE_NOTE = ['The meeting point:', '', `![Fort Joy map](${FORT_JOY_MAP})`, '', 'Then lunch by the *harbour*.'].join('\n');
+
 // My thoughts: the page's editor (components/richtext/richVisuals.js) draws them too.
 const THOUGHTS = ['Energy: $E = mc^2$, at $5 a slide.', '', '```mermaid', 'flowchart LR', '  Draft --> Check --> Ship', '```', '', 'Then the review.'].join('\n');
 
@@ -113,6 +119,16 @@ const NOTES = {
       content: THOUGHTS,
       enhancedContent: ['## Summary', '', 'We agreed on $E = mc^2$ for the slide.', '', '```mermaid', 'flowchart LR', '  Draft --> Review --> Publish', '```'].join('\n'),
       transcript: [{ source: 'you', text: 'Energy is mass times the speed of light squared.', ts: NOW - 3590 }],
+    },
+    {
+      id: 42,
+      title: 'Field trip',
+      noteType: 'personal',
+      folder: 'Personal',
+      source: 'manual',
+      createdTs: NOW - 1800,
+      updatedTs: NOW - 1800,
+      content: PICTURE_NOTE,
     },
   ],
 };
@@ -313,4 +329,53 @@ test("the page's editor draws them too, and the note stays as written", async ({
   await expect(code).toBeHidden();
   await main.waitForTimeout(800);
   await expectStore(yap, 'notes.json', (s) => s.notes.find((n) => n.id === 41)?.content === THOUGHTS, 'the note as written');
+});
+
+test("the page's editor shows a picture (fetched only when clicked), and the note stays as written", async ({ yap, main, fakeWeb, shot }) => {
+  await theme(yap, main, 'light');
+  await openView(main, 'Notes');
+  await main.locator('.folder').filter({ hasText: 'Personal' }).click();
+  await main.locator('.item').filter({ hasText: 'Field trip' }).click();
+  const page = main.getByRole('textbox', { name: 'My thoughts' });
+  await expect(page).toBeVisible();
+  const asks = () => fakeWeb.requests.filter((r) => r.service === 'standin' && r.path === new URL(FORT_JOY_MAP).pathname).length;
+  const before = asks();
+
+  // Its box in the picture's place, its text ("!" and the link) hidden; nothing fetched yet.
+  const box = page.getByRole('button', { name: /^Show image: Fort Joy map, from wiki\.example\.com/ });
+  await expect(box).toBeVisible();
+  await expect(page.locator('.rich-picture')).toHaveCount(1);
+  await expect(page.locator('a', { hasText: 'Fort Joy map' })).toBeHidden();
+  await expect(page).toContainText('Then lunch by the harbour.');
+  await main.waitForTimeout(400);
+  expect(asks()).toBe(before);
+  await shot(main, '10-editor-picture-box');
+
+  // A click: fetched, then the picture itself (the caret never moved there: its text stays hidden).
+  await box.click();
+  const img = page.locator('.rich-picture img.md-img');
+  await expect(img).toBeVisible();
+  await expect.poll(() => img.evaluate((el) => el.naturalWidth)).toBe(320);
+  expect(asks()).toBe(before + 1);
+  expect(await img.getAttribute('alt')).toBe('Fort Joy map');
+  await expect(page.locator('a', { hasText: 'Fort Joy map' })).toBeHidden();
+  await shot(main, '11-editor-picture-shown');
+
+  // A click on the picture: its text shows beside it, to edit; out of it, hidden again.
+  await img.click();
+  await expect(page.locator('a', { hasText: 'Fort Joy map' })).toBeVisible();
+  await expect(img).toBeVisible();
+  await shot(main, '12-editor-picture-text');
+  await page.getByText('Then lunch by the').click();
+  await expect(page.locator('a', { hasText: 'Fort Joy map' })).toBeHidden();
+
+  // Dark: the box and the picture on the app's dark colours.
+  await theme(yap, main, 'dark');
+  await expect(img).toBeVisible();
+  await shot(main, '13-editor-picture-dark');
+  await theme(yap, main, 'light');
+
+  // Nothing was written: the note is as it was.
+  await main.waitForTimeout(800);
+  await expectStore(yap, 'notes.json', (s) => s.notes.find((n) => n.id === 42)?.content === PICTURE_NOTE, 'the note as written');
 });

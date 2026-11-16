@@ -431,6 +431,11 @@
     }).then((u) => uns.push(u));
     const mo = new MutationObserver(scheduleReport);
     mo.observe(document.body, { subtree: true, childList: true, attributes: true });
+    // A card that changes size with no change to the page's elements (a
+    // picture shown in it, maths' fonts arriving): its rect again.
+    const ro = new ResizeObserver(scheduleReport);
+    const cardsEl = document.querySelector('.stage > .cards');
+    if (cardsEl) ro.observe(cardsEl);
     document.addEventListener('transitionend', scheduleReport);
     document.addEventListener('animationend', scheduleReport);
     window.addEventListener('resize', scheduleReport);
@@ -438,6 +443,7 @@
     return () => {
       uns.forEach((u) => u && u());
       mo.disconnect();
+      ro.disconnect();
       document.removeEventListener('transitionend', scheduleReport);
       document.removeEventListener('animationend', scheduleReport);
       window.removeEventListener('resize', scheduleReport);
