@@ -57,7 +57,7 @@ export function buildFresh(stamp, head) {
 // ---------------------------------------------------------------- arguments
 
 /** Flags that take no value. */
-const SWITCHES = new Set(['spoken', 'fake', 'live-web', 'stale-ok', 'no-wait', 'agents', 'keep-workspace', 'no-shots', 'while', 'retry', 'edit', 'incognito', 'keep', 'close', 'research']);
+const SWITCHES = new Set(['spoken', 'fake', 'live-web', 'stale-ok', 'no-wait', 'agents', 'keep-workspace', 'no-shots', 'while', 'retry', 'edit', 'incognito', 'project-page', 'keep', 'close', 'research']);
 
 /**
  * `argv` (after the command) → `{ _: [positional…], flag: value }`.
