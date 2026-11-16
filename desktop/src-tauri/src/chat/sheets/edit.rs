@@ -425,7 +425,10 @@ impl Xlsx {
             // Its row as tall as its lines in the view (Excel's own fit: 15 points a line of an 11-point font;
             // IronCalc's row heights are 25/16 of a point). The file's row isn't given a height: Excel fits it.
             let size = self.model().get_style_for_cell(sheet, row, col).map(|s| s.font.sz).unwrap_or(11).max(1) as f64;
-            let need = input.split('\n').count() as f64 * 15.0 * size / 11.0 * 1.5625;
+            // (IronCalc's column widths are 9 a character; the view draws 7 px a character, 64 px with none.)
+            let width = self.model().workbook.worksheet(sheet).ok().and_then(|ws| ws.get_column_width(col).ok()).unwrap_or(90.0);
+            let px = if (width - 90.0).abs() < 0.01 { super::COLUMN_PX as f64 } else { width / 9.0 * 7.0 };
+            let need = wrapped_lines(input, px, size) as f64 * 15.0 * size / 11.0 * 1.5625;
             if self.model.get_row_height(sheet, row).is_ok_and(|h| h < need) && self.model.set_rows_height(sheet, row, row, need).is_ok() {
                 let _ = self.model.flush_send_queue();
                 calls += 1;
@@ -543,6 +546,35 @@ impl Xlsx {
             .collect();
         self.was = now.into_iter().collect();
     }
+}
+
+/// **How many lines `text` takes wrapped in a column `px` wide** (font
+/// `size` points): each line typed, its words laid in greedily at about
+/// 5.6 px a character of an 11-point font (Calibri's), a word too long for
+/// a line its own lines. An estimate — Excel measures — erring tall. Pure.
+pub fn wrapped_lines(text: &str, px: f64, size: f64) -> usize {
+    let per_line = ((px - 7.0).max(7.0) / (5.6 * size / 11.0)).max(1.0);
+    text.split('\n')
+        .map(|line| {
+            let mut lines = 1usize;
+            let mut used = 0.0f64;
+            for word in line.split(' ') {
+                let n = word.chars().count() as f64;
+                let need = if used > 0.0 { used + 1.0 + n } else { n };
+                if need <= per_line {
+                    used = need;
+                } else if used == 0.0 {
+                    // A word longer than a line: broken across as many as it needs.
+                    lines += (n / per_line).ceil() as usize - 1;
+                    used = n % per_line;
+                } else {
+                    lines += 1 + ((n / per_line).ceil() as usize).saturating_sub(1);
+                    used = if n > per_line { n % per_line } else { n };
+                }
+            }
+            lines
+        })
+        .sum()
 }
 
 /// What rows or columns put in or out is, said ("insert a row", "delete 3 columns").

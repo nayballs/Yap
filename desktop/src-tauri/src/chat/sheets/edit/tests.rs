@@ -614,6 +614,10 @@ fn alt_enter_s_line_break_wraps_the_cell_and_is_saved_with_it() {
     // Undo: the text and its wrap together.
     assert_eq!(e.undo(), Some((0, 9, 1)));
     assert!(!e.dirty());
+    // Its row grown to its lines in the view: the lines typed, wrapped at the column's width.
+    assert_eq!(wrapped_lines("Pay the rent first\nthen the energy bill", 64.0, 11.0), 5);
+    assert_eq!(wrapped_lines("Short", 200.0, 11.0), 1);
+    assert_eq!(wrapped_lines("abcdefghijklmnopqrstuvwxyz", 64.0, 11.0), 3, "a word longer than a line");
     // An `<xf>` with an alignment already: wrapText set in it.
     assert_eq!(
         save::xf_with_wrap(r#"<xf numFmtId="0" fontId="2" applyAlignment="1"><alignment horizontal="center"/></xf>"#, 0, false, true).unwrap(),
