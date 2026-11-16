@@ -295,7 +295,9 @@ on an element that also has a `settings.css` class (`set-note`,
   right now — "Follows Windows' app mode, which is dark right now", live),
   "Reading font" (each option and the closed box
   in its own font → `readingFont`), "Text size" (`readingSize`), a preview of
-  the reading text, "Motion" (System / Reduced → `motion`; System's line says
+  the reading text, "Message actions" (Show on hover / Always show →
+  `messageActions`, data-setting `message-actions`: the rows under Chat's
+  messages), "Motion" (System / Reduced → `motion`; System's line says
   whether Windows' "Animation effects" is on). Settings applies its copy to
   the main window at once; the other windows follow the save
   (`lib/core/appearance.js`, [frontend.md](./frontend.md#the-dark-theme-2026-10-22)).

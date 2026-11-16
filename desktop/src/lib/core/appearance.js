@@ -1,5 +1,5 @@
 // Settings → General → Appearance (config `theme`, `readingFont`,
-// `readingSize`, `motion`) and the Yap bar's colours (`barTheme`), applied to
+// `readingSize`, `motion`, `messageActions`) and the Yap bar's colours (`barTheme`), applied to
 // EVERY Yap window: the main window, onboarding, the meeting notepad, the Yap
 // bar and the split preview all call `initAppearance()` (App.svelte). It
 // marks <html> and app.css does the rest:
@@ -18,6 +18,9 @@
 //   data-motion = reduced (absent = full motion)
 //       → no non-essential animation or transition (app.css), and the Yap
 //         bar's Svelte transitions take 0 ms (`motionMs`).
+//   data-message-actions = always (absent = on hover, the default)
+//       → the rows under Chat's messages always shown (ChatMessage.svelte),
+//         not only on hovering the message or its keyboard focus.
 //
 // Only the reading text uses the reading tokens — Chat's messages, notes and
 // their Enhanced view, the notepad's My thoughts / Transcript / Summary and
@@ -147,6 +150,12 @@ export const MOTION_OPTIONS = [
   { value: 'reduced', label: 'Reduced' },
 ];
 
+/** Settings → General → Appearance → Message actions. */
+export const MESSAGE_ACTIONS_OPTIONS = [
+  { value: 'hover', label: 'Show on hover' },
+  { value: 'always', label: 'Always show' },
+];
+
 const FONT_IDS = new Set(READING_FONTS.map((f) => f.value));
 const SIZE_IDS = new Set(READING_SIZES.map((s) => s.value));
 
@@ -158,7 +167,8 @@ export function appearanceOf(cfg) {
   const font = FONT_IDS.has(cfg?.readingFont) ? cfg.readingFont : 'default';
   const size = SIZE_IDS.has(cfg?.readingSize) ? cfg.readingSize : 'default';
   const motion = cfg?.motion === 'reduced' ? 'reduced' : 'system';
-  return { font, size, motion };
+  const actions = cfg?.messageActions === 'always' ? 'always' : 'hover';
+  return { font, size, motion, actions };
 }
 
 /** Is motion reduced in this window right now (the setting, or Windows'
@@ -181,10 +191,12 @@ export function motionMs(ms) {
 export function applyAppearance(cfg) {
   if (typeof document === 'undefined') return;
   lastCfg = cfg;
-  const { font, size, motion } = appearanceOf(cfg);
+  const { font, size, motion, actions } = appearanceOf(cfg);
   const root = document.documentElement;
   if (root.dataset.readingFont !== font) root.dataset.readingFont = font;
   if (root.dataset.readingSize !== size) root.dataset.readingSize = size;
+  if (actions === 'always') root.dataset.messageActions = 'always';
+  else delete root.dataset.messageActions;
   const reduced = motion === 'reduced' || !!osReduced?.matches;
   if (reduced) root.dataset.motion = 'reduced';
   else delete root.dataset.motion;
