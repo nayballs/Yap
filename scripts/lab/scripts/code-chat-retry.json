@@ -8,7 +8,7 @@
     { "expect": { "status": "answered", "answerContains": "PELICAN" } },
     { "ask": "", "retry": true, "timeout": 300, "note": "↻ Retry under the answer; the lab presses \"Retry from this message?\"." },
     {
-      "expect": { "status": "answered", "answerContains": "PELICAN", "result": [{ "path": "branch", "equals": "retry" }, { "path": "question", "matches": "/PELICAN/" }] },
+      "expect": { "status": "answered", "answerContains": "PELICAN", "result": [{ "path": "branch", "equals": "retry" }, { "path": "question", "matches": "/^Reply with exactly one word: PELICAN/" }] },
       "note": "The new answer, read back (it was empty before), and the question it answered again."
     },
     { "ask": "Reply with exactly one word: FALCON. Don't read or change any file.", "edit": true, "timeout": 300, "note": "Edit the message: the pencil, the words, Save and send." },

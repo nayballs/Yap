@@ -19,16 +19,29 @@ export function labDir(env = process.env) {
   return env.YAP_LAB_DIR ? path.resolve(env.YAP_LAB_DIR) : path.join(REPO, 'test-results', 'lab');
 }
 
+/** Is `repo` a linked git worktree (its `.git` a file, not a folder)? A session's own checkout, beside the main one. */
+export function inWorktree(repo = REPO, stat = (p) => fs.statSync(p, { throwIfNoEntry: false })) {
+  const s = stat(path.join(repo, '.git'));
+  return !!s && s.isFile();
+}
+
 /**
- * Where `lab build` puts the test Yap: `YAP_LAB_TARGET_DIR`, else
+ * Where `lab build` puts the test Yap (and `start` finds it): `YAP_LAB_TARGET_DIR`, else
  * `yap-lab` in this PC's builds folder (`E:\Builds` when there is one: the
  * maintainer's PC keeps every build there, never in the checkout), else
  * desktop/src-tauri/target/lab. A Cargo target dir of its own, so it never
- * fights `tauri dev`, the e2e suite's or the evaluations' builds.
+ * fights `tauri dev`, the e2e suite's or the evaluations' builds. **A worktree
+ * names its own** (16 Nov 2026): `E:\Builds\yap-lab` is the main checkout's kept
+ * cache — a session's branch building there overwrites it, and a lab started
+ * from it runs another branch's build — so from a worktree it's refused, saying
+ * what to set (`npm run test:lab` too, which builds first).
  */
-export function targetDir(env = process.env, exists = fs.existsSync) {
+export function targetDir(env = process.env, exists = fs.existsSync, worktree = () => inWorktree()) {
   if (env.YAP_LAB_TARGET_DIR) return path.resolve(env.YAP_LAB_TARGET_DIR);
-  if (process.platform === 'win32' && exists('E:\\Builds')) return 'E:\\Builds\\yap-lab';
+  if (process.platform === 'win32' && exists('E:\\Builds')) {
+    if (worktree()) throw new Error("This checkout is a git worktree: set YAP_LAB_TARGET_DIR to a build folder of its own (E:\\Builds\\yap\\<task>\\lab) for every lab and test:lab command; E:\\Builds\\yap-lab is the main checkout's");
+    return 'E:\\Builds\\yap-lab';
+  }
   return path.join(APP, 'src-tauri', 'target', 'lab');
 }
 

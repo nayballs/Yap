@@ -64,6 +64,13 @@ maintainer's keeps every build there), else `desktop/src-tauri/target/lab`. A ke
 cache: leave it there. Writes `lab-build.json` beside `debug/` (the commit it was built
 from). The build's output goes to `test-results/lab/build.log`.
 
+**From a git worktree** (a session's own checkout), `E:\Builds\yap-lab` is refused
+(16 Nov 2026): it's the main checkout's kept cache, which a branch's build would
+overwrite and whose build a lab started there would run. Set `YAP_LAB_TARGET_DIR` to a
+folder of the task's own (`E:\Builds\yap\<task>\lab`) for **every** `lab` and
+`test:lab` command (`build`, `start`, `check`, `run` look there); `build`, `start` and
+`npm run test:lab` say so and stop otherwise.
+
 ```json
 {"ok":true,"exe":"E:\\Builds\\yap-lab\\debug\\yap.exe","commit":"29e5e3917919a1a430e3ac9e69395ac8a69ae038","dirty":true,"log":"…\\test-results\\lab\\build.log","ms":58891}
 ```
@@ -827,7 +834,7 @@ that hits one should say so, and it isn't a bug in the tool:
 
 Offline, ~1 minute plus the incremental build (`YAP_LAB_NO_BUILD=1` skips it; the
 build goes where `lab build` puts it, so set `YAP_LAB_TARGET_DIR` when that's someone
-else's): the pure parts (options, the model, the config, the build's freshness, a
+else's — from a worktree it must be set: [`build`](#build---target-dir)): the pure parts (options, the model, the config, the build's freshness, a
 turn's record summed up, shot names and themes, PNG stitching, the sheet's layout, a
 script's checks), then a `--fake` run end to end — build, start (its own data folder,
 the scratch workspace, the window at 1280 × 860, one lab at a time), a typed question

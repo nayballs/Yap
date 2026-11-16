@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { REPO, buildFresh, labConfig, minutesFrom, onOff, parseArgs, parseModel, parseSize } from './options.mjs';
+import { REPO, buildFresh, inWorktree, labConfig, minutesFrom, onOff, parseArgs, parseModel, parseSize, targetDir } from './options.mjs';
 import { coloursIn, drawPng, meanLuma, pngSize, readPng, stitch } from './png.mjs';
 import { checkTurn, kindOf, probePasses, resultObject, screenChecks, valueHolds } from './script.mjs';
 import { pageCuts, PAGE_MAX } from './sheet.mjs';
@@ -69,6 +69,16 @@ describe('options', () => {
     assert.equal(plan.agentsPay, 'plan');
     assert.equal(plan.memoryLearnChats, false);
     assert.equal(plan.postProcessEnabled, false);
+    // Where the build goes: one's own when named; the main checkout's kept cache never from a worktree.
+    if (process.platform === 'win32') {
+      const yes = () => true;
+      assert.equal(targetDir({}, yes, () => false), 'E:\\Builds\\yap-lab');
+      assert.throws(() => targetDir({}, yes, () => true), /git worktree: set YAP_LAB_TARGET_DIR/);
+      assert.equal(targetDir({ YAP_LAB_TARGET_DIR: 'E:\\Builds\\yap\\task\\lab' }, yes, () => true), 'E:\\Builds\\yap\\task\\lab');
+    }
+    assert.equal(inWorktree('C:\\nowhere', () => ({ isFile: () => true })), true);
+    assert.equal(inWorktree('C:\\nowhere', () => ({ isFile: () => false })), false);
+    assert.equal(inWorktree('C:\\nowhere', () => undefined), false);
     // A meeting's summary on Chat's own model, never a provider the lab didn't pick.
     assert.deepEqual(plan.llmScopes.noteFormatting, plan.llmScopes.chat);
     assert.equal(labConfig({ model: parseModel('ondevice') }).llmScopes.noteFormatting.provider, 'ondevice');
