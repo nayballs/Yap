@@ -39,6 +39,8 @@ use crate::ai::claude_code::cli::{self, Place, Program};
 
 #[cfg(debug_assertions)]
 pub mod fake;
+#[cfg(debug_assertions)]
+pub mod lab;
 
 /// How long `gh` may take.
 const TIMEOUT: Duration = Duration::from_secs(20);

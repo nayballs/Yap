@@ -271,7 +271,12 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   `yap-read` / `yap-read-word` / `read_aloud_state`) sits nearest the pill
   whenever Yap reads aloud, a notice card above it: 440 wide, the bar
   surface, radius 16; a chip ("Reading aloud" / "Paused", its tooltip how
-  the word timing was found), "3 of 42", ✕ (Stop); the sentence in the
+  the word timing was found), "3 of 42", ✕ (Stop); **maths in the
+  sentence** (an answer's, read aloud; 16 Nov 2026: `bar/readingPieces.js`
+  finds `$…$`, `\(…\)`, `$$…$$`, `\[…\]` as `core/markdown.js` `mathAt`
+  does, so a price stays words) drawn by KaTeX (`use:markdownVisuals`), one
+  piece holding its words (`data-w="6 7 8"`), lit as a whole while any of
+  them is said; the sentence in the
   **reading font and size** from Settings → General → Appearance
   (`--yap-font-reading`, OpenDyslexic included; 17 px × `--yap-reading-scale`,
   line height 1.65 × `--yap-reading-leading`, a little word spacing), up to
@@ -290,7 +295,21 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   kind (Update, Meeting, Call, Tip, Error, Yap Code — icon `agent`, 2026-11-07; icon `tip` = a bulb, the coaching
   hints, whose `{key}` the card names from its `hotkey`), the title 15 / 600, the body 15
   muted, a ghost button and a primary one (ink on light, cream on dark) at
-  radius 8, the ✕ 24×24 at 30 % top-right; a `countdown` line with a ring
+  radius 8, the ✕ 24×24 at 30 % top-right; **a markdown body** (16 Nov
+  2026) — the Voice Assistant's answer, and a notice with `Card.markdown`
+  (a model's words: Yap Code's "Claude replied" / "Agent done" card,
+  `chat/turn/report.rs`, and a routine's, `chat/routines/run.rs`; Yap's own
+  notices stay text) — is rendered as Chat renders it, its maths, diagrams
+  and pictures drawn (`ui/markdownVisuals.js`, KaTeX and mermaid loaded the
+  first time one shows; [notes.md](./notes.md), "Maths, diagrams, diffs and
+  pictures"): on the `--bar-*` tokens, a diagram in the bar's own Light /
+  Dark (`themeFrom('data-bar-theme')`, not the app's), a picture as "Show
+  image" (fetched only on a click; then at most 180 px tall), a notice's
+  body scrolling past 170 px; no shadow or backdrop-filter on any of it, and
+  the card's region reported again when it changes size (a ResizeObserver
+  on `.cards` in `Overlay.svelte`: a picture shown, KaTeX's fonts arriving).
+  `bar_simulate {card: "answer" | "markdown"}` puts up demo ones
+  (`markdown-everywhere.spec.js`); a `countdown` line with a ring
   ("Esc to cancel" only when the card has an `escapeAction`, its `done`
   text at zero), or as the card's **headline** (`Countdown.headline`: the
   quiet-meeting countdown, "Ending notes in 28 s…" at 20 / 650 beside the

@@ -9,18 +9,19 @@
 // Never: %APPDATA%\yap (the test Yap is portable, in the lab's folder), the
 // person's config, keys, memory or chats, a sign-in, a click or key on the
 // screen (Playwright's go to the test Yap's webviews over CDP).
+import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { APP, labConfig, onOff, parseModel } from './options.mjs';
+import { APP, labConfig, localServer, minutesFrom, onOff, parseModel } from './options.mjs';
 import { drawPng, pngSize } from './png.mjs';
 import { templated } from './fake.mjs';
 import { captureElement, captureLivePage, capturePanel, captureThread, captureWindow, livePage, pinTheme, shotNames, slug, themeNow, themesOf } from './shots.mjs';
-import { makeSheet } from './sheet.mjs';
-import { conversationOf, endOf, cardsOf, pendingOf, summarize, toolsOf, cut, planCommentsOf } from './turns.mjs';
-import { makeWorkspace, NAME as WORKSPACE_NAME } from './workspace.mjs';
+import { labBrowser, makeSheet } from './sheet.mjs';
+import { branchFrom, conversationOf, endOf, cardsOf, pendingOf, routineEnd, summarize, toolsOf, cut, planCommentsOf } from './turns.mjs';
+import { makeGitRepo, makeWorkspace, NAME as WORKSPACE_NAME } from './workspace.mjs';
 
 const LAB = path.resolve(process.argv[2] ?? '');
 const START = JSON.parse(fs.readFileSync(path.join(LAB, 'start.json'), 'utf8'));
@@ -98,6 +99,8 @@ const SESSION_GRACE_MS = 20_000;
 
 /** The turn going now, or the last one. */
 let turn = null;
+/** The test Yap told the person is in another app (`ask --spoken --away`). */
+let awayNow = false;
 let turns = 0;
 
 class Turn {
@@ -142,9 +145,29 @@ async function agentsNow() {
 async function tick() {
   readRecord();
   const t = turn;
-  if (!t || t.finalized || t.ticking) return;
+  // (A turn of the lab's own ends when its command does: `actionTurn`.)
+  if (!t || t.finalized || t.ticking || t.kind === 'lab') return;
   t.ticking = true;
   try {
+    // A routine's run (`routine new|now`): over when Settings' runs list says so, never by a Chat stream.
+    if (t.routine) {
+      const end = routineEnd(await tryInvoke('routines_list', {}, null), { id: t.routine.id, after: t.routine.after });
+      if (end.run) t.run = end.run;
+      if (!end.done) return;
+      t.status = end.status;
+      t.error = end.error;
+      t.conversation = end.run.chat || end.run.thread || null;
+      // Its question: the run's own message in that chat (`/<command> …`), the answer after it.
+      const conv = t.conversation ? await tryInvoke('chat_get', { id: t.conversation }) : null;
+      const from = branchFrom(conv);
+      if (from) {
+        t.askedAt = from.index;
+        t.question = from.text || t.question;
+      }
+      t.endedAt = Date.now();
+      await finalize(t);
+      return;
+    }
     t.conversation ??= conversationOf(t.items);
     const end = endOf(t.items, { spoken: t.spoken });
     // A Code chat's own session (turns.mjs directOf): over with its answer in the chat — or, its turn over and
@@ -199,6 +222,13 @@ async function snapshot(t) {
 
 /** A turn's result with its shots (and what couldn't be shot). */
 function withShots(t, out) {
+  // (A Retry or Edit says so; a routine's turn has its run: when, why, where its answer went.)
+  if (t.branch) out.branch = t.branch;
+  if (t.routine) {
+    out.run = runOf(t.run);
+    // (A routine that had a chat already: did this run go to the same one?)
+    if (out.run && t.routine.chatBefore) out.run.sameChat = out.run.chat === t.routine.chatBefore;
+  }
   out.shots = t.shots.map(shotEntry);
   if (t.shotErrors.length) out.shotErrors = [...t.shotErrors];
   return out;
@@ -216,6 +246,13 @@ async function finalize(t) {
   const result = summarize({ turn: t, items: t.items, conv, pages, approvals: [], agents, transcript });
   if (t.autoAnswered.length) result.autoAnswered = t.autoAnswered;
   t.status = result.status;
+  // Shots of its own first (a routine's notice on the bar, before its chat is opened and the card goes).
+  for (const pre of t.shotsOn ? (t.preShots ?? []) : []) {
+    if (pre.before) await pre.before().catch((e) => t.shotErrors.push(`${pre.set}: ${e.message.split('\n')[0]}`));
+    await shotSet(t, pre).catch((e) => t.shotErrors.push(`${pre.set} shots: ${e.message.split('\n')[0]}`));
+  }
+  // (A routine run with the person away: back in Yap now, before its chat is opened.)
+  if (t.away) await tryInvoke('e2e_focus', { focused: true });
   // Its shots: the thread's turn whole, the panel, the live page, in each theme.
   if (t.shotsOn) await shotSet(t, { set: 'end' }).catch((e) => t.shotErrors.push(`shots: ${e.message.split('\n')[0]}`));
   withShots(t, result);
@@ -252,7 +289,7 @@ function writeShotIndex(t) {
   fs.mkdirSync(turnShotDir(t), { recursive: true });
   fs.writeFileSync(
     path.join(turnShotDir(t), 'index.json'),
-    JSON.stringify({ turn: t.n, question: t.question, status: t.result?.status ?? t.status, conversation: t.conversation, spoken: !!t.spoken, shots: t.shots }, null, 2)
+    JSON.stringify({ turn: t.n, question: t.question, status: t.result?.status ?? t.status, conversation: t.conversation, spoken: !!t.spoken, ...(t.kind ? { kind: t.kind } : {}), shots: t.shots }, null, 2)
   );
   if (t.finalized && t.transcriptData) {
     withShots(t, t.result);
@@ -324,7 +361,9 @@ async function shotSet(t, { set = 'end', prefix = '', windows = null, themes = t
     fs.mkdirSync(dir, { recursive: true });
     const views = (await tryInvoke('e2e_page_views', {}, [])) ?? [];
     const page = livePage(yap, views, { onScreenOnly: !explicit });
-    let list = windows;
+    // (A turn of the lab's own may say which windows, and how to bring them up: a routine's note, an action's view.)
+    let list = windows ?? t?.windows ?? null;
+    if (!windows && t?.windows && t.show) await t.show(t);
     if (!list) {
       if (t) await showTurn(t);
       list = [];
@@ -456,7 +495,7 @@ async function openChat(chat) {
   // As Yap's own "Open in Chat" does: the Chat view follows this event.
   await m.evaluate((p) => window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event: 'yap-assistant-turn', payload: p }), { phase: 'open', conversationId: id, show: true });
   await waitFor(async () => (await m.locator(`.conv.active[data-conv="${id}"]`).count()) > 0, 10_000, `conversation ${id} to open`);
-  return { askedAt: conv?.messages?.length ?? 0 };
+  return { askedAt: conv?.messages?.length ?? 0, conv };
 }
 
 /**
@@ -475,7 +514,7 @@ async function sameChat() {
       return !!col && [...col.querySelectorAll('.cbubble.user')].some((b) => norm(b.innerText).includes(want));
     }, turn.question)
     .catch(() => false);
-  if (shown) return { askedAt: conv?.messages?.length ?? 0 };
+  if (shown) return { askedAt: conv?.messages?.length ?? 0, conv };
   return openChat(String(id));
 }
 
@@ -517,15 +556,58 @@ async function dropFiles(files) {
   await chips.nth(before + paths.length - 1).waitFor({ state: 'visible', timeout: 60_000 });
 }
 
-async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null }) {
+/**
+ * **Toasts over the message box's Send**, closed with their own × as the person closes them to reach it (Yap's
+ * notices stack at the foot of the main window, over the box's right end: 16 Nov 2026, auto-archive's notice and
+ * "Chat restored" left Send unclickable and the next `ask` timed out).
+ */
+async function clearSend() {
+  const send = main().getByRole('button', { name: 'Send', exact: true });
+  const box = await send.boundingBox({ timeout: 2_000 }).catch(() => null);
+  if (!box) return;
+  const toasts = main().getByRole('status');
+  for (let i = 0; i < 6; i++) {
+    const hit = await toasts
+      .evaluateAll((els, b) => els.findIndex((e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 0 && r.left < b.x + b.width && r.right > b.x && r.top < b.y + b.height && r.bottom > b.y;
+      }), box)
+      .catch(() => -1);
+    if (hit < 0) return;
+    await toasts.nth(hit).getByRole('button', { name: 'Close', exact: true }).click({ timeout: 2_000 }).catch(() => {});
+    await sleep(300);
+  }
+}
+
+async function startTurn({ text, spoken = false, away = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null }) {
   if (!text?.trim()) throw new Error('Nothing to ask');
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
+  // `--away` (a spoken question asked from another app, 16 Nov 2026): the test Yap told its window isn't in front
+  // (e2e_focus, as the e2e suite's `inAnotherApp`), so the answer comes on the Yap bar's card. Left so until the next
+  // question asked without it, so `shot --window bar` still finds the card.
+  if (away !== awayNow) {
+    await invoke('e2e_focus', { focused: !away });
+    awayNow = away;
+  }
   readRecord();
   const since = lastSeq();
-  const { askedAt } = await (chat === 'same' ? sameChat() : openChat(chat)).catch((e) => {
+  const opened = await (chat === 'same' ? sameChat() : openChat(chat)).catch((e) => {
     throw new Error(`Couldn't open Chat on ${chat || 'a new chat'}: ${e.message.split('\n')[0]}`);
   });
-  const t = new Turn({ question: text, spoken, since, askedAt, autoCards, report, shots, themes });
+  let { askedAt } = opened;
+  let question = text;
+  // A new version starts at the person's message it answers again (branchFrom): a Code chat's Retry rewinds the
+  // thread there and asks again, so the conversation's length when asked found no answer (16 Nov 2026: `answer`
+  // came back empty though the thread had it). A Retry's question is that message.
+  if (how === 'retry' || how === 'edit') {
+    const from = branchFrom(opened.conv);
+    if (from) {
+      askedAt = from.index;
+      if (how === 'retry' && from.text.trim()) question = from.text;
+    }
+  }
+  const t = new Turn({ question, spoken, since, askedAt, autoCards, report, shots, themes });
+  if (how !== 'ask') t.branch = how;
   turn = t;
   try {
     // A new chat started from a project's page (chat/projects.rs), the project made first if need be.
@@ -540,12 +622,17 @@ async function startTurn({ text, spoken = false, chat = 'new', autoCards = null,
     if (how === 'retry' || how === 'edit') {
       await branchTurn(how, text);
     } else if (spoken) {
+      // (Pictures and files in the box first, as a person drops them before asking out loud: the question takes
+      // them with Chat in view, 16 Nov 2026.)
+      if (pictures?.length) await dropPictures(pictures);
+      if (attach?.length) await dropFiles(attach);
       await invoke('e2e_assistant_ask', { text, listenMs: 300 });
     } else {
       if (pictures?.length) await dropPictures(pictures);
       if (attach?.length) await dropFiles(attach);
       const box = main().getByRole('textbox', { name: 'Message' });
       await box.fill(text, { timeout: 10_000 });
+      await clearSend();
       // (Exactly "Send": with an agent's tab beside the chat, other buttons' names have the word.)
       await main().getByRole('button', { name: 'Send', exact: true }).click({ timeout: 10_000 });
     }
@@ -595,7 +682,9 @@ async function confirmIfAsked() {
 
 /**
  * **A new chat in a project** (`--project`, chat/projects.rs): the project named `project.name` made if there's none
- * (its instructions set when given), then its page opened and its New chat pressed, as the person does.
+ * (its instructions set when given), then its page opened and its New chat pressed, as the person does — or, with
+ * `project.page` (`--project-page`, 16 Nov 2026), its page left in view (a question asked out loud there starts its
+ * new chat in it: chat/assistant.rs `new_in_project`).
  */
 async function newChatInProject(project) {
   const name = String(project.name).trim();
@@ -605,6 +694,10 @@ async function newChatInProject(project) {
   const m = main();
   await m.getByRole('button', { name: 'Projects', exact: true }).click({ timeout: 10_000 });
   await m.getByTestId('chat-projects').getByRole('button', { name }).first().click({ timeout: 10_000 });
+  if (project.page) {
+    await m.getByTestId('chat-project').getByRole('button', { name: `New chat in ${name}` }).waitFor({ state: 'visible', timeout: 10_000 });
+    return;
+  }
   await m.getByRole('button', { name: `New chat in ${name}` }).click({ timeout: 10_000 });
 }
 
@@ -1039,6 +1132,19 @@ async function setThings(a) {
       done.workspace = workspace;
     }
   }
+  // The lab's read-only gh (agents/prs/lab.rs: gh pr list / view on Yap's own public repository, nothing else).
+  if (a.gh !== undefined) {
+    const on = onOff(a.gh, false, 'gh');
+    if (on && START.fake) throw new Error('The read-only gh is for a live lab (start without --fake)');
+    done.gh = { on, exe: await invoke('e2e_gh_lab', { on }) };
+  }
+  // The scratch workspace on a git branch, Yap's own repository its remote (no commit, nothing fetched).
+  if (a.git !== undefined) {
+    if (!workspace) throw new Error('No workspace to make a git repository of: start the lab with --yap-code on');
+    if (!path.resolve(workspace.path).startsWith(path.resolve(LAB) + path.sep)) throw new Error(`set --git only works on the lab's scratch workspace, not ${workspace.path}`);
+    const run = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    done.git = makeGitRepo(workspace.path, String(a.git), { run });
+  }
   const files = a.files ?? (a.file ? [a.file] : []);
   if (files.length) {
     if (!workspace) throw new Error('No workspace to seed files in: start the lab with --yap-code on');
@@ -1046,7 +1152,7 @@ async function setThings(a) {
     if (!path.resolve(workspace.path).startsWith(path.resolve(LAB) + path.sep)) throw new Error(`set only seeds the lab's scratch workspace, not ${workspace.path}`);
     done.files = files.map((f) => seedFile(workspace.path, f));
   }
-  if (!Object.keys(done).length) throw new Error('Nothing to set: --web, --yap-code, --connectors, --bypass, config or files');
+  if (!Object.keys(done).length) throw new Error('Nothing to set: --web, --yap-code, --connectors, --bypass, --gh, --git, config or files');
   return done;
 }
 
@@ -1165,6 +1271,490 @@ function logs({ since, grep, tail }) {
   return { file: yap.logPath, next: all.length, lines: lines.map((l) => `${l.n}: ${cut(l.text, 1000)}`) };
 }
 
+// ---------------------------------------------------------------- the lab's own turns (16 Nov 2026)
+
+/**
+ * **A turn of the lab's own**: something done to the test Yap that isn't a question — an auto-archive run, a kept
+ * page saved, a Code chat's summary read — with shots and a transcript as a question's, so a script's `expect`, the
+ * sheet and `--chat same` go on from it (its conversation is the last turn's unless `fn` sets `t.conversation`).
+ * `fn(t)` does it and returns what it found, laid into the turn's JSON; `windows`: its shots' windows, brought up by
+ * `show(t)` first. A failure is the turn's (`status: "failed"`, `error`), never the command's.
+ */
+async function actionTurn(question, fn, a = {}, { windows = ['main'], show = null } = {}) {
+  if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
+  readRecord();
+  const t = new Turn({ question, spoken: false, since: lastSeq(), askedAt: 0, ...shotsFor(a) });
+  t.kind = 'lab';
+  t.conversation = turn?.conversation ?? null;
+  t.windows = windows;
+  t.show = show;
+  turn = t;
+  let found = {};
+  try {
+    found = (await fn(t)) ?? {};
+    t.status = 'answered';
+  } catch (e) {
+    t.status = 'failed';
+    t.error = e.message.split('\n')[0];
+    found = e.found ?? {};
+  }
+  t.endedAt = Date.now();
+  readRecord();
+  if (t.shotsOn) await shotSet(t, { set: 'end' }).catch((e) => t.shotErrors.push(`shots: ${e.message.split('\n')[0]}`));
+  const result = { turn: t.n, kind: 'lab', status: t.status, conversation: t.conversation, question, ...found, error: t.error, ms: t.endedAt - t.startedAt };
+  withShots(t, result);
+  fs.mkdirSync(TURNS, { recursive: true });
+  t.transcriptFile = path.join(TURNS, `${String(t.n).padStart(3, '0')}.json`);
+  result.transcript = t.transcriptFile;
+  t.transcriptData = { result, record: t.items };
+  fs.writeFileSync(t.transcriptFile, JSON.stringify(t.transcriptData, null, 2));
+  t.result = result;
+  t.finalized = true;
+  writeShotIndex(t);
+  log(`turn ${t.n} (the lab's own) ${t.status}`);
+  return result;
+}
+
+/** A failure carrying what was found so far (the turn's JSON keeps it). */
+const failWith = (message, found) => Object.assign(new Error(message), { found });
+
+/** Chat open on conversation `id` (the Chat view, its thread shown), as Yap's own "Open in Chat" opens one. */
+async function showConversation(id) {
+  await onScreen();
+  await openChatView().catch(() => {});
+  await main().evaluate((p) => window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event: 'yap-assistant-turn', payload: p }), { phase: 'open', conversationId: id, show: true });
+  await waitFor(async () => (await main().locator(`.conv.active[data-conv="${id}"]`).count()) > 0, 10_000, `conversation ${id} to open`).catch(() => {});
+}
+
+/** The conversation an action is about: `--chat <id>`, `same` / none (the last turn's). */
+function chatOf(a) {
+  const c = a.chat ?? 'same';
+  if (c === 'same') {
+    if (!turn?.conversation) throw new Error('Which chat? --chat <id> (or ask something first: --chat same is the last turn’s)');
+    return turn.conversation;
+  }
+  const id = Number(c);
+  if (!Number.isFinite(id)) throw new Error(`--chat is a conversation's id or same, not "${c}"`);
+  return id;
+}
+
+// ---- routines (chat/routines.rs) ----
+
+/** A routine's run as the turn's JSON shows it. */
+function runOf(r) {
+  if (!r) return null;
+  const at = (s) => (Number(s) > 0 ? new Date(Number(s) * 1000).toISOString() : null);
+  return { id: r.id, routine: r.routine, command: r.command, cause: r.cause, state: r.state, why: r.why || null, chat: r.chat || null, note: r.note || null, thread: r.thread || null, about: r.about || null, queued: at(r.queued), started: at(r.started), ended: at(r.ended), slot: at(r.slot) };
+}
+
+/**
+ * The Skill a routine runs: `--skill <command>` (Yap's own or the person's: `standup`, `/fun-fact`), made first as
+ * one of the person's own when `--instructions` are given (`--name`, `--runs-on meeting|meetings|both`), as
+ * Settings → Skills makes one. `{ id, command }`.
+ */
+async function skillFor(a) {
+  const command = String(a.skill ?? '').replace(/^\//, '').trim();
+  if (!command) throw new Error('routine new needs --skill <command> (with --instructions "<what it does>" to make one first)');
+  const all = (await invoke('skills_list')) ?? [];
+  let skill = all.find((s) => s.command === command) ?? null;
+  if (a.instructions) {
+    if (skill?.builtin) throw new Error(`/${command} is one of Yap's own Skills: name another --skill to make one`);
+    const runsOn = a['runs-on'] ?? (a['with-note'] ? 'meeting' : 'both');
+    skill = await invoke('skill_save', { skill: { id: skill?.id ?? '', name: a.name ?? command, command, description: '', instructions: String(a.instructions), runsOn } });
+  }
+  if (!skill) throw new Error(`No Skill /${command}: --instructions "<what it does>" makes one`);
+  return { id: skill.id, command: skill.command };
+}
+
+/** `--at HH:MM`, `--in <minutes>`, `--after-meeting [--folder <f>] [--outside]` → a routine's trigger. */
+function triggerOf(a) {
+  if (a['after-meeting']) return { kind: 'meetingEnd', folder: a.folder ?? '', outside: !!a.outside };
+  const time = a.at ? String(a.at) : minutesFrom(new Date(), a.in ?? 2);
+  if (!/^\d{1,2}:\d{2}$/.test(time)) throw new Error(`--at is HH:MM (the PC's own time), not "${time}"`);
+  return { kind: 'schedule', days: a.days ?? 'daily', weekday: Number(a.weekday ?? 0), time };
+}
+
+/**
+ * Its next run, as a turn of the lab's own: started now, over when Settings' runs list says the run is (`tick`); a
+ * routine's own chat shows its thread, one with the meeting's note shows Notes on it. Before its shots, the Yap bar
+ * (its one quiet card, while it's there: Yap's window isn't in front in a lab run).
+ */
+/** The last routine `routine new` made (`routine now` with no id runs it). */
+let lastRoutine = null;
+
+function routineTurn(routine, a, question) {
+  if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it first`);
+  readRecord();
+  const t = new Turn({ question, spoken: false, since: lastSeq(), askedAt: 0, ...shotsFor(a) });
+  t.kind = 'routine';
+  t.routine = { id: routine.id, after: Math.floor(Date.now() / 1000), chatBefore: Number(routine.chat) || 0 };
+  lastRoutine = routine.id;
+  // `--away`: the person in another app while it runs (test mode's focus), so its one quiet card goes on the Yap bar
+  // (never while Yap's window is in front): the bar's shot waits for it, then the person is back in Yap.
+  t.away = !!a.away;
+  const card = () => yap.overlay.getByRole('status').filter({ hasText: /Routine/ }).first();
+  t.preShots = t.away ? [{ set: 'notice', prefix: 'notice-', windows: ['bar'], before: () => card().waitFor({ state: 'visible', timeout: 10_000 }) }] : [];
+  if (routine.to === 'note') {
+    t.windows = ['main'];
+    t.show = async (tt) => {
+      if (tt.run?.note) await invoke('routine_open', { chat: null, note: tt.run.note }).catch(() => {});
+      await sleep(1200);
+    };
+  }
+  turn = t;
+  return t;
+}
+
+/**
+ * `routine new|now|list|on|off|delete` (chat/routines.rs, 16 Nov 2026): Skills that run by themselves, on the test
+ * Yap's own clock and meetings.
+ * - `new --skill <command> [--instructions "<…>" --name <n>] [--in <minutes> (2) | --at HH:MM | --after-meeting
+ *   [--with-note] [--folder <f>] [--outside]] [--words "<…>"]`: saved as Settings' form saves one; its next run is
+ *   a turn of the lab's own — `wait` (or `routine wait`) until it's over, its answer and shots as a question's;
+ * - `now <id>`: Settings' Run now, waited on the same way (`--no-wait`);
+ * - `list`: Settings' list (`routines_list`); `on|off|delete <id>`.
+ */
+async function routineCmd(a) {
+  const [sub = 'list', id] = a._;
+  if (sub === 'list') return { listing: await invoke('routines_list') };
+  if (sub === 'on' || sub === 'off') {
+    await invoke('routine_set_on', { id, on: sub === 'on' });
+    return { routine: id, on: sub === 'on' };
+  }
+  if (sub === 'delete') {
+    await invoke('routine_delete', { id });
+    return { deleted: id };
+  }
+  if (sub === 'wait') {
+    if (!turn?.routine) throw new Error('No routine is waited on: routine new or routine now first');
+    return settle(turn, Number(a.timeout ?? 600));
+  }
+  if (sub === 'new') {
+    const skill = await skillFor(a);
+    const trigger = triggerOf(a);
+    const to = a['with-note'] ? 'note' : 'chat';
+    if (to === 'note' && trigger.kind !== 'meetingEnd') throw new Error('--with-note is for an --after-meeting routine');
+    const saved = await invoke('routine_save', { routine: { id: '', skill: skill.id, words: String(a.words ?? ''), trigger, on: true, to } });
+    const listed = ((await invoke('routines_list')).routines ?? []).find((r) => r.id === saved.id);
+    const when = trigger.kind === 'schedule' ? `${trigger.days} at ${trigger.time}` : `after a meeting${trigger.folder ? ` in ${trigger.folder}` : ''}${to === 'note' ? ', with its note' : ''}`;
+    const t = routineTurn(saved, a, `Routine /${skill.command} (${when})`);
+    if (t.away) await invoke('e2e_focus', { focused: false });
+    return {
+      routine: { id: saved.id, skill: skill.command, trigger, to, next: listed?.next ? new Date(listed.next * 1000).toISOString() : null },
+      turn: t.n,
+      status: 'running',
+      hint: trigger.kind === 'schedule' ? `It runs at ${trigger.time} (the scheduler looks every 30 s): npm run lab -- wait` : 'It runs once a meeting ends and its summary is written: npm run lab -- meeting "<title>", then wait',
+    };
+  }
+  if (sub === 'now') {
+    const which = id ?? lastRoutine;
+    if (!which) throw new Error('routine now <id> (routine list has them; none: the last one routine new made)');
+    const r = ((await invoke('routines_list')).routines ?? []).find((x) => x.id === which);
+    if (!r) throw new Error(`No routine ${which}`);
+    const t = routineTurn(r, a, `Routine /${r.command} (Run now)`);
+    if (t.away) await invoke('e2e_focus', { focused: false });
+    await invoke('routine_run_now', { id: which });
+    return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
+  }
+  throw new Error('routine new|now|wait|list|on|off|delete');
+}
+
+/** A made-up meeting's lines (fictional people: support/fake-llm.js's own kind of words). */
+const MEETING_LINES = [
+  { source: 'them', text: 'Thanks everyone. The deposit landed this quarter, so the budget looks worse than it is for now.' },
+  { source: 'you', text: 'Understood. Alice, can you send the revised budget by Friday so we can close this out?' },
+  { source: 'them', text: 'Yes, I will send the revised budget by Friday afternoon.' },
+  { source: 'you', text: 'Great. We agreed to keep the launch on the third of March.' },
+];
+
+/**
+ * `meeting "<title>" [--folder <f>] [--lines "them: …|you: …"]` (16 Nov 2026): a made-up meeting recorded and ended
+ * in the test Yap, as the routines spec does it — a note, the recorder started, test mode's lines fed in, ended —
+ * so an "after a meeting" routine runs on it once its summary is written (or couldn't be). Fictional words only.
+ */
+async function meetingCmd(a) {
+  const title = String(a._[0] ?? 'Quick sync').trim() || 'Quick sync';
+  const lines = a.lines
+    ? String(a.lines)
+        .split('|')
+        .map((l) => /^\s*(you|them)\s*:\s*(.+)$/i.exec(l))
+        .filter(Boolean)
+        .map((m) => ({ source: m[1].toLowerCase(), text: m[2].trim() }))
+    : MEETING_LINES;
+  if (!lines.length) throw new Error('--lines is "them: …|you: …"');
+  const note = await invoke('note_create', { title, folder: a.folder ?? null, content: null, source: null });
+  await invoke('meeting_start', { noteId: note.id });
+  const recording = async () => (await invoke('meeting_state')).recording;
+  await waitFor(recording, 20_000, 'the meeting to record');
+  const ts = Math.floor(Date.now() / 1000);
+  await invoke('e2e_meeting_feed', { segments: lines.map((l, i) => ({ ...l, ts: ts + i * 8 })) });
+  await invoke('meeting_end', {});
+  await waitFor(async () => !(await recording()), 30_000, 'the meeting to end');
+  return { note: note.id, title, folder: a.folder ?? null, lines: lines.length };
+}
+
+// ---- auto-archive (chat/auto_archive.rs) ----
+
+/**
+ * `age <days> [--chat <id>|same|all]` (16 Nov 2026): chats made that many days older (`e2e_chat_age`: their start,
+ * last use and messages' times moved back), so auto-archive can be tried on the lab's own chats without waiting.
+ * `--chat all` (the default: every chat but a meeting's Ask thread or an incognito one).
+ */
+async function ageCmd(a) {
+  const days = Number(a._[0] ?? a.days);
+  if (!Number.isFinite(days) || days < 1) throw new Error('age <days> [--chat <id>|same|all]');
+  const which = a.chat ?? 'all';
+  const ids = which === 'all' ? null : [chatOf(a)];
+  const aged = await invoke('e2e_chat_age', { ids, days });
+  return { aged, days };
+}
+
+/**
+ * `archive [--days 7|30|90] [--undo]` (16 Nov 2026): auto-archive's run now, as the daily one runs
+ * (`e2e_chat_auto_archive`), its setting set first when `--days` is given ("Archive chats you haven't used in"), as a
+ * turn of the lab's own: what it archived, what's left in Chat's list and in Archived, and the notice in Yap's window
+ * with its Undo (`--undo` presses it, and says what came back). The main window's shots: the list and the toast.
+ */
+async function archiveCmd(a) {
+  return actionTurn(
+    `Auto-archive${a.days ? ` (${a.days} days)` : ''}${a.undo ? ', then Undo' : ''}`,
+    async () => {
+      const titles = async (cmd) => ((await invoke(cmd)) ?? []).map((c) => ({ id: c.id, title: c.title }));
+      const before = new Set((await titles('chats_archived')).map((c) => c.id));
+      // Chat's list on screen (the notice is Yap's window's), on the Chat side.
+      await onScreen();
+      await openChatView();
+      await showList();
+      if (a.days !== undefined) {
+        const days = Number(a.days);
+        if (![0, 7, 30, 90].includes(days)) throw new Error('--days is 7, 30 or 90 (0: never)');
+        // (Setting it runs it at once, as the app does: on_config_saved.)
+        await patchConfig({ chatArchiveDays: days });
+      }
+      const cfg = await invoke('get_config');
+      const ran = await invoke('e2e_chat_auto_archive');
+      const archivedList = await titles('chats_archived');
+      const archived = archivedList.filter((c) => !before.has(c.id)).map((c) => c.id);
+      const toast = main().getByRole('status').filter({ hasText: /Archived (a chat|\d+ chats) you hadn't used/ });
+      const said = await toast
+        .first()
+        .waitFor({ state: 'visible', timeout: archived.length ? 8_000 : 1_500 })
+        .then(async () => (await toast.first().innerText()).replace(/\s+/g, ' ').trim())
+        .catch(() => null);
+      const found = { days: cfg.chatArchiveDays ?? 0, archived, lastRun: ran, notice: said, list: await titles('chats_list'), archivedList };
+      if (a.undo) {
+        if (!said) throw failWith('No notice to Undo', found);
+        await toast.first().getByRole('button', { name: 'Undo' }).click({ timeout: 5_000 });
+        await sleep(800);
+        found.undone = true;
+        found.list = await titles('chats_list');
+        found.archivedList = await titles('chats_archived');
+      }
+      return found;
+    },
+    a,
+    { windows: ['main'] }
+  );
+}
+
+// ---- a Code chat's summary: Changes through the lab's read-only gh (agents/prs.rs, agents/prs/lab.rs) ----
+
+/**
+ * `summary [--chat <id>|same]` (16 Nov 2026): a Code chat's summary beside it (the title bar's Summary), as a turn of
+ * the lab's own: its Environment's branch, its Changes — the pull requests (`code_chat_pull_requests`, asked afresh)
+ * and the rows it draws — and the panel's shots. With `set --gh on` (and the scratch workspace on a branch: `set
+ * --git <branch>`) the rows are the branch's real pull requests on Yap's own repository.
+ */
+async function summaryCmd(a) {
+  const id = chatOf(a);
+  return actionTurn(
+    `The summary of Code chat ${id}`,
+    async (t) => {
+      t.conversation = id;
+      await showConversation(id);
+      // Asked afresh first (gh's answer is kept 30 s: the panel, opened next, reads this one).
+      const prs = await invoke('code_chat_pull_requests', { conversation: id, workspace: null, fresh: true });
+      const panel = main().getByTestId('chat-summary');
+      const button = main().getByTestId('chat-summary-button');
+      // Open already: closed and opened again, so it reads what's true now.
+      if (await panel.isVisible().catch(() => false)) {
+        await button.click({ timeout: 10_000 });
+        await panel.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {});
+      }
+      if (!(await panel.isVisible().catch(() => false))) await button.click({ timeout: 10_000 });
+      await panel.waitFor({ state: 'visible', timeout: 10_000 });
+      // (The pointer off the title bar: the button's tooltip would sit over the panel in its shots.)
+      await main().mouse.move(640, 500).catch(() => {});
+      // Its Changes drawn: a row each, or the one quiet line.
+      const changes = main().getByTestId('chat-summary-changes');
+      await waitFor(async () => (await changes.locator('[data-testid="chat-summary-pr"], [data-testid="chat-summary-changes-note"]').count()) > 0, 30_000, 'the summary’s Changes').catch(() => {});
+      const rows = await changes
+        .locator('[data-testid="chat-summary-pr"]')
+        .evaluateAll((els) => els.map((e) => ({ text: e.innerText.replace(/\s+/g, ' ').trim(), state: e.dataset.state, checks: e.dataset.checks, archive: !!e.querySelector('[data-testid="chat-summary-pr-archive"]') })))
+        .catch(() => []);
+      const note = await changes.getByTestId('chat-summary-changes-note').innerText({ timeout: 1_000 }).catch(() => null);
+      const branch = await main().getByTestId('chat-summary-branch').innerText({ timeout: 1_000 }).catch(() => null);
+      return { branch: branch?.replace(/\s+/g, ' ').trim() ?? null, prs: { status: prs.status, branch: prs.branch ?? null, list: prs.list }, rows, note };
+    },
+    a,
+    { windows: ['panel'] }
+  );
+}
+
+// ---- a kept page's Save as… and Open in browser (chat/made/pages.rs) ----
+
+/**
+ * **Windows' Save as, answered by the lab** (`kept save`): the dialog plugin's IPC (`plugin:dialog|save`, a fetch to
+ * `ipc.localhost` in Yap's main window) answered with a file in the lab's own folder, and what it was asked
+ * (`defaultPath`, `filters`) kept — no dialog opens, nothing of the person's is touched. Tauri's `invoke` can't be
+ * replaced (it's a read-only property); its custom-protocol fetch can.
+ */
+async function answerSaveDialog(file) {
+  await main().evaluate((answer) => {
+    if (!window.__yapLabRealFetch) {
+      const real = window.fetch.bind(window);
+      window.__yapLabRealFetch = real;
+      window.fetch = (input, init) => {
+        const url = typeof input === 'string' ? input : (input?.url ?? '');
+        let cmd = '';
+        try {
+          const u = new URL(url);
+          if (u.hostname === 'ipc.localhost') cmd = decodeURIComponent(u.pathname.slice(1));
+        } catch {
+          /* not a URL */
+        }
+        const hook = window.__yapLabDialog;
+        if (hook && cmd === 'plugin:dialog|save') {
+          window.__yapLabDialog = null;
+          let asked = null;
+          try {
+            asked = JSON.parse(typeof init?.body === 'string' ? init.body : '{}');
+          } catch {
+            /* a body of another kind */
+          }
+          window.__yapLabDialogAsked = asked;
+          return Promise.resolve(new Response(JSON.stringify(hook.answer), { status: 200, headers: { 'Tauri-Response': 'ok', 'Content-Type': 'application/json' } }));
+        }
+        return real(input, init);
+      };
+    }
+    window.__yapLabDialogAsked = undefined;
+    window.__yapLabDialog = { answer };
+  }, file);
+}
+
+/** The kept page's ⋯ beside the chat, and one of its items (`Save as…`, `Open in browser`), clicked. */
+async function keptMenu(item) {
+  const kept = main().getByTestId('chat-kept-page');
+  if (!(await kept.isVisible().catch(() => false))) throw new Error('No kept page beside the chat: ask for one first (a page Yap keeps: save_page)');
+  await kept.getByTestId('chat-kept-more').click({ timeout: 5_000 });
+  await main().getByRole('menuitem', { name: item }).click({ timeout: 5_000 });
+  return kept;
+}
+
+/** What a page file outside Yap holds: its size, title, the sandbox's policy, its libraries. */
+function aboutPage(file) {
+  const html = fs.readFileSync(file, 'utf8');
+  return {
+    bytes: Buffer.byteLength(html),
+    title: /<title>([^<]*)<\/title>/i.exec(html)?.[1] ?? null,
+    policy: /<meta[^>]+http-equiv=["']?Content-Security-Policy/i.test(html),
+    scripts: (html.match(/<script\b[^>]*\bsrc=["'][^"']+/gi) ?? []).map((s) => s.replace(/^.*src=["']/i, '')),
+    integrity: /<script\b[^>]*\bintegrity=/i.test(html),
+    sendPrompt: /sendPrompt/.test(html),
+  };
+}
+
+/**
+ * The page copy opened as the person's browser would — in the lab's own headless browser instead, never the
+ * person's: light and dark (`prefers-color-scheme`), its console errors and the policy's refusals kept, a shot of
+ * each into the turn's folder (window "browser").
+ */
+async function renderOutside(t, file, themes) {
+  const b = await labBrowser();
+  const out = { errors: [], refused: [], shots: [] };
+  try {
+    for (const theme of themes.map((x) => x ?? 'light')) {
+      const ctx = await b.newContext({ viewport: { width: 900, height: 700 }, colorScheme: theme });
+      const page = await ctx.newPage();
+      await page.addInitScript(() => document.addEventListener('securitypolicyviolation', (e) => (window.__refused = [...(window.__refused ?? []), `${e.violatedDirective} ${e.blockedURI}`])));
+      page.on('console', (m) => m.type() === 'error' && out.errors.push(cut(m.text(), 200)));
+      page.on('pageerror', (e) => out.errors.push(cut(e.message, 200)));
+      await page.goto(pathToFileURL(file).href, { waitUntil: 'load', timeout: 30_000 });
+      await page.waitForTimeout(1_200);
+      out.refused.push(...((await page.evaluate(() => window.__refused ?? []).catch(() => [])) ?? []));
+      const dir = turnShotDir(t);
+      fs.mkdirSync(dir, { recursive: true });
+      const shot = path.join(dir, `outside-${String(out.shots.length + 1).padStart(2, '0')}-browser-${theme}.png`);
+      const png = await page.screenshot({ path: shot });
+      const { width, height } = pngSize(png);
+      out.shots.push(shot);
+      t.shots.push({ file: shot, window: 'browser', theme, set: 'outside', width, height, dpr: 1 });
+      await ctx.close();
+    }
+  } finally {
+    await b.close().catch(() => {});
+  }
+  out.errors = [...new Set(out.errors)];
+  out.refused = [...new Set(out.refused)];
+  return out;
+}
+
+/**
+ * `kept save [--name <file>]` / `kept open` (16 Nov 2026): the kept page beside the chat, outside Yap, through its ⋯
+ * as the person does it — as a turn of the lab's own.
+ * - **save**: Save as… with Windows' dialog answered by the lab (`answerSaveDialog`: a file in the lab's own
+ *   `saved/` folder; what the dialog was asked kept), the toast, and the file read back;
+ * - **open**: Open in browser — test mode keeps the copy's address instead of opening the person's browser
+ *   (`e2e_opened_urls`) — then the copy read back and opened in the lab's own headless browser, light and dark
+ *   (its shots in the sheet as "browser"; its console errors and the page policy's refusals listed).
+ */
+async function keptCmd(a) {
+  const [how = 'save'] = a._;
+  if (how !== 'save' && how !== 'open') throw new Error('kept save|open');
+  return actionTurn(
+    how === 'save' ? 'Save as… on the kept page' : 'Open in browser on the kept page',
+    async (t) => {
+      if (how === 'save') {
+        const dir = path.join(LAB, 'saved');
+        fs.mkdirSync(dir, { recursive: true });
+        const name = String(a.name ?? `page-${Date.now()}`).replace(/[^\w .-]+/g, '-');
+        const file = path.join(dir, name);
+        await answerSaveDialog(file);
+        await keptMenu('Save as…');
+        const toast = main().getByRole('status').filter({ hasText: /Page saved|Couldn't save the page/ });
+        const said = await toast
+          .first()
+          .waitFor({ state: 'visible', timeout: 10_000 })
+          .then(async () => (await toast.first().innerText()).replace(/\s+/g, ' ').trim())
+          .catch(() => null);
+        const asked = await main().evaluate(() => window.__yapLabDialogAsked ?? null);
+        if (asked === undefined || asked === null) throw failWith('The Save as dialog was never asked for (or not through the custom-protocol IPC)', { toast: said });
+        const wrote = [file, `${file}.html`].find((f) => fs.existsSync(f)) ?? null;
+        const found = { dialog: asked.options ?? asked, toast: said, file: wrote, ...(wrote ? { page: aboutPage(wrote) } : {}) };
+        if (!wrote) throw failWith('Nothing was written', found);
+        return found;
+      }
+      const before = ((await invoke('e2e_opened_urls')) ?? []).length;
+      await keptMenu('Open in browser');
+      let url = null;
+      await waitFor(async () => {
+        const all = (await invoke('e2e_opened_urls')) ?? [];
+        url = all.slice(before).find((u) => u.startsWith('file:')) ?? null;
+        return !!url;
+      }, 10_000, 'the page’s copy to be opened').catch(() => {});
+      if (!url) throw failWith('Open in browser opened nothing', {});
+      const file = fileURLToPath(url);
+      const found = { opened: url, file, page: fs.existsSync(file) ? aboutPage(file) : null };
+      if (!found.page) throw failWith('The copy it opened isn’t there', found);
+      if (t.shotsOn) found.outside = await renderOutside(t, file, t.themes);
+      return found;
+    },
+    a,
+    { windows: ['panel'] }
+  );
+}
+
 async function shutdown(why, end = 'stopped') {
   if (stopping) return;
   stopping = true;
@@ -1198,7 +1788,7 @@ const COMMANDS = {
     const attach = Array.isArray(a.attach) ? a.attach : a.attach ? String(a.attach).split(',').filter(Boolean) : null;
     const how = a.retry ? 'retry' : a.edit ? 'edit' : 'ask';
     const text = how === 'retry' ? String(a.text ?? '').trim() || 'Retry' : a.text;
-    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null } : null, ...shotsFor(a) });
+    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', away: !!a.away && !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null, page: !!a['project-page'] } : null, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
   wait: async (a) => {
@@ -1267,6 +1857,13 @@ const COMMANDS = {
     if (!t.finalized) out.hint = 'The report is still being written; the lab saves it when the turn ends: npm run lab -- wait';
     return out;
   },
+  // The lab's own turns (16 Nov 2026): routines, a made-up meeting, auto-archive, a Code chat's summary, a kept page outside Yap.
+  routine: async (a) => routineCmd(a),
+  meeting: async (a) => meetingCmd(a),
+  age: async (a) => ageCmd(a),
+  archive: async (a) => archiveCmd(a),
+  summary: async (a) => summaryCmd(a),
+  kept: async (a) => keptCmd(a),
   fake: async (a) => {
     if (!fakeLlm) throw new Error('Only with start --fake (and a model that isn’t the plan)');
     // (Placeholders — a ref on a live page, a point of a shot — filled in as each call is made: fake.mjs.)
@@ -1365,11 +1962,19 @@ async function start() {
       fakeBase = fakeLlm.base;
     }
   }
+  // The on-device model (`--model ondevice`): test mode's stand-in path for the sidecar, pointed at the server the
+  // session started on this PC (YAP_LAB_LOCAL_LLM), with an empty model file of that name, as the e2e suite's.
+  let prepare;
+  if (model.kind === 'local') {
+    env.YAP_E2E_LOCAL_LLM = localServer(process.env.YAP_LAB_LOCAL_LLM);
+    const { installStandInModel } = await harness('local-llm.js');
+    prepare = (dir) => installStandInModel(dir, model.model);
+  }
   const config = labConfig({ model, effort: START.effort, web: START.web, yapCode: START.yapCode, connectors: START.connectors, key: process.env.YAP_LAB_ANTHROPIC_KEY ?? '', fakeBase });
   fs.rmSync(RECORD, { force: true });
   const { launchYap } = await harness('yap.js');
   log('launching the test Yap', START.exe);
-  yap = await launchYap({ name: 'lab', runsDir: RUNS, exe: START.exe, config, env });
+  yap = await launchYap({ name: 'lab', runsDir: RUNS, exe: START.exe, config, env, prepare });
   yap.child.on('exit', (code) => {
     if (!stopping) {
       log(`the test Yap exited (${code})`);

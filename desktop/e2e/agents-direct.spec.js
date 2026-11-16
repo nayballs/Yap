@@ -54,7 +54,7 @@ import { RUNS } from './support/yap.js';
 import { newCodeChat, toSide } from './support/code-chats.js';
 import { writePng } from './support/png.js';
 import { startFakeWeb, FORT_JOY_URL, LEVELING_URL, BASKET_URL, BASKET_APP } from './support/fake-web.js';
-import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine, turnParts, notesAfter, workOf, turnPictures, todosIn, lastRead, cardPart } from '../src/lib/core/agents.js';
+import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine, turnParts, notesAfter, workOf, turnPictures, todosIn, lastRead, cardPart, thoughtFor } from '../src/lib/core/agents.js';
 import { panelRows, panelGroups, panelTotals } from '../src/lib/core/agentPanel.js';
 import { workingLine } from '../src/lib/core/working.js';
 import { sayingOver, questionAnswers, questionsAnswered } from '../src/lib/core/agentNow.js';
@@ -500,6 +500,32 @@ const pictureBack = (id, png) => ({
 /** Its to-do list with the first `done` ticked off (the next in progress). */
 const bedsPlan = (done) =>
   ['Look at the beds', 'Look at the path', 'Place the herbs'].map((content, i) => ({ content, activeForm: `${content.replace(/^Look/, 'Looking').replace(/^Place/, 'Placing')}`, status: i < done ? 'completed' : i === done ? 'in_progress' : 'pending' }));
+/** A thinking block starting, in Claude Code's stream (`--include-partial-messages`): its own message's. */
+const thinkingStarts = (index = 0) => ({ type: 'stream_event', event: { type: 'content_block_start', index, content_block: { type: 'thinking', thinking: '', signature: '' } }, parent_tool_use_id: null, session_id: '{{session_id}}' });
+/**
+ * **Opus 5.5 in a `-p` run** (16 Nov 2026, seen on Claude Code 2.1.296): its thinking blocks come with their words
+ * empty — the API's default for it, and no flag, setting or variable of Claude Code's asks for them there. It thinks,
+ * reads a file, thinks twice more in a row (one line, their time added), says what it found and answers.
+ */
+const UNSENT = [
+  { _wait_user: true },
+  { ...init(), model: 'claude-opus-5-5' },
+  thinkingStarts(),
+  { _sleep_ms: 1200 },
+  said('u0', [{ type: 'thinking', thinking: '', signature: 'sig-u0' }]),
+  said('u1', [{ type: 'tool_use', id: 'toolu_flock', name: 'Read', input: { file_path: '{{cwd}}\\flock.md' } }]),
+  toolResult('toolu_flock', '17 sheep; all but 9 ran away.'),
+  thinkingStarts(),
+  { _sleep_ms: 700 },
+  said('u2', [{ type: 'thinking', thinking: '', signature: 'sig-u2' }]),
+  thinkingStarts(1),
+  { _sleep_ms: 700 },
+  said('u2', [{ type: 'thinking', thinking: '', signature: 'sig-u2b' }]),
+  said('u3', [{ type: 'text', text: 'Nine stayed; he buys 27 more and sells a quarter of the 36.' }]),
+  said('u4', [{ type: 'text', text: '27 sheep.' }], 'end_turn'),
+  result('27 sheep.', 0.01),
+  { _wait_user: true },
+];
 const THOUGHT = 'They want the beds laid out. Plan first, then look at each picture.';
 const LOOK_FIRST = "I'll make a plan, then look at the beds.";
 const LOOK_NEXT = 'The beds are in two rows. Now the path.';
@@ -516,6 +542,9 @@ const HERBS_PNG = writePng(80, 120, [60, 110, 90]);
 const IN_ORDER = [
   { _wait_user: true },
   init(),
+  // (Its thinking's start, as Claude Code's partial messages have it: the block's time, once it's whole.)
+  thinkingStarts(),
+  { _sleep_ms: 1100 },
   said('o0', [{ type: 'thinking', thinking: THOUGHT, signature: 'sig-o0' }]),
   said('o1', [{ type: 'text', text: LOOK_FIRST }]),
   said('o2', [{ type: 'tool_use', id: 'toolu_todo1', name: 'TodoWrite', input: { todos: bedsPlan(0) } }]),
@@ -1033,7 +1062,10 @@ test('a long turn reads in order: its words between its lines, a message sent me
   };
   await view('Thinking');
   await expect(first).toHaveAttribute('data-view', 'thinking');
-  await expect(first.getByTestId('chat-agent-work-thought')).toHaveText([new RegExp(`^Thinking\\s*${THOUGHT}`)]);
+  // (Under how long it took: its block's start in the stream to the block whole. Its words came: no note.)
+  await expect(first.getByTestId('chat-agent-work-thought')).toHaveText([new RegExp(`^Thought for \\d+s\\s*${THOUGHT}`)]);
+  await expect(first.getByTestId('chat-agent-work-thought')).toHaveAttribute('data-sent', 'true');
+  await expect(thread(main).getByTestId('chat-agent-work-thought-not-sent')).toHaveCount(0);
   // (First, before its words: as it came.)
   expect((await rows(first))[0]).toBe(`said: ${LOOK_FIRST}`);
   await expect(first.locator('[data-testid="chat-agent-work-thought"] + [data-testid="chat-agent-work-said"]')).toHaveCount(1);
@@ -1061,7 +1093,67 @@ test('a long turn reads in order: its words between its lines, a message sent me
   // Its log kept the thinking (never a phone's: link/code/view.rs) — its own event, no words said.
   const log = (await yap.invoke('agent_get', { id: agent.id })).log;
   expect(log.filter((e) => e.thought).map((e) => [e.thought, e.said ?? null, e.step ?? null])).toEqual([[THOUGHT, null, null]]);
+  expect(log.find((e) => e.thought).thoughtMs).toBeGreaterThanOrEqual(1000);
   expect(log.filter((e) => e.read).length).toBe(1);
+});
+
+// 16 Nov 2026: on Opus 5.5 and Sonnet 5.5 the Thinking view looked the same as Normal — Claude Code's `-p` stream has
+// their thinking blocks with the words empty (the API's default for them; no documented flag, setting or variable
+// asks for them there: docs/architecture/yap-code.md). The view says so plainly and shows how long it thought.
+test("a model whose thinking Claude Code doesn't send: the Thinking view has how long it thought, and says why there are no words", async ({ yap, main, shot }) => {
+  test.setTimeout(90_000);
+  await script(yap, UNSENT, 'unsent-thinking');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Work out the flock.');
+  const agent = await newAgent(yap, before);
+  await ended(yap, agent.id, 30_000);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['27 sheep.']);
+  const work = thread(main).getByTestId('chat-agent-work');
+  // Normal: no thinking at all, one stretch and its words.
+  await expect(work.getByTestId('chat-agent-work-thought')).toHaveCount(0);
+  const view = async (name) => {
+    await main.getByRole('button', { name: /^More for Work out the flock/ }).click();
+    await main.locator('[data-context-menu]').getByRole('menuitem', { name: 'Transcript view' }).click();
+    await main.locator('[data-context-menu]').last().getByRole('menuitemradio', { name }).click();
+    await expect(main.locator('[data-context-menu]')).toHaveCount(0);
+  };
+  await view('Thinking');
+  await expect(work).toHaveAttribute('data-view', 'thinking');
+  // Where it thought, in order: its time alone (the two in a row one line), the first saying why there are no words.
+  const order = () =>
+    work.locator('[data-testid="chat-agent-work-thought"] .wthink, [data-testid="chat-agent-work-said"], [data-testid="chat-agent-work-steps"] .wtext').evaluateAll((els) => els.map((e) => (e.classList.contains('wthink') ? 'thought' : e.dataset.testid === 'chat-agent-work-said' ? 'said' : 'line')));
+  expect(await order()).toEqual(['thought', 'line', 'thought', 'said']);
+  const thoughts = work.getByTestId('chat-agent-work-thought');
+  await expect(thoughts.locator('.wthink')).toHaveText([/^Thought for \d+s$/, /^Thought for \d+s$/]);
+  for (const t of await thoughts.all()) await expect(t).toHaveAttribute('data-sent', 'false');
+  const why = work.getByTestId('chat-agent-work-thought-not-sent');
+  await expect(why).toHaveCount(1);
+  await expect(why).toHaveText("Claude Code doesn't send this model's thinking to Yap, only how long it thought.");
+  await expect(thoughts.first().getByTestId('chat-agent-work-thought-not-sent')).toHaveCount(1);
+  // (The others say it on hover.)
+  await expect(thoughts.nth(1)).toHaveAttribute('title', /only how long it thought/);
+  // Never an empty box: no thought without its line.
+  for (const t of await thoughts.all()) expect((await t.textContent()).trim().length).toBeGreaterThan(10);
+  await shot(main, '76-thinking-not-sent');
+  await theme(yap, main, 'dark');
+  await shot(main, '77-thinking-not-sent-dark');
+  await theme(yap, main, 'light');
+  // Verbose too; Normal again none.
+  await view('Verbose');
+  await expect(work.getByTestId('chat-agent-work-thought')).toHaveCount(2);
+  await view('Normal');
+  await expect(work.getByTestId('chat-agent-work-thought')).toHaveCount(0);
+
+  // Its log: each block's time, no words (none came), nothing said.
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  const timed = log.filter((e) => e.thoughtMs != null);
+  expect(timed.map((e) => [e.thought ?? null, e.said ?? null, e.step ?? null])).toEqual([
+    [null, null, null],
+    [null, null, null],
+    [null, null, null],
+  ]);
+  expect(timed[0].thoughtMs).toBeGreaterThanOrEqual(1000);
 });
 
 // The maintainer, 14 Nov 2026: a message sent while Claude wrote a paragraph came back joined to that answer, and the
@@ -2472,6 +2564,14 @@ test('core/agents.js: a turn in parts at the messages it read, its thinking in o
   const split = [ev({ step: 'Reading a.png' }), ev({ thought: 'Then b.' }), ev({ step: 'Reading b.png' })];
   expect(workOf(split).map((x) => x.kind)).toEqual(['work']);
   expect(workOf(split, '', false, { thinking: true }).map((x) => x.kind)).toEqual(['work', 'thought', 'work']);
+  // **Its time** (16 Nov 2026): with its words, and alone when Claude Code sent none (Opus 5.5, Sonnet 5.5 in a `-p`
+  // run) — two such in a row are one line, their time added; Normal shows none of them.
+  const timed = [ev({ thought: 'Plan first.', thoughtMs: 3400 }), ev({ step: 'Reading a.png' }), ev({ thoughtMs: 2100 }), ev({ thoughtMs: 900 }), ev({ said: 'Looked.' }), ev({ thoughtMs: 400 })];
+  const timedItems = workOf(timed, '', false, { thinking: true });
+  expect(timedItems.map((x) => (x.kind === 'thought' ? [x.text, x.ms] : x.kind))).toEqual([['Plan first.', 3400], 'work', ['', 3000], 'said', ['', 400]]);
+  expect(workOf(timed).map((x) => x.kind)).toEqual(['work', 'said']);
+  expect(timedItems.filter((x) => x.kind === 'thought').map((x) => thoughtFor(x.ms))).toEqual(['Thought for 3s', 'Thought for 3s', 'Thought for 1s']);
+  expect([thoughtFor(null), thoughtFor(75_000)]).toEqual(['Thinking', 'Thought for 1m 15s']);
   // Every picture of the turn, in order, each with its step's words.
   expect(turnPictures(events).map((p) => [p.id, p.caption])).toEqual([
     ['agent/ab12/p1', 'Read a.png'],

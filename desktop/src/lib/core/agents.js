@@ -86,6 +86,19 @@ export function workClock(secs) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+/**
+ * **A thought's line in a Code chat's Thinking view** (16 Nov 2026): "Thought
+ * for 4s" (`workClock`, as the lead's clock beside it; at least 1s), or
+ * "Thinking" when its time wasn't seen (an older log).
+ */
+export function thoughtFor(ms) {
+  if (ms == null || !Number.isFinite(Number(ms))) return 'Thinking';
+  return `Thought for ${workClock(Math.max(1, Math.round(Number(ms) / 1000)))}`;
+}
+
+/** What a Code chat's Thinking view says once where the words of Claude's thinking would be (Opus 5.5, Sonnet 5.5). */
+export const THOUGHT_NOT_SENT = "Claude Code doesn't send this model's thinking to Yap, only how long it thought.";
+
 /** Seconds as the screens say a length of time: "12 s", "3 min", "1 h 5 min". */
 export function duration(secs) {
   const s = Math.max(0, Math.round(Number(secs) || 0));
@@ -282,19 +295,25 @@ export function timelineOf(log, final = '') {
  *
  * `thinking` (15 Nov 2026, the thread's Thinking and Verbose views, as
  * Claude Code's app has them): its thinking too, in order — `{kind:
- * 'thought', text, ts}` (the log's `thought`, agents/runner.rs) — each
- * between the stretches it came between. Without it, thinking is no item and
- * never splits a stretch.
+ * 'thought', text, ms, ts}` (the log's `thought` and `thoughtMs`,
+ * agents/runner.rs) — each between the stretches it came between. A thought
+ * whose words Claude Code didn't send (Opus 5.5, Sonnet 5.5: `text` '') is
+ * its time alone, and one straight after another such is the same line, its
+ * time added. Without it, thinking is no item and never splits a stretch.
  */
 export function workOf(log, final = '', live = false, { thinking = false } = {}) {
   const out = [];
   let group = null;
   for (const e of log || []) {
-    if (typeof e?.thought === 'string') {
-      const t = e.thought.trim();
-      if (thinking && t) {
+    const ms = Number.isFinite(e?.thoughtMs) && e.thoughtMs >= 0 ? e.thoughtMs : null;
+    if (typeof e?.thought === 'string' || ms != null) {
+      const t = typeof e.thought === 'string' ? e.thought.trim() : '';
+      const last = out[out.length - 1];
+      if (thinking && !t && ms != null && last?.kind === 'thought' && !last.text && last.ms != null) {
+        last.ms += ms;
+      } else if (thinking && (t || ms != null)) {
         group = null;
-        out.push({ kind: 'thought', text: t, ts: Number(e.ts) || 0 });
+        out.push({ kind: 'thought', text: t, ms, ts: Number(e.ts) || 0 });
       }
       continue;
     }

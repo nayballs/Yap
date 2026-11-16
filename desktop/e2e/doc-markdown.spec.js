@@ -252,3 +252,74 @@ test('new blocks are plain markdown, and the words never turn into markup', () =
   });
   expect(added).toBe('1. One\n2. \n3. Two'.replace('2. \n', '2.\n'));
 });
+
+// The editor's page shows a picture written "![alt](https://…)" (16 Nov 2026,
+// components/richtext/richVisuals.js `picturesIn`): the editor reads it as a
+// "!" and a link — written back exactly — and the page finds it there, as
+// core/markdown.js reads it in a render. A link with no "!", a bare address,
+// a "!" in other marks or in code, a link off the web: no picture.
+test('a picture is found where "![alt](https://…)" was written, and the markdown reads back unchanged', async () => {
+  const { picturesIn } = await import('../src/lib/components/richtext/richVisuals.js');
+  const pictures = (md) => {
+    const doc = readMarkdown(schema, md).doc;
+    const out = [];
+    doc.descendants((node, pos) => {
+      if (!node.isTextblock) return true;
+      out.push(...picturesIn(node, pos + 1).map(({ url, alt, from, to }) => ({ url, alt, text: doc.textBetween(from, to) })));
+      return false;
+    });
+    return out;
+  };
+  const md = 'The map: ![Fort Joy map](https://wiki.example.com/images/fort_joy_map.png) and *see ![the **old** one](https://wiki.example.com/old.png)*.';
+  expect(roundTrip(md)).toBe(md);
+  expect(pictures(md)).toEqual([
+    { url: 'https://wiki.example.com/images/fort_joy_map.png', alt: 'Fort Joy map', text: '!Fort Joy map' },
+    { url: 'https://wiki.example.com/old.png', alt: 'the old one', text: '!the old one' },
+  ]);
+  for (const plain of [
+    'A link: [Fort Joy map](https://wiki.example.com/map.png).',
+    'Wow! https://wiki.example.com/map.png',
+    '**Wow!**[map](https://wiki.example.com/map.png)',
+    '`code!`[map](https://wiki.example.com/map.png)',
+    '![Write to us](mailto:team@example.com)',
+  ]) {
+    expect(pictures(plain), plain).toEqual([]);
+    expect(roundTrip(plain)).toBe(plain);
+  }
+});
+
+// The reading card's sentence (16 Nov 2026, bar/readingPieces.js): a formula
+// read aloud is one piece holding its words, drawn by KaTeX; a price stays words.
+test("the reading card's pieces: a formula is one piece with its words, a price is words", async () => {
+  const { readingPieces } = await import('../src/lib/bar/readingPieces.js');
+  // As voice/read_aloud.rs `parts` sends "Area $A = \pi r^2$ here.": words 0–4 and what's between.
+  const parts = [
+    { text: 'Area', w: 0 },
+    { text: ' $' },
+    { text: 'A', w: 1 },
+    { text: ' = \\' },
+    { text: 'pi', w: 2 },
+    { text: ' ' },
+    { text: 'r^2', w: 3 },
+    { text: '$ ' },
+    { text: 'here', w: 4 },
+    { text: '.' },
+  ];
+  expect(readingPieces(parts)).toEqual([
+    { text: 'Area', w: 0 },
+    { text: ' ', w: null },
+    { text: '$A = \\pi r^2$', maths: true, display: false, ws: [1, 2, 3] },
+    { text: ' ', w: null },
+    { text: 'here', w: 4 },
+    { text: '.', w: null },
+  ]);
+  const price = [{ text: 'It', w: 0 }, { text: ' ' }, { text: 'costs', w: 1 }, { text: ' $' }, { text: '5', w: 2 }, { text: ' and $' }, { text: '10', w: 3 }, { text: '.' }];
+  expect(readingPieces(price)).toEqual(price.map((p) => ({ text: p.text, w: p.w ?? null })));
+  // Display maths ends its sentence: the full stop after it isn't drawn alone under it.
+  expect(readingPieces([{ text: '$$ ' }, { text: 'x^2', w: 0 }, { text: ' $$.' }])).toEqual([{ text: '$$ x^2 $$', maths: true, display: true, ws: [0] }]);
+  expect(readingPieces([{ text: '$$ x $$ then' }])).toEqual([
+    { text: '$$ x $$', maths: true, display: true, ws: [] },
+    { text: ' then', w: null },
+  ]);
+  expect(readingPieces([])).toEqual([]);
+});
