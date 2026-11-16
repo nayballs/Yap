@@ -343,7 +343,7 @@ test("the + menu's Connectors ▸: one switched off in a new chat isn't offered,
     await openView(main, 'Chat');
     await main.getByRole('button', { name: 'New chat' }).first().click();
     await plus().click();
-    await expect(row()).toContainText('1 of 1 on in this chat');
+    await expect(row()).toContainText('1 of 1 on');
     await row().click();
     await expect(lights()).toHaveAttribute('aria-pressed', 'true');
     await expect(menu().getByRole('button', { name: 'Manage connectors…' })).toBeVisible();
@@ -351,7 +351,7 @@ test("the + menu's Connectors ▸: one switched off in a new chat isn't offered,
     // Off for this new chat: its first question offers none of its tools (nor Yap's line about them).
     await lights().click();
     await expect(lights()).toHaveAttribute('aria-pressed', 'false');
-    await expect(row()).toContainText('0 of 1 on in this chat');
+    await expect(row()).toContainText('0 of 1 on');
     await setConfig(yap, main, { theme: 'dark' });
     await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe('dark');
     if (!(await menu().isVisible())) {
@@ -361,7 +361,8 @@ test("the + menu's Connectors ▸: one switched off in a new chat isn't offered,
     await expect(lights()).toHaveAttribute('aria-pressed', 'false');
     await shot(main, '07-connectors-menu-dark');
     await setConfig(yap, main, { theme });
-    await main.getByRole('textbox', { name: 'Message' }).click();
+    // (Esc closes the + menu, as a person would — its submenu first: on the start screen the box sits mid-thread.)
+    for (let i = 0; i < 2 && (await row().count()); i += 1) await main.keyboard.press('Escape');
     await expect(row()).toHaveCount(0);
     let from = fakeLlm.requests.length;
     fakeLlm.scriptChat([{ content: 'No connectors in this chat.' }]);
@@ -388,8 +389,9 @@ test("the + menu's Connectors ▸: one switched off in a new chat isn't offered,
     // A new chat: every connector on again, and offered.
     await main.getByRole('button', { name: 'New chat' }).first().click();
     await plus().click();
-    await expect(row()).toContainText('1 of 1 on in this chat');
-    await main.getByRole('textbox', { name: 'Message' }).click();
+    await expect(row()).toContainText('1 of 1 on');
+    await main.keyboard.press('Escape');
+    await expect(row()).toHaveCount(0);
     from = fakeLlm.requests.length;
     fakeLlm.scriptChat([{ content: 'Your lights are within reach.' }]);
     await send('Can you see my lights?');

@@ -34,9 +34,13 @@
   import { agents } from '../../stores/agents.svelte.js';
   import { workingDirectly } from '../../core/agents.js';
   import SkillMenu from '../../components/SkillMenu.svelte';
+  import { tick, untrack } from 'svelte';
   import ModelChip from './ModelChip.svelte';
-  import StyleChip from './StyleChip.svelte';
-  import ResearchChip from './ResearchChip.svelte';
+  // A plain chat's + menu (16 Nov 2026, the Claude app's): Research and Style live there, their chips in the box.
+  import { research, refreshResearch } from './chatResearch.svelte.js';
+  import { ChatStyle } from './chatStyles.svelte.js';
+  import { skills as skillList, openMoreSkills } from '../../stores/skills.svelte.js';
+  import { skillMenu } from '../../core/skills.js';
   // A Code chat's workspace chip and Yap Code's Mode chip, before it, and its
   // box's edge (codeChats.svelte.js, codeChat.css).
   import CodeChips from './CodeChips.svelte';
@@ -253,6 +257,190 @@
     plain && chat.assistantHotkey ? `Dictate. Or press ${formatHotkeySpec(chat.assistantHotkey)} in any app to ask out loud` : 'Dictate your message'
   );
 
+  // **A plain chat's + menu** (16 Nov 2026, the Claude desktop app's, in Yap's items): Upload or add files (Ctrl+U)
+  // and Take a screenshot; Skills › (the "/" menu's list: a pick goes in the box) and Connectors › (with the preview
+  // on: this chat's switches); Research (✓ when on) and Style › (the chat's style, Create & edit styles…); Voice
+  // replies, their volume, Voice settings…. Icon rows, dividers, › for a submenu, ✓ for what's on. Enter, Space or
+  // ↓ on + opens it at its first row, ↑ at its last; ↑ ↓ Home End move, → opens a submenu, ← or Esc closes it, Esc
+  // closes the menu and gives + the focus back. On the start screen it opens downwards, as the app's does, unless
+  // there's no room. What's on shows in the box as a chip (Research ×, Concise ×). A Code chat's menu as ever.
+  let plusBtn = $state(null);
+  let menuEl = $state(null);
+  /** The submenu open: 'skills' | 'connectors' | 'style' | null. */
+  let sub = $state(null);
+  let menuDown = $state(false);
+  /** Opened from the keyboard: which row takes the focus ('first' | 'last'), or null (a click). */
+  let focusOnOpen = null;
+  const style = new ChatStyle();
+  $effect(() => {
+    if (plain) style.follow(chat.activeId);
+  });
+  $effect(() => {
+    if (plain) untrack(() => style.loadList());
+  });
+  // Settings → Skills → Chat styles changed them (or the style new chats start with): read again.
+  $effect(() => {
+    const again = () => {
+      style.loadList();
+      style.follow(untrack(() => chat.activeId));
+    };
+    window.addEventListener('yap-chat-styles-changed', again);
+    return () => window.removeEventListener('yap-chat-styles-changed', again);
+  });
+  // Can Chat's model research now (asked again when the model changes)?
+  $effect(() => {
+    if (!plain) return;
+    void chat.limits?.label;
+    void chat.limits?.provider;
+    refreshResearch();
+  });
+  const researchShown = $derived(plain && research.on && research.can);
+  const styleShown = $derived(plain && style.current !== 'normal' && !!style.name);
+  const skillGroups = $derived(plain ? skillMenu(skillList.list, '', 'meetings').groups : []);
+  const researchTitle = $derived(
+    !research.can && research.why
+      ? research.why
+      : research.on
+        ? 'Research is on: each question gets a plan, many searches and a report beside the chat. Click to turn it off.'
+        : 'Research: a plan, many searches and page reads, then a long report with citations'
+  );
+
+  function plusClick(e) {
+    // (Enter or Space on the button: a click with no pointer.)
+    focusOnOpen = plain && !chat.plusOpen && e.detail === 0 ? 'first' : null;
+    chat.plusOpen = !chat.plusOpen;
+  }
+  function plusKey(e) {
+    if (!plain || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+    e.preventDefault();
+    focusOnOpen = e.key === 'ArrowDown' ? 'first' : 'last';
+    if (chat.plusOpen) focusMenu(focusOnOpen);
+    else chat.plusOpen = true;
+  }
+  // Opened: downwards on the start screen when there's room; its first (or last) row focused when the keyboard opened it.
+  $effect(() => {
+    if (!chat.plusOpen || !plain) {
+      sub = null;
+      return;
+    }
+    untrack(() => {
+      menuDown = chat.messages.length === 0;
+      tick().then(() => {
+        if (menuDown && menuEl && menuEl.getBoundingClientRect().bottom > window.innerHeight - 8) menuDown = false;
+        if (focusOnOpen) focusMenu(focusOnOpen);
+        focusOnOpen = null;
+      });
+    });
+  });
+  const topRows = () => [...(menuEl?.querySelectorAll('[data-mi="top"]') ?? [])];
+  function focusMenu(where) {
+    const rows = topRows();
+    (where === 'last' ? rows.at(-1) : rows[0])?.focus();
+  }
+  /** Submenu `name` open (a click, the pointer on its row, →); `focus`: its first row takes the focus (the keyboard's →). */
+  async function openSub(name, focus = false) {
+    sub = name;
+    if (focus) {
+      await tick();
+      menuEl?.querySelector('.subpop [data-mi="sub"]')?.focus();
+    }
+  }
+  function closeSub() {
+    const row = menuEl?.querySelector(`[data-sub="${sub}"]`);
+    sub = null;
+    row?.focus();
+  }
+  function closeMenu() {
+    chat.plusOpen = false;
+    plusBtn?.focus();
+  }
+  function menuKey(e) {
+    const inSub = e.target?.closest?.('.subpop');
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (inSub && sub) closeSub();
+      else closeMenu();
+      return;
+    }
+    // (The volume slider keeps its own arrows.)
+    if (e.target?.matches?.('input[type="range"]')) return;
+    if (e.key === 'ArrowLeft' && inSub) {
+      e.preventDefault();
+      closeSub();
+      return;
+    }
+    if (e.key === 'ArrowRight' && !inSub && e.target?.dataset?.sub) {
+      e.preventDefault();
+      openSub(e.target.dataset.sub, true);
+      return;
+    }
+    const rows = inSub ? [...inSub.querySelectorAll('[data-mi="sub"]')] : topRows();
+    if (!rows.length) return;
+    const at = rows.indexOf(document.activeElement);
+    let to = null;
+    if (e.key === 'ArrowDown') to = at < 0 ? 0 : (at + 1) % rows.length;
+    else if (e.key === 'ArrowUp') to = at < 0 ? rows.length - 1 : (at - 1 + rows.length) % rows.length;
+    else if (e.key === 'Home') to = 0;
+    else if (e.key === 'End') to = rows.length - 1;
+    if (to == null) return;
+    e.preventDefault();
+    rows[to].focus();
+  }
+
+  /** Research from the menu (as the chip under the box was): asked first whether Chat's model can. */
+  async function flipResearch() {
+    await refreshResearch();
+    if (!research.can) {
+      research.on = false;
+      toast({ title: "Research isn't available", description: research.why || "Chat's model can't research now." });
+      return;
+    }
+    research.on = !research.on;
+    chat.plusOpen = false;
+    chat.inputEl?.focus();
+  }
+  function researchOff() {
+    research.on = false;
+    chat.inputEl?.focus();
+  }
+  async function pickStyle(id) {
+    chat.plusOpen = false;
+    await style.pick(id);
+    chat.inputEl?.focus();
+  }
+  async function styleOff() {
+    await style.pick('normal');
+    chat.inputEl?.focus();
+  }
+  // Create & edit styles… (StylesDialog.svelte, its own chunk).
+  let StylesDialog = $state(null);
+  let stylesOpen = $state(false);
+  async function openStyles() {
+    chat.plusOpen = false;
+    if (!StylesDialog) StylesDialog = (await import('./StylesDialog.svelte')).default;
+    await style.loadList();
+    stylesOpen = true;
+  }
+  async function stylesClosed() {
+    stylesOpen = false;
+    await style.loadList();
+    await style.follow(chat.activeId);
+    chat.inputEl?.focus({ preventScroll: true });
+  }
+  /** A Skill from Skills ›: in the box as "/command ", for words to follow (as Tab in the "/" menu). */
+  function pickSkillHere(s) {
+    chat.plusOpen = false;
+    chat.pickSkill(s, false);
+  }
+  function moreSkills() {
+    chat.plusOpen = false;
+    openMoreSkills();
+  }
+  function uploadFiles() {
+    chat.pickFiles();
+  }
+
   // The mic: a dictation into the chat box (chat_dictate: the text comes
   // back as `yap-chat-dictation`, at the caret). Again: stop and send it in.
   function micChat() {
@@ -449,17 +637,21 @@
     <div class="pluswrap" bind:this={plusEl}>
       <button
         class="plusbtn"
+        bind:this={plusBtn}
         aria-label="Chat options"
         aria-haspopup="dialog"
         aria-expanded={chat.plusOpen}
-        title={chat.speakReplies ? `Voice replies on · ${Math.round(chat.voiceVolume * 100)}%` : 'Voice replies and volume'}
-        onclick={() => (chat.plusOpen = !chat.plusOpen)}
+        title={plain ? 'Add files, Skills, Research, Style and more' : chat.speakReplies ? `Voice replies on · ${Math.round(chat.voiceVolume * 100)}%` : 'Voice replies and volume'}
+        onclick={plusClick}
+        onkeydown={plusKey}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
         <!-- Voice replies are on: a small amber dot, the switch is inside. -->
         {#if chat.speakReplies}<span class="plusdot" aria-hidden="true"></span>{/if}
       </button>
-      {#if chat.plusOpen}
+      {#if chat.plusOpen && plain}
+        {@render plainMenu()}
+      {:else if chat.plusOpen}
         <div class="pluspop" role="dialog" aria-label="Chat options">
           <!-- Attach files (chat/attachments.rs): their text goes with the question. -->
           <button class="optrow" aria-label="Attach files" data-testid="chat-attach-files" onclick={chat.pickFiles}>
@@ -553,6 +745,33 @@
         </div>
       {/if}
     </div>
+    {#if plain}
+      <!-- What's on for this chat, beside the + as the Claude app shows it: Research, a Style other than Normal; × turns
+           it off (Normal). Nothing at Normal with Research off. Then the room before the buttons on the right. -->
+      {#if researchShown || styleShown}
+        <span class="modechips" data-testid="chat-box-modes">
+          {#if researchShown}
+            <span class="modechip on" data-testid="chat-research-on" title="Research is on: each question gets a plan, many searches and a report beside the chat">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" /><path d="m15 15 5 5" /><path d="M8 10.5h5M10.5 8v5" /></svg>
+              <span class="mname">Research</span>
+              <button type="button" class="mcx" aria-label="Turn off Research" title="Turn off Research" onclick={researchOff}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+              </button>
+            </span>
+          {/if}
+          {#if styleShown}
+            <span class="modechip" data-testid="chat-style-on" title={`Answers in this chat are written in the ${style.name} style`}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z" /><path d="M13.5 6.5l4 4" /></svg>
+              <span class="mname">{style.name}</span>
+              <button type="button" class="mcx" aria-label={`Stop using ${style.name}: back to Normal`} title="Back to Normal" onclick={styleOff}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+              </button>
+            </span>
+          {/if}
+        </span>
+      {/if}
+      <span class="rowgap" aria-hidden="true"></span>
+    {/if}
     <!-- "/": Skills, run across the meetings (chat/skills.rs). -->
     <SkillMenu picker={chat.skills} onpick={chat.pickSkill} />
     <!-- "@" in a Code chat: its workspace's files (agents/mention.rs). -->
@@ -637,18 +856,207 @@
   <div class="composerfoot">
     <CodeChips {chat} {code} />
     <ModelChip bind:this={chipRef} {onopensettings} quiet conversationId={chat.activeId} />
-    {#if !code?.current && !code?.onCode}
-      <!-- How this chat's answers are written (chat/styles.rs): Chat's side only. -->
-      <StyleChip conversationId={chat.activeId} />
-      <!-- Research (chat/research.rs): a plan, many searches, a report beside the chat. -->
-      <ResearchChip {chat} />
-    {/if}
+    <!-- (A plain chat's Style and Research are in the + menu since 16 Nov 2026, their chips in the box while on.) -->
     <!-- How much of the model's context this chat uses (bottom right, as
          Claude's chat box shows it); its panel has the day's AI use. -->
     <span class="footgap"></span>
     <ContextRing conversationId={chat.activeId} stamp={chat.contextStamp} onnewchat={() => chat.newChat()} onseeall={() => onopenusage?.()} />
   </div>
 </div>
+
+{#if StylesDialog && stylesOpen}
+  <StylesDialog onclose={stylesClosed} onpick={(id) => style.pick(id)} />
+{/if}
+
+{#snippet chev()}
+  <svg class="mside mchev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+{/snippet}
+{#snippet tick_()}
+  <svg class="mside mtick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+{/snippet}
+
+{#snippet plainMenu()}
+  <!-- A plain chat's + menu (the Claude desktop app's shape, Yap's own items). A dialog, not a menu: it holds the
+       voice's volume slider; its rows are buttons, ↑ ↓ between them. -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="pluspop plainmenu" class:down={menuDown} role="dialog" aria-label="Chat options" tabindex="-1" bind:this={menuEl} onkeydown={menuKey} data-testid="chat-plus-menu">
+    <!-- Attach files (chat/attachments.rs): their text goes with the question. -->
+    <button class="mrow" data-mi="top" aria-label="Upload or add files" aria-keyshortcuts="Control+U" data-testid="chat-attach-files" onclick={uploadFiles}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.1-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8" /></svg>
+      <span class="mlabel">Upload or add files</span>
+      <kbd class="mside mkey">Ctrl+U</kbd>
+    </button>
+    <!-- Snip to Chat (snip.rs): this window leaves the shot. -->
+    <button class="mrow" data-mi="top" aria-label="Take a screenshot" onclick={takeScreenshot}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4 8.1 15.9" /><path d="M14.5 14.5 20 20" /><path d="M8.1 8.1 12 12" /></svg>
+      <span class="mlabel">Take a screenshot</span>
+      {#if chat.snipHotkey}<kbd class="mside mkey">{formatHotkeySpec(chat.snipHotkey)}</kbd>{/if}
+    </button>
+    <div class="optsep" role="separator"></div>
+    <!-- Skills ›: the "/" menu's list (chat/skills.rs); a pick goes in the box as "/command ". -->
+    <div class="optsub">
+      <button
+        class="mrow"
+        data-mi="top"
+        data-sub="skills"
+        aria-haspopup="menu"
+        aria-expanded={sub === 'skills'}
+        aria-label="Skills"
+        data-testid="chat-plus-skills"
+        onclick={(e) => openSub('skills', e.detail === 0)}
+        onpointerenter={() => (sub = 'skills')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="m14.5 7.5-5 9" /></svg>
+        <span class="mlabel">Skills</span>
+        {@render chev()}
+      </button>
+      {#if sub === 'skills'}
+        <div class="pluspop subpop skillsub" role="menu" aria-label="Skills" data-testid="chat-plus-skills-menu">
+          {#each skillGroups as g (g.label)}
+            {#if g.label}<div class="mhead" role="presentation">{g.label}</div>{/if}
+            {#each g.items as s (s.id)}
+              <button class="mrow" role="menuitem" data-mi="sub" title={s.description || s.name} onclick={() => pickSkillHere(s)}>
+                <span class="mlabel"><span class="mcmd">/{s.command}</span> <span class="mquiet">{s.name}</span></span>
+              </button>
+            {/each}
+          {:else}
+            <div class="mhead" role="presentation">No Skills in the / menu</div>
+          {/each}
+          <div class="optsep" role="separator"></div>
+          <button class="mrow" role="menuitem" data-mi="sub" onclick={moreSkills}><span class="mlabel mquiet">More Skills…</span></button>
+        </div>
+      {/if}
+    </div>
+    {#if chat.connectors.shown}
+      <!-- Connectors › (connectors/chats.rs): this chat's switches, as Claude's composer has. -->
+      <div class="optsub">
+        <button
+          class="mrow"
+          data-mi="top"
+          data-sub="connectors"
+          aria-haspopup="true"
+          aria-expanded={sub === 'connectors'}
+          aria-label="Connectors"
+          data-testid="chat-connectors-row"
+          onclick={(e) => openSub('connectors', e.detail === 0)}
+          onpointerenter={() => (sub = 'connectors')}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 7V3M15 7V3" /><path d="M6 7h12v4a6 6 0 0 1-12 0z" /><path d="M12 17v4" /></svg>
+          <span class="mlabel">Connectors</span>
+          <span class="mside mcount">{chat.connectors.onCount} of {chat.connectors.list.length} on</span>
+          {@render chev()}
+        </button>
+        {#if sub === 'connectors'}
+          <div class="pluspop subpop" role="group" aria-label="Connectors in this chat" data-testid="chat-connectors-menu">
+            {#each chat.connectors.list as c (c.id)}
+              <button class="mrow" data-mi="sub" aria-pressed={c.on} aria-label={c.name} title={c.on ? `${c.name} is on in this chat` : `${c.name} is off in this chat`} onclick={() => flipConnector(c)}>
+                <ConnectorLogo logo={c.logo} name={c.name} color={c.color} size={18} />
+                <span class="mlabel">{c.name}</span>
+                {#if c.on}{@render tick_()}{/if}
+              </button>
+            {/each}
+            <div class="optsep" role="separator"></div>
+            <button class="mrow" data-mi="sub" onclick={manageConnectors}><span class="mlabel mquiet">Manage connectors…</span></button>
+          </div>
+        {/if}
+      </div>
+    {/if}
+    <div class="optsep" role="separator"></div>
+    <!-- Research (chat/research.rs): ✓ while on; greyed, with why, when Chat's model can't. -->
+    <button
+      class="mrow"
+      class:unavail={!research.can}
+      data-mi="top"
+      aria-pressed={research.on && research.can}
+      aria-label="Research"
+      title={researchTitle}
+      data-testid="chat-plus-research"
+      onclick={flipResearch}
+      onpointerenter={() => (sub = null)}
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" /><path d="m15 15 5 5" /><path d="M8 10.5h5M10.5 8v5" /></svg>
+      <span class="mlabel">Research</span>
+      {#if research.on && research.can}{@render tick_()}{/if}
+    </button>
+    <!-- Style › (chat/styles.rs): the chat's own, the one in use ticked; Create & edit styles…. -->
+    <div class="optsub">
+      <button
+        class="mrow"
+        data-mi="top"
+        data-sub="style"
+        aria-haspopup="menu"
+        aria-expanded={sub === 'style'}
+        aria-label={`Style: ${style.name || 'Normal'}`}
+        data-testid="chat-plus-style"
+        onclick={(e) => openSub('style', e.detail === 0)}
+        onpointerenter={() => (sub = 'style')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z" /><path d="M13.5 6.5l4 4" /></svg>
+        <span class="mlabel">Style</span>
+        <span class="mside mcount">{style.name || 'Normal'}</span>
+        {@render chev()}
+      </button>
+      {#if sub === 'style'}
+        <div class="pluspop subpop" role="menu" aria-label="Style" data-testid="chat-plus-style-menu">
+          {#each style.builtins as s (s.id)}
+            <button class="mrow" role="menuitemradio" aria-checked={s.id === style.current} data-mi="sub" title={s.description || undefined} onclick={() => pickStyle(s.id)}>
+              <span class="mlabel">{s.name}</span>
+              {#if s.id === style.current}{@render tick_()}{/if}
+            </button>
+          {/each}
+          {#if style.mine.length}<div class="optsep" role="separator"></div>{/if}
+          {#each style.mine as s (s.id)}
+            <button class="mrow" role="menuitemradio" aria-checked={s.id === style.current} data-mi="sub" onclick={() => pickStyle(s.id)}>
+              <span class="mlabel">{s.name}</span>
+              {#if s.id === style.current}{@render tick_()}{/if}
+            </button>
+          {/each}
+          <div class="optsep" role="separator"></div>
+          <button class="mrow" role="menuitem" data-mi="sub" onclick={openStyles}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+            <span class="mlabel">Create & edit styles…</span>
+          </button>
+        </div>
+      {/if}
+    </div>
+    <div class="optsep" role="separator"></div>
+    <!-- Spoken replies on / off (Settings → Voice Assistant → Speak replies), their volume, Voice settings…. -->
+    <button class="mrow" data-mi="top" aria-pressed={chat.speakReplies} aria-label="Voice replies" title={voiceTitle} onclick={toggleVoiceReplies} onpointerenter={() => (sub = null)}>
+      {#if chat.speakReplies}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.4 5.6a9 9 0 0 1 0 12.8" /></svg>
+      {:else}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="m22 9-6 6M16 9l6 6" /></svg>
+      {/if}
+      <span class="mlabel">Voice replies</span>
+      {#if chat.speakReplies}{@render tick_()}{/if}
+    </button>
+    <div class="mvol">
+      <input
+        id="chat-voice-volume"
+        type="range"
+        min="0"
+        max="100"
+        step="5"
+        aria-label="Voice volume"
+        value={Math.round(chat.voiceVolume * 100)}
+        oninput={(e) => moveVolume(Number(e.currentTarget.value) / 100)}
+        onchange={keepVolume}
+      />
+      <span class="volval">{Math.round(chat.voiceVolume * 100)}%</span>
+    </div>
+    <button
+      class="mrow"
+      data-mi="top"
+      onclick={() => {
+        chat.plusOpen = false;
+        onopensettings?.('voice');
+      }}
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
+      <span class="mlabel">Voice settings…</span>
+    </button>
+  </div>
+{/snippet}
 
 <style>
   .vollabel {
@@ -943,8 +1351,200 @@
     min-height: 46px;
     padding: 5px 6px;
   }
-  .composer.plain .pluswrap {
-    margin-right: auto;
+  .composer.plain .rowgap {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  /* What's on for this chat, beside the +: "Research ×", "Concise ×" (the Claude app's mode chips in its box). */
+  .modechips {
+    align-self: center;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin-left: 2px;
+  }
+  .modechip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    height: 26px;
+    padding: 0 3px 0 8px;
+    border: 1px solid var(--yap-border);
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s1);
+    color: var(--yap-fg);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .modechip > svg {
+    flex: none;
+    width: 13px;
+    height: 13px;
+    color: var(--yap-muted);
+  }
+  .modechip.on {
+    border-color: var(--yap-primary-line);
+    background: var(--yap-primary-wash);
+  }
+  .modechip.on > svg {
+    color: var(--yap-primary);
+  }
+  .modechip .mname {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mcx {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: var(--yap-muted);
+    cursor: pointer;
+  }
+  .mcx:hover {
+    background: var(--yap-s3);
+    color: var(--yap-fg);
+  }
+  .mcx:focus-visible {
+    outline: 2px solid var(--yap-primary-line);
+    outline-offset: 0;
+  }
+  .mcx svg {
+    width: 9px;
+    height: 9px;
+  }
+
+  /* **A plain chat's + menu** (the Claude desktop app's): one line a row, an icon each, the shortcut, › or ✓ at the
+     right; dividers between the parts. Upwards from the + in a thread, downwards on the start screen. */
+  .plainmenu {
+    width: 252px;
+    padding: 5px;
+    border-radius: 12px;
+  }
+  .plainmenu:focus {
+    outline: none;
+  }
+  .plainmenu.down {
+    top: calc(100% + 8px);
+    bottom: auto;
+  }
+  .plainmenu .subpop {
+    width: 232px;
+    padding: 5px;
+  }
+  .plainmenu.down .subpop {
+    top: -5px;
+    bottom: auto;
+  }
+  .skillsub {
+    width: 280px !important;
+    max-height: 360px;
+  }
+  .mrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 32px;
+    padding: 5px 8px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--yap-fg);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .mrow:hover,
+  .mrow[aria-expanded='true'] {
+    background: var(--yap-s3);
+  }
+  .mrow:focus-visible {
+    outline: none;
+    background: var(--yap-s3);
+    box-shadow: inset 0 0 0 1.5px var(--yap-primary-line);
+  }
+  .mrow > svg:first-child {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    color: var(--yap-fg-80);
+  }
+  .mrow.unavail {
+    color: var(--yap-muted);
+  }
+  .mrow.unavail > svg:first-child {
+    opacity: 0.6;
+  }
+  .mlabel {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mside {
+    flex: none;
+  }
+  .mkey {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 11.5px;
+  }
+  .mcount {
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--yap-muted);
+    font-size: 11.5px;
+  }
+  .mchev {
+    width: 14px;
+    height: 14px;
+    margin-right: -2px;
+    color: var(--yap-muted);
+  }
+  .mtick {
+    width: 16px;
+    height: 16px;
+    color: var(--yap-primary);
+  }
+  .mhead {
+    padding: 6px 8px 3px;
+    color: var(--yap-muted);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .mcmd {
+    font-weight: 600;
+  }
+  .mquiet {
+    color: var(--yap-muted);
+  }
+  .mvol {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 8px 6px 34px;
+  }
+  .mvol input {
+    flex: 1 1 auto;
+    min-width: 0;
+    accent-color: var(--yap-primary);
   }
   .msginput:focus {
     outline: none;

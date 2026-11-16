@@ -593,20 +593,27 @@ async function startTurn({ text, spoken = false, away = false, chat = 'new', aut
   try {
     // A new chat started from a project's page (chat/projects.rs), the project made first if need be.
     if (project) await newChatInProject(project);
-    // The chat's style from Style under the box (chat/styles.rs), as the person picks it.
+    // The chat's style from Style in the box's + menu (chat/styles.rs), as the person picks it.
     if (style) await pickStyle(style);
-    // Research under the box (chat/research.rs), switched on as the person would.
+    // Research from the box's + menu (chat/research.rs; 16 Nov 2026), switched on as the person would: its chip in
+    // the box says it's on.
     if (research) {
-      const chip = main().getByTestId('chat-research-chip');
-      if ((await chip.getAttribute('aria-pressed', { timeout: 10_000 })) !== 'true') await chip.click({ timeout: 10_000 });
-      // (The chip asks Rust whether Chat's model can research before it turns on, so it's on a moment after the
-      // click: 16 Nov 2026, read at once it was still off and the question never went — the chip on just after.)
-      const on = await chip
-        .and(main().locator('[aria-pressed="true"]'))
-        .waitFor({ state: 'attached', timeout: 5_000 })
-        .then(() => true)
-        .catch(() => false);
-      if (!on) throw new Error(`Research can't be switched on: ${await chip.getAttribute('title')}`);
+      const chip = main().getByTestId('chat-research-on');
+      if (!(await chip.count())) {
+        await main().getByRole('button', { name: 'Chat options' }).click({ timeout: 10_000 });
+        const row = main().getByTestId('chat-plus-research');
+        await row.click({ timeout: 10_000 });
+        // (The row asks Rust whether Chat's model can research before it turns on: on a moment after the click.)
+        const on = await chip
+          .waitFor({ state: 'visible', timeout: 5_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!on) {
+          const why = await row.getAttribute('title').catch(() => '');
+          await main().keyboard.press('Escape').catch(() => {});
+          throw new Error(`Research can't be switched on: ${why}`);
+        }
+      }
     }
     // A new chat made incognito with its ghost (chat/incognito.rs).
     if (incognito) {
@@ -690,13 +697,14 @@ function projectFiles(v) {
   return typeof v === 'string' && v.trim() ? v.split(',').map((s) => s.trim()).filter(Boolean) : null;
 }
 
-/** Style under the message box (chat/styles.rs): the one named `name` (any case), as the person picks it. */
+/** Style from the box's + menu (chat/styles.rs; Style ›): the one named `name` (any case), as the person picks it. */
 async function pickStyle(name) {
   const m = main();
-  await m.getByTestId('chat-style-chip').click({ timeout: 10_000 });
+  await m.getByRole('button', { name: 'Chat options' }).click({ timeout: 10_000 });
+  await m.getByTestId('chat-plus-style').click({ timeout: 10_000 });
   const wanted = String(name).trim().toLowerCase();
-  const items = m.getByRole('menu').first().getByRole('menuitemradio');
-  // (The chip reads the styles before its menu opens: wait for it.)
+  const items = m.getByTestId('chat-plus-style-menu').getByRole('menuitemradio');
+  // (The styles are read as the box shows: wait for them.)
   await items.first().waitFor({ state: 'visible', timeout: 10_000 });
   const names = (await items.allTextContents()).map((t) => t.trim().toLowerCase());
   const at = names.indexOf(wanted);

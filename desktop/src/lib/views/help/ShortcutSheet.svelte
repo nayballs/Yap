@@ -38,6 +38,7 @@
     { keys: ['Ctrl', 'F'], label: 'Search Settings, notes or chats' },
     { keys: ['Ctrl', 'N'], label: 'New chat, in Chat' },
     { keys: ['Ctrl', 'B'], label: 'Hide or show your chats, in Chat' },
+    { keys: ['Ctrl', 'U'], label: 'Upload or add files, in a chat' },
     { keys: ['Ctrl', 'Shift', 'B'], label: 'The browser beside the chat, in Chat' },
     { keys: ['Ctrl', ';'], label: "Ask a side question about the chat, in Chat: it isn't added unless you keep it" },
     { keys: ['Esc'], label: 'Close a dialog, a menu or Settings' },

@@ -479,6 +479,17 @@
 
   // B, by its letter or (a page beside the chat's keys come as `yap-page-key`) its key code.
   const isB = (e) => e.key?.toLowerCase() === 'b' || (!e.key && e.keyCode === 66);
+  /** Ctrl+U for Upload or add files: a plain chat's, the focus in Chat itself (never a document, a dialog or Settings). */
+  const isUploadKey = (e) =>
+    (e.ctrlKey || e.metaKey) &&
+    !e.shiftKey &&
+    !e.altKey &&
+    (e.key?.toLowerCase() === 'u' || (!e.key && e.keyCode === 85)) &&
+    !e.repeat &&
+    !e.defaultPrevented &&
+    plainChat &&
+    !chat.page &&
+    !e.target?.closest?.('.ProseMirror, [contenteditable="true"], [role="alertdialog"], [role="dialog"]:not([data-testid="chat-plus-menu"])');
 
   /**
    * Ctrl+B: the list shown or hidden — not where Ctrl+B makes text bold (a
@@ -546,6 +557,11 @@
       // On the Code side: a new code chat in this one's workspace.
       if (code.onCode && (code.current ?? code.workspaces[0])) code.newCodeChat(code.current ?? code.workspaces[0]);
       else chat.newChat();
+    } else if (isUploadKey(e)) {
+      // Ctrl+U in a plain chat: Upload or add files (the + menu's first row, as the Claude app's) — not a key Yap's
+      // in-page shortcuts took first, nor in a document being written (its own Ctrl+U), a dialog or Settings.
+      e.preventDefault();
+      chat.pickFiles();
     } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && isB(e) && !e.defaultPrevented && !e.target?.closest?.('.ProseMirror')) {
       // (Not over a document being written: the editor's own keys first.)
       e.preventDefault();

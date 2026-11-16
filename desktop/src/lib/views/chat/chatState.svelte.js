@@ -838,6 +838,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   /** + → Attach files…: Windows' file picker, several at once. */
   async function pickFiles() {
     plusOpen = false;
+    // (The e2e suite puts its own picker here — `window.__yapTestPickFiles`, the paths it "picked" — so Windows'
+    // dialog never opens over the person's windows in a test run.)
+    if (typeof window.__yapTestPickFiles === 'function') {
+      await attachFiles((await window.__yapTestPickFiles()) || []);
+      return;
+    }
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const picked = await open({ multiple: true, title: 'Attach files to your message' });

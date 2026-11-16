@@ -5,10 +5,12 @@
 //   window's top when there's no room above.
 // - In Chat, at the window's least size and larger, light and dark: a notice raised while a message is typed sits
 //   above the message box, Send clear and clickable — a taller box (lines typed) lifts it further; with no box in
-//   the view (Home) it's back in its corner.
-// Toasts are raised through the notice policy in test mode (`e2e_notice`); nothing is sent.
+//   the view (Home) it's back in its corner; a new chat's box in the middle of its start screen leaves the stack
+//   in its corner, under the box and clear of it.
+// Toasts are raised through the notice policy in test mode (`e2e_notice`); one question goes, to the local fake.
 import { test, expect, openView, setConfig } from './support/fixtures.js';
 import { placeToasts } from '../src/lib/ui/toastClear.js';
+import { startFakeLlm } from './support/fake-llm.js';
 
 test.use({
   yapOptions: {
@@ -127,6 +129,30 @@ test('a taller box lifts the stack further, and with no box in view it goes back
   await main.setViewportSize({ width: 860, height: 700 });
   await openView(main, 'Chat');
   await main.getByRole('button', { name: 'New chat' }).first().click();
+  // A new chat's box sits in the middle of the thread (its start screen, 16 Nov 2026): a notice keeps its corner,
+  // under the box and clear of it, however many lines are typed.
+  await box(main).fill('A short line.');
+  expect(await yap.invoke('e2e_notice', { surface: 'window', kind: 'e2e-toast-start', level: 'info', title: 'A notice on the start screen', body: 'Below the box.', timeoutMs: 60_000 })).toBe(true);
+  await expect(toastOf(main, 'A notice on the start screen')).toBeVisible();
+  await main.waitForTimeout(450);
+  await box(main).fill(['Things for Saturday:', 'the harbour museum', 'the market', 'lunch at the pier', 'the lighthouse walk', 'back by six'].join('\n'));
+  await main.waitForTimeout(450);
+  expect(overlap(await rectOf(stack(main)), await rectOf(main.locator('.composer')))).toBe(false);
+  expect(Math.round(700 - (await rectOf(stack(main))).bottom)).toBe(20);
+  await closeToasts(main);
+  // A chat with a message: its box at the foot, where the stack has to rise above it. (The fake answers once.)
+  const fake = await startFakeLlm();
+  const before = await yap.invoke('get_config');
+  try {
+    await setConfig(yap, main, { llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fake.base, model: 'fake-chat', apiKey: '', apiKeys: {}, prompt: '', disableThinking: false } } });
+    fake.scriptChat([{ content: 'Noted.' }]);
+    await box(main).fill('Plan my Saturday.');
+    await box(main).press('Enter');
+    await expect(main.locator('.cbubble.assistant').last()).toContainText('Noted.');
+  } finally {
+    await setConfig(yap, main, { llmScopes: before.llmScopes });
+    await fake.close();
+  }
   await box(main).fill('A short line.');
   expect(await yap.invoke('e2e_notice', { surface: 'window', kind: 'e2e-toast-tall', level: 'info', title: 'A notice that stays', body: 'Until it is closed.', timeoutMs: 60_000 })).toBe(true);
   await expect(toastOf(main, 'A notice that stays')).toBeVisible();

@@ -1,6 +1,6 @@
 // Research (desktop/src-tauri/src/chat/research.rs, chat/turn/research.rs, 16 Nov 2026; the Claude
 // app's Research mode as Anthropic's help pages describe it):
-// - The Research switch under the message box, beside Style (ResearchChip.svelte): on, a question is
+// - Research in the message box's + menu, its chip in the box while on (Composer.svelte): on, a question is
 //   researched; greyed, with why, when web search is off.
 // - The plan first: a call with no tools writes it, and it's the outline card's research plan in the
 //   thread ("Research plan", Start research / Edit); nothing is searched until the person answers.
@@ -90,7 +90,10 @@ function fakeChat(fakeLlm) {
 const box = (main) => main.getByRole('textbox', { name: 'Message' });
 const thread = (main) => main.locator('.msgs');
 const lastAnswer = (main) => thread(main).locator('.cbubble.assistant').last();
-const chip = (main) => main.getByTestId('chat-research-chip');
+// Research is in the box's + menu (16 Nov 2026, the Claude app's), its chip in the box while it's on.
+const plus = (main) => main.getByRole('button', { name: 'Chat options' });
+const menuRow = (main) => main.getByTestId('chat-plus-research');
+const chip = (main) => main.getByTestId('chat-research-on');
 const card = (main) => thread(main).getByTestId('chat-outline-card').last();
 const panel = (main) => main.getByTestId('chat-doc');
 const line = (main) => main.getByTestId('chat-activity');
@@ -117,10 +120,18 @@ function gate() {
   const promise = new Promise((r) => (open = r));
   return { promise, open };
 }
-/** Switch Research on (or off). */
+/** Switch Research on from the + menu (or off, from its chip's ×). */
 async function research(main, on) {
-  if ((await chip(main).getAttribute('aria-pressed')) !== String(on)) await chip(main).click();
-  await expect(chip(main)).toHaveAttribute('aria-pressed', String(on));
+  if ((await chip(main).count()) > 0 !== on) {
+    if (on) {
+      await plus(main).click();
+      await expect(menuRow(main)).toHaveAttribute('aria-pressed', 'false');
+      await menuRow(main).click();
+    } else {
+      await chip(main).getByRole('button', { name: 'Turn off Research' }).click();
+    }
+  }
+  await expect(chip(main)).toHaveCount(on ? 1 : 0);
 }
 
 /** The number Yap gave a page this turn, from the tool results the model read. */
@@ -288,19 +299,37 @@ test('■ Stop mid-research: no report, and a plain "research …" researches wi
   held.open();
 });
 
-test('a greeting with Research on is answered as ever; with web search off the switch says why', async ({ yap, main, fakeLlm }) => {
+test('a greeting with Research on is answered as ever; with web search off the switch says why', async ({ yap, main, fakeLlm, shot }) => {
   fakeLlm.reply('researchPlan', () => '{"research": false}');
   fakeLlm.scriptChat([{ content: 'Hello! What shall we look into?' }]);
   await freshChat(main);
   await research(main, true);
+  // The + menu with Research ticked, and both chips in the box with a Style picked (16 Nov 2026).
+  await plus(main).click();
+  await expect(menuRow(main)).toHaveAttribute('aria-pressed', 'true');
+  await expect(menuRow(main).locator('.mtick')).toBeVisible();
+  await main.getByTestId('chat-plus-style').click();
+  await main.getByTestId('chat-plus-style-menu').getByRole('menuitemradio', { name: 'Concise' }).click();
+  await expect(main.getByTestId('chat-box-modes')).toContainText('Research');
+  await expect(main.getByTestId('chat-box-modes')).toContainText('Concise');
+  await shot(main, '12-research-and-style-chips-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '13-research-and-style-chips-dark');
+  await theme(yap, main, 'light');
+  await main.getByTestId('chat-style-on').getByRole('button', { name: /back to Normal/ }).click();
+  await expect(main.getByTestId('chat-style-on')).toHaveCount(0);
   await ask(main, 'Hi there');
   await expect(lastAnswer(main)).toContainText('Hello! What shall we look into?', { timeout: 20_000 });
   await expect(thread(main).getByTestId('chat-outline-card')).toHaveCount(0);
-  // Web search off: the switch can't, and says why.
+  // Web search off: the + menu's Research can't, and says why; its chip goes from the box.
   await setConfig(yap, main, { webSearch: false });
-  await chip(main).click();
-  await expect(chip(main)).toHaveAttribute('aria-pressed', 'false');
-  await expect(chip(main)).toHaveAttribute('title', /turn on web search/);
+  await plus(main).click();
+  await menuRow(main).click();
+  await expect(menuRow(main)).toHaveAttribute('aria-pressed', 'false');
+  await expect(menuRow(main)).toHaveAttribute('title', /turn on web search/);
+  await expect(chip(main)).toHaveCount(0);
+  await main.keyboard.press('Escape');
+  await expect(menuRow(main)).toHaveCount(0);
   await setConfig(yap, main, { webSearch: true });
 });
 
@@ -332,7 +361,7 @@ test('an Edit of a question researched by the switch alone researches it again, 
   // The switch off now: an Edit researches again, as it was asked — the plan first (■ there: nothing researched,
   // the edit kept).
   await research(main, false);
-  await expect(chip(main)).toHaveAttribute('aria-pressed', 'false');
+  await expect(chip(main)).toHaveCount(0);
   await questions(main).first().hover();
   await thread(main).getByTestId('chat-edit-message').first().click();
   await thread(main).getByTestId('chat-edit-input').fill('How did the Dvorak keyboard layout come about?');
