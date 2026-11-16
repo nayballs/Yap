@@ -222,6 +222,7 @@ is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 | `open_chat {id}` ⁺ | This phone's questions go to conversation `id` from now on; its messages come back (`thread`). |
 | `new_chat` ⁺ | The next question starts a conversation (`thread` with `id: null`). |
 | `read_aloud {id}` ⁺ | Say answer `id` (`answer.id`, one this phone was given while Yap runs) on the phone, whole, in Yap's voice. |
+| `rate {id, rating}` ⁺ | 👍 / 👎 on answer `id` (one this phone was given; 16 Nov 2026, `chat/feedback.rs`): `rating` `"good"` or `"bad"`, `null` to take it back — kept with the answer in Chat on the PC, as the desktop's thumbs keep it (the same mark again keeps the reasons the PC's 👎 card gave). Answered with `rated`. Offered when `ready.can` has `"rate"`. |
 | `set_model {id}` | Switch Chat's model (one of `ready.models`). |
 | `set_model {provider, model, baseUrl?, file?}` ⁺ | Switch Chat's model to a row of Chat's picker, as the desktop picker does (`chat_set_model`'s own checks: a provider with a key, a server Settings knows, an on-device model on this PC). |
 | `set_effort {level}` ⁺ | The effort Chat's model answers at (`null`: its default). |
@@ -235,14 +236,15 @@ is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 | `pair_wait {code}` | The pairing waits for a yes on the PC, which shows the same code. |
 | `paired {device:{id, secret}}` | Paired: the phone keeps these for its next visits. |
 | `denied {reason}` | Refused, in words the phone can show ("Too many tries from this phone. Try again in 4 minutes."); the socket closes. |
-| `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}], can⁺, picker⁺}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others; `can`: what it answers beyond v1 (`["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak"]`); `picker`: what Chat's picker shows (`{status, catalog, local, images}`, `link/models.rs`; never a key; `status.images` and `status.imagesSwitch` say whether Chat's model reads pictures and which would). Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
+| `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}], can⁺, picker⁺}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others; `can`: what it answers beyond v1 (`["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak", …, "rate"]`); `picker`: what Chat's picker shows (`{status, catalog, local, images}`, `link/models.rs`; never a key; `status.images` and `status.imagesSwitch` say whether Chat's model reads pictures and which would). Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
 | `chats {items:[{id, title, ts}]}` ⁺ | Chat's conversations, newest first (`link/chats.rs`). |
-| `thread {id, title, messages:[{role, text, id?, voice?, pictures?}], more}` ⁺ | A conversation's latest messages (words only; an answer's `id` for ▶; `pictures`: how many a question carried), `more` when older ones were left out; `id: null` for a new chat (or one that's gone, after an `error`). |
+| `thread {id, title, messages:[{role, text, id?, voice?, pictures?, rating?}], more}` ⁺ | A conversation's latest messages (words only; an answer's `id` for ▶ and its `rating`, 👍 / 👎; `pictures`: how many a question carried), `more` when older ones were left out; `id: null` for a new chat (or one that's gone, after an `error`). |
 | `chat {id, title}` ⁺ | This phone's question went to conversation `id` (the one chosen for it, or a new chat's): its questions go there from now on. |
 | `title {id, title}` ⁺ | Conversation `id` was renamed in Chat (every phone hears it). Chat's titles are a conversation's first words; a rename is the only change. |
 | `cant_read {message}` ⁺ | Chat's model can't read the question's pictures, or its server turned them down (`snip::vision`'s words). The page puts the question back in the composer with them and shows Chat's line. |
 | `state {phase}` | `"idle"` \| `"listening"` \| `"transcribing"` \| `"thinking"` \| `"speaking"`. |
 | `heard {text}` | The question, transcribed and corrected (a typed one, as it came). |
+| `rated {id, rating?}` ⁺ | Answer `id`'s 👍 / 👎 as Chat keeps it now (`rate`'s reply): `"good"`, `"bad"`, or none. |
 | `words {text}` ⁺ | Talk's words for the phone's box (`start {mode:"words"}`), transcribed and corrected, trimmed: nothing was asked. Then `state idle`. |
 | `step {label}` | What the answer is doing, in Chat's activity line's words (`chat/activity.rs`: "Searching the web · …"). |
 | `answer {text, final, id⁺}` | **The whole answer so far** (each replaces the last; `""` = words taken back before a tool call); `final:true` with the checked answer and its `id` in Chat (`chat:<conversation>:<index>`, for ▶). |

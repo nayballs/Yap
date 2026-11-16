@@ -150,6 +150,13 @@ pub struct ChatMessage {
     /// back at the next start (`attachments::restore_from_disk`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<crate::chat::attachments::Attachment>,
+    /// **The person's 👍 / 👎 on an answer** (`chat/feedback.rs`, 16 Nov
+    /// 2026): good, or not good with why — kept on this PC, sent nowhere,
+    /// never read by a model (but a Retry with its note). An older Yap's save
+    /// drops the field; `chat_feedback.json` puts it back at the next start
+    /// (`feedback::restore_from_disk`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feedback: Option<crate::chat::feedback::Feedback>,
 }
 
 /// **Message `i` of `messages` as a model reads it** ([`ChatMessage::sent_text`])
@@ -550,6 +557,8 @@ fn load_from_disk() -> Store {
     for c in store.conversations.iter_mut() {
         branches::heal(c);
     }
+    // …and the answers' 👍 / 👎 (chat/feedback.rs), in whichever version they are now.
+    crate::chat::feedback::restore_from_disk(&mut store.conversations);
     store
 }
 
@@ -578,18 +587,20 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     if SAVER.write_json(&chats_path(), store, false).is_ok() {
-        // The shares', the attached files' and the branches' copies for an
-        // older Yap's save (chat/shares.rs, chat/attachments.rs,
-        // chats/branches.rs): never an incognito chat's.
+        // The shares', the attached files', the branches' and the 👍 / 👎
+        // copies for an older Yap's save (chat/shares.rs, chat/attachments.rs,
+        // chats/branches.rs, chat/feedback.rs): never an incognito chat's.
         if store.conversations.iter().any(|c| c.incognito) {
             let kept: Vec<Conversation> = store.conversations.iter().filter(|c| !c.incognito).cloned().collect();
             crate::chat::shares::mirror_to_disk(&kept);
             crate::chat::attachments::mirror_to_disk(&kept);
             branches::mirror_to_disk(&kept);
+            crate::chat::feedback::mirror_to_disk(&kept);
         } else {
             crate::chat::shares::mirror_to_disk(&store.conversations);
             crate::chat::attachments::mirror_to_disk(&store.conversations);
             branches::mirror_to_disk(&store.conversations);
+            crate::chat::feedback::mirror_to_disk(&store.conversations);
         }
     }
     // Search by meaning reads what changed, in the background.
@@ -607,6 +618,7 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
         crate::chat::shares::restore_from_disk(&mut store.conversations);
         crate::chat::attachments::restore_from_disk(&mut store.conversations);
         branches::restore_from_disk(&mut store.conversations);
+        crate::chat::feedback::restore_from_disk(&mut store.conversations);
         save_to_disk(store);
     }
     f(store)
@@ -989,6 +1001,36 @@ pub fn set_thinking(id: u64, index: usize, thought: crate::chat::think::Thought)
             save_to_disk(s);
         }
     });
+}
+
+/// **The person's 👍 / 👎 on an answer** (`chat/feedback.rs`): conversation
+/// `id`'s message `index`, an answer of the chat's (never an agent's report
+/// marker) — at time `ts` when the page knows it, so a message that moved
+/// since (a version switched meanwhile) is refused. `None` takes it back.
+/// Its place in the list stays (`updated_ts` untouched). The mark as kept.
+pub fn set_feedback(id: u64, index: usize, ts: Option<u64>, feedback: Option<crate::chat::feedback::Feedback>) -> Result<Option<crate::chat::feedback::Feedback>, String> {
+    with_store(|s| {
+        let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
+        let m = conv
+            .messages
+            .get_mut(index)
+            .filter(|m| m.role == "assistant" && m.kind.is_empty() && ts.is_none_or(|t| m.ts == t))
+            .ok_or("That answer isn't there any more.")?;
+        if m.feedback != feedback {
+            m.feedback = feedback;
+            save_to_disk(s);
+        }
+        Ok(s.conversations.iter().find(|c| c.id == id).and_then(|c| c.messages.get(index)).and_then(|m| m.feedback.clone()))
+    })
+}
+
+/// Conversation `id`'s answer `index`: its 👍 / 👎 and its words (a Retry
+/// with the note, read before the answer is set aside).
+pub fn answer_feedback(id: u64, index: usize) -> Option<(crate::chat::feedback::Feedback, String)> {
+    with_store(|s| {
+        let m = s.conversations.iter().find(|c| c.id == id)?.messages.get(index).filter(|m| m.role == "assistant")?;
+        Some((m.feedback.clone()?, m.text.clone()))
+    })
 }
 
 /// Keep the documents an answer made or changed with it (`documents.rs`):
@@ -1374,6 +1416,7 @@ pub fn append_message(
             chapter: None,
             kind: String::new(),
             attachments: Vec::new(),
+            feedback: None,
         });
         conv.updated_ts = now_secs();
         // Asked again in an archived chat: it's back in the list.
@@ -2254,6 +2297,7 @@ mod tests {
             chapter: None,
             kind: String::new(),
             attachments: vec![],
+            feedback: None,
         };
         let messages = vec![
             msg("user", vec![]),
@@ -2613,6 +2657,29 @@ mod tests {
         assert_eq!(rename(9999, "Nope").unwrap_err(), "Conversation not found");
         // The list shows the new name.
         assert!(list().as_array().unwrap().iter().any(|c| c["title"] == "Launch plan"));
+    }
+
+    #[test]
+    fn an_answers_thumbs_are_kept_with_it_and_only_an_answers() {
+        use crate::chat::feedback::{clean, FeedbackIn};
+        let c = create("Buses");
+        append(c.id, "user", "Which bus?", &[], None, false).unwrap();
+        let a = append(c.id, "assistant", "The 42.", &[], None, false).unwrap();
+        let ts = get(c.id).unwrap().messages[a].ts;
+        let bad = clean(&FeedbackIn { rating: "bad".into(), reasons: vec!["untrue".into()], note: "The 43".into() }, 5).unwrap();
+        assert_eq!(set_feedback(c.id, a, Some(ts), Some(bad.clone())).unwrap(), Some(bad.clone()));
+        assert_eq!(answer_feedback(c.id, a), Some((bad.clone(), "The 42.".to_string())));
+        // A question, a time that moved, a chat that's gone: refused.
+        assert!(set_feedback(c.id, 0, None, Some(bad.clone())).is_err());
+        assert!(set_feedback(c.id, a, Some(ts + 99), None).is_err());
+        assert!(set_feedback(c.id + 999, a, None, None).is_err());
+        // Taken back.
+        assert_eq!(set_feedback(c.id, a, None, None).unwrap(), None);
+        assert_eq!(answer_feedback(c.id, a), None);
+        // Saved with the answer, as chats.json's save writes it; the page gets it with the chat.
+        set_feedback(c.id, a, None, Some(bad.clone())).unwrap();
+        assert!(saved_json().contains(r#""feedback":{"rating":"bad","reasons":["untrue"],"note":"The 43","ts":5}"#), "{}", saved_json());
+        assert_eq!(for_page(get(c.id).unwrap()).messages[a].feedback, Some(bad));
     }
 
     #[test]

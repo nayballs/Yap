@@ -226,7 +226,10 @@
     const r = m.role === 'assistant' ? retryOf(m, chat.messages.indexOf(m)) : null;
     if (a?.onedit || a?.onrewind || r) items.push({ separator: true });
     if (a?.onedit) items.push({ label: a.edit ? `Edit (${a.edit.toLowerCase()})` : 'Edit', icon: 'pencil', disabled: !!a.edit, onselect: a.onedit });
-    if (r) items.push({ label: r.why ? `Retry (${r.why.toLowerCase()})` : 'Retry', icon: 'sync', disabled: !!r.why, onselect: r.onretry });
+    if (r) {
+      const label = r.noted ? 'Retry with your note' : 'Retry';
+      items.push({ label: r.why ? `${label} (${r.why.toLowerCase()})` : label, icon: 'sync', disabled: !!r.why, onselect: r.onretry });
+    }
     if (a?.onrewind) {
       items.push({ label: a.rewind ? `Rewind (${a.rewind.toLowerCase()})` : 'Rewind', icon: 'undo', disabled: !!a.rewind, onselect: a.onrewind });
       items.push({ label: a.fork ? `Fork from here (${a.fork.toLowerCase()})` : 'Fork from here', icon: 'split', disabled: !!a.fork, onselect: a.onfork });
@@ -258,19 +261,38 @@
   // what was there as a version, ‹ 1/2 › to switch. Not while an answer is being written. In a Code chat both are
   // Claude Code's own Rewind (asked first, as Rewind is), then the message sent again: no versions kept there.
   const busyWhy = $derived(chat.sending || chat.answeringHere ? 'Unavailable while an answer is being written' : '');
-  /** ↻ under answer `m` (index `i`), or null where there's none. */
+  /**
+   * ↻ under answer `m` (index `i`), or null where there's none. An answer marked 👎 is retried with its note (what was
+   * wrong, given to the model: chat/feedback.rs) — ↻ and 👎's card's Retry alike.
+   */
   function retryOf(m, i) {
     if (m?.role !== 'assistant' || !m.id || m.kind || m.streaming || i < 1) return null;
+    const noted = m.feedback?.rating === 'bad';
     if (code?.current) {
       const qi = chat.messages.findLastIndex((x, k) => k < i && x.role === 'user' && !x.kind);
       const q = chat.messages[qi];
       const t = q?.id ? messageTurn(agents.list, chat.activeId, q.id) : null;
       if (!t) return null;
-      return { why: t.rewind || busyWhy, onretry: () => askCodeSend(q, null, t.files) };
+      return { why: t.rewind || busyWhy, noted, onretry: () => askCodeSend(q, null, t.files, noted ? i : null) };
     }
     const q = chat.messages[i - 1];
     if (q?.role !== 'user' || q.kind || !q.id) return null;
-    return { why: busyWhy, onretry: () => chat.retryAt(m) };
+    return { why: busyWhy, noted, onretry: () => chat.retryAt(m, { feedback: noted }) };
+  }
+
+  // **👍 / 👎** (16 Nov 2026, chat/feedback.rs; the Claude app's thumbs, beside Copy and ↻): kept with the answer on
+  // this PC, sent nowhere. 👎 opens a small card — what was wrong, Retry with that note given to the model (a new
+  // version, both kept; in a Code chat through Rewind), and in a plain chat "Learn from this" (memory's Preferences or
+  // the chat's style, only on the person's click). Never an agent's report, nor an answer still being written.
+  /** The thumbs under answer `m` (index `i`), or null. */
+  function ratingOf(m, i) {
+    if (m?.role !== 'assistant' || !m.id || m.kind || m.streaming) return null;
+    return {
+      value: m.feedback ?? null,
+      onrate: (fb) => chat.rate(m, fb),
+      // Learn from this: Chat's side only (a Code chat keeps Yap's memory out; an incognito chat never updates it).
+      learn: !code?.current && !chat.incognito ? { conversation: chat.activeId, onremember: (fact) => chat.rememberFrom(m, fact) } : null,
+    };
   }
   /** The ‹ k/n › of the message at `i`, or null. */
   function branchOf(i) {
@@ -297,18 +319,21 @@
     rewindFiles = true;
     rewindOpen = true;
   }
-  /** A Code chat's Retry (`words` null: the message as it was) or Edit: back to before `m`, then sent — asked first. */
-  function askCodeSend(m, words, files) {
-    rewindAsk = { m, files, mode: words == null ? 'retry' : 'edit', words };
+  /**
+   * A Code chat's Retry (`words` null: the message as it was) or Edit: back to before `m`, then sent — asked first.
+   * `noteFrom`: a Retry with the note on 👎's card — the index of the answer whose 👎 goes to Claude with it.
+   */
+  function askCodeSend(m, words, files, noteFrom = null) {
+    rewindAsk = { m, files, mode: words == null ? 'retry' : 'edit', words, noteFrom };
     rewindFiles = true;
     rewindOpen = true;
   }
   async function doRewind() {
     if (!rewindAsk) return;
-    const { m, files, mode, words } = rewindAsk;
+    const { m, files, mode, words, noteFrom } = rewindAsk;
     if (mode !== 'rewind') {
       rewindOpen = false;
-      chat.saveEdit(m, words ?? chat.wordsOf(m), { files: files > 0 && rewindFiles, code: true });
+      chat.saveEdit(m, words ?? chat.wordsOf(m), { files: files > 0 && rewindFiles, code: true, feedbackFrom: noteFrom });
       return;
     }
     rewindBusy = true;
@@ -319,7 +344,9 @@
   }
   // (Its words: what the dialog says for each.)
   const rewindText = $derived(
-    rewindAsk?.mode === 'retry'
+    rewindAsk?.mode === 'retry' && rewindAsk.noteFrom != null
+      ? { title: 'Retry with your note?', body: "Everything after this message goes, as with Rewind, and Claude won't see it again. Then the message is sent again, with what you said was wrong with the answer.", confirm: 'Retry', busy: 'Retrying…' }
+      : rewindAsk?.mode === 'retry'
       ? { title: 'Retry from this message?', body: "Everything after it goes, as with Rewind, and Claude won't see it again. Then the message is sent again.", confirm: 'Retry', busy: 'Retrying…' }
       : rewindAsk?.mode === 'edit'
         ? { title: 'Send the edited message?', body: "This message and everything after it go, as with Rewind, and Claude won't see them again. Your new words are sent in its place.", confirm: 'Send', busy: 'Sending…' }
@@ -460,6 +487,7 @@
               onkept={openKept}
               branch={m.id && !m.streaming ? branchOf(i) : null}
               retry={m.role === 'assistant' ? retryOf(m, i) : null}
+              rating={m.role === 'assistant' ? ratingOf(m, i) : null}
               editing={m.role === 'user' && chat.editing?.id === m.id ? chat.editing : null}
               onedited={(words) => saveEdited(m, words)}
               oneditcancel={() => chat.cancelEdit()}

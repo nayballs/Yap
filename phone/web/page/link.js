@@ -993,6 +993,15 @@ function onText(text) {
       S.step = String(m.label ?? '');
       if (!S.workSince) S.workSince = performance.now();
       break;
+    case 'rated': {
+      // An answer's 👍 / 👎 as Chat keeps it now (`rate`'s reply).
+      const t = S.turns.find((x) => x.answerId && x.answerId === m.id);
+      if (t) {
+        t.rating = m.rating === 'good' || m.rating === 'bad' ? m.rating : '';
+        renderConvo();
+      }
+      break;
+    }
     case 'answer': {
       const t = currentTurn(true);
       t.a = String(m.text ?? '');
@@ -1180,6 +1189,8 @@ function turnsOf(messages, more = false) {
       if (!t || t.a) turns.push((t = blank));
       t.a = m.text;
       t.answerId = typeof m.id === 'string' ? m.id : '';
+      // Its 👍 / 👎 as Chat keeps it (chat/feedback.rs).
+      t.rating = m.rating === 'good' || m.rating === 'bad' ? m.rating : '';
       t.aAt = at[i];
       t.files = [...(t.files || []), ...sharedNames(m.files)];
     }
@@ -1767,6 +1778,21 @@ const SQUARE = ['M7.5 5h9A2.5 2.5 0 0 1 19 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.
 const COPY = ['M9 9.5A1.5 1.5 0 0 1 10.5 8h8A1.5 1.5 0 0 1 20 9.5v9a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 9 18.5z', 'M15 8V5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H9'];
 const COPIED = ['M5 12.5l4.5 4.5L19 7.5'];
 const SPEAKER = ['M4 9.5h3.5L12 5.5v13l-4.5-4H4z', 'M15.5 9a4 4 0 0 1 0 6', 'M18 6.5a7.5 7.5 0 0 1 0 11'];
+// 👍 (👎 is the same, turned over: link.css `.thumb.down`), as the desktop's thumbs under an answer.
+const THUMB = ['M7 10.5 10.6 4a1.9 1.9 0 0 1 3.5 1.3l-.9 4.2h5.3a2 2 0 0 1 1.95 2.45l-1.35 6A2.2 2.2 0 0 1 16.95 19.7H7z', 'M7 10.5H4.6A1.6 1.6 0 0 0 3 12.1v6A1.6 1.6 0 0 0 4.6 19.7H7z'];
+
+/**
+ * **👍 / 👎 on an answer** (`rate`, 16 Nov 2026: chat/feedback.rs): kept with it in Chat on the PC, sent nowhere.
+ * Pressed again, taken back. Shown at once; the PC's `rated` says what's kept. Why it wasn't good is said on the PC
+ * (its 👎 card).
+ */
+function rateAnswer(t, rating) {
+  if (!S.ready || !t.answerId) return;
+  const next = t.rating === rating ? null : rating;
+  if (!send({ type: 'rate', id: t.answerId, rating: next })) return;
+  t.rating = next || '';
+  renderConvo();
+}
 const PHOTO = ['M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z', 'M5 17l4.5-4.5 3 3L15 13l4 4'];
 const FILE = ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z', 'M14 3v5h5'];
 
@@ -1931,6 +1957,20 @@ function renderConvo() {
         c.append(icon('', COPY), vh('Copy'));
         c.addEventListener('click', () => copyAnswer(t, c));
         foot.appendChild(c);
+        // 👍 / 👎, kept with the answer in Chat on the PC (a PC that keeps them: `rate`).
+        if (t.answerId && can('rate')) {
+          for (const [rating, label] of [['good', 'Good answer'], ['bad', 'Not a good answer']]) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            const on = t.rating === rating;
+            b.className = 'footbtn thumb' + (rating === 'bad' ? ' down' : '') + (on ? ' on' : '');
+            b.dataset.testid = rating === 'good' ? 'thumbs-up' : 'thumbs-down';
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            b.append(icon('', THUMB), vh(label));
+            b.addEventListener('click', () => rateAnswer(t, rating));
+            foot.appendChild(b);
+          }
+        }
       }
       if (readHere || (readable && !speaking)) {
         const b = document.createElement('button');

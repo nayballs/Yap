@@ -1798,14 +1798,56 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
    * **Retry** the answer `m` (Chat's: the Claude app's ↻): its question answered again, the old answer and what
    * followed kept as a version, ‹ 2/2 › on the new one. (A Code chat's is an edit with the same words: `saveEdit`.)
    */
-  function retryAt(m) {
+  function retryAt(m, { feedback = false } = {}) {
     const index = indexOf(m?.id);
     if (activeId == null || sending || !Number.isInteger(index)) return false;
     const q = messages[index - 1];
     if (q?.role !== 'user' || q.kind) return false;
     editing = null;
-    send({ text: q.text?.trim() || DEFAULT_PROMPT, retry: index, voice: !!q.voice });
+    // (`feedback`: 👎's card's Retry with this note — the answer's 👎 goes to the model with it, chat/feedback.rs.)
+    send({ text: q.text?.trim() || DEFAULT_PROMPT, retry: index, voice: !!q.voice, feedback: !!feedback });
     return true;
+  }
+
+  // ---- 👍 / 👎 on an answer (16 Nov 2026, chat/feedback.rs; the Claude app's thumbs) ----
+
+  /** Answer `id`'s mark as the thread shows it (`fb` null: none). */
+  function markShown(id, fb) {
+    messages = messages.map((x) => (x.id === id ? { ...x, feedback: fb ?? undefined } : x));
+  }
+
+  /**
+   * **👍 / 👎 on answer `m`**: `fb` `{rating: 'good'|'bad', reasons, note}`, or null to take it back. Shown at once,
+   * kept with the answer on this PC (never sent anywhere); the mark as kept, or undefined when it couldn't be.
+   */
+  async function rate(m, fb) {
+    const conv = activeId;
+    const index = indexOf(m?.id);
+    if (conv == null || !m?.id || !Number.isInteger(index)) return undefined;
+    const before = m.feedback ?? null;
+    markShown(m.id, fb);
+    try {
+      const kept = await invoke('chat_feedback', { id: conv, index, ts: m.ts ?? null, feedback: fb });
+      if (activeId === conv) markShown(m.id, kept);
+      return kept ?? null;
+    } catch (e) {
+      if (activeId === conv) markShown(m.id, before);
+      toast({ title: "Couldn't keep your feedback", description: String(e?.message ?? e), variant: 'destructive' });
+      return undefined;
+    }
+  }
+
+  /** **Learn from this** (👎's card): `fact` kept in memory's Preferences, as the person left it (memory's toast says so, Undo on it). */
+  async function rememberFrom(m, fact) {
+    const index = indexOf(m?.id);
+    if (activeId == null || !Number.isInteger(index)) return false;
+    try {
+      await invoke('chat_feedback_remember', { id: activeId, index, fact });
+      return true;
+    } catch (e) {
+      toast({ title: "Couldn't remember that", description: String(e?.message ?? e), variant: 'default' });
+      return false;
+    }
   }
 
   /** The person's message `m`'s own words (no screenshot text, no picked elements' blocks). */
@@ -1824,12 +1866,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
    * message), its screenshots and the passage it was about going again. `code`: a Code chat's — a Rewind to before it
    * first (`files`: the files Claude changed since go back too). False when it didn't go.
    */
-  function saveEdit(m, text, { files = false, code = false } = {}) {
+  function saveEdit(m, text, { files = false, code = false, feedbackFrom = null } = {}) {
     const index = indexOf(m?.id);
     const words = String(text ?? '').trim();
     if (activeId == null || sending || !Number.isInteger(index) || !words) return false;
     editing = null;
-    send({ text: words, edit: index, from: m, elements: splitElements(m.text || '').elements, editFiles: !!files, code: !!code });
+    // (`feedbackFrom`: a Code chat's Retry with the note on 👎's card — that answer's index; its 👎 goes to Claude.)
+    const fromAnswer = Number.isInteger(feedbackFrom) ? feedbackFrom : null;
+    send({ text: words, edit: index, from: m, elements: splitElements(m.text || '').elements, editFiles: !!files, code: !!code, feedbackFrom: fromAnswer });
     return true;
   }
 
@@ -2195,7 +2239,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       paint(rec);
     };
     const call = retry != null
-      ? streamCall('chat_retry', { conversationId: activeId, index: retry }, onEvent)
+      ? streamCall('chat_retry', { conversationId: activeId, index: retry, ...(opts.feedback ? { feedback: true } : {}) }, onEvent)
       : streamCall(
       'chat_send',
       {
@@ -2219,7 +2263,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         // A new chat's connectors switched off in its + menu (connectors/chats.rs).
         connectorsOff: activeId == null ? connectors.newChatOff() : null,
         // An edit (chat/commands.rs `edit`): the message it replaces, its picked elements again.
-        ...(edit != null ? { edit, editFiles: opts.editFiles === true, elements: opts.elements?.length ? opts.elements : null } : {}),
+        ...(edit != null ? { edit, editFiles: opts.editFiles === true, elements: opts.elements?.length ? opts.elements : null, ...(Number.isInteger(opts.feedbackFrom) ? { feedbackFrom: opts.feedbackFrom } : {}) } : {}),
         // A new chat asked incognito (chat/incognito.rs).
         incognito: rec.ghost || null,
         // …or in a project (chat/projects.rs).
@@ -2560,6 +2604,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     forkAt,
     forkOf,
     retryAt,
+    rate,
+    rememberFrom,
     wordsOf,
     startEdit,
     cancelEdit,

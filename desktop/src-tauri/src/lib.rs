@@ -531,6 +531,8 @@ pub fn run() {
             chat::commands::chat_rename,
             chat::commands::chat_retry,
             chat::commands::chat_branch,
+            chat::feedback::chat_feedback,
+            chat::feedback::chat_feedback_remember,
             chat::commands::chat_tabs_closed,
             chat::commands::chats_archived,
             chat::commands::chat_archive,

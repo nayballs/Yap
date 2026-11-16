@@ -13,6 +13,7 @@ pub mod commands;
 pub mod compact;
 pub mod documents;
 pub mod export;
+pub mod feedback;
 pub mod incognito;
 pub mod made;
 pub mod note_chats;

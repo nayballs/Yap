@@ -173,6 +173,10 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// `project`: a new chat started from a project's page (chat/projects.rs):
 /// the conversation it makes is in that project. Ignored for an existing one
 /// (its ⋯ moves it: `chat_project_set`).
+///
+/// `feedbackFrom` (with `edit`; 16 Nov 2026, a Code chat's Retry with the
+/// note on 👎's card): that answer's 👎 goes to Claude after the message,
+/// this turn only (`chat/feedback.rs`); the message is saved as it is.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -197,9 +201,15 @@ pub async fn chat_send(
     edit_files: Option<bool>,
     incognito: Option<bool>,
     project: Option<String>,
+    feedback_from: Option<usize>,
 ) -> Result<serde_json::Value, String> {
     // The files attached in the box (chat/attachments.rs): each still there.
     let files = crate::chat::attachments::taken(&files.unwrap_or_default())?;
+    // A Retry with its 👎's note (an edit with the same words): read before the edit rewinds past the answer.
+    let note = match (edit, conversation_id, feedback_from) {
+        (Some(_), Some(id), Some(answer)) => crate::chat::feedback::retry_note_at(id, answer),
+        _ => None,
+    };
     // A Skill (`/decisions`, a one-tap prompt): asked across the meetings,
     // its own passages and instructions (chat/skills.rs).
     let skill_turn = match skill.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
@@ -268,6 +278,8 @@ pub async fn chat_send(
     // never an incognito or a Code chat.
     let in_project = project.filter(|p| conversation_id.is_none() && code_folder_none && !ghost && !p.trim().is_empty());
     let send = Box::pin(crate::chat::projects::with_new(in_project, send));
+    // A Retry with its 👎's note: given to the model (or the Code chat's session) this turn only.
+    let send = Box::pin(crate::chat::feedback::with_note(note, send));
     // Chat's own turn: Think pressed (the model on this PC), or a cloud
     // model at its effort (`ai/effort.rs`): what it thought comes back.
     let (out, thought) = crate::chat::think::scoped(think.unwrap_or(false), send).await;
@@ -385,6 +397,11 @@ fn skill_again(text: &str) -> Option<crate::chat::skills::SkillTurn> {
 /// chat's `forks`. An answer that never comes (an error, ■ before any of
 /// it) puts the old one back. Not in a Code chat: there Retry is an Edit
 /// with the same words (Claude Code's own Rewind, `chat_send`'s `edit`).
+///
+/// `feedback` (16 Nov 2026, 👎's card: Retry with this note): the answer's
+/// 👎 — what was wrong, the person's words, the earlier answer for
+/// reference — goes to the model with the question, this turn only
+/// (`chat/feedback.rs`). The question stays as it was.
 #[tauri::command]
 pub async fn chat_retry(
     app: AppHandle,
@@ -392,6 +409,7 @@ pub async fn chat_retry(
     index: usize,
     on_stream: crate::chat::stream::PageChannel,
     turn_id: Option<String>,
+    feedback: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     if crate::chat::stream::is_answering(conversation_id) {
         return Err(WAIT_FOR_ANSWER.to_string());
@@ -399,6 +417,8 @@ pub async fn chat_retry(
     if crate::agents::code_chat::folder_of(Some(conversation_id)).is_some() {
         return Err("In a Code chat, Retry sends the message again from a Rewind.".to_string());
     }
+    // (Its 👎's note: read before the answer is set aside.)
+    let note = if feedback == Some(true) { crate::chat::feedback::retry_note_at(conversation_id, index) } else { None };
     let begun = crate::chat::chats::begin_retry(conversation_id, index)?;
     tracing::info!(conversation = conversation_id, index, "Chat: an answer retried (the old one set aside)");
     let question = &begun.question;
@@ -409,7 +429,7 @@ pub async fn chat_retry(
     let turn = send_turn(&app, Some(conversation_id), question.sent_words(), None, Some(question.voice), on_stream, turn_id, image_ids, Vec::new(), None);
     let turn = crate::chat::attachments::with(question.attachments.clone(), turn);
     let send = crate::chat::skills::with(skill_again(&question.text), turn);
-    let send = Box::pin(crate::chat::turn::again(conversation_id, begun.question_at, send));
+    let send = Box::pin(crate::chat::feedback::with_note(note, crate::chat::turn::again(conversation_id, begun.question_at, send)));
     let (out, thought) = crate::chat::think::scoped(false, send).await;
     let out = keep_thought(out, thought);
     if crate::chat::chats::end_branch(conversation_id, begun.at, begun.back_to, true) {

@@ -64,8 +64,9 @@ fn shared_names(m: &crate::chat::chats::ChatMessage) -> Vec<String> {
 
 /// **Message `index` of `c` as the phone shows it**: a question's own words
 /// (an agent's report marker keeps its `kind`, so it's never shown as the
-/// person's bubble: 2026-11-08), an answer's with its id in Chat for ▶; the
-/// names of the files either shared (the files stay on the PC). Pure.
+/// person's bubble: 2026-11-08), an answer's with its id in Chat for ▶ and
+/// its 👍 / 👎; the names of the files either shared (the files stay on the
+/// PC). Pure.
 pub fn message(c: &Conversation, index: usize) -> Option<ThreadMessage> {
     let m = c.messages.get(index)?;
     match m.role.as_str() {
@@ -77,8 +78,17 @@ pub fn message(c: &Conversation, index: usize) -> Option<ThreadMessage> {
             pictures: m.images.len(),
             kind: m.kind.clone(),
             files: shared_names(m),
+            rating: None,
         }),
-        "assistant" => Some(ThreadMessage { role: "assistant", text: capped(m.text.trim()), id: Some(format!("chat:{}:{index}", c.id)), files: shared_names(m), ..Default::default() }),
+        "assistant" => Some(ThreadMessage {
+            role: "assistant",
+            text: capped(m.text.trim()),
+            id: Some(format!("chat:{}:{index}", c.id)),
+            files: shared_names(m),
+            // Its 👍 / 👎 (chat/feedback.rs), as the desktop's thumbs show it.
+            rating: m.feedback.as_ref().map(|f| f.rating.clone()),
+            ..Default::default()
+        }),
         _ => None,
     }
 }
@@ -146,9 +156,15 @@ mod tests {
         assert_eq!(title, "Garden plan");
         assert!(!more);
         assert_eq!(messages.len(), 4, "only questions and answers");
-        assert_eq!(messages[0], ThreadMessage { role: "user", text: "What grows in shade?".into(), id: None, voice: true, pictures: 2, kind: String::new(), files: Vec::new() });
+        assert_eq!(messages[0], ThreadMessage { role: "user", text: "What grows in shade?".into(), id: None, voice: true, pictures: 2, kind: String::new(), files: Vec::new(), rating: None });
         assert_eq!(messages[1].id.as_deref(), Some("chat:7:1"), "its place in Chat");
         assert_eq!(messages[3].id.as_deref(), Some("chat:7:4"));
+        // An answer's 👍 / 👎 goes with it (chat/feedback.rs); none, nothing.
+        c.messages[4].feedback = Some(crate::chat::feedback::Feedback { rating: "bad".into(), reasons: vec!["long".into()], note: String::new(), ts: 1 });
+        let (_, rated, _) = thread(&c);
+        assert_eq!((rated[1].rating.as_deref(), rated[3].rating.as_deref()), (None, Some("bad")));
+        assert_eq!(serde_json::to_value(&rated[3]).unwrap()["rating"], "bad");
+        assert!(serde_json::to_value(&rated[1]).unwrap().get("rating").is_none());
         // The latest only, each message capped.
         c.messages = (0..KEEP_MESSAGES + 6).map(|i| said(if i % 2 == 0 { "user" } else { "assistant" }, &format!("m{i}"))).collect();
         c.messages.push(said("assistant", &"x".repeat(MAX_CHARS + 50)));

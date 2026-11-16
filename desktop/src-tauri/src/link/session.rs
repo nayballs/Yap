@@ -757,6 +757,7 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
             say(tx, empty_thread());
         }
         In::ReadAloud { id } => read_aloud(hub, tx, session, latest, asking, &id),
+        In::Rate { id, rating } => rate(hub, tx, asking, &id, rating),
         In::SetModel { id, provider, model, base_url, file } => {
             // A row of Chat's picker (`ready.picker`), as the desktop picker
             // picks it; else one of `ready.models` by its id (a first page).
@@ -887,6 +888,29 @@ fn read_aloud(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
     };
     tracing::info!(chars = text.chars().count(), "Yap Link: an answer read aloud on the phone");
     speak_on_phone(hub, session, latest, asking, id, text);
+}
+
+/// **👍 / 👎 on an answer** (`rate`, 16 Nov 2026, `chat/feedback.rs`): kept
+/// with it in Chat as the desktop's thumbs keep it — only an answer this
+/// phone was given. A 👎 the PC's card gave reasons to keeps them; `rating`
+/// none takes the mark back. `rated` says what's kept.
+fn rate(hub: &Arc<Hub>, tx: &Tx, asking: &Asking, id: &str, rating: Option<String>) {
+    let at = if hub.was_given(&asking.device, id) { parse_message_id(id) } else { None };
+    let Some((conversation, index)) = at else {
+        say(tx, Out::Error { message: NOT_HERE.into() });
+        return;
+    };
+    let was = crate::chat::chats::answer_feedback(conversation, index).map(|(f, _)| f);
+    let mark = match rating.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        // (The same mark again: as it is, its reasons kept.)
+        Some(r) if was.as_ref().is_some_and(|f| f.rating == r) => was.map(|f| crate::chat::feedback::FeedbackIn { rating: f.rating, reasons: f.reasons, note: f.note }),
+        Some(r) => Some(crate::chat::feedback::FeedbackIn { rating: r.to_string(), ..Default::default() }),
+        None => None,
+    };
+    match crate::chat::feedback::chat_feedback(conversation, index, None, mark) {
+        Ok(kept) => say(tx, Out::Rated { id: id.to_string(), rating: kept.map(|f| f.rating) }),
+        Err(message) => say(tx, Out::Error { message }),
+    }
 }
 
 /// An answer's words in Chat, by its id (`chat:<conversation>:<index>`).

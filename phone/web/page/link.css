@@ -911,6 +911,18 @@ main {
 .footbtn.on {
   background: var(--yap-primary-wash);
 }
+/* 👍 / 👎 (rate): 👎 is 👍 turned over; pressed, filled softly in the primary colour. A shade smaller than Copy's. */
+.footbtn.thumb svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+.footbtn.thumb.down svg {
+  transform: rotate(180deg);
+}
+.footbtn.thumb.on svg path:first-child {
+  fill: currentColor;
+  fill-opacity: 0.22;
+}
 .speaking {
   display: inline-flex;
   align-items: center;
