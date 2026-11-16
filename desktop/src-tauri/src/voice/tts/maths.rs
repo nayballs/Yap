@@ -203,7 +203,38 @@ pub fn in_words_mapped(text: &str, v: Variety) -> (String, Vec<Placed>) {
 /// Characters that make a run of plain text maths ("πd²/4", "≈ 78.5").
 /// Not μ or Ω (units: "5 μm", "10 Ω"), not arrows (prose: "Friday → Monday").
 fn plain_trigger(c: char) -> bool {
-    matches!(c, 'π' | 'θ' | '²' | '³' | '⁴' | '⁵' | '⁶' | '⁷' | '⁸' | '⁹' | '⁰' | '¹' | 'ⁿ' | '×' | '÷' | '±' | '∓' | '≈' | '≤' | '≥' | '≠' | '√' | '∛' | '∞' | '∑' | '∫' | '∂' | '∝' | '≡')
+    vulgar(c).is_some()
+        || matches!(c, 'π' | 'θ' | '²' | '³' | '⁴' | '⁵' | '⁶' | '⁷' | '⁸' | '⁹' | '⁰' | '¹' | 'ⁿ' | '×' | '÷' | '±' | '∓' | '≈' | '≤' | '≥' | '≠' | '√' | '∛' | '∞' | '∑' | '∫' | '∂' | '∝' | '≡')
+}
+
+/// A fraction written as one character ("⅓"): its numerator and denominator.
+fn vulgar(c: char) -> Option<(u8, u8)> {
+    Some(match c {
+        '½' => (1, 2),
+        '⅓' => (1, 3),
+        '⅔' => (2, 3),
+        '¼' => (1, 4),
+        '¾' => (3, 4),
+        '⅕' => (1, 5),
+        '⅖' => (2, 5),
+        '⅗' => (3, 5),
+        '⅘' => (4, 5),
+        '⅙' => (1, 6),
+        '⅚' => (5, 6),
+        '⅐' => (1, 7),
+        '⅛' => (1, 8),
+        '⅜' => (3, 8),
+        '⅝' => (5, 8),
+        '⅞' => (7, 8),
+        '⅑' => (1, 9),
+        '⅒' => (1, 10),
+        _ => return None,
+    })
+}
+
+/// `\frac{n}{d}`'s tokens.
+fn frac_tokens(n: &str, d: &str) -> [Tok; 7] {
+    [Tok::Cmd("frac".into()), Tok::Open, Tok::Num(n.into()), Tok::Close, Tok::Open, Tok::Num(d.into()), Tok::Close]
 }
 
 /// A token's edges: (leading punctuation, the token, trailing punctuation).
@@ -591,6 +622,20 @@ fn tokens(tex: &str, v: Variety) -> Vec<Tok> {
                         _ => break,
                     }
                 }
+                // "4/3" written together: a fraction ("four thirds").
+                let over = chars.get(j) == Some(&'/') && chars.get(j + 1).is_some_and(char::is_ascii_digit) && !point && !s.contains(',');
+                if over {
+                    let mut k = j + 1;
+                    while chars.get(k).is_some_and(char::is_ascii_digit) {
+                        k += 1;
+                    }
+                    if chars.get(k) != Some(&'.') {
+                        let d: String = chars[j + 1..k].iter().collect();
+                        out.extend(frac_tokens(&s, &d));
+                        i = k;
+                        continue;
+                    }
+                }
                 out.push(Tok::Num(s));
                 i = j;
             }
@@ -603,7 +648,10 @@ fn tokens(tex: &str, v: Variety) -> Vec<Tok> {
                 i = j;
             }
             _ => {
-                if let Some(s) = superscript(c) {
+                if let Some((n, d)) = vulgar(c) {
+                    out.extend(frac_tokens(&n.to_string(), &d.to_string()));
+                    i += 1;
+                } else if let Some(s) = superscript(c) {
                     // Superscript digits run together: "¹⁰".
                     let mut run = String::from(s);
                     let mut j = i + 1;
@@ -2188,7 +2236,10 @@ impl Say {
             }
             return;
         }
-        if simple(top) && simple(bottom) {
+        // "a over b"; a product over one term too ("pi d squared over
+        // four": πd²/4 whichever way it's heard).
+        let product = (2..=4).contains(&top.len()) && top.iter().all(|a| simple(std::slice::from_ref(a)));
+        if (simple(top) || product) && simple(bottom) {
             self.list(top, ctx);
             self.w("over");
             self.list(bottom, ctx);
@@ -2551,7 +2602,7 @@ mod tests {
         assert_eq!(uk("x^n + 1"), "x to the n plus one");
         assert_eq!(uk("2^{10}"), "two to the tenth");
         assert_eq!(uk("10^{6}"), "ten to the sixth");
-        assert_eq!(uk("x^{1/2}"), "x to the power of one over two");
+        assert_eq!(uk("x^{1/2}"), "x to the power of one half");
         assert_eq!(uk("x^{\\frac{1}{2}}"), "x to the power of one half");
         assert_eq!(uk("x^\\alpha"), "x to the alpha");
         assert_eq!(uk("A^T"), "A transpose");
@@ -2904,6 +2955,17 @@ mod tests {
         assert_eq!(plain_in_words("so a = 5 and x ≤ 3", v), "so a equals five and x is less than or equal to three");
         assert_eq!(plain_in_words("about √2, or 1.41", v), "about the square root of two, or 1.41");
         assert_eq!(us_plain("x = −3"), "x equals negative three");
+        // The Lab's sphere and cone answers: "4/3" and "⅓" are fractions.
+        assert_eq!(
+            plain_in_words("a volume of 4/3 × π × 27 = 36π, which is about 113.1 cubic centimetres.", v),
+            "a volume of four thirds times pi times twenty-seven equals thirty-six pi, which is about 113.1 cubic centimetres."
+        );
+        assert_eq!(
+            plain_in_words("a volume of ⅓ × π × 9 × 4 = 12π, which is", v),
+            "a volume of one third times pi times nine times four equals twelve pi, which is"
+        );
+        assert_eq!(plain_in_words("add ½ a cup", v), "add one half a cup");
+        assert_eq!(uk("22/7"), "twenty-two over seven");
         // Left alone: prose, a size, a range, code, units, arrows.
         for s in ["Set width = 100 in the file.", "a 3 × 4 grid", "from 10 - 15 people", "and/or", "Friday → Monday", "5 μm and 10 Ω", "x=1 in code", "It's 5 = good"] {
             assert_eq!(plain_in_words(s, v), s);
@@ -2925,7 +2987,9 @@ mod tests {
             ("E = \\frac{1}{2}mv^2", "E equals one half m v squared"),
             ("s = ut + \\tfrac{1}{2}at^2", "s equals u t plus one half a t squared"),
             ("y = mx + c", "y equals m x plus c"),
-            ("F = G\\frac{m_1 m_2}{r^2}", "F equals G the fraction m sub one m sub two, over r squared"),
+            ("F = G\\frac{m_1 m_2}{r^2}", "F equals G m sub one m sub two over r squared"),
+            ("A = \\frac{\\pi d^2}{4}", "A equals pi d squared over four"),
+            ("V = \\frac{\\pi d^3}{6}", "V equals pi d cubed over six"),
             ("\\vec{F} = m\\vec{a}", "vector F equals m vector a"),
             ("T = 2\\pi\\sqrt{\\frac{L}{g}}", "T equals two pi times the square root of L over g"),
             ("\\theta = 45^\\circ", "theta equals forty-five degrees"),
