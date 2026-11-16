@@ -183,6 +183,18 @@ impl Loop<'_> {
     /// made still has sections to write: then it's asked once to outline
     /// it, or to finish it, and the step goes again.
     fn answered(&mut self, content: String) -> Step {
+        // A research turn that answered before any search ("I'll research
+        // this…"): asked once to research first (chat/research.rs).
+        if self.extra.research.is_some() && !self.research_nudged && !self.web.as_deref().is_some_and(crate::web::Turn::looked) {
+            self.research_nudged = true;
+            tracing::info!(provider = self.provider, "Chat: a research turn answered before any search; the model is asked to research first");
+            if let Some(live) = self.live {
+                live.sink.send(crate::chat::stream::Event::Text { text: String::new() });
+            }
+            self.messages.push(json!({ "role": "assistant", "content": content }));
+            self.messages.push(json!({ "role": "user", "content": crate::chat::research::SEARCH_FIRST }));
+            return Step::Again;
+        }
         // A new document's first step, its web tools held back for the
         // outline, answered in words ("I'll look this up first…"):
         // asked once to make the outline; the web stays held for that
@@ -226,7 +238,9 @@ impl Loop<'_> {
     /// call WITHOUT tools to force a plain answer. The answer and the
     /// turn's chips.
     pub(super) async fn answer_now(mut self) -> Result<(String, Vec<String>), String> {
-        self.messages.push(json!({ "role": "user", "content": ANSWER_NOW_NOTE }));
+        // (A research turn's: the report now, chat/research.rs.)
+        let note = if self.extra.research.is_some() { crate::chat::research::WRITE_NOW } else { ANSWER_NOW_NOTE };
+        self.messages.push(json!({ "role": "user", "content": note }));
         let native = self.claude_step();
         // (Claude on the Messages API keeps its tools, told to call none: its
         // earlier calls in the messages need them defined.)
