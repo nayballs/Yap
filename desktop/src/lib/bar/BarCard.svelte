@@ -361,6 +361,12 @@
     align-self: stretch;
     max-height: 210px;
     overflow-y: auto;
+    /* Room under the words for KaTeX's hidden layout boxes, which reach a
+       few pixels below a tall inline formula (\dfrac, a root): without it a
+       one-line answer scrolled by 6 px, a scrollbar beside one formula (Yap
+       Lab, 16 Nov 2026). The margin gives the room back. */
+    padding-bottom: 8px;
+    margin-bottom: -8px;
     color: var(--bar-text);
     font-size: 14px;
     overscroll-behavior: contain;

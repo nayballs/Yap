@@ -316,9 +316,9 @@ export async function runScript(script, { send, state, options = {} }) {
   const lab = state.lab ?? {};
   const needs = script.needs ?? {};
   const missing = [needs.yapCode && !lab.yapCode ? '--yap-code on' : '', needs.web && !lab.web ? '--web on' : '', needs.connectors && !lab.connectors ? '--connectors on' : ''].filter(Boolean);
-  // A model of Yap's own tool loop (`--fake`, or an API model): a plan chat is Claude Code's, which makes no documents.
+  // A model of Yap's own tool loop (`--fake`, or an API model): what only the tool loop runs, never a plan chat (Claude Code's own).
   if (needs.toolLoop && lab.model?.kind === 'plan') {
-    out.failures.push({ step: 0, error: 'This script needs a model of Yap’s own tool loop: start --fake (or --model anthropic:…); a plan chat makes no documents' });
+    out.failures.push({ step: 0, error: 'This script needs a model of Yap’s own tool loop: start --fake (or --model anthropic:…)' });
     return out;
   }
   // The real web and the person's own Claude Code and gh (`--fake` has stand-ins).

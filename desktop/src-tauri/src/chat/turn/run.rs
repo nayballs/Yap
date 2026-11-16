@@ -108,7 +108,7 @@ pub(super) async fn with_tools(
         file_pictures: files.as_ref(),
         // Each tool result within what the request has left.
         room: (sizing.mode != crate::chat::budget::Mode::Messages).then_some(fitted.budget.request),
-        docs: Some(&built.doc_turn),
+        docs: Some(built.doc_turn.as_ref()),
         // Words selected in another app or on a page beside the chat (never
         // one of Yap's own windows): web content.
         // (An element picked on a page is web content too: `pages/pick.rs`.)

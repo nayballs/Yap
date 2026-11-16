@@ -412,6 +412,29 @@ test("the answer's card shows only when Chat isn't in view: beside the app in fr
   await yap.invoke('tts_stop');
 });
 
+// One tall inline formula (\dfrac, a root) on the card: drawn, and no
+// scrollbar beside it (16 Nov 2026, Yap Lab: KaTeX's hidden layout boxes
+// reach a few pixels below the line, so the one-line answer scrolled by 6 px).
+test("an answer that's one tall formula fits its card: drawn, nothing to scroll", async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, { speakReplies: true });
+  await inAnotherApp(yap);
+  fakeLlm.scriptChat([{ content: 'The roots are $x = \\dfrac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$.' }]);
+  await ask(yap, 'what is the fictional formula for the roots');
+  const card = answerCard(yap);
+  await expect(card).toContainText('The roots are', { timeout: 15_000 });
+  const body = card.locator('.body.answer');
+  await expect(body.locator('.katex')).toHaveCount(1);
+  // (Measured once KaTeX's fonts are in: they set the formula's size.)
+  const room = await body.evaluate(async (el) => {
+    await document.fonts.ready;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return { scroll: el.scrollHeight, client: el.clientHeight };
+  });
+  expect(room.scroll, 'the answer scrolls').toBeLessThanOrEqual(room.client);
+  await yap.invoke('tts_stop');
+  await expect(card).toHaveCount(0);
+});
+
 // A spoken answer being written into the open chat has Chat's own ■ too
 // (26 Oct 2026: a looping on-device answer ran on with no Stop in the box).
 test('a spoken answer still being written into Chat has ■ in the message box, and it stops it', async ({ yap, main, fakeLlm }) => {

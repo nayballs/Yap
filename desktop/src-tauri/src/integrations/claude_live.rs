@@ -53,6 +53,11 @@
 //!   take of the screen or a page goes back to the model as MCP image
 //!   content, and what they show to the turn's stream (the screenshots with
 //!   the question, a page's tab, a shot in the steps, a card, a picture).
+//! - **Documents beside the chat** ([`documents`], 16 Nov 2026), for a plain
+//!   plan chat's run ([`RunSpec::documents`]): the tool loop's rich document
+//!   tools and rules — a new one's outline on the person's card first, their
+//!   own edits winning — for the turn the call belongs to; the panel opens
+//!   on it through the turn's stream, and the answer keeps it.
 //! - **The person's connectors** ([`connectors`], Connectors wave 7), for a
 //!   Chat run on their plan offered them ([`RunSpec::connectors`]): every
 //!   connector tool the turn may use that isn't Off, by Yap's names
@@ -75,6 +80,7 @@
 mod approve;
 mod cards;
 pub mod connectors;
+pub mod documents;
 pub mod eyes;
 mod agents;
 mod reads;
@@ -199,11 +205,24 @@ pub struct RunSpec {
     /// (its system prompt, in the fingerprint, says so); each call reads the
     /// project of the turn's conversation. Never an agent's run.
     pub projects: bool,
+    /// **Documents beside the chat** ([`documents`], 16 Nov 2026): the rich
+    /// document tools (`create_document`, `write_section`, `read_document`,
+    /// `edit_document`, `document_history`, `restore_document`) for a plain
+    /// plan chat's session, listed for the whole session (its system prompt,
+    /// in the fingerprint, says so); each call is for the turn it belongs to
+    /// (`turn::Context::docs`). Never a Code chat's or an agent's run.
+    pub documents: bool,
 }
 
 impl RunSpec {
     pub fn new(label: impl Into<String>, tools: Tools) -> RunSpec {
-        RunSpec { label: label.into(), tools, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), connectors: None, reads: false, cards: crate::chat::cards::Cards::default(), projects: false }
+        RunSpec { label: label.into(), tools, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), connectors: None, reads: false, cards: crate::chat::cards::Cards::default(), projects: false, documents: false }
+    }
+
+    /// The same, with the documents beside the chat (`on`).
+    pub fn with_documents(mut self, on: bool) -> RunSpec {
+        self.documents = on;
+        self
     }
 
     /// The same, with a big project's tools (`on`).
@@ -267,6 +286,8 @@ pub struct RunHandle {
     cards: crate::chat::cards::Cards,
     /// A big project's tools ([`RunSpec::projects`], a Chat run's).
     projects: bool,
+    /// The documents beside the chat ([`RunSpec::documents`], a Chat run's).
+    documents: bool,
     /// The chat turn its calls belong to ([`RunHandle::begin_turn`]).
     turn: Arc<turn::Slot>,
 }
@@ -341,6 +362,7 @@ impl RunHandle {
             .filter(|n| *n != approve::NAME)
             .chain(if self.servers { crate::chat::pages::preview::NAMES } else { &[] }.iter().copied())
             .chain(if self.projects { crate::chat::projects::knowledge::NAMES } else { &[] }.iter().copied())
+            .chain(if self.documents { documents::NAMES } else { &[] }.iter().copied())
             .map(str::to_string)
             .chain(self.connectors.iter().cloned())
             .map(|n| format!("mcp__{SERVER}__{n}"))

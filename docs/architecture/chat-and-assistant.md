@@ -5888,8 +5888,46 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   turn's thread, a no is a refusal the model reads; the chip and line are
   wave 4's; a server's answer is outside content (a later write asks, an
   agent is refused): [integrations.md](./integrations.md#connectors-in-plan-chats-wave-7).
-- **What a plan turn doesn't do** (`gates.rs` `on_the_plan`): documents
-  beside the chat, Think's budget (effort covers it). "Remember that…" goes through Yap's own memory
+- **Documents beside the chat** (16 Nov 2026; before, a plan chat made
+  none, so the outline card never showed where most people use Chat): a
+  plain plan chat's session lists the tool loop's rich set —
+  `create_document`, `write_section`, `read_document`, `edit_document`,
+  `document_history`, `restore_document` — over the same endpoint
+  (`claude_live/documents.rs`: [integrations.md](./integrations.md#claude-code-runs-endpoint-integrationsclaude_livers-2026-11-07)),
+  all in `--allowedTools`, named in the prompt with Claude Code's names
+  (`plan.rs` `documents_lines`: what they are, the outline the person sees
+  first, a page cited as a link with the site's name, then
+  `documents::rich::INSTRUCTIONS` mapped). Each call is the tool loop's for
+  its turn (`turn::Context::docs`: the plan turn's own `documents::Turn`,
+  `Built::doc_turn` shared as an `Arc`, so the answer keeps the pill and the
+  chat its document): **a new one's outline first** — the card in the plan
+  turn's thread wherever the tool loop shows it ([The outline before the
+  writing](#the-outline-before-the-writing-2026-11-15): "Show the outline
+  before writing" on, a question card possible, someone watching), the HTTP
+  call held for Go or Edit, the result telling the model what the person
+  made of it; ■ Stop or a newer question makes nothing. The panel opens on
+  it (`Event::Document` through the turn's stream), each section streams in
+  as Claude Code writes its arguments (`claude_plan/map.rs` `ToolArgs`), and
+  the chips fold ("Wrote 3 sections in …"). **The person's words win**: the
+  model's picture follows every call (`documents::after_call`), so an
+  `edit_document` on a block they changed since is refused with the block as
+  it is; the next question's context says what they changed
+  (`documents::context`, as for any model); the panel's saves merge
+  (`merge3`). Only this chat's documents change (`Turn::refuses`), the same
+  title twice a turn is one document (`Turn::made_already`), and the safety
+  rule holds (`tools::refused_after_outside` on the turn's web and
+  connector flags; every plan model is strong, so its documents go on after
+  the web, as on an API key). Claude Code's own `WebSearch` can't be held
+  for the outline as the tool loop's web is (`web::Turn::outline_first`), so
+  a question that makes a new document gets a line in its context
+  (`plan.rs` `new_document_line`: `create_document` now, before any
+  WebSearch). A turn that ends with its new document half written is
+  asked to finish it on the same session first (`plan.rs` `finish_line`,
+  the tool loop's `documents::finish_note`, at most `FINISH_NUDGES` times;
+  each result counted). Never a Code chat's (its changes are an agent's) nor
+  a research's (its report is Yap's, `documents::create_report`).
+- **What a plan turn doesn't do** (`gates.rs` `on_the_plan`): Think's
+  budget (effort covers it). "Remember that…" goes through Yap's own memory
   pass, as for a model without tools (`turn.rs` `remembered`). Yap's own
   summary of a long chat is skipped (`compact.rs`): Claude Code compacts its
   own session.
@@ -5907,7 +5945,7 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   ring not shown: [ai-models.md](./ai-models.md#plan-usage-limits-2026-11-07)).
   A turn's rate-limit events move the ring live; after it, `get_usage` is
   asked on its session once it's free.
-- E2E: `claude-plan*.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
+- E2E: `claude-plan*.spec.js`; documents: `plan-documents.spec.js` (the outline card, then the document beside the chat; an edit; the person's typing kept; Edit on the card) and `cargo test claude_live::documents` ([`docs/e2e-tests.md`](../e2e-tests.md)).
 
 ## Yap Code in Chat (2026-11-07)
 
@@ -6046,7 +6084,10 @@ keeps its screenshots (`Conversation::every_message`: `image_ids`,
 the same versions, the version shown being this one — one a conversation,
 the last switch winning wherever it was made. A phone's ‹ › is `switch_branch`
 (`link/session.rs` `show_version`), its ↻ in a plain chat `begin_retry` with
-the question asked the phone's way under `turn::again`; a change here
+the question asked the phone's way under `turn::again`, its ✎ in a plain
+chat `begin_edit` with the new words asked the phone's way (the question
+named by its place and its time in Chat; kept unless it ended in an error,
+as an edit here is); a change here
 (`chat_branch`, `chat_retry`, an edit's end) tells the phones
 (`link::versions_changed`), and one there tells this view
 (`yap-chat-versions` → `chatState.onVersions`, the chat open read again).
@@ -6429,8 +6470,10 @@ but the outline opened straight into the panel and the writing went on.
   Chat or the Voice Assistant, never across the meetings nor a phone's
   question), any model's tool loop — not only the strong ones' outline-first
   turns. A small context that sheds the card tools (`fit.rs`
-  `Family::Cards`) keeps it: it isn't a tool and takes no room. A plan chat
-  makes no documents (ai-models.md), so it never comes there. Nobody to ask
+  `Family::Cards`) keeps it: it isn't a tool and takes no room. A plan
+  chat's `create_document` comes over Yap's run endpoint and waits on the
+  same card (16 Nov 2026, `claude_live/documents.rs`: [Chat on your Claude
+  plan](#chat-on-your-claude-plan-2026-11-07)). Nobody to ask
   (no page watching, Bypass permissions, an evaluation): made at once.
 - **Its place in the turn** (`tools/agent/dispatch.rs`, `outline::create`):
   `create_document` (the tool loop's `Source::Notes`, the turn's documents
@@ -6497,7 +6540,7 @@ but the outline opened straight into the panel and the writing went on.
   `with_the_outline_off…`); e2e `chat-outline.spec.js` (the card before any
   writing and Go, light and dark; Edit renamed, moved, taken out, added and a
   note, the writing following it; switched off; the Settings switch; asked
-  out loud from another app and "Go ahead, but drop the second part").
+  out loud from another app and "Go ahead, but drop the second part"); on the plan, `plan-documents.spec.js` and `cargo test claude_live::documents`.
 
 ## Styles (2026-11-15)
 
@@ -6594,8 +6637,11 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   tools the deeper ones (`max_uses`, its fetches as many as the reads), a
   provider's own search gets Yap's `read_page` beside it too (the report
   cites only pages read; decided 16 Nov 2026, against "own tools only" for
-  this one mode) —; the gate runs only the web's tools and the notes' reads
-  (`research::allows`; anything else — an app, the clipboard, memory, a
+  this one mode) —; the gate runs only the web's tools, the notes' reads and
+  a big project's two reads (`read_project_file`, `search_project_files`:
+  offered only in a project chat searched in parts — until 16 Nov 2026 they
+  were offered there and then refused, while the plan's session could use
+  them) (`research::allows`; anything else — an app, the clipboard, memory, a
   note, a document, an agent, a page click — refused with
   `research::refusal`); `STEPS` (40) steps; a first step that answers before
   any search is asked once to search first (`SEARCH_FIRST`); past its time

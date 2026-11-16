@@ -751,7 +751,9 @@ li.md-loose > p:last-child {
   margin-bottom: 0 !important;
 }
 /* A task item: its checkbox where the bullet would be, no bullet as well
-   (the notepad's summary and a note's page style their own). */
+   (the notepad's summary and a note's page style their own; a page whose
+   box is placed in the list's indent — RichNote's, DocPanel's — undoes
+   this margin, or the box goes off the page's edge). */
 li.task {
   list-style: none;
   margin-left: -18px;

@@ -11,8 +11,10 @@
 //! of the user message the turn started with), `{{notes}}` (those of the
 //! messages taken in while it worked, joined with "; "), `{{user_pictures}}`
 //! (how many pictures the turn's messages came with: its first and each
-//! one taken in since) and `{{cwd}}`
-//! filled in, JSON-escaped. A line whose
+//! one taken in since), `{{cwd}}` and `{{mcp_id}}` (the `data.id` of the
+//! last `_mcp` call's answer in the tool loop's shape — a document's note
+//! id, for the next call to name; also filled in an `_mcp` line's own
+//! arguments) filled in, JSON-escaped. A line whose
 //! first key starts with `_` is an instruction:
 //!
 //! - `{"_wait_user":true}`: wait for the next user message on stdin (one
@@ -374,7 +376,7 @@ fn json_or_file(v: &str) -> Result<Value, String> {
 /// Play `script`: `input` is stdin's lines (closed: stdin closed). The exit
 /// code.
 pub fn play(script: &str, ctx: &Ctx, input: Receiver<String>, out: &mut dyn Write) -> Result<i32, String> {
-    let mut p = Player { ctx, input, out, queue: VecDeque::new(), user_text: String::new(), notes: Vec::new(), pictures: Vec::new(), in_turn: false, skipping: false, closed: false, hooks: 0, usage: None, checkpoint: None, kept: std::collections::HashSet::new() };
+    let mut p = Player { ctx, input, out, queue: VecDeque::new(), user_text: String::new(), notes: Vec::new(), pictures: Vec::new(), in_turn: false, skipping: false, closed: false, hooks: 0, usage: None, checkpoint: None, kept: std::collections::HashSet::new(), mcp_id: None };
     // `_for`: the kind of run the lines play in (`None`: every kind).
     let kind = ctx.kind();
     let mut part: Option<String> = None;
@@ -398,6 +400,9 @@ pub fn play(script: &str, ctx: &Ctx, input: Receiver<String>, out: &mut dyn Writ
         }
         match control {
             Some((key, arg)) => {
+                // An `_mcp` call may name an earlier one's answer (`{{mcp_id}}`).
+                let filled = (key == "_mcp").then(|| serde_json::from_str::<Value>(&p.fill(line)).ok()).flatten();
+                let arg = filled.as_ref().map_or(arg, |f| &f["_mcp"]);
                 if let Some(code) = p.instruction(key, arg)? {
                     return Ok(code);
                 }
@@ -441,6 +446,8 @@ struct Player<'a> {
     /// on), and the files an edit has kept since it.
     checkpoint: Option<String>,
     kept: std::collections::HashSet<String>,
+    /// The `data.id` of the last `_mcp` call's answer (`{{mcp_id}}`).
+    mcp_id: Option<u64>,
 }
 
 impl Player<'_> {
@@ -454,6 +461,7 @@ impl Player<'_> {
             .replace("{{notes}}", &json_inner(&self.notes.join("; ")))
             .replace("{{user_pictures}}", &self.pictures.len().to_string())
             .replace("{{cwd}}", &json_inner(&self.ctx.cwd))
+            .replace("{{mcp_id}}", &self.mcp_id.map(|n| n.to_string()).unwrap_or_default())
     }
 
     /// A user message echoed back as it's taken in (`--replay-user-messages`).
@@ -584,6 +592,9 @@ impl Player<'_> {
             "_mcp" => {
                 let mut handed_back = false;
                 for line in self.mcp(arg) {
+                    if let Some(id) = answered_id(&line) {
+                        self.mcp_id = Some(id);
+                    }
                     self.print(&line)?;
                     handed_back |= serde_json::from_str::<Value>(&line).is_ok_and(|v| hands_a_tool_result_back(&v));
                 }
@@ -751,6 +762,18 @@ impl Player<'_> {
         };
         json!({"type":"system","subtype":"fake_mcp","server":name,"tool":tool,"response":response,"error":error,"session_id":self.ctx.session_id}).to_string()
     }
+}
+
+/// **The `data.id` an `_mcp` call's answer gave** (its `fake_mcp` line: the
+/// result's first text block, in the tool loop's shape `{"success", "data":
+/// {"id"…}}`), for `{{mcp_id}}`. Pure.
+fn answered_id(line: &str) -> Option<u64> {
+    let v: Value = serde_json::from_str(line).ok()?;
+    if v["subtype"] != "fake_mcp" {
+        return None;
+    }
+    let text = v["response"]["result"]["content"][0]["text"].as_str()?;
+    serde_json::from_str::<Value>(text).ok()?["data"]["id"].as_u64()
 }
 
 /// **An MCP result's content as Claude Code hands it to the model** (2.1.296,
@@ -1324,6 +1347,17 @@ mod tests {
         assert_eq!(call["method"], "tools/call");
         assert_eq!(call["params"]["arguments"]["input"]["command"], "ls");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_mcp_answers_id_is_kept_for_the_next_call_to_name() {
+        let made = json!({ "type": "system", "subtype": "fake_mcp", "response": { "result": { "content": [{ "type": "text", "text": "{\"success\":true,\"data\":{\"id\":12}}" }] } } });
+        assert_eq!(answered_id(&made.to_string()), Some(12));
+        // Not one: a tool result, an answer without an id, a failed call.
+        assert_eq!(answered_id(r#"{"type":"user"}"#), None);
+        let read = json!({ "type": "system", "subtype": "fake_mcp", "response": { "result": { "content": [{ "type": "text", "text": "3 meetings in Yap" }] } } });
+        assert_eq!(answered_id(&read.to_string()), None);
+        assert_eq!(answered_id(&json!({ "type": "system", "subtype": "fake_mcp", "response": null, "error": "no" }).to_string()), None);
     }
 
     #[test]
