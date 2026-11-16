@@ -8,9 +8,10 @@
 // - Skills: "/" in the notepad's Ask box lists the core ones that run on
 //   one meeting (Enter runs one, Tab puts it in the box to add words), the
 //   person's own made in Settings → Skills, a copy of a built-in;
-// - Chat's one-tap prompts (with no calendar: Write my stand-up, List my
-//   open to-dos, What did we decide?) and "/" in Chat and the Meetings
-//   view's Ask bar, asked across the meetings with their own passages;
+// - the Meetings view's one-tap prompts (with no calendar: Write my stand-up,
+//   List my open to-dos, What did we decide?) and "/" in Chat and the
+//   Meetings view's Ask bar, asked across the meetings with their own
+//   passages (Chat's start screen has no prompts since 16 Nov 2026);
 // - a meeting's past chat renamed.
 // The AI is the local fake (support/fake-llm.js), which records every
 // request. No audio device is opened: transcript lines are handed to the
@@ -374,7 +375,7 @@ test("a meeting's past chat renamed from Past chats", async ({ yap, main }) => {
   await pad.keyboard.press('Escape');
 });
 
-test('Chat: one-tap prompts and "/" ask across the meetings with their own passages; so does the Meetings view', async ({
+test('Chat: "/" asks across the meetings with its own passages; so do the Meetings view\'s one-tap prompts', async ({
   yap,
   main,
   fakeLlm,
@@ -383,13 +384,14 @@ test('Chat: one-tap prompts and "/" ask across the meetings with their own passa
   fakeLlm.reply('other', () => '- Draft the finance request, by Wednesday [1].');
   await openView(main, 'Chat');
   await main.getByRole('button', { name: 'New chat' }).first().click();
-  const prompts = main.getByRole('group', { name: 'Try asking' });
-  // No calendar here: Prepare for my next meeting waits for one.
-  await expect(prompts.getByRole('button')).toHaveText(['Write my stand-up', 'List my open to-dos', 'What did we decide?']);
-  await shot(main, '30-chat-prompts');
+  // Chat's start screen has no one-tap prompts since 16 Nov 2026 (the Claude app's new-chat screen): "/" runs a Skill.
+  await expect(main.getByTestId('chat-start')).toBeVisible();
+  await expect(main.getByRole('group', { name: 'Try asking' })).toHaveCount(0);
   const asked = fakeLlm.requests.length;
-  await prompts.getByRole('button', { name: 'List my open to-dos' }).click();
-  await expect(main.locator('.cbubble.user').last()).toContainText('List my open to-dos.');
+  const box = main.getByRole('textbox', { name: 'Message' });
+  await box.fill('/todos');
+  await box.press('Enter');
+  await expect(main.locator('.cbubble.user').last()).toContainText('/todos');
   await expect(main.getByTestId('chat-across-meetings')).toBeVisible();
   const answer = main.locator('.cbubble.assistant').last();
   await expect(answer).toContainText('Draft the finance request');
@@ -407,7 +409,6 @@ test('Chat: one-tap prompts and "/" ask across the meetings with their own passa
   await shot(main, '31-open-to-dos');
 
   // "/" in Chat lists what runs across the meetings.
-  const box = main.getByRole('textbox', { name: 'Message' });
   await box.fill('/');
   const menu = skillMenu(main);
   await expect(menu).toContainText('/standup');

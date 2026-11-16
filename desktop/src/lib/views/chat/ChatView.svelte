@@ -114,6 +114,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { onMount, onDestroy, untrack, tick, setContext } from 'svelte';
+  import { motionMs } from '../../core/appearance.js';
   import { chatRequest } from '../../stores/chatRequest.svelte.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { createChatState } from './chatState.svelte.js';
@@ -179,6 +180,36 @@
     openSettings: (section) => onopensettings?.(section),
     // A merged pull request's Archive in the summary (SummaryTab.svelte): this chat, as the list archives it.
     archive: (id) => archiveChats(chat, [id], true),
+  });
+  // **Plain Chat's start screen** (16 Nov 2026, after the Claude app's new-chat screen): no messages yet, the greeting
+  // (ChatThread) and the box right under it sit in the middle of the thread; the first message sends the box down to
+  // its place at the foot, a gentle move (none with Motion → Reduced). Plain chats read on a column of their own
+  // (`--yap-chat-width`, app.css), the box two rows: words, then + and the mic (Composer). Code chats as ever.
+  const plainChat = $derived(!code.current && !code.onCode && !chat.page);
+  const startScreen = $derived(plainChat && chat.messages.length === 0);
+  let threadSection = $state(null);
+  /** The box's top before the start screen went, for its move down. */
+  let boxFrom = null;
+  $effect.pre(() => {
+    if (startScreen) return;
+    // (Read just before the thread replaces the start screen: the box still in the middle.)
+    untrack(() => {
+      const el = threadSection?.querySelector(':scope > .composer');
+      boxFrom = el && chat.sending ? el.getBoundingClientRect().top : null;
+    });
+  });
+  $effect(() => {
+    if (startScreen) return;
+    untrack(() => {
+      const from = boxFrom;
+      boxFrom = null;
+      const el = threadSection?.querySelector(':scope > .composer');
+      const ms = motionMs(320);
+      if (from == null || !el || !ms || typeof el.animate !== 'function') return;
+      const dy = from - el.getBoundingClientRect().top;
+      if (Math.abs(dy) < 2) return;
+      el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'translateY(0)' }], { duration: ms, easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)' });
+    });
   });
   // **An attached spreadsheet** (chat/attachments/sheet.rs): its chip opens it beside the chat, as Excel draws it.
   setContext(SHEETS, { open: (file) => doc.showSheet({ src: { from: 'attachment', id: file.id }, name: file.name }) });
@@ -731,6 +762,9 @@
     class="thread"
     class:withbtn={!room.listShown}
     class:incognito={chat.incognito}
+    class:plain={plainChat}
+    class:start={startScreen}
+    bind:this={threadSection}
     inert={cover || undefined}
     onpointerdown={room.listFloats ? () => layout.dismissFloating() : undefined}
   >
@@ -774,6 +808,10 @@
     {:else}
       <ChatThread {chat} {code} {onopensettings} />
       <Composer {chat} {code} {onopensettings} {onopenusage} />
+      {#if startScreen}
+        <!-- The start screen's lower part: the greeting and the box sit a little above the middle. -->
+        <div class="startgap chatstart" aria-hidden="true"></div>
+      {/if}
       {#if side.open}
         <SideQuestion {side} busy={sideBusy} code={!!code.current} onkept={sideKept} onclose={() => tick().then(() => chat.inputEl?.focus())} />
       {/if}
@@ -1006,8 +1044,19 @@
   .thread.withbtn {
     --thread-clear: 26px;
   }
-  .thread.withbtn > :global(:not(.composer):not(.showchats):not(.threadbox):not(.scopeline)) {
+  .thread.withbtn > :global(:not(.composer):not(.showchats):not(.threadbox):not(.scopeline):not(.chatstart)) {
     margin-left: 26px;
+  }
+  /* A plain chat's column (app.css --yap-chat-width): the messages, the box and the lines over them, the Claude
+     app's proportions. A Code chat and the projects' pages keep --yap-thread-width. */
+  .thread.plain {
+    --yap-thread-width: var(--yap-chat-width);
+  }
+  /* The start screen: the room above the box (ChatThread's greeting at its foot) and below it, shared so the box
+     sits a little above the middle, as the Claude app's. */
+  .startgap {
+    flex: 1.25 1 0;
+    min-height: 0;
   }
   /* An incognito chat (chat/incognito.rs): a ring round the whole thread,
      as the Claude app's border. */

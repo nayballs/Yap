@@ -5,7 +5,7 @@
 // - Settings: two pages that each say what they do, with links between
 //   them; Language Models' tabs named alike; General's way to the shortcuts.
 // - The assistant shortcut: set, refused when it clashes with another
-//   shortcut, cleared; the gentle "Set an assistant shortcut" in Chat.
+//   shortcut, cleared; named in the tooltip of Chat's mic.
 // - A question asked with it (staged with the debug-only
 //   `e2e_assistant_ask`: the shortcut's own steps, a transcript in the mic's
 //   place): the bar's capsule ("Ask Yap…", "Thinking…", "Speaking…" with ■),
@@ -211,12 +211,13 @@ test('Commands and the Voice Assistant: two pages that say what they do, with li
 });
 
 test('the assistant shortcut: set in Settings, never one that clashes, and Chat points to it', async ({ yap, main, shot }) => {
-  // None set: an empty chat says how to ask out loud.
+  // None set: the mic in Chat's box just dictates (its tooltip names the shortcut once there is one: 16 Nov 2026,
+  // where the empty chat's "Or press … in any app" line was).
   await freshChat(main);
-  // The shortcut's line, not Ask across meetings' (Chat shows both, 25 Oct 2026).
-  await expect(main.locator('.asknote', { hasText: 'assistant shortcut' })).toContainText('Set an assistant shortcut to ask out loud from any app');
-  await shot(main, '13-chat-set-an-assistant-shortcut');
-  await main.getByRole('button', { name: 'Set an assistant shortcut' }).click();
+  const mic = main.getByRole('button', { name: 'Dictate your message' });
+  await expect(mic).toHaveAttribute('title', 'Dictate your message');
+  await shot(main, '13-chat-no-assistant-shortcut');
+  await openSettings(main, 'Voice Assistant');
   const dialog = settingsDialog(main);
   await expect(dialog.getByRole('heading', { level: 1, name: 'Voice Assistant' })).toBeVisible();
   const group = dialog.getByRole('group', { name: 'Assistant shortcut' });
@@ -247,8 +248,8 @@ test('the assistant shortcut: set in Settings, never one that clashes, and Chat 
   await main.keyboard.press('Escape');
   expect(yap.readJson('config.json').editHotkey).toBe('');
   await closeSettings(main);
-  // Chat names it.
-  await expect(main.locator('.asknote', { hasText: 'to ask out loud' })).toContainText('Or press F23 in any app to ask out loud');
+  // Chat names it, in the mic's tooltip.
+  await expect(mic).toHaveAttribute('title', 'Dictate. Or press F23 in any app to ask out loud');
 
   // Cleared again.
   await openSettings(main, 'Voice Assistant');

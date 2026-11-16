@@ -402,6 +402,11 @@ body {
      ChatGPT's 48rem (768 px), growing with the Text size so a line keeps
      its length. A narrower thread is its own width. */
   --yap-thread-width: calc(768px * var(--yap-reading-scale));
+  /* A plain chat's column (16 Nov 2026, the Claude app's proportions measured
+     from its new-chat screen: its box 3.7 times as wide as "How can I help you
+     today?" in the box's own type): the messages and the box. Code chats keep
+     --yap-thread-width. */
+  --yap-chat-width: calc(600px * var(--yap-reading-scale));
 }
 :root[data-reading-font='sans'] {
   /* Geist (Vercel; OFL) */

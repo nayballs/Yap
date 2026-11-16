@@ -547,8 +547,11 @@ for (const where of ['plain', 'code']) {
     const threadMoves = changes('thread');
     expect(threadMoves.map((f) => f.t), 'the thread changed once, as the panel opened').toEqual([opened.t]);
     expect(opened.thread[1]).toBe((await chatWidth(main)) - 520);
-    // The composer as tall throughout (a plain chat turning into a Code chat too).
-    expect(new Set(frames.map((f) => f.composer[2])).size, 'the composer’s height').toBe(1);
+    // The composer as tall throughout — a plain chat turning into a Code chat takes the Code chat's one-row box
+    // (16 Nov 2026: a plain chat's is two rows, the Claude app's), in one step, never through heights between.
+    const heights = frames.map((f) => f.composer[2]);
+    const steps = heights.filter((h, i) => i > 0 && h !== heights[i - 1]).length;
+    expect(steps, `the composer’s height: ${[...new Set(heights)].join(' → ')}`).toBeLessThanOrEqual(where === 'code' ? 0 : 1);
     // The thread kept its newest line in view.
     expect(frames.at(-1).scrolls).toBe(true);
     expect(frames.at(-1).atBottom).toBe(true);

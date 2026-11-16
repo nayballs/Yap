@@ -1229,6 +1229,16 @@ async function setThings(a) {
     const run = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     done.git = makeGitRepo(workspace.path, String(a.git), { run });
   }
+  // The start screen's clock (ChatThread.svelte, 16 Nov 2026): a time of the lab's own for Chat's greeting — "23:40"
+  // (today), "2026-11-18T23:40", or "now" (the real time again) — so a late night can be shot. Nothing else reads it.
+  if (a.clock !== undefined) {
+    const ms = clockAt(a.clock);
+    await main().evaluate((v) => {
+      window.__yapTestClock = v;
+      window.dispatchEvent(new Event('yap-test-clock'));
+    }, ms);
+    done.clock = ms == null ? 'now' : new Date(ms).toString();
+  }
   const files = a.files ?? (a.file ? [a.file] : []);
   if (files.length) {
     if (!workspace) throw new Error('No workspace to seed files in: start the lab with --yap-code on');
@@ -1236,8 +1246,23 @@ async function setThings(a) {
     if (!path.resolve(workspace.path).startsWith(path.resolve(LAB) + path.sep)) throw new Error(`set only seeds the lab's scratch workspace, not ${workspace.path}`);
     done.files = files.map((f) => seedFile(workspace.path, f));
   }
-  if (!Object.keys(done).length) throw new Error('Nothing to set: --web, --yap-code, --connectors, --bypass, --gh, --git, config or files');
+  if (!Object.keys(done).length) throw new Error('Nothing to set: --web, --yap-code, --connectors, --bypass, --gh, --git, --clock, config or files');
   return done;
+}
+
+/** `set --clock`'s time: "now" (or nothing) → null; "HH:MM" → today then; else any date `Date` reads. */
+function clockAt(v) {
+  const s = String(v ?? '').trim();
+  if (!s || s === 'now' || s === 'true') return null;
+  const hm = /^(\d{1,2}):(\d{2})$/.exec(s);
+  if (hm) {
+    const d = new Date();
+    d.setHours(Number(hm[1]), Number(hm[2]), 0, 0);
+    return d.getTime();
+  }
+  const ms = Date.parse(s);
+  if (!Number.isFinite(ms)) throw new Error(`set --clock: "${s}" isn't a time ("23:40", "2026-11-18T23:40" or "now")`);
+  return ms;
 }
 
 async function state() {

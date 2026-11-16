@@ -245,6 +245,14 @@
     onopensettings?.('connectors');
   }
 
+  // **A plain chat** (16 Nov 2026, the Claude app's box): two rows — the words, then + on the left and the mic on the
+  // right —, the start screen's "How can I help you today?", and the mic's tooltip names the Voice Assistant's
+  // shortcut (where the empty chat's "Or press 9 in any app…" line was). A Code chat's box as ever.
+  const plain = $derived(!code?.current && !code?.onCode);
+  const micTitle = $derived(
+    plain && chat.assistantHotkey ? `Dictate. Or press ${formatHotkeySpec(chat.assistantHotkey)} in any app to ask out loud` : 'Dictate your message'
+  );
+
   // The mic: a dictation into the chat box (chat_dictate: the text comes
   // back as `yap-chat-dictation`, at the caret). Again: stop and send it in.
   function micChat() {
@@ -266,6 +274,7 @@
   class:dropping={chat.dragging}
   class:code-chat={!!code?.current}
   class:code-room={!!code?.enabled}
+  class:plain
   style:--thread-gutter="{chat.threadGutter}px"
   use:keepClear
   data-model-picker-above
@@ -567,7 +576,11 @@
             ? queueHint
             : code?.current
             ? `Ask for a change in ${code.current.name}, or anything else`
-            : 'Ask about your notes, or type / for Skills'}
+            : code?.onCode
+            ? 'Ask about your notes, or type / for Skills'
+            : chat.messages.length
+            ? 'Reply…'
+            : 'How can I help you today?'}
       aria-label="Message"
       aria-busy={chat.sending}
       aria-autocomplete="list"
@@ -596,7 +609,7 @@
          in, so you can type ahead. -->
     <!-- Think it through (chat/think.rs): this question only. -->
     <ThinkButton {chat} />
-    <button class="micbtn" title="Dictate your message" aria-label="Dictate your message" onclick={micChat}>
+    <button class="micbtn" title={micTitle} aria-label="Dictate your message" onclick={micChat}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1" /><path d="M12 18v4" /></svg>
     </button>
     {#if chat.sending || chat.assistantAnswering}
@@ -915,6 +928,23 @@
   /* (The buttons, 30 px, a pixel up from the foot: centred on one line, as before.) */
   .inputbar > :global(:not(.msginput):not(textarea)) {
     margin-bottom: 1px;
+  }
+  /* **A plain chat's box** (16 Nov 2026, the Claude app's proportions): the words on top, room for a second line,
+     then a row with + on the left and Think, the mic and Send on the right. */
+  .composer.plain > .inputbar {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    padding: 8px 8px 7px;
+    border-radius: 16px;
+  }
+  .composer.plain .msginput {
+    order: -1;
+    flex: 1 0 100%;
+    min-height: 46px;
+    padding: 5px 6px;
+  }
+  .composer.plain .pluswrap {
+    margin-right: auto;
   }
   .msginput:focus {
     outline: none;

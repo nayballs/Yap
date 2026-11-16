@@ -2,10 +2,10 @@
   // Chat's thread: the conversation's messages (ChatMessage), and at its
   // foot while an answer comes what the turn is doing now and for how long
   // (ActivityLine: "Searching the web · … · 1m 59s"; a model on this PC slow
-  // to start says why), or — no messages yet — what Chat is for, what it
-  // needs if no AI model is set up, and the Voice Assistant's shortcut (or
-  // how to set one). An empty Code chat greets you as the Code side instead
-  // (CodeEmpty.svelte).
+  // to start says why), or — no messages yet — the start screen: Yap's mark
+  // and a greeting by the time of day (core/greeting.js), the box right under
+  // it in the middle (ChatView), and what Chat needs if no AI model is set up.
+  // An empty Code chat greets you as the Code side instead (CodeEmpty.svelte).
   //
   // It keeps its newest line in view while it grows (core/stickToBottom.js,
   // 2026-11-07): pinned at the bottom while you're there — streamed text,
@@ -16,14 +16,12 @@
   import { fade } from 'svelte/transition';
   import { motionMs } from '../../core/appearance.js';
   import { followBottom } from '../../core/stickToBottom.js';
-  import { formatHotkeySpec } from '../../core/hotkeys.js';
   import { messageItems } from '../../core/itemMenus.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { STILL_WORKING_S } from './chatState.svelte.js';
   import { SUMMARY_DIVIDER } from './chatBudget.js';
-  import { skills } from '../../stores/skills.svelte.js';
-  import { calendar } from '../../stores/calendar.svelte.js';
-  import { promptChips } from '../../core/skills.js';
+  import { greetingFor } from '../../core/greeting.js';
+  import yapMark from '../../../assets/yap-logo.svg';
   import ChatMessage from './ChatMessage.svelte';
   import ActivityLine from './ActivityLine.svelte';
   import CodeEmpty from './CodeEmpty.svelte';
@@ -129,10 +127,23 @@
   /** A step's picture, large: paged across its turn's (‹ 2 of 4 ›). */
   const openPaged = (list, at) => (chat.viewing = { ...list[at], list, at });
 
-  // The one-tap prompts (chat/skills.rs: the first three of Prepare for my
-  // next meeting — with a calendar —, Write my stand-up, List my open
-  // to-dos, What did we decide?), each asked across the meetings.
-  const prompts = $derived(promptChips(skills.list, { calendar: calendar.connections.length > 0 }));
+  // **The start screen's greeting** (core/greeting.js): "Afternoon, Sam" by the local time, About you's name, the
+  // band followed while it shows. The e2e suite and Yap Lab put their own time in the clock's place
+  // (`window.__yapTestClock`, ms, then a `yap-test-clock` event; null: the real time again), to shoot a late night.
+  let clockNow = $state(Date.now());
+  let testClock = $state(typeof window !== 'undefined' && Number.isFinite(window.__yapTestClock) ? window.__yapTestClock : null);
+  $effect(() => {
+    const onTest = () => (testClock = Number.isFinite(window.__yapTestClock) ? window.__yapTestClock : null);
+    window.addEventListener('yap-test-clock', onTest);
+    return () => window.removeEventListener('yap-test-clock', onTest);
+  });
+  $effect(() => {
+    if (chat.messages.length) return;
+    clockNow = Date.now();
+    const t = setInterval(() => (clockNow = Date.now()), 60_000);
+    return () => clearInterval(t);
+  });
+  const hello = $derived(greetingFor(chat.aboutName, new Date(testClock ?? clockNow)));
 
   // The answer's words have begun (a slow start's hint goes).
   const answering = $derived(chat.messages.some((m) => m.streaming && m.text));
@@ -334,52 +345,34 @@
 {#if chat.messages.length === 0 && (code?.current || code?.onCode)}
   <!-- An empty Code chat: the Code side's own greeting. -->
   <CodeEmpty {chat} {code} {onopensettings} />
-{:else if chat.messages.length === 0 && chat.incognito}
-  <!-- A new chat with its ghost on (chat/incognito.rs): what that means. -->
-  <div class="empty" data-testid="chat-incognito-empty">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11a7 7 0 0 1 14 0v9l-2.33-1.5L14.33 20 12 18.5 9.67 20l-2.34-1.5z" /><circle cx="9.5" cy="11" r="1" fill="currentColor" stroke="none" /><circle cx="14.5" cy="11" r="1" fill="currentColor" stroke="none" /></svg>
-    <p class="across">Incognito chat</p>
-    <p class="asknote">It isn't saved to your chats, and memory isn't used or updated. It's gone when you leave it.</p>
-  </div>
 {:else if chat.messages.length === 0}
-  <div class="empty">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8M8 13h5" /></svg>
-    {#if chat.scope === 'meetings'}
-      <!-- Asked across the meetings (search/ask.rs): found on this PC, cited. -->
-      <p class="across">Ask across your meetings and notes</p>
-      <p class="asknote">Answers come from what was said and written, and cite the moment: click a number to open it.</p>
-    {:else}
-      <p>Ask about your notes, transcripts, or anything else</p>
-      <p class="asknote">
-        <button class="setkey" onclick={() => chat.askAcrossMeetings()}>Ask across your meetings</button>
-        for answers that cite the moment they come from.
-      </p>
-    {/if}
-    {#if prompts.length}
-      <!-- One-tap prompts: the question filled in and sent, across the meetings. -->
-      <div class="prompts" role="group" aria-label="Try asking">
-        {#each prompts as p (p.id)}
-          <button class="prompt" disabled={chat.sending} onclick={() => chat.runPrompt(p)}>{p.chip}</button>
-        {/each}
-      </div>
-      <p class="asknote">Or type / for Skills, like /standup or /decisions.</p>
+  <!-- **The start screen** (16 Nov 2026, after the Claude app's new-chat screen): Yap's mark and a greeting by the
+       time of day in the display serif, centred, the message box right under it in the middle of the thread
+       (ChatView's `.thread.start`); the first message sends the box down to its place at the foot. A new chat with
+       its ghost on (chat/incognito.rs) says so in the greeting's place. -->
+  <div class="hello chatstart" data-testid="chat-start" data-band={chat.incognito ? 'incognito' : hello.band}>
+    <h1 class="greet">
+      {#if chat.incognito}
+        <svg class="ghostmark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11a7 7 0 0 1 14 0v9l-2.33-1.5L14.33 20 12 18.5 9.67 20l-2.34-1.5z" /><circle cx="9.5" cy="11" r="1" fill="currentColor" stroke="none" /><circle cx="14.5" cy="11" r="1" fill="currentColor" stroke="none" /></svg>
+        <span class="greettext" data-testid="chat-greeting">Incognito chat</span>
+      {:else}
+        <img class="mark" src={yapMark} alt="" aria-hidden="true" draggable="false" />
+        <span class="greettext" class:waiting={chat.aboutName == null} data-testid="chat-greeting">{hello.text}</span>
+      {/if}
+    </h1>
+    {#if chat.incognito}
+      <p class="hellonote" data-testid="chat-incognito-empty">It isn't saved to your chats, and memory isn't used or updated. It's gone when you leave it.</p>
+    {:else if chat.scope === 'meetings'}
+      <!-- Asked across the meetings (search/ask.rs; the Meetings view's Ask bar, a Skill): found on this PC, cited. -->
+      <p class="hellonote" data-testid="chat-start-meetings">Asking across your meetings and notes: answers cite the moment they come from.</p>
     {/if}
     {#if !chat.chatReady}
       <!-- Before a first question fails: what Chat needs. -->
-      <p class="asknote needsai">
+      <p class="hellonote needsai">
         Chat needs an AI model: a free key from a cloud provider, or one that runs on this PC.
         <button class="setkey" onclick={() => onopensettings?.('cleanup#chat')}>Set up an AI model</button>
       </p>
     {/if}
-    <!-- The Voice Assistant: the same chat, asked out loud from any app. -->
-    <p class="asknote">
-      {#if chat.assistantHotkey}
-        Or press <kbd>{formatHotkeySpec(chat.assistantHotkey)}</kbd> in any app to ask out loud and hear the answer.
-      {:else}
-        <button class="setkey" onclick={() => onopensettings?.('voice#assistant-shortcut')}>Set an assistant shortcut</button>
-        to ask out loud from any app and hear the answer.
-      {/if}
-    </p>
   </div>
 {:else}
   {#if chat.incognito}
@@ -743,77 +736,65 @@
     outline-offset: 2px;
     border-radius: 4px;
   }
-  .empty {
-    flex: 1 1 auto;
+  /* **The start screen** (the Claude app's new-chat screen): the mark and the greeting centred at the foot of the
+     thread's upper part, the box right under them (ChatView's `.thread.start` shares the room out). */
+  .hello {
+    flex: 1 1 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 10px;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0 8px 22px;
     text-align: center;
-    color: var(--yap-muted-55);
   }
-  .empty svg {
-    width: 36px;
-    height: 36px;
-    opacity: 0.7;
-  }
-  .empty p {
+  .greet {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4em;
+    max-width: 100%;
     margin: 0;
-    max-width: 220px;
-    font-size: 12px;
-    line-height: 1.6;
+    font-family: var(--yap-font-display);
+    font-size: calc(34px * var(--yap-reading-step));
+    font-weight: 400;
+    line-height: 1.15;
+    letter-spacing: -0.005em;
+    color: var(--yap-fg);
   }
-  /* The Voice Assistant's line: a gentle way to its shortcut. */
-  .empty .asknote {
-    max-width: 280px;
-    margin-top: 6px;
+  .greettext {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+    transition: opacity 0.14s;
+  }
+  /* (The name not read yet: the line's room kept, its words a moment later.) */
+  .greettext.waiting {
+    opacity: 0;
+  }
+  /* Yap's mark, a touch taller than the greeting's capitals. */
+  .greet .mark {
+    flex: 0 0 auto;
+    width: 0.92em;
+    height: 0.92em;
+    user-select: none;
+  }
+  .greet .ghostmark {
+    flex: 0 0 auto;
+    width: 0.9em;
+    height: 0.9em;
+    color: var(--yap-fg);
+  }
+  .hellonote {
+    max-width: 420px;
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.55;
     color: var(--yap-muted);
   }
-  .empty .asknote.needsai {
-    max-width: 320px;
+  .hellonote.needsai {
     color: var(--yap-fg-80);
-  }
-  .empty .across {
-    max-width: 280px;
-    color: var(--yap-fg);
-    font-weight: 600;
-  }
-  /* The one-tap prompts on an empty chat. */
-  .prompts {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 6px;
-    max-width: 420px;
-    margin-top: 6px;
-  }
-  .prompt {
-    height: 28px;
-    padding: 0 12px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-full);
-    background: var(--yap-s1);
-    color: var(--yap-fg);
-    font: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition:
-      background 0.15s,
-      border-color 0.15s;
-  }
-  .prompt:hover:not(:disabled) {
-    background: var(--yap-s2);
-    border-color: var(--yap-border-hover);
-  }
-  .prompt:disabled {
-    opacity: 0.55;
-    cursor: default;
-  }
-  .prompt:focus-visible {
-    outline: 2px solid var(--yap-focus-ring);
-    outline-offset: 2px;
   }
   /* A conversation asked across the meetings says so over its thread. */
   .scopeline {
@@ -856,16 +837,6 @@
   }
   .ghostline svg {
     color: var(--yap-fg);
-  }
-  .asknote kbd {
-    padding: 1px 6px;
-    border: 1px solid var(--yap-key-border);
-    border-radius: var(--yap-r-sm);
-    background: var(--yap-key-bg);
-    color: var(--yap-key-fg);
-    font: inherit;
-    font-size: 11px;
-    font-weight: 650;
   }
   .setkey {
     padding: 0;
