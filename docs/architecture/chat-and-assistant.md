@@ -4805,8 +4805,7 @@ the page: `views/chat/SheetTab.svelte` + `sheetView.js`.
   Copy path and ↻ beside it.
 - **Not done** (follow-ups): editing formats and sheets (see Editing a sheet); a Chat tool that keeps a spreadsheet as it keeps pages; a picture of the sheet as shown for a Code
   chat's Claude to check its own layout; conditional formatting, charts,
-  pictures and comments aren't drawn; rows with wrapped text aren't grown
-  to fit (their height is the file's); General numbers aren't shortened to
+  pictures and comments aren't drawn; General numbers aren't shortened to
   fit as Excel shortens them (they show `####`); a project's spreadsheet
   doesn't open in the view from the project's page.
 - **Privacy**: nothing logged but counts and kinds.
@@ -4887,7 +4886,13 @@ commands); the page: `SheetTab.svelte`.
   `alignment.wrap_text`; Undo takes both back at once). Saved as an `<xf>`
   copied from the cell's own with `<alignment wrapText="1">`
   (`save::xf_with_wrap`); the row's height isn't written (Excel fits a row
-  that wraps itself).
+  that wraps itself). **Rows fitted as Excel fits them** (`xlsx::fit_wrapped_rows`,
+  in every read, not only an edit's): a row with no height of its own is as
+  tall as the most lines a wrapped cell in it takes at its column's width
+  (`edit::wrapped_lines`: the lines typed, words laid in at about 5.6 px a
+  character of an 11-point font, erring tall), 15 points a line; a merge's
+  cell isn't fitted (nor is it in Excel). The row being typed in grows at
+  once (IronCalc's own fit is too short for two lines of Calibri).
 - **Rows and columns** (16 Nov 2026, `chat/sheets/shift.rs`,
   `shift/parts.rs`, `edit::Editor::lines`, `sheet_lines`): a row number's
   or a column letter's right-click menu — Insert row above / below, Insert

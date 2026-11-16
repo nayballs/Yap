@@ -505,9 +505,49 @@ pub(super) fn book_of(model: &Model, kept: &Kept) -> Book {
             }
             sheet.row_looks.push(RowLook { r: row.r as u32, px, hidden: row.hidden, style });
         }
+        fit_wrapped_rows(&mut sheet, &book, ws.rows.iter().filter(|r| r.custom_height).map(|r| r.r as u32).collect());
         book.sheets.push(sheet);
     }
     book
+}
+
+/// **Rows fitted to their wrapped text, as Excel fits them** (16 Nov 2026):
+/// a row with no height of its own (`custom`: the rows that have one) is as
+/// tall as the most lines a wrapped cell in it takes at its column's width
+/// (`edit::wrapped_lines`), 15 points a line of an 11-point font — a line
+/// break typed (Alt+Enter), or a long text. A merge's cell isn't (Excel
+/// doesn't fit those either).
+fn fit_wrapped_rows(sheet: &mut Sheet, book: &Book, custom: std::collections::HashSet<u32>) {
+    let col_px = |c: u32| sheet.cols.iter().find(|k| k.from <= c && c <= k.to).and_then(|k| k.px).unwrap_or(super::COLUMN_PX) as f64;
+    let merged = |r: u32, c: u32| sheet.merges.iter().any(|m| m.row == r && m.col == c);
+    let mut fits: Vec<(u32, f32)> = Vec::new();
+    for row in &sheet.rows {
+        if custom.contains(&row.r) {
+            continue;
+        }
+        let mut need = 0.0f64;
+        for c in &row.cells {
+            let Some(st) = book.styles.get(c.style as usize).filter(|st| st.wrap) else { continue };
+            if c.text.is_empty() || merged(row.r, c.col) {
+                continue;
+            }
+            let size = st.size.map(|s| s as f64 / 10.0).unwrap_or(book.size as f64).max(1.0);
+            let lines = super::edit::wrapped_lines(&c.text, col_px(c.col), size);
+            if lines > 1 {
+                need = need.max(height_px(lines as f64 * 15.0 * size / 11.0) as f64);
+            }
+        }
+        if need > 0.0 {
+            fits.push((row.r, need as f32));
+        }
+    }
+    for (r, px) in fits {
+        match sheet.row_looks.iter_mut().find(|l| l.r == r) {
+            Some(look) => look.px = Some(look.px.unwrap_or(0.0).max(px)),
+            None => sheet.row_looks.push(RowLook { r, px: Some(px), hidden: false, style: None }),
+        }
+    }
+    sheet.row_looks.sort_by_key(|l| l.r);
 }
 
 /// A column width as Excel keeps it (characters of its widest digit, with

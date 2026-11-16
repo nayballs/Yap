@@ -611,6 +611,11 @@ fn alt_enter_s_line_break_wraps_the_cell_and_is_saved_with_it() {
     assert!(sheet1.contains("<c r=\"A9\" s=\"9\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Order by Friday\nPlot 7 first</t></is></c>"), "{sheet1}");
     let again = read_now(Format::Xlsx, &written.bytes).unwrap();
     assert!(again.styles[cell(&again.sheets[0], 9, 1).style as usize].wrap);
+    // Its row as tall as its two lines: as edited, and read again from the file (a row Excel fits, no height of its own).
+    let px = |b: &super::super::Book| b.sheets[0].row_looks.iter().find(|l| l.r == 9).and_then(|l| l.px);
+    assert_eq!(px(&book), Some(40.0));
+    assert_eq!(px(&again), Some(40.0));
+    assert!(!part(&written.bytes, "xl/worksheets/sheet1.xml").contains(r#"<row r="9" ht"#), "no height written: Excel fits it");
     // Undo: the text and its wrap together.
     assert_eq!(e.undo(), Some((0, 9, 1)));
     assert!(!e.dirty());
