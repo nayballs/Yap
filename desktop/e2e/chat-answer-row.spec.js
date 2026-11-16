@@ -135,7 +135,7 @@ test('its size is the Claude app’s, measured beside it on one screen: 24 px sq
         const t = row.querySelector('time.when');
         return { text, square: b.height, wide: b.width, icon: icon.width, when: t ? parseFloat(getComputedStyle(t).fontSize) : null };
       });
-  // At the default reading size: the Claude app's own (32.webp: Yap and the app side by side, one Windows scale).
+  // At the default reading size: the Claude app's own (a screenshot of Yap and the app side by side, one Windows scale).
   let m = await measure('chat-answer-actions');
   expect(m).toMatchObject({ text: 12.5, square: 24, wide: 24, icon: 16.5, when: 13.5 });
   // The person's message row: the same squares (Copy, Edit), always shown under the latest message.

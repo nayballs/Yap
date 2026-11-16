@@ -637,7 +637,7 @@
     animation: none;
   }
   /* **The rows under a message** (16 Nov 2026): the Claude app's own sizes, measured with Yap beside it on one screen
-     at one Windows scale (32.webp; the first pass, sized to a share of Yap's text, came out about 0.75 of the app's):
+     at one Windows scale (the first pass, sized to a share of Yap's text, came out about 0.75 of the app's):
      24 px squares side by side, glyphs about 12 px (a 16.5 px icon), the time 13.5 px. Those at Yap's default reading
      size, and in step with Settings → Appearance's reading size from there (--row). */
   .uacts,
