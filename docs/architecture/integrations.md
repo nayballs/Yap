@@ -1002,6 +1002,32 @@ no Local API (the bridge can be off), and it reaches the live UI.
   `RunSpec::reads`) lists the box and chapters as well
   (`Cards::for_code_session`, `server.rs` keeps them for it); never an
   agent Chat sent out. [chat-and-assistant.md](./chat-and-assistant.md#cards-in-the-thread-a-question-the-next-step-box-chapters-2026-11-15).
+- **Documents beside the chat from a plan chat** (`documents.rs`, 16 Nov
+  2026): for a Chat run registered with `RunSpec::documents`
+  (`with_documents`: a plain plan chat's, never a Code chat's or an agent's
+  run, `server.rs` drops it for one), the tool loop's rich set —
+  `create_document`, `write_section`, `read_document`, `edit_document`,
+  `document_history`, `restore_document` — with its schemas, after Yap's own tools (before a
+  connector's), in `--allowedTools` and named in the prompt (`plan.rs`
+  `documents_lines`) and in the server's `instructions`. Each call runs the
+  tool loop's code (`tools::notes::execute`, `documents.rs`) for the turn it
+  belongs to (`turn::Context::docs`: the plan turn's own `documents::Turn`,
+  so the answer keeps the pill; `None` in a research turn: refused): the
+  safety rule as the gate has it (`refused_after_outside` with the turn's
+  web and connector flags, a locked call waiting for its own tool call in
+  the turn's events first; every plan model is strong, so its documents go
+  on after the web), the evaluation's intercept, `Turn::made_already` and
+  `Turn::refuses`, a passage's "[2]" named for its meeting; then **a new
+  document's outline** on the person's card in the plan turn's thread, the
+  HTTP call held for Go or Edit (`cards/outline.rs` `create`, wherever the
+  turn's `cards.outline` is on and someone watches; the turn ending makes
+  nothing); the model's picture of it after every call
+  (`documents::after_call`, so `edit_document` refuses a block the person
+  changed); `Event::Document` on the turn's stream (the panel opens), and
+  `yap-note-changed` to every window. A section streams into the panel from
+  Claude Code's own `input_json_delta` (`claude_plan/map.rs` → `ToolArgs`
+  → `stream::Step`), and the sections' chips fold (`documents::push_chip`).
+  [chat-and-assistant.md](./chat-and-assistant.md#chat-on-your-claude-plan-2026-11-07).
 - **The screen and the pages from a plan chat** (`eyes.rs`, 2026-11-07; the
   one browser toolset since 8 Nov 2026): for a Chat run registered with
   `RunSpec::eyes` (`with_eyes`: the screen look's gate, the pages' and
