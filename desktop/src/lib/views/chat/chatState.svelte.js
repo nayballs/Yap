@@ -35,6 +35,7 @@ import { SkillPicker } from '../../stores/skills.svelte.js';
 import { think, takeThink } from './chatThink.svelte.js';
 import { researchIt } from './chatResearch.svelte.js';
 import { createDocPanel } from './chatDoc.svelte.js';
+import { partView } from './projectFile.js';
 import { createChatConnectors } from './chatConnectors.svelte.js';
 // Chat's status dots (stores/chatStatus.svelte.js): the list as read here,
 // and the ask-first cards waiting in a turn (needs you).
@@ -1238,6 +1239,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
    * meeting or note opened in Notes at the line it came from.
    */
   function openSource(s) {
+    // A part of a big project's file (chat/projects/sources.rs): the file beside the chat at its place — a spreadsheet
+    // in the sheet view at its row, any other as Yap read it at its page, slide, heading or line (projectFile.js).
+    if (s?.project) {
+      const to = partView(s);
+      if (to?.sheet) doc.showSheet(to.sheet);
+      else if (to?.file) doc.showProjectFile(to.file);
+      return;
+    }
     // A meeting on the calendar with no note yet (chat/tools/calendar.rs):
     // its note, made from the invite as the Meetings view's row makes it.
     if (s?.note == null && s?.event) {

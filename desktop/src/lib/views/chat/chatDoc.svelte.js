@@ -110,8 +110,10 @@ export const picKey = (id) => `pic:${id}`;
 export const agentKey = (id) => `agent:${id}`;
 /** A Code chat's file, its Runs and its summary (FileTab, RunsTab, SummaryTab: 15 Nov 2026). */
 export const fileKey = (rel) => `file:${rel}`;
-/** A spreadsheet beside the chat (SheetTab, chat/sheets/view.rs): a Code chat's file's, or an attached one's. */
-export const sheetKey = (src) => (src?.from === 'attachment' ? `sheet:att:${src.id}` : `sheet:ws:${src?.rel}`);
+/** A spreadsheet beside the chat (SheetTab, chat/sheets/view.rs): a Code chat's file's, an attached one's, a project's. */
+export const sheetKey = (src) => (src?.from === 'attachment' ? `sheet:att:${src.id}` : src?.from === 'project' ? `sheet:pf:${src.file}` : `sheet:ws:${src?.rel}`);
+/** A big project's file as Yap read it (ProjectFileTab, chat/projects/sources.rs): its tab's key, one a file. */
+export const projectFileKey = (file) => `pfile:${file}`;
 export const RUNS_KEY = 'runs';
 export const SUMMARY_KEY = 'summary';
 /** A page Yap keeps (chat/made/pages.rs): its tab's key. The chat's Outputs: its tab's. */
@@ -147,9 +149,14 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
   // A Code chat's file beside the chat (agents/files.rs: `{rel, line, seq}`; its File tab).
   let file = $state(null);
   let fileSeq = 0;
-  // A spreadsheet beside the chat (chat/sheets/view.rs: `{src, name, seq}`; its Sheet tab).
+  // A spreadsheet beside the chat (chat/sheets/view.rs: `{src, name, seq, at?}`; its Sheet tab; `at`: `{sheet, row}`
+  // to open at, a project part's).
   let sheet = $state(null);
   let sheetSeq = 0;
+  // A big project's file beside the chat, as Yap read it (chat/projects/sources.rs: `{project, file, name, kind, from,
+  // to, at, place, section, seq}`; ProjectFileTab), at a part's place.
+  let projectFile = $state(null);
+  let projectFileSeq = 0;
   // A page Yap keeps beside the chat (chat/made/pages.rs: `{id, conversation, title, n?, seq}`; KeptPageTab):
   // `n` the version asked for (none: its newest), `seq` counts each time it's asked for.
   let kept = $state(null);
@@ -242,6 +249,10 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
           : showing === 'task'
             ? task
               ? taskKey(task.key)
+              : null
+          : showing === 'pfile'
+            ? projectFile
+              ? projectFileKey(projectFile.file)
               : null
           : id != null
             ? docKey(id)
@@ -501,12 +512,31 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     if (!s?.src) return;
     if (showing === 'doc') flushSave();
     sheetSeq += 1;
-    const v = { src: s.src, name: s.name || '', seq: sheetSeq };
+    const v = { src: s.src, name: s.name || '', seq: sheetSeq, at: s.at ?? null };
     const key = sheetKey(v.src);
     inRow({ key, kind: 'sheet', sheet: v });
     extra = extra.map((t) => (t.key === key ? { ...t, sheet: v } : t));
     sheet = v;
     showing = 'sheet';
+    open = true;
+  }
+
+  /**
+   * **A big project's file at a part's place** (a source's pill or its row under the answer, chat/projects/sources.rs:
+   * `{project, file, name, kind, from, to, at, place, section}`): its tab (ProjectFileTab), the file as Yap read it,
+   * read only, scrolled to the part and the part marked. One tab a file; `seq` tells it it was asked again (another
+   * part). A spreadsheet's goes to the sheet view instead (`showSheet` with `at`).
+   */
+  function showProjectFile(ref) {
+    if (!ref?.file || !ref?.project) return;
+    if (showing === 'doc') flushSave();
+    projectFileSeq += 1;
+    const f = { ...ref, seq: projectFileSeq };
+    const key = projectFileKey(f.file);
+    inRow({ key, kind: 'pfile', title: f.name || '', pfile: f });
+    extra = extra.map((t) => (t.key === key ? { ...t, title: f.name || t.title, pfile: f } : t));
+    projectFile = f;
+    showing = 'pfile';
     open = true;
   }
 
@@ -599,6 +629,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     else if (t?.kind === 'agent') showAgent({ ...t.agent, turn: null, view: null, auto: true });
     else if (t?.kind === 'file') showFile(t.file);
     else if (t?.kind === 'sheet') showSheet(t.sheet);
+    else if (t?.kind === 'pfile') showProjectFile(t.pfile);
     else if (t?.kind === 'runs') showRuns();
     else if (t?.kind === 'summary') {
       inRow(t);
@@ -719,6 +750,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     agent = null;
     file = null;
     sheet = null;
+    projectFile = null;
     kept = null;
     task = null;
     if (page || Object.keys(pageNow).length) closePages();
@@ -857,6 +889,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     get agent() { return agent; },
     get file() { return file; },
     get sheet() { return sheet; },
+    get projectFile() { return projectFile; },
     get kept() { return kept; },
     get task() { return task; },
     get pageNow() { return pageNow; },
@@ -890,6 +923,7 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     showFile,
     showRuns,
     showSheet,
+    showProjectFile,
     toggleSummary,
     showKept,
     showOutputs,

@@ -333,6 +333,11 @@ pub struct Extra<'a> {
     /// The chips of the project's parts sent with the question: the tool
     /// loop's chips start with them.
     pub project_chips: &'a [String],
+    /// **The turn's numbering of the project's parts** (`chat/projects/
+    /// sources.rs`): the question's first; each part the tools read gets the
+    /// next number after the web's and the calendar's, and the page hears
+    /// them all as sources (a "[2]" draws as a pill while it's written).
+    pub project_cites: Option<&'a crate::chat::projects::sources::Cites>,
     /// **A research turn** (chat/research.rs): its caps and clock. Only the
     /// web's tools and the notes' reads run (`research::allows`), Yap's
     /// `read_page` beside a provider's own search too (the report cites

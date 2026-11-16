@@ -45,7 +45,9 @@ one side.
   some; `opened` / `cited` when a page was read or a document cites it,
   2026-10-31: "The Sources row, compact" below). An answer asked across the meetings keeps its passages the same way
   (`Source` with `note`, `field`, `line`, `ts`, `quote`: the moment its pill
-  opens), and the conversation keeps `scope: "meetings"` (`set_scope` /
+  opens), an answer in a big project the parts of its files it cites
+  (`Source` with `project`: the file and its place, [below](#big-projects-searched-in-parts-2026-11-16)),
+  and the conversation keeps `scope: "meetings"` (`set_scope` /
   `scope_of`), so its follow-ups are asked across the meetings too — the
   passages, the citation rules and checks are [search.md](./search.md#ask-across-meetings-in-chat).
   **Every answer is checked before it's shown and saved**
@@ -6735,9 +6737,25 @@ reads only what a question needs. Yap does the same
   the chat's model (`knowledge::searched`; an 8K model's half is about
   3.5K, a 200K Claude's about 96K). Decided per turn, by the model asked:
   the same project goes whole to Claude and in parts to the on-device 4B.
-- **The parts** (`parts::split`, pure): about 700 tokens each (at most
-  1,100; a smaller section goes on into the next), from the text the
-  attachments' readers made, by its kind — a PDF by its `[Page n]` lines
+- **The parts** (`parts::split`, pure): **sized to the model**
+  (`parts::Size`, `knowledge::Room::size`, by what a question's parts may
+  take, `Room::parts`, from `budget::budget`): up to 2,000 tokens of room
+  (an 8K or 16K model, the on-device one, a plan's few tokens a minute)
+  **small** parts of about 350 tokens (at most 560), so two or three fit
+  where one 700-token part did; up to 8,000 (a 32K or 64K model) the
+  middle size, about 700 (at most 1,100); past it (128K and up, Claude,
+  GPT) **large** ones of about 1,200 (at most 1,800), a dozen at most each
+  with more around the answer. Three sizes, not one a model (Anthropic's
+  own retrieval write-up chunks at about 800): each size's parts are made
+  once a file and kept apart (`knowledge::SPLITS` by file and size, 96 at
+  most), so a turn on another model never takes another size's parts and
+  its part numbers are its own list's; the search index reads the
+  meaning of **every size a model may read a project in**
+  (`knowledge::passages`, `searched_from`: small parts over 4K tokens, the
+  middle size over 10K, large over 40K), a part's key what the embedding
+  model reads of it, so a size's vectors are its own and the sweep drops
+  a size no longer read. A smaller section goes on into the next. From
+  the text the attachments' readers made, by its kind — a PDF by its `[Page n]` lines
   (a scanned page's OCR'd text too; a long page goes on as "[Page n,
   continued]"), a presentation by its slides, a spreadsheet by its sheets'
   rows (each part starting with the sheet's line and the table's head, so
@@ -6747,7 +6765,9 @@ reads only what a question needs. Yap does the same
   lines. Each part knows **where it is**: "pages 12–13", "slides 3–5",
   "sheet "Orders", rows 2–180", "lines 40–120", and the section it's in
   (a heading's path, "Leave › Annual leave"; in a PDF or an older `.doc`, a
-  line that looks like a heading, never a running head or footer). A
+  line that looks like a heading, never a running head or footer), and
+  the lines of the file's text it came from (`Part::lines`, a long page's
+  pieces each their own; `span`, `sheet`: what its pill opens at). A
   project's spreadsheet is read up to 250,000 tokens (a question's is cut
   to 40,000: `sheet::with_most`). The parts are made once a file (its text
   never changes), kept in memory for 64 files.
@@ -6755,13 +6775,18 @@ reads only what a question needs. Yap does the same
   says the files are too long to send whole, lists them with their parts
   (`<project_files>`: "- staff-handbook.pdf (a PDF, 60 pages: …): 40 parts:
   1 pages 1–2, "Welcome"; 2 …"; past 1,500 tokens, each file's count and
-  range), and how to cite ("(staff-handbook.pdf, page 12)"). A model with
+  range), and how to cite: by the part's number in square brackets, before
+  the full stop ("…27 days of leave [2]."), its `<document index>` or the
+  `"n"` a tool gives it, no list of sources (a side question's, whose
+  answer has no sources, in words: "(staff-handbook.pdf, page 12)"). A model with
   tools is told to read what it wasn't given rather than guess.
 - **Each question** gets the parts that match it in its own context
   (`Prompt::project_parts`): "From the project's files, the parts that
-  match this question:" and a `<documents>` block, each part's `<source>`
+  match this question:" and a `<documents>` block, each part's index its
+  citation number (from 1, the files' order), its `<source>`
   its file's (`attachments::source`) then "part 12 of 40, pages 23–24,
-  "4.1 Annual leave"". At most a tenth of a request (1,000 to 16,000
+  "4.1 Annual leave"", then a line on citing them
+  (`knowledge::CITE_LINE`). At most a tenth of a request (1,000 to 16,000
   tokens, `Room::parts`), 12 parts, and two thirds of the room the turn has
   left beside its system prompt, context, tools and question (the budget),
   so the history keeps some. A follow-up of two words or fewer ("and sick
@@ -6796,8 +6821,70 @@ reads only what a question needs. Yap does the same
   (`Event::Chips`); the tool loop starts with them (`Extra::project_chips`),
   the plan's stream too (`ToChat::lead`), and the answer keeps them
   (`finish.rs` `with_first`).
+- **The parts an answer cites are its numbered sources** (16 Nov 2026,
+  `chat/projects/sources.rs`; the Claude app's answers cite a project's
+  files with pills that open them), as a web answer's pages are:
+  - **One numbering** (`sources::Cites`, made with the question's parts
+    and kept in the turn's `Built::project`): the question's parts [1] to
+    [k]; a part a tool reads the next number the turn has, a part read
+    again its own. In Chat's tool loop the web's pages are numbered after
+    the question's parts (`web::Turn::reserve_number` k times, `run.rs`)
+    and a tool's part takes the web's next (as the calendar's meetings
+    do), else the next after the calendar's meetings and the parts so far
+    (`dispatch.rs`, `knowledge::Numbering`). On your Claude plan, whose
+    pages Yap numbers itself as Claude Code's searches come in, one shared
+    numbering (`sources::Numbers`): the plan's `Mapper::numbered` and the
+    project tools over the run endpoint (`claude_live` `Context::project`,
+    `rpc.rs`) both take from it. A tool's part says its `"n"` and how to
+    cite it.
+  - **While it's written**: the question's parts go to the page as sources
+    with their chips (`Event::Chips`), the tool loop's reports and the
+    plan's stream add them to the pages' (`agent.rs` `report`, `plan.rs`
+    `ToChat::chips`), so a "[2]" is a pill as it streams.
+  - **Kept** (`finish::cited_parts`, before the answer's checks, every
+    path): a citation in words naming one of the turn's parts —
+    "(staff-handbook.pdf, page 12)", "(see handbook.md, section "Annual
+    leave")" — becomes its "[n]" (`sources::cite_mentions`; a longer
+    parenthesis keeps its words, the number after it; two parts it could
+    be, or none: left alone); then the parts it cites join its sources,
+    by number, `cited` — never a number another source has (a small
+    model's web pipeline writes its own prompt without the parts and
+    numbers its pages from 1). An answer that cites none keeps none: the
+    chips still say which parts it was given. A part is a `chats::Source`
+    with the file's name its title, its place its site ("page 23", "rows
+    61–90", its section's heading in quotes), its words its quote, and
+    `project` (`ProjectPlace`: the project, the file's id and kind, the
+    part's number, its lines, its first page, slide or row, its sheet and
+    section; an older Yap drops it, and its pill opens nothing).
+  - **In the thread**: the pill (`core/markdown.js`: a project part is a
+    passage, `a.md-cite.md-passage`, titled "staff-handbook.pdf · page
+    23") and a chip under the answer (`SourcesRow.svelte`, a file's mark,
+    "From the project" when they're all parts, else "Sources").
+  - **Opened beside the chat** (`chatState.openSource`, `projectFile.js`
+    `partView`), read only. Chosen per kind, the simplest that works:
+    **a spreadsheet** (a workbook, a CSV) in **the sheet view** (#132),
+    as Excel draws it, from the project's kept copy (`sheets/view.rs`
+    `Src::Project`, `projects::copy_of`; "the project's copy … read only
+    here"), at its sheet and the part's first row, that row's first cell
+    selected (SheetTab's `at`); **any other file** in **the project file
+    view** (`ProjectFileTab.svelte`, a tab of its own, `pfile:<file>`, in
+    the document panel's row): the file as Yap read it — the text the
+    model was given (`project_file_view`, at most 2 MB, only a file of
+    that project by its ids) — scrolled to the part's lines and the part
+    marked (a bar in the accent on a tint), its place in the header
+    ("Page 23", "“3. Annual leave”"). **A PDF** page by page, each
+    `[Page n]` a page's heading (its OCR said), at its page; **Markdown**
+    as the document panel draws a document (`renderMarkdown` with its
+    blocks' lines, the part's blocks marked by them), at its heading; **a
+    Word document**'s paragraphs with its heading styles as headings; **a
+    presentation** slide by slide, its speaker notes quieter, at its
+    slide; **code** as numbered lines (the Code chat file view's look,
+    #109). Not the PDF's own pages as pictures: Yap keeps its copy, but
+    showing it needs a PDF viewer in the panel — the text view is what the
+    model read, OCR'd scans too, and works for every file.
 - **A side question** (Ctrl+;, no tools): the list of parts and the parts
-  that match the side question (`knowledge::for_side`).
+  that match the side question (`knowledge::for_side`), cited in words
+  (its answer has no sources).
 - **The project's page** says how Chat's model reads the files, under them
   (`project_knowledge`, `projectLines.js` `knowledgeLine`): "About 130K
   tokens: too much to send Claude Opus 5.5 whole with every question, so
@@ -6805,14 +6892,21 @@ reads only what a question needs. Yap does the same
   whole".
 - **Privacy**: the log has counts, tokens and parts, never names or words.
 - **Not done**: a part's meaning is read only with search by meaning on
-  (keywords otherwise); a project's parts aren't cited as numbered sources
-  with a pill that opens the file at the page (the answer names them in its
-  words); parts aren't re-split for a model's size (one size for all).
+  (keywords otherwise); a PDF's own pages as pictures beside the chat (its
+  text is shown); a whole small project's files aren't numbered sources
+  (only a big project's parts are); the spreadsheet view selects the
+  part's first row, not every row of it.
 - Tests: `cargo test chat::projects` (`parts.rs`: every reader's parts and
-  places, sections, running heads, sizes; `knowledge.rs`: whole or in parts
-  by the model's room, the ranking by words and by meaning, follow-ups, the
-  room, the blocks, the tools); `claude_live` (the plan's run lists and runs
-  them); `word.rs` (heading styles); `chat-projects.spec.js`.
+  places, sections, running heads, sizes, each part's lines, the three
+  sizes; `knowledge.rs`: whole or in parts by the model's room, its size,
+  each size kept and indexed apart, the ranking by words and by meaning,
+  follow-ups, the room, the blocks, the numbered documents, the tools and
+  their numbers; `sources.rs`: one numbering, the cited kept, citations in
+  words); `turn::finish` (the cited parts beside the web's); `claude_live`
+  (the plan's run lists and runs them); `word.rs` (heading styles);
+  `chat-projects.spec.js` (the parts as pills and a row, a PDF opened at
+  its page, Markdown at its heading, a CSV in the sheet view at its row,
+  light and dark).
 
 ## Auto-archive (2026-11-15)
 

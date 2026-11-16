@@ -148,11 +148,22 @@ pub struct Mapper {
     earlier_calls: u64,
     /// The `WebSearch` and `WebFetch` calls begun (a research's caps).
     begun: (usize, usize),
+    /// **The turn's numbering, shared** (a big project's parts, numbered as
+    /// its tools answer over the run endpoint: `chat/projects/sources.rs`):
+    /// the pages found take the next number there. `None`: from 1.
+    numbers: Option<crate::chat::projects::sources::Numbers>,
 }
 
 impl Mapper {
     pub fn new() -> Mapper {
         Mapper::default()
+    }
+
+    /// The same, its pages numbered from the turn's `numbers` (after a big
+    /// project's parts sent with the question, beside its tools' parts).
+    pub fn numbered(mut self, numbers: Option<crate::chat::projects::sources::Numbers>) -> Mapper {
+        self.numbers = numbers;
+        self
     }
 
     /// The chips so far ("Searched the web: \"…\"").
@@ -414,7 +425,10 @@ impl Mapper {
             s.opened |= opened;
             return;
         }
-        let n = self.sources.len() + 1;
+        let n = match &self.numbers {
+            Some(numbers) => numbers.next(),
+            None => self.sources.len() + 1,
+        };
         let title = one_line(title, 120);
         self.sources.push(Source {
             n,
