@@ -1,5 +1,6 @@
 // **Files attached to a question** (chat/attachments.rs, 15 Nov 2026): what the box and the thread say about them.
 // Pure, so the e2e suite checks them without the app (chat-files.spec.js).
+import { badgeOf, fileSize } from './fileChip.js';
 
 /** Endings dropped on Chat that go in as pictures (snip/attach.rs reads them), not as files. */
 const PICTURES = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'tif', 'tiff', 'heic', 'heif']);
@@ -14,12 +15,8 @@ export function endingOf(path) {
 /** Whether a dropped path is a picture (Chat's screenshots take it). */
 export const isPicturePath = (path) => PICTURES.has(endingOf(path));
 
-/** The chip's badge: the file's ending in capitals, at most four letters ("PDF", "MD", "DOCX"), else its kind's. */
-export function badgeOf(file) {
-  const e = endingOf(file?.name);
-  if (e && e.length <= 4) return e.toUpperCase();
-  return { pdf: 'PDF', word: 'DOC', powerpoint: 'PPT', markdown: 'MD', code: 'CODE' }[file?.kind] || 'TXT';
-}
+/** The chip's badge and size (every file chip's: fileChip.js): "PDF", "MD", "DOCX"; "572B", "2.1 KB". */
+export { badgeOf, fileSize };
 
 /** A PDF's pages read with OCR (scans: Windows' text recognition, on this PC), and those left unread: "2 pages read
  *  with OCR", "20 pages read with OCR, 28 not read"; '' for none. */
@@ -30,16 +27,6 @@ export function ocrLine(file) {
   const read = n ? `${n} page${n === 1 ? '' : 's'} read with OCR` : '';
   const unread = left ? `${left} page${left === 1 ? '' : 's'} with no text not read` : '';
   return n && left ? `${read}, ${left} not read` : read || unread;
-}
-
-/** A size as the Claude app's chips say it: "572B", "2.1 KB", "14 KB", "1.4 MB". */
-export function fileSize(bytes) {
-  const b = Math.max(0, Number(bytes) || 0);
-  if (b < 1024) return `${b}B`;
-  const kb = b / 1024;
-  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
-  const mb = kb / 1024;
-  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
 }
 
 /** Tokens said roughly ("about 1.2k tokens"). */

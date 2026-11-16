@@ -31,6 +31,11 @@
 //   Background tasks (a run's clock and Stop, "N finished"). A merged pull
 //   request's Archive archives the chat.
 //
+// - **One chip a file a turn** (16 Nov 2026): Claude writes report.md and shares it; the
+//   answer's chip (the Claude app's file chip) is its one card — the turn's "Agent done ·
+//   Changed report.md" names it as a link — a click opens it where its links open, its ⋯ is
+//   a file link's menu.
+//
 // The chat is on the plan with Yap's stand-in for Claude Code (agents-direct.spec.js'
 // way); the workspace and the folder "outside" it are in this run's own folder.
 import fs from 'node:fs';
@@ -122,6 +127,22 @@ const SHAPES = [
 const ONE_LINE = 'Every bed is in notes.md';
 const SHAPED = [{ _wait_user: true }, init(), said('s1', [{ type: 'text', text: SHAPES }], 'end_turn'), result(SHAPES), { _wait_user: true }];
 const IN_ONE_LINE = [{ _wait_user: true }, init(), said('s2', [{ type: 'text', text: ONE_LINE }], 'end_turn'), result(ONE_LINE), { _wait_user: true }];
+/** Writes a new report.md and shares it in the chat (Yap's `share_files`, over its endpoint), then answers. */
+const REPORT_MD = '# Bed report\n\nFour beds in the north border.\n';
+const SHARED_SAID = 'The bed report is ready.';
+const WRITES_AND_SHARES = [
+  { _wait_user: true },
+  init(),
+  said('w1', [{ type: 'tool_use', id: 'toolu_write', name: 'Write', input: { file_path: '{{cwd}}\\report.md', content: REPORT_MD } }]),
+  { _hook: { event: 'PreToolUse', input: { tool_name: 'Write', tool_use_id: 'toolu_write', tool_input: { file_path: 'report.md' } } } },
+  { _write_file: { path: 'report.md', text: REPORT_MD } },
+  toolResult('toolu_write', 'File created successfully at: report.md'),
+  said('w2', [{ type: 'tool_use', id: 'toolu_share', name: 'mcp__yap__share_files', input: { files: ['{{cwd}}\\report.md'], caption: 'The bed report' } }]),
+  { _mcp: { tool: 'share_files', arguments: { files: ['{{cwd}}\\report.md'], caption: 'The bed report' }, result_for: 'toolu_share' } },
+  said('w3', [{ type: 'text', text: SHARED_SAID }], 'end_turn'),
+  result(SHARED_SAID),
+  { _wait_user: true },
+];
 /** A plain chat's answer: the same words (no workspace, so nothing is a link or runs). */
 const PLAIN = [{ _wait_user: true }, init(), said('p1', [{ type: 'text', text: ANSWER }], 'end_turn'), result(ANSWER), { _wait_user: true }];
 
@@ -664,6 +685,77 @@ test('a file link’s ⋯ never covers its link: a short one, one that wraps, on
   await theme(yap, main, 'light');
   await main.mouse.move(5, 5);
   await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+});
+
+test('one chip a file a turn: a file written and shared is the answer’s chip, the report’s line a link; a click opens it, its ⋯ a link’s menu', async ({ yap, main, shot }) => {
+  writeEditors(STAND_INS);
+  await yap.invoke('e2e_file_opens', { clear: true });
+  await script(yap, WRITES_AND_SHARES, 'writes-and-shares');
+  const before = (await agents(yap)).length;
+  await openView(main, 'Chat');
+  if (await panel(main).count()) await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+  await newCodeChat(main, 'garden-planner');
+  await send(main, 'Write up the beds in a report and send it to me.');
+  await expect.poll(async () => (await agents(yap)).length, { timeout: 20_000 }).toBe(before + 1);
+  const agent = (await agents(yap))[0];
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id)?.status, { timeout: 30_000 }).toBe('done');
+  await expect(answer(main)).toContainText(SHARED_SAID);
+  const reportFile = path.join(GARDEN, 'report.md');
+  // Kept twice — the turn's report has the new file, the answer shares it — and shown once: the answer's chip.
+  const kept = (await yap.invoke('chat_get', { id: agent.conversation })).messages;
+  expect(kept.map((m) => m.kind || m.role)).toEqual(['user', 'agentReport', 'assistant']);
+  expect(kept[1].files?.[0]?.items?.map((i) => i.name)).toEqual(['report.md']);
+  expect(kept[2].files?.[0]?.items?.map((i) => i.name)).toEqual(['report.md']);
+  const chips = thread(main).getByTestId('chat-file-card');
+  await expect(chips).toHaveCount(1);
+  await expect(chips.getByTestId('chat-file-name')).toHaveText('report.md');
+  await expect(chips.getByTestId('chat-file-badge')).toHaveText('MD');
+  await expect(thread(main).getByTestId('chat-share-caption')).toHaveText('The bed report');
+  expect((await chips.boundingBox()).y).toBeGreaterThan((await answer(main).boundingBox()).y);
+  // The report's line names it, a link (no card of its own).
+  const report = thread(main).getByTestId('chat-agent-report');
+  await expect(report).toHaveCount(1);
+  await expect(report.getByTestId('chat-agent-report-file')).toHaveText('report.md');
+  await expect(report.getByTestId('chat-file-card')).toHaveCount(0);
+  await shot(main, '02r-one-chip-a-file-a-turn');
+  await theme(yap, main, 'dark');
+  await shot(main, '02s-one-chip-a-file-a-turn-dark');
+  await theme(yap, main, 'light');
+
+  // A click on the chip: where its links open (Yap's file view here), as a link to the workspace's file.
+  await chips.getByTestId('chat-file-open').click();
+  const file = main.getByTestId('chat-file');
+  await expect(file).toHaveAttribute('data-rel', 'report.md');
+  await expect(file.getByTestId('chat-file-body')).toContainText('Four beds in the north border.');
+  await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+  // The report's link opens it the same way.
+  await report.getByTestId('chat-agent-report-file').click();
+  await expect(file).toHaveAttribute('data-rel', 'report.md');
+  await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+
+  // Its ⋯ (on hover): a file link's menu — Open in Yap, Open in <editor>, Show in folder, Copy path.
+  await chips.hover();
+  await chips.getByTestId('chat-file-more').click();
+  const menu = main.getByRole('menu');
+  await expect(menu.getByRole('menuitem')).toHaveText(['Open in Yap', 'Open in VS Code', 'Show in folder', 'Copy path']);
+  await shot(main, '02t-a-chips-menu');
+  await menu.getByRole('menuitem', { name: 'Open in VS Code' }).click();
+  await expect.poll(async () => (await yap.invoke('e2e_file_opens')).at(-1)).toEqual(expect.objectContaining({ with: 'vscode', rel: 'report.md' }));
+  await chips.hover();
+  await chips.getByTestId('chat-file-more').click();
+  await main.evaluate(() => {
+    window.__copied = [];
+    navigator.clipboard.writeText = async (t) => void window.__copied.push(t);
+  });
+  await menu.getByRole('menuitem', { name: 'Copy path' }).click();
+  await expect.poll(() => main.evaluate(() => window.__copied)).toEqual([reportFile]);
+  // "Open file links in" an editor: a click on the chip goes there too.
+  await setConfig(yap, main, { agentsOpenFiles: 'vscode' });
+  await yap.invoke('e2e_file_opens', { clear: true });
+  await chips.getByTestId('chat-file-open').click();
+  await expect.poll(async () => (await yap.invoke('e2e_file_opens')).at(-1) ?? null).toEqual(expect.objectContaining({ with: 'vscode', rel: 'report.md' }));
+  await expect(main.getByTestId('chat-file')).toHaveCount(0);
+  await setConfig(yap, main, { agentsOpenFiles: 'yap' });
 });
 
 test('an Outputs row opens where “Open file links in” says, safely: workspace files only, a file Windows would run in Yap', async ({ yap, main, shot }) => {

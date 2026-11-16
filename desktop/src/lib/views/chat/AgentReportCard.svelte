@@ -9,19 +9,32 @@
   // one tab an agent, and a request asked while it worked is in the same
   // report as the turn before it). A plan waiting for its go-ahead has **Go ahead** too: the
   // person's click carries it out (`agent_go_ahead`, Yap's own words at the
-  // chat's Mode), once — disabled as soon as it's pressed. Its own small
-  // chunk.
+  // chat's Mode), once — disabled as soon as it's pressed. **Its files**
+  // (16 Nov 2026): the new files and pictures its turn made as chips under it
+  // (SharedFiles.svelte); one whose one chip is elsewhere in the turn — the
+  // answer shares it (`elsewhere`: ChatThread, fileChip.js
+  // `chippedElsewhere`) — only as its name in "Changed …", a link that opens
+  // it as its chip would (every file the line names that the card holds is
+  // one). Its own small chunk.
+  import { getContext } from 'svelte';
   import { reportTitle, reportFolder, agentOfReport, turnOfReport, statusTone, planWaits, reportChanged } from '../../core/agents.js';
   import { agents, goAheadWithPlan } from '../../stores/agents.svelte.js';
+  import { menuKey } from '../../ui/contextMenu.svelte.js';
+  import { changedParts, normPath } from './fileChip.js';
+  import { SHARED_FILES } from './sharedOpen.js';
 
   /**
    * `m`: the marker message (its `id` "chat:<conv>:<i>", its `text`, the
    * pictures and new files its turn made: `files`, chat/shares.rs);
    * `conversation`: the chat's id; `onopen(agent)`; `room`: the thread's
-   * width (CSS px) and `onpicture(p)` for those pictures.
+   * width (CSS px) and `onpicture(p)` for those pictures; `elsewhere`: its
+   * files (normalised paths) whose one chip is elsewhere in the turn.
    */
   /** `quiet`: a Code chat's thread — a plain line that opens the agent's tab, no box and no "Open" (11 Nov 2026, as Claude Code's transcript). */
-  let { m, conversation = null, onopen = null, room = 0, onpicture = null, quiet = false } = $props();
+  let { m, conversation = null, onopen = null, room = 0, onpicture = null, quiet = false, elsewhere = null } = $props();
+
+  // Chat's way to open a shared file beside the chat, and its menu (ChatView.svelte).
+  const files = getContext(SHARED_FILES) ?? null;
 
   const folder = $derived(reportFolder(m.text));
   const agent = $derived(agentOfReport(agents.list, m.id, conversation, folder));
@@ -33,8 +46,14 @@
   const as = $derived(turn ?? (latest ? agent : null));
   const title = $derived(reportTitle(as, m.text));
   const tone = $derived(as ? statusTone(as.status) : /didn't finish/.test(title) ? 'failed' : 'done');
-  // What it changed, in a line (the marker's own "Files it changed: …", its commands' files after it).
+  // What it changed, in a line (the marker's own "Files it changed: …", its commands' files after it): the files
+  // the card holds as links, and any whose chip is elsewhere in the turn that the line doesn't name, after it.
   const changed = $derived(reportChanged(m.text));
+  const items = $derived((m.files || []).flatMap((s) => s?.items || []).filter((it) => it?.path));
+  const chippedAway = $derived(elsewhere?.size ? items.filter((it) => elsewhere.has(normPath(it.path))) : []);
+  const changedLine = $derived(changedParts(changed, items, chippedAway));
+  const openItem = (it) => files?.open(it);
+  const itemMenu = (e, it) => files?.menu(e, it, e.currentTarget);
   // A plan still waiting for its go-ahead, or one this card sent on (kept
   // in the store: used once, even if the thread draws the card again).
   let failed = $state('');
@@ -56,7 +75,19 @@
   <span class="jdot tone-{tone}" aria-hidden="true"></span>
   <div class="jtext">
     <p class="jtitle">{title} · <span class="jfolder">{agent?.folder || folder || 'a folder'}</span></p>
-    {#if changed}<p class="jline">Changed {changed}</p>{/if}
+    {#if changedLine.length}
+      <p class="jline" data-testid="chat-agent-report-changed">
+        Changed {#each changedLine as part, i (i)}{#if part.item && files}<button
+              type="button"
+              class="jfile"
+              title={part.item.path}
+              data-testid="chat-agent-report-file"
+              onclick={() => openItem(part.item)}
+              oncontextmenu={(e) => itemMenu(e, part.item)}
+              onkeydown={(e) => menuKey(e, (ev) => itemMenu(ev, part.item))}>{part.text}</button
+            >{:else}{part.text}{/if}{/each}
+      </p>
+    {/if}
     {#if failed}<p class="jline jfail" role="alert">{failed}</p>{/if}
   </div>
   {#if agent && (waits || sent)}
@@ -72,9 +103,10 @@
 </div>
 {#if m.files?.length}
   <!-- Its turn's work, shown: the pictures it made or changed (up to four,
-       then "+N more"), its new files as compact cards (chat/shares.rs). -->
+       then "+N more"), its new files as chips (chat/shares.rs) — each but one
+       whose chip is under the answer. -->
   {#await import('./SharedFiles.svelte') then { default: SharedFiles }}
-    <SharedFiles shares={m.files} {conversation} {room} {onpicture} report />
+    <SharedFiles shares={m.files} {conversation} {room} {onpicture} report {elsewhere} />
   {/await}
 {/if}
 
@@ -133,6 +165,28 @@
     white-space: nowrap;
     font-size: 12px;
     color: var(--yap-muted);
+  }
+  /* A file the card holds, named in "Changed …": a link that opens it. */
+  .jfile {
+    display: inline;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .jfile:hover {
+    color: var(--yap-fg-80);
+    text-decoration-color: currentColor;
+  }
+  .jfile:focus-visible {
+    outline: 2px solid var(--yap-primary-line);
+    outline-offset: 1px;
+    border-radius: 3px;
   }
   .jopen {
     flex: 0 0 auto;

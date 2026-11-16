@@ -115,6 +115,7 @@ mod tests {
             "chatStatus.js",
             "whenSaid.js",
             "pageConfirm.js",
+            "fileChip.js",
         ] {
             let (bytes, kind) = file(&format!("/core/{f}")).unwrap_or_else(|| panic!("core/{f} isn't in the build"));
             assert_eq!(kind, "text/javascript; charset=utf-8", "{f}");

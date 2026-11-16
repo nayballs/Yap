@@ -1,7 +1,7 @@
 // Files shared into the conversation (`share_files`,
 // desktop/src-tauri/src/chat/shares.rs): how a share is laid out in the
-// thread — one picture large, several as a grid, any other file as a card —
-// and the words on its cards. Pure, no Svelte state (SharedFiles.svelte
+// thread — one picture large, several as a grid, any other file as a chip (FileChip.svelte, fileChip.js) —
+// and how its pictures are tiled. Pure, no Svelte state (SharedFiles.svelte
 // draws it; an agent's report card shows its turn's files the same way).
 
 /** A single picture: at most this tall (CSS px), as wide as the readable column. */
@@ -78,52 +78,6 @@ export function shareParts(share, { report = false } = {}) {
     cards = cards.slice(0, REPORT_MAX);
   }
   return { pictures, cards, morePictures, moreFiles };
-}
-
-/** "340 B", "12 KB", "1.4 MB", "2.1 GB". */
-export function sizeLabel(bytes) {
-  const n = Math.max(0, Number(bytes) || 0);
-  if (n < 1024) return `${n} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let v = n / 1024;
-  let u = 0;
-  while (v >= 1024 && u < units.length - 1) {
-    v /= 1024;
-    u += 1;
-  }
-  return `${v >= 10 || u === 0 ? Math.round(v) : v.toFixed(1)} ${units[u]}`;
-}
-
-/** A folder, shortened to its last two parts ("…\garden-planner\docs"); the whole when it's short. */
-export function shortFolder(folder) {
-  const f = String(folder ?? '');
-  const sep = f.includes('\\') ? '\\' : '/';
-  const parts = f.split(/[\\/]/).filter(Boolean);
-  if (parts.length <= 3) return f;
-  return `…${sep}${parts.slice(-2).join(sep)}`;
-}
-
-/** What a card says a file is: "Markdown", "PDF · 3 pages", "Picture"… */
-export function kindLabel(item) {
-  switch (item?.kind) {
-    case 'markdown':
-      return 'Markdown';
-    case 'text':
-      return 'Text';
-    case 'code':
-      return 'Code';
-    case 'pdf':
-      return item.pages > 0 ? `PDF · ${item.pages === 1 ? '1 page' : `${item.pages} pages`}` : 'PDF';
-    case 'image':
-      return 'Picture';
-    default:
-      return 'File';
-  }
-}
-
-/** Whether a file's card has a preview to unfold (shares.rs `previews`). */
-export function hasPreview(item) {
-  return ['markdown', 'text', 'code'].includes(item?.kind) && !!item?.path && !item?.missing;
 }
 
 /** A folder's own name ("docs"). */

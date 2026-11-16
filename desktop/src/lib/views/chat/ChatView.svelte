@@ -131,6 +131,7 @@
   import { chatOutputs } from '../../stores/chatOutputs.svelte.js';
   import { CODE_FILES } from '../../ui/fileLinks.js';
   import { openFileLink, openFileLinkMenu, loadEditors } from './fileOpen.svelte.js';
+  import { SHARED_FILES, openShared, openSharedMenu } from './sharedOpen.js';
   import { archiveChats } from './chatLibrary.svelte.js';
   import { SHEETS } from './sheetView.js';
   import { runCommand } from './codeRuns.svelte.js';
@@ -181,6 +182,19 @@
   });
   // **An attached spreadsheet** (chat/attachments/sheet.rs): its chip opens it beside the chat, as Excel draws it.
   setContext(SHEETS, { open: (file) => doc.showSheet({ src: { from: 'attachment', id: file.id }, name: file.name }) });
+  // **A file shared into the chat** (16 Nov 2026, its chip: SharedFiles.svelte, AgentReportCard.svelte): a click
+  // opens it beside the chat — where a Code chat's links open for a file of its workspace, else Yap's file or sheet
+  // view, else its own app — and its ⋯ is its menu (sharedOpen.js).
+  setContext(SHARED_FILES, {
+    get conversation() {
+      return chat.activeId ?? null;
+    },
+    get code() {
+      return !!code.current;
+    },
+    open: (item) => openShared(item, { doc, conversation: chat.activeId, code: !!code.current }),
+    menu: (e, item, el) => openSharedMenu(e, item, el, { doc, conversation: chat.activeId, code: !!code.current }),
+  });
   // A message sent while a Code chat's own session works waits in the queue (chatState's `queued`).
   // (A Code chat: Rust says whether its own session works — the page's list of agents lags a moment behind.)
   chat.setQueueGate(() => code.current != null);

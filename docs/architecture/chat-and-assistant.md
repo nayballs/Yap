@@ -1179,6 +1179,12 @@ one side.
   in folder** (`chat_file_open`, `chat_file_reveal`): only a file shared in
   that conversation, still there, judged again as the file system has it;
   a test run keeps what it would open (`e2e_kept`: "open:…", "reveal:…").
+  **Read for the view beside the chat** (16 Nov 2026, a file chip's click:
+  `chat_file_read`, the same check, then `agents::files::read_file` — at most
+  1 MB and 20,000 lines, one that isn't text said so; `shared_path` gives the
+  sheet view's `Src::Shared` its file, read only). The preview a card once
+  folded under ▸ (`chat_file_preview`) has no button any more: opening the
+  file is its preview.
   **An agent's report** (`of_agent_turn`, `chat/turn/report.rs`): the turn's
   changed files that are pictures by their bytes (the first 4 copied, the
   rest `morePictures`) and its other files the turn created (the turn's
@@ -2430,29 +2436,73 @@ picture as a `ShownPicture`: its file's name as caption, its folder as
 where it's from). A picture's **⋯** (on hover or focus; its right-click
 too): Copy image, Save image as… (the screenshots' own), Show in folder,
 Open original (its file in its app; a web picture's address in the
-browser). **A card** for any other file: an icon by its kind, the name
-(the whole path on hover), the folder shortened ("…\garden-planner\docs",
-the whole on hover), size and kind ("PDF · 3 pages"), **Open** (a Markdown
-file in Yap's own window; any other in its app — none for one that would
-run something), **Show in folder**, **Copy path**, and the first lines
-folded under **▸ Preview** (read when unfolded); a file no longer at its
-path says **"Moved or deleted"** (Copy path only). **Live**: a turn's
+browser). **Any other file is a chip** (16 Nov 2026, the maintainer's pick
+of three designs: the Claude app's file chips; before, a card with Open,
+Show in folder, Copy path and "▸ Preview" buttons, and the same file could
+show twice in a turn). `FileChip.svelte` + `fileChip.js` (pure), one look
+for every file Chat shows as a box — shared files, an agent's report's new
+files, a question's attachments: one compact rounded box with a small
+**type badge** coloured by the file's family (`familyOf`: documents blue,
+PDFs red, spreadsheets green, slides orange, pictures violet, code teal,
+archives amber, sound and video pink, the rest grey — `--yap-file-*` in
+`app.css`, light and dark, each 4.5:1 or better as the badge's letters on
+its own wash; `badgeOf`: the ending in capitals, at most four letters), the
+**name** cut in the middle so its ending shows (`nameParts`: the start
+gives way with "…", the end — the ending and the word before it — stays),
+and the **size** quiet beside it (`fileSize`, the app's "572B", "14 KB");
+the whole path (and a PDF's pages) on hover. **Its size is the app's**,
+measured on its screenshot as #163 measured the rows (its answer text 15.7
+px): 36 px tall with a 7 px corner, an 18 px badge with 10.5 px letters, the
+name 13.5 px, the size 11.5 px — at the default reading size, in step with
+Settings → Appearance's from there. Several sit side by side in a **row that
+wraps**, "+N more" after a report's fourth; the caption a quiet line under
+them. **A click opens it beside the chat** (`sharedOpen.js`, Chat's
+`SHARED_FILES` context in ChatView): a file of a Code chat's workspace where
+its links open ("Open file links in": Yap's file view, a workbook as a
+sheet, an editor at the line, the default app — `code_files_check` says
+which files are the workspace's); any other a spreadsheet in the **sheet
+view** (read only: `Src::Shared`, `chat/sheets/view.rs`), a text, Markdown
+or code file in the **file view** (`chat_file_read`: only a file shared in
+that conversation, read as a Code chat's file is — `FileTab` with Open in
+its app where Open in <editor> would be), anything else in its own app
+(`chat_file_open`; never one that would run a program). Opening it is its
+preview: no "▸ Preview". **Its ⋯** on hover or keyboard focus (the next Tab
+stop; its right-click, the ContextMenu key and Shift+F10 too), over the
+size so nothing moves: a workspace file's menu is a file link's (Open in
+Yap, Open in <editor>, Show in folder, Copy path); any other's Open in Yap
+(where Yap has a view of it), Open in its own window (a Markdown file's) or
+Open in its app, Show in folder, Copy path. A file no longer at its path
+says **"Moved or deleted"** and opens nothing (its menu: Copy path).
+**One chip a file a turn** (`chippedElsewhere`, ChatThread → the report
+card's `elsewhere`): a file the turn's answer shares is its one chip, under
+the answer; the same file on an agent's report card (its "Agent done ·
+Changed …" in the work lines) is only its name in that line, a link that
+opens it as the chip would (`changedParts`: every file of the card's the
+line names is one; one it doesn't name goes after it), and a file two shares
+of one answer hold shows once (`onceEach`). Paths compared as Rust's
+`workspaces::norm` (`normPath`). **Live**: a turn's
 `{kind: "share", share}` (as `share_files` lands) goes in the answer's
 bubble as it comes (`liveFiles`, chatState's `Answer.shares`); the saved
 answer takes `chat_send`'s `files`. **An agent's report card**
 (`AgentReportCard.svelte`, `report`): its turn's pictures as a grid, four
-then "+N more", and its new files as compact cards (Open and Show in folder,
-no preview), up to four then "+N more". Its step's chip: "Shared 2 pictures
+then "+N more", and its new files as chips, up to four then "+N more". The
+phone (Yap Link) draws an answer's files as the same chips, by name and size
+(`link/chats.rs` `fileSizes`; it imports `fileChip.js` as `core/fileChip.js`,
+[link.md](./link.md)). Its step's chip: "Shared 2 pictures
 and notes.md" (folded: "shared files"); the line while it runs: "Sharing
 ‘concept.png’" / "Sharing 3 files". Tested in `desktop/e2e/chat-share.spec.js`:
 one picture copied, kept, drawn large and whole, a click opening the
 panel's tab or the viewer, its ⋯; three pictures as a grid of filled 4:3
-tiles at their device pixels; a
-Markdown file and a .txt as cards (Open: Yap's Markdown window, the text
-file kept for the suite; Show in folder; Copy path; the preview), then one
-deleted: "Moved or deleted"; a seeded agent's report card; the shares an
-older Yap's save dropped, put back from `chat_files.json`. Screenshots light
-and dark.
+tiles at their device pixels; a Markdown file and a .txt as chips side by
+side at the app's sizes (a click: the file view; the ⋯ by pointer and
+keyboard, its items; Open in its own window: Yap's Markdown window; the text
+file's app and folder kept for the suite; Copy path), then one deleted:
+"Moved or deleted", nothing opens; six files of every family wrapping inside
+the column, a long name cut with its ending kept, a .csv in the sheet view
+read only, a PDF in its app; a seeded agent's report card; one chip a file a
+turn (the report's link opening it, its menu); the shares an older Yap's save
+dropped, put back from `chat_files.json`; `fileChip.js` in Node. A Code
+chat's: `code-chat-files.spec.js` (below). Screenshots light and dark.
 
 **Visuals in the answer** (15 Nov 2026, `VisualFrame.svelte`, `visualBridge.js`,
 `made.svelte.js`; `chat/made.rs`): "Made a visual" in the muted line's

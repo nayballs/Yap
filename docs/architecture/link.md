@@ -250,7 +250,7 @@ is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 | `denied {reason}` | Refused, in words the phone can show ("Too many tries from this phone. Try again in 4 minutes."); the socket closes. |
 | `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}], can⁺, picker⁺}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others; `can`: what it answers beyond v1 (`["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak"]`, Remote Control's three, then `"versions"` and `"edit"`, 16 Nov 2026; `"retry"` and `"rate"` were said that day only, and the page offers neither); `picker`: what Chat's picker shows (`{status, catalog, local, images}`, `link/models.rs`; never a key; `status.images` and `status.imagesSwitch` say whether Chat's model reads pictures and which would). Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
 | `chats {items:[{id, title, ts}]}` ⁺ | Chat's conversations, newest first (`link/chats.rs`). |
-| `thread {id, title, messages:[{role, text, id?, voice?, pictures?, version?, ts?, edit?}], more}` ⁺ | A conversation's latest messages (words only; an answer's `id` for ▶; `pictures`: how many a question carried; ⁺ `version {at, shown, count}`: its versions' ‹ k/n ›, the one shown being the PC's; ⁺ `ts`: its time in Chat, unix seconds, which an answer's row says ("12 minutes ago"); ⁺ `edit`: a question ✎ may edit, its time in Chat, which `edit` names it by), `more` when older ones were left out; `id: null` for a new chat (or one that's gone, after an `error`). |
+| `thread {id, title, messages:[{role, text, id?, voice?, pictures?, files?, fileSizes?, version?, ts?, edit?}], more}` ⁺ | A conversation's latest messages (words only; an answer's `id` for ▶; `pictures`: how many a question carried; `files`: the names of the files it shared on the PC (an agent's report's too), ⁺ `fileSizes` their sizes in the same order (16 Nov 2026) — drawn as the PC's file chips (a coloured type badge, the name cut in the middle, the size: `core/fileChip.js`), each name once a turn, then "On your PC"; nothing opens on the phone; ⁺ `version {at, shown, count}`: its versions' ‹ k/n ›, the one shown being the PC's; ⁺ `ts`: its time in Chat, unix seconds, which an answer's row says ("12 minutes ago"); ⁺ `edit`: a question ✎ may edit, its time in Chat, which `edit` names it by), `more` when older ones were left out; `id: null` for a new chat (or one that's gone, after an `error`). |
 | `versions {chat}` ⁺ | Conversation `chat`'s version shown changed (a ‹ › or an Edit on the PC or another phone, or this phone's ✎ at its end; every phone hears): a phone showing it asks for its `thread` again (`open_chat`), once nothing of its own is under way there. |
 | `chat {id, title}` ⁺ | This phone's question went to conversation `id` (the one chosen for it, or a new chat's): its questions go there from now on. |
 | `title {id, title}` ⁺ | Conversation `id` was renamed in Chat (every phone hears it). Chat's titles are a conversation's first words; a rename is the only change. |
@@ -608,7 +608,10 @@ the phone's own "seen", `yap.link.seen`), `core/codeChats.js` (grouping by
 workspace, the prompts), `core/money.js`, `core/pageConfirm.js` (the
 ask-first card's words: `views/chat/pageConfirm.js`, served at `core/`) and
 `core/codeWire.js` (the wire's helpers: `codeOn`, `approve`, `confirm`,
-`setMode`, `MIN_SHOWN_MS`, `PHONE_MODES`).
+`setMode`, `MIN_SHOWN_MS`, `PHONE_MODES`). Every chat's answer also reads
+`core/fileChip.js` (`views/chat/fileChip.js`: a file chip's badge, its
+colour's family, its name cut in the middle, its size — the phone's chips
+the PC's, in `link.css`'s own `--yap-file-*`).
 
 - **Chat | Code** in the drawer: Chat the plain conversations (each with its
   dot), Code the agents working (folder, line, how long), then each

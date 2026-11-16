@@ -252,7 +252,13 @@ pub fn as_text(bytes: &[u8], cut: bool) -> (String, bool) {
 
 /// **Read the file `raw` names** in the workspace at `root`.
 pub fn read(root: &Path, raw: &str) -> Result<FileView, Refused> {
-    let file = resolve(root, raw)?;
+    read_file(resolve(root, raw)?)
+}
+
+/// **Read `file` for its view** (already found: a workspace's, or a file
+/// shared in a chat, `chat/shares.rs` `chat_file_read`): at most
+/// [`READ_MAX`] bytes and [`LINES_MAX`] lines; one that isn't text said so.
+pub fn read_file(file: FileRef) -> Result<FileView, Refused> {
     let mut f = std::fs::File::open(&file.abs).map_err(|_| Refused::Missing)?;
     let size = f.metadata().map(|m| m.len()).unwrap_or(0);
     let mut bytes = Vec::new();

@@ -105,6 +105,16 @@
   --yap-status-needs: var(--yap-warning);
   --yap-status-needs-ring: rgba(176, 124, 16, 0.22);
   --yap-status-new: #2f6fd8;
+  /* A file chip's type badge, by the file's family (core/fileChip.js `familyOf`): app.css's `--yap-file-*` */
+  --yap-file-doc: #2c64b4;
+  --yap-file-pdf: #b8352d;
+  --yap-file-sheet: #18703c;
+  --yap-file-slides: #a6461a;
+  --yap-file-picture: #7352ba;
+  --yap-file-code: #146d74;
+  --yap-file-archive: #7a5a0a;
+  --yap-file-media: #a83e73;
+  --yap-file-text: #69645a;
 
   --yap-font-ui: 'Figtree Variable', 'Segoe UI Variable Text', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
     'Noto Sans', sans-serif;
@@ -180,6 +190,15 @@
     --yap-success: #3dbb74;
     --yap-status-needs-ring: rgba(220, 160, 60, 0.26);
     --yap-status-new: #6ea6ff;
+    --yap-file-doc: #79acf5;
+    --yap-file-pdf: #f08580;
+    --yap-file-sheet: #5fcf8f;
+    --yap-file-slides: #f29560;
+    --yap-file-picture: #b9a2f2;
+    --yap-file-code: #6fcfd4;
+    --yap-file-archive: #e0b552;
+    --yap-file-media: #ef93bf;
+    --yap-file-text: #aaa59b;
   }
 }
 
@@ -699,21 +718,96 @@ main {
   font-size: 0.875rem;
   color: var(--yap-muted);
 }
-/* The files an answer shared on the PC (chat/shares.rs): their names under it. */
+/* The files an answer shared on the PC (chat/shares.rs): a chip each, as the PC's (FileChip.svelte, in rem: they
+   grow with the phone's text), in a row that wraps, then "On your PC". Nothing opens: the files stay there. */
 .afiles {
   align-self: flex-start;
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
   margin: 0;
-  padding: 4px 12px;
-  border-radius: var(--yap-r-full);
-  border: 1px solid var(--yap-border-subtle);
-  font-size: 0.875rem;
-  color: var(--yap-muted);
-  overflow-wrap: anywhere;
 }
-.afiles svg,
+.fchip {
+  --fc: var(--yap-file-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 2.25rem;
+  padding: 0 0.6rem 0 0.45rem;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: 0.45rem;
+  background: var(--yap-s2);
+  color: var(--yap-fg);
+  font-size: 0.84rem;
+}
+.fchip.fam-doc {
+  --fc: var(--yap-file-doc);
+}
+.fchip.fam-pdf {
+  --fc: var(--yap-file-pdf);
+}
+.fchip.fam-sheet {
+  --fc: var(--yap-file-sheet);
+}
+.fchip.fam-slides {
+  --fc: var(--yap-file-slides);
+}
+.fchip.fam-picture {
+  --fc: var(--yap-file-picture);
+}
+.fchip.fam-code {
+  --fc: var(--yap-file-code);
+}
+.fchip.fam-archive {
+  --fc: var(--yap-file-archive);
+}
+.fchip.fam-media {
+  --fc: var(--yap-file-media);
+}
+.fchip .fc-badge {
+  flex: 0 0 auto;
+  min-width: 1.4rem;
+  padding: 0 0.28rem;
+  border: 1px solid color-mix(in srgb, var(--fc) 34%, transparent);
+  border-radius: var(--yap-r-full);
+  background: color-mix(in srgb, var(--fc) 13%, transparent);
+  color: var(--fc);
+  font-size: 0.66rem;
+  font-weight: 650;
+  line-height: 1rem;
+  letter-spacing: 0.03em;
+  text-align: center;
+}
+/* The name cut in the middle: its start gives way with "…", its ending stays. */
+.fchip .fc-name {
+  display: inline-flex;
+  min-width: 0;
+  font-weight: 500;
+  white-space: pre;
+}
+.fchip .fc-head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fchip .fc-tail {
+  flex: 0 0 auto;
+}
+.fchip .fc-size {
+  flex: 0 0 auto;
+  color: var(--yap-muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fc-where {
+  font-size: 0.75rem;
+  color: var(--yap-muted);
+}
 .qpics-n svg {
   width: 1rem;
   height: 1rem;
