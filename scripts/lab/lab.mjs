@@ -9,8 +9,9 @@
 //         [--stale-ok] [--fake [--live-web]] [--idle <min>]
 //         [--size 1280x860] [--no-shots] [--theme light|dark]
 //   check                                  is Claude Code here and signed in?
-//   ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>]
+//   ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>]
 //       [--timeout 600] [--no-shots] [--theme light|dark]
+//       (--away: asked from another app, so the answer is a card on the Yap bar)
 //   wait [--timeout 600] [--agents [--cards allow|deny]]
 //   answer <card-id> allow|deny|always [--timeout 600] [--no-wait]
 //   answer <card-id> pick "<option>"       a question card ("A|B": several questions, "A,B": several picks)
