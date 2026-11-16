@@ -638,8 +638,8 @@
   }
   /* **The rows under a message** (16 Nov 2026): the Claude app's own sizes, measured with Yap beside it on one screen
      at one Windows scale (32.webp; the first pass, sized to a share of Yap's text, came out about 0.75 of the app's):
-     24 px squares side by side, glyphs about 13 px, the time 13.5 px. Those at Yap's default reading size, and in step
-     with Settings → Appearance's reading size from there (--row). */
+     24 px squares side by side, glyphs about 12 px (a 16.5 px icon), the time 13.5 px. Those at Yap's default reading
+     size, and in step with Settings → Appearance's reading size from there (--row). */
   .uacts,
   .msgfoot {
     --row: var(--yap-reading-scale);
@@ -654,7 +654,7 @@
     justify-content: flex-end;
     gap: 0;
     /* (The last icon's ink under the bubble's text edge: the square's half less the glyph's.) */
-    margin: 3px calc(13px - 5.4px * var(--row)) 0 auto;
+    margin: 3px calc(13px - 5.9px * var(--row)) 0 auto;
   }
   /* (On hovering the message, the row or its focus; its ‹ 1/2 › always, and a queued message's ✓ while it waits.) */
   .reveal {
@@ -690,8 +690,8 @@
       color 0.12s;
   }
   .act svg {
-    width: calc(18px * var(--row));
-    height: calc(18px * var(--row));
+    width: calc(16.5px * var(--row));
+    height: calc(16.5px * var(--row));
   }
   .act:hover {
     background: color-mix(in srgb, var(--yap-fg) 8%, transparent);
@@ -941,7 +941,7 @@
     align-self: flex-start;
     gap: 0;
     min-height: calc(24px * var(--row));
-    margin: -2px 0 2px calc(13px - 5.4px * var(--row));
+    margin: -2px 0 2px calc(13px - 5.9px * var(--row));
   }
   /* (Being read: Read aloud's square in the primary colour.) */
   .msgfoot .act.reading {

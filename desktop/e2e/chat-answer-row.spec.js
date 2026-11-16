@@ -4,7 +4,7 @@
 // - Under an answer: Copy, Fork from here, Pin as chapter, Read aloud (a speaker), then its time ("just now") and its
 //   model — never 👍 / 👎 or ↻ Retry (taken out the same day). Under the person's message, on hover: Copy and Edit.
 //   Each button's tooltip as the app's: its name, and what it does. Light and dark.
-// - Their size: the Claude app's own, measured with Yap beside it on one screen (24 px squares, 18 px icons, the time
+// - Their size: the Claude app's own, measured with Yap beside it on one screen (24 px squares, 16.5 px icons, the time
 //   13.5 px), in step with the reading size from there. The latest message's row always shown, as the app's.
 // - Copy copies the answer as text; Read aloud reads it (■ to stop).
 // - Fork from here: a new chat with the conversation up to that answer, opened; the original as it was.
@@ -121,7 +121,7 @@ test('under an answer: Copy, Fork from here, Pin as chapter, Read aloud and its 
   await main.keyboard.press('Escape');
 });
 
-test('its size is the Claude app’s, measured beside it on one screen: 24 px squares, 18 px icons, 13.5 px time, in step with the reading size', async ({ yap, main, fakeLlm }) => {
+test('its size is the Claude app’s, measured beside it on one screen: 24 px squares, 16.5 px icons, 13.5 px time, in step with the reading size', async ({ yap, main, fakeLlm }) => {
   await freshChat(main);
   await ask(main, fakeLlm, 'Is a 35-litre rucksack enough?', 'Yes, for two days.');
   const measure = (which) =>
@@ -137,10 +137,10 @@ test('its size is the Claude app’s, measured beside it on one screen: 24 px sq
       });
   // At the default reading size: the Claude app's own (32.webp: Yap and the app side by side, one Windows scale).
   let m = await measure('chat-answer-actions');
-  expect(m).toMatchObject({ text: 12.5, square: 24, wide: 24, icon: 18, when: 13.5 });
+  expect(m).toMatchObject({ text: 12.5, square: 24, wide: 24, icon: 16.5, when: 13.5 });
   // The person's message row: the same squares (Copy, Edit), always shown under the latest message.
   const u = await measure('chat-message-actions');
-  expect([u.square, u.icon]).toEqual([24, 18]);
+  expect([u.square, u.icon]).toEqual([24, 16.5]);
   await expect(thread(main).getByTestId('chat-message-actions').last().locator('.reveal')).toHaveCSS('opacity', '1');
   // Larger reading: in step with it.
   await setConfig(yap, main, { readingSize: 'larger' });
@@ -148,7 +148,7 @@ test('its size is the Claude app’s, measured beside it on one screen: 24 px sq
   m = await measure('chat-answer-actions');
   const k = m.text / 12.5;
   expect(m.square).toBeCloseTo(24 * k, 0);
-  expect(m.icon).toBeCloseTo(18 * k, 0);
+  expect(m.icon).toBeCloseTo(16.5 * k, 0);
   expect(m.when).toBeCloseTo(13.5 * k, 0);
   await setConfig(yap, main, { readingSize: 'default' });
 });

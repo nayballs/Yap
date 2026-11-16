@@ -6284,9 +6284,9 @@ tiny". So both rows are the app's, in every chat:
 - **Their size: the Claude app's own** (16 Nov 2026). Measured with Yap
   beside the app on one screen at one Windows scale, glyph by glyph on the
   decoded pixels: the app's squares 24 px side by side, its glyphs about
-  13 px, its time about 13.5 px, its message row the same. Yap's are those
-  at the default reading size — `.act` 24 px with an 18 px icon (its ink
-  about 13 px), the time 13.5 px, the model label a little smaller (the app
+  12 px, its time about 13.5 px, its message row the same. Yap's are those
+  at the default reading size — `.act` 24 px with a 16.5 px icon (its
+  ink about 12 px), the time 13.5 px, the model label a little smaller (the app
   has none) — and in step with Settings → Appearance's reading size from
   there (`--row`, the reading scale). A first pass sized them to a share of
   Yap's own text and came out about three quarters of the app's (the app's
