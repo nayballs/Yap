@@ -289,6 +289,8 @@
       <path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l3 2" />
     {:else if name === 'cut'}
       <circle cx="6" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M8.1 7.9L20 20M8.1 16.1L20 4" />
+    {:else if name === 'plus'}
+      <path d="M12 5v14M5 12h14" />
     {:else if name === 'lines'}
       <path d="M4 6h16M4 12h16M4 18h10" />
     {/if}

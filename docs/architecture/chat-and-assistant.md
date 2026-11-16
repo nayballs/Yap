@@ -4803,11 +4803,7 @@ the page: `views/chat/SheetTab.svelte` + `sheetView.js`.
   spreadsheet app (Windows' default for its ending; "Open in app" for an
   `.ods`), on that click only; a test run keeps it (`open-sheet:<name>`).
   Copy path and ↻ beside it.
-- **Not done** (follow-ups): editing anything but a cell's value or
-  formula (formats, rows and columns, sheets; see Editing a sheet); an
-  empty styled cell openpyxl writes as `<c t="n"/>` (no value) reads as 0
-  where Excel shows nothing (IronCalc's import; seen in the Lab, 16 Nov
-  2026); a Chat tool that keeps a spreadsheet as it keeps pages; a picture of the sheet as shown for a Code
+- **Not done** (follow-ups): editing formats and sheets (see Editing a sheet); a Chat tool that keeps a spreadsheet as it keeps pages; a picture of the sheet as shown for a Code
   chat's Claude to check its own layout; conditional formatting, charts,
   pictures and comments aren't drawn; rows with wrapped text aren't grown
   to fit (their height is the file's); General numbers aren't shortened to
@@ -4869,6 +4865,90 @@ commands); the page: `SheetTab.svelte`.
   rewrites that record only (quoted only where it must be); the others stay
   as written, quotes and all; a row past the end is added with empty records
   between, as Excel writes them.
+- **Typed as the person's Region writes** (16 Nov 2026, `xlsx::locale_for`):
+  IronCalc reads input in a locale, and Yap gives it the person's Region
+  (Settings → About you → Region, `ai/about_you.rs`) where IronCalc has a
+  match (`xlsx::locale_for_region`): the UK and the countries that write
+  dates day first and numbers `1,234.50` (Ireland, Australia, New Zealand,
+  India, Singapore, Hong Kong, Malta, the Channel Islands, the Isle of Man,
+  Gibraltar) `en-GB` — `16/11/2026` typed is a date, `£12.50` a price in
+  pounds (`$` and `€` too); Germany and Austria `de`, France and Monaco
+  `fr` (Belgium and Luxembourg in French), Spain `es`, Italy `it`, the US
+  `en`. No match (Switzerland, Canada…): the file's own — the language its
+  number formats name, `[$-809]dd/mm/yyyy` (`xlsx::locale_of_file`) — else
+  IronCalc's `en` (the US's), so a date is never read the wrong way round.
+  Decided: the reading too (where a file's format leaves it to the
+  locale), so the view, what's typed and the save's read-back agree; the
+  function names stay Excel's English. A test run has no Region of its own
+  (`YAP_E2E_LOCALE` stands in, a unit test none).
+- **Alt+Enter** (16 Nov 2026): a new line inside the cell, in the cell and
+  the formula bar (both a `<textarea>`; the box grows with its lines, the
+  bar to four), and the cell's text **wrapped**, as Excel does (IronCalc's
+  `alignment.wrap_text`; Undo takes both back at once). Saved as an `<xf>`
+  copied from the cell's own with `<alignment wrapText="1">`
+  (`save::xf_with_wrap`); the row's height isn't written (Excel fits a row
+  that wraps itself).
+- **Rows and columns** (16 Nov 2026, `chat/sheets/shift.rs`,
+  `shift/parts.rs`, `edit::Editor::lines`, `sheet_lines`): a row number's
+  or a column letter's right-click menu — Insert row above / below, Insert
+  column left / right, Delete row N / column X (last, in red; no "Are you
+  sure?": Undo puts it back, as Excel). Excel's rules, the same in every
+  part of the file: a line at or past the one put in moves on; an area
+  across it grows (`SUM(D2:D5)` with a row put in before row 4 is
+  `SUM(D2:D6)`), one ending just above doesn't; a cell taken out is
+  `#REF!`, an area loses only the lines it had there (IronCalc's own Delete
+  makes such an end `#REF!`; Excel shrinks it); `$` changes nothing. Only
+  references to that sheet move (named, or unnamed on it). A row put in
+  takes the row above's formats, a column the one to its left's (Excel's
+  default, "Format Same As Above").
+  - **What's moved** (research: what Excel's Insert changes in the XML):
+    the sheet's rows and cells renumbered, every formula's references, an
+    array formula's area, a shared formula whose cells or references move
+    written out cell by cell (the model's own text for each); `<dimension>`,
+    the frozen panes and selection, column widths (`<cols>`), merged cells
+    (gone when taken out or down to one cell), conditional formats (their
+    areas and formulas, the newer `x14` ones in `<extLst>` too), data
+    validation, hyperlinks (and their links into the workbook), the
+    autofilter and sorts, page breaks, ignored errors, protected ranges,
+    watched cells, sparklines; on the other sheets every formula, rule and
+    link that names it; defined names (print areas and titles too);
+    charts' series, titles and labels (`<c:f>`, a chartEx's `<cx:f>`);
+    pictures', charts' and shapes' anchors (moved and sized as their
+    `editAs` says: "twoCell" moves and grows, "oneCell" moves, "absolute"
+    stays) and a shape's text linked to a cell; comments (and their notes'
+    boxes in the legacy VML, edited as text inside each `<x:ClientData>`);
+    threaded comments; tables (grown by rows put in inside them, shrunk by
+    data rows taken out). Excel's calculation chain is already gone (the
+    save's rule) and the workbook calculates on opening.
+  - **Refused, with why, and nothing changed** ("Yap can't insert a row
+    here: an array formula would be cut apart. Do it in Excel."): a pivot
+    table on the sheet or fed by it, slicers or timelines, a data table
+    (What-If), scenarios, custom views, form controls and embedded objects,
+    cells mapped to XML, a part of the sheet Yap doesn't know, an `<ext>`
+    Yap doesn't know that names cells; a picture, chart or comment on lines
+    that would go; a table's heading or totals row taken out, a table's
+    columns cut apart, rows put in a table with calculated columns (Excel
+    fills them in); an array formula cut apart; cells pushed off the end of
+    the sheet; a reference Yap can't be sure of (across sheets, `Jan:Mar!B3`;
+    one with no sheet in a defined name or a chart; a formula it can't
+    read).
+  - **How it's done — what's shown is what's saved**: the package as a
+    save would write it now (`save::xlsx_bytes`, read back as ever) is
+    changed part by part and **read again as the workbook shown**
+    (`edit::Layer`), so the view, the calculation and the file can't
+    disagree; then **checked**: the same rows or columns put in or taken
+    out by IronCalc's own `insert_rows` (…) on the workbook as it was, and
+    every cell of every sheet must hold the same (its value or formula),
+    every merge be the same — one allowance, an area's end IronCalc makes
+    `#REF!` where Yap shrinks it. A difference: refused ("…would come out
+    different"), never saved. The file is written by the usual save, under
+    the usual rule (only while it's what was read).
+  - **Undo**: the workbook as it was put back whole (the step keeps it:
+    the last 20 rows-or-columns changes), its own typing's history with it;
+    Redo the same way. A CSV: its text, as any change.
+  - **A CSV**: records put in or taken out (a new one as empty fields as
+    wide as the first record), fields put in or taken out of each record
+    that reaches them; every other record as written.
 - **Undo and Redo**: Ctrl+Z, Ctrl+Y (or Ctrl+Shift+Z), and ↶ ↷ in the
   header; the cell undone is selected (its sheet shown). IronCalc's own
   history for an `.xlsx`; the text's versions for a CSV (up to 64 MB of
@@ -4941,13 +5021,15 @@ commands); the page: `SheetTab.svelte`.
   two versions could only be merged by guessing. Changes made before Claude
   started are still saved (the rule above protects Claude's own writes);
   what's being typed when it starts stays in its box.
-- **Not done** (follow-ups): formats, rows, columns, sheets, fill, copy and
-  paste of ranges, Alt+Enter (a line break in a cell); clicking a cell to
-  add its reference to a formula being typed; a formula that spills (Excel's
-  dynamic arrays need the file's metadata); a table's heading; editing an
+- **Not done** (follow-ups): formats, sheets, fill, copy and paste of
+  ranges, moving rows or columns, more than one row or column at once from
+  the menu (Rust takes a count), the Insert/Delete keys (Ctrl+Shift+=,
+  Ctrl+−); clicking a cell to add its reference to a formula being typed; a
+  formula that spills (Excel's dynamic arrays need the file's metadata); a
+  table's heading; rows put in a table with calculated columns; editing an
   attached file (its copy) or an `.xls`/`.ods`; formulas typed in a CSV
-  calculated in the view; input read in the person's locale (IronCalc's
-  `en`: `16/11/2026` stays text, `$`/`€` are currencies, `£` isn't).
+  calculated in the view; Excel's built-in short date (format 14) shown in
+  the Region's order.
 - **Privacy**: counts and kinds only in the log (a save held back, a sheet
   saved, a copy made — never a name, a path or a cell).
 - Tests: `cargo test chat::sheets` (`sheets/edit/tests.rs`: the cells'
@@ -4959,11 +5041,22 @@ commands); the page: `SheetTab.svelte`.
   macros, validation, conditional formatting, tab colour and page setup
   kept; array formulas refused; the CSV's record, its BOM and CRLF, its row
   numbers; the rule — the same size and time put back but other bytes is a
-  change; the view's open → edit → save → conflict → copy); and
+  change; the view's open → edit → save → conflict → copy; rows put in and
+  taken out, saved and undone; a column; refusals; a CSV's records and
+  fields; Alt+Enter's wrap; the UK's date and pounds, the Region's and the
+  file's locale; openpyxl's typed empty cell), `sheets/shift/tests.rs`
+  (every kind of reference moved — areas grown and shrunk, `$`, whole rows
+  and columns, other sheets, names, tables, other workbooks, text — and the
+  unsure refused; a budget package with every part that points at a cell,
+  rows and columns put in and taken out, the parts with nothing to move
+  byte for byte; pivot tables, scenarios and cut arrays refused); and
   `chat-sheets-edit.spec.js` (typed in a cell and the formula bar, Enter,
   Tab, arrows, Esc, F2, Delete, Ctrl+Z/Y and ↶, the file's XML checked on
   disk, a CSV's record; changed on disk → the bar, Save as a copy, Reload;
-  read only while Claude works; an attached copy read only).
+  read only while Claude works; an attached copy read only; a row put in
+  from its number's menu inside the total, typed into the UK's way
+  (`£1.50`, `16/11/2026`), Alt+Enter, a column and the row taken out, Ctrl+Z,
+  the file checked; a CSV's record put in; an attached copy's menu).
 
 ## The message box is several lines (2026-11-15)
 

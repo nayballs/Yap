@@ -496,3 +496,198 @@ fn the_view_saves_edits_and_holds_back_over_a_change_on_disk() {
     assert!(view::edit_cell(attached.id, 0, 1, 1, "x").unwrap_err().contains("read only"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ---- rows and columns, Alt+Enter, the locale (16 Nov 2026) ----------------------------------------
+
+#[test]
+fn a_row_put_in_inside_the_totals_is_counted_saved_and_undone() {
+    let original = seed_order();
+    let mut e = Editor::open("seed-order.xlsx", Format::Xlsx, &original).unwrap();
+    // A row before row 5 (Kale): inside the total's D3:D5.
+    assert_eq!(e.lines(0, Axis::Rows, 5, 1, true).unwrap(), (0, 5, 1));
+    assert!(e.dirty(), "a row put in is a change to save");
+    let book = e.book();
+    assert_eq!(cell(&book.sheets[0], 7, 4).formula.as_deref(), Some("=SUM(D3:D6)"));
+    assert_eq!(cell(&book.sheets[0], 6, 1).text, "Kale", "moved down");
+    assert_eq!(cell(&book.sheets[0], 3, 6).formula.as_deref(), Some("=D3/D$7"));
+    // Typed into the new row: it has the row above's looks (pounds), and the total takes it in.
+    e.edit(0, 5, 1, "Shallots").unwrap();
+    e.edit(0, 5, 2, "2").unwrap();
+    e.edit(0, 5, 3, "1.5").unwrap();
+    e.edit(0, 5, 4, "=B5*C5").unwrap();
+    let book = e.book();
+    assert_eq!(cell(&book.sheets[0], 5, 3).text, "£1.50");
+    assert_eq!(cell(&book.sheets[0], 7, 4).text, "£26.00", "23 + 3");
+    // Saved: the file has the row, the total over it, the merge and the other sheets as they were.
+    let Editor::Xlsx(x) = &e else { unreachable!() };
+    let written = save::xlsx_bytes(x).unwrap();
+    let again = read_now(Format::Xlsx, &written.bytes).unwrap();
+    assert_eq!(cell(&again.sheets[0], 7, 4).text, "£26.00");
+    assert_eq!(cell(&again.sheets[0], 5, 1).text, "Shallots");
+    assert_eq!(again.sheets[0].merges.len(), 1);
+    let sheet1 = part(&written.bytes, "xl/worksheets/sheet1.xml");
+    assert!(sheet1.contains("<f>SUM(D3:D6)</f>"), "{sheet1}");
+    let (before, after) = (raw_entries(&original), raw_entries(&written.bytes));
+    for name in ["xl/worksheets/sheet2.xml", "xl/worksheets/sheet3.xml"] {
+        assert_eq!(before[name], after[name], "{name} kept as it was");
+    }
+    // Undo: the cells, then the row; back to the file, no change at all. Redo puts the row back.
+    for _ in 0..4 {
+        e.undo().unwrap();
+    }
+    assert!(e.dirty(), "the row's still in");
+    assert_eq!(e.undo(), Some((0, 5, 1)));
+    assert!(!e.dirty(), "back to the file");
+    assert_eq!(cell(&e.book().sheets[0], 6, 4).formula.as_deref(), Some("=SUM(D3:D5)"));
+    assert_eq!(e.redo(), Some((0, 5, 1)));
+    assert_eq!(cell(&e.book().sheets[0], 7, 4).formula.as_deref(), Some("=SUM(D3:D6)"));
+    assert_eq!(e.redo(), Some((0, 5, 1)), "then the name typed");
+    assert_eq!(cell(&e.book().sheets[0], 5, 1).text, "Shallots");
+}
+
+#[test]
+fn a_row_taken_out_shrinks_the_total_and_a_column_moves_its_formulas() {
+    let mut e = Editor::open("seed-order.xlsx", Format::Xlsx, &seed_order()).unwrap();
+    // The total's last row taken out: SUM(D3:D4), as Excel has it (IronCalc's own Delete would say #REF!).
+    e.lines(0, Axis::Rows, 5, 1, false).unwrap();
+    let book = e.book();
+    assert_eq!(cell(&book.sheets[0], 5, 4).formula.as_deref(), Some("=SUM(D3:D4)"));
+    assert_eq!(cell(&book.sheets[0], 5, 4).text, "£11.00");
+    e.undo().unwrap();
+    // A column put in before C: the prices and totals move right, every formula with them.
+    e.lines(0, Axis::Cols, 3, 1, true).unwrap();
+    let book = e.book();
+    assert_eq!(cell(&book.sheets[0], 6, 5).formula.as_deref(), Some("=SUM(E3:E5)"));
+    assert_eq!(cell(&book.sheets[0], 3, 5).formula.as_deref(), Some("=B3*D3"));
+    assert_eq!(cell(&book.sheets[0], 6, 5).text, "£23.00");
+    assert_eq!(book.sheets[0].merges[0].cols, 5, "the title's merge grown over the new column");
+}
+
+#[test]
+fn rows_yap_cant_move_safely_are_refused_and_nothing_changes() {
+    let xml = format!(r#"<sheetData><row r="1">{}</row><row r="2">{}<c r="B2"><f t="array" ref="B2:B4">A1:A3*2</f></c></row></sheetData>"#, n("A1", 1.0, 0), n("A2", 2.0, 0));
+    let bytes = super::super::tests::xlsx_of(&[("Beds", "", xml)], STYLES);
+    let mut e = Editor::open("beds.xlsx", Format::Xlsx, &bytes).unwrap();
+    let why = e.lines(0, Axis::Rows, 3, 1, true).unwrap_err();
+    assert!(why.contains("insert a row") && why.contains("array formula"), "{why}");
+    assert!(!e.dirty() && !e.can_undo());
+    assert!(e.lines(0, Axis::Rows, 0, 1, true).is_err());
+}
+
+#[test]
+fn a_csvs_rows_and_columns_go_in_and_out_record_by_record() {
+    let text = "Bed,Crop,Sown\n1,\"Broad beans\",\"3 March, under fleece\"\n2,Leeks,12 April\n";
+    let r = |at, insert| Shift { axis: Axis::Rows, at, n: 1, insert };
+    let c = |at, insert| Shift { axis: Axis::Cols, at, n: 1, insert };
+    assert_eq!(with_lines(text, b',', &r(2, true)), "Bed,Crop,Sown\n,,\n1,\"Broad beans\",\"3 March, under fleece\"\n2,Leeks,12 April\n");
+    assert_eq!(with_lines(text, b',', &r(2, false)), "Bed,Crop,Sown\n2,Leeks,12 April\n");
+    assert_eq!(with_lines(text, b',', &r(3, false)), "Bed,Crop,Sown\n1,\"Broad beans\",\"3 March, under fleece\"\n");
+    assert_eq!(with_lines(text, b',', &r(9, true)), text, "past the last record: nothing");
+    assert_eq!(with_lines(text, b',', &c(2, true)), "Bed,,Crop,Sown\n1,,Broad beans,\"3 March, under fleece\"\n2,,Leeks,12 April\n");
+    assert_eq!(with_lines(text, b',', &c(1, false)), "Crop,Sown\nBroad beans,\"3 March, under fleece\"\nLeeks,12 April\n");
+    assert_eq!(with_lines("a\nb,c\n", b',', &c(1, false)), "\"\"\nc\n", "a record left with nothing is one empty field");
+    let mut e = Editor::open("beds.csv", Format::Csv, text.as_bytes()).unwrap();
+    e.lines(0, Axis::Rows, 2, 1, false).unwrap();
+    assert_eq!(cell(&e.book().sheets[0], 2, 2).text, "Leeks");
+    assert!(e.dirty());
+    e.undo().unwrap();
+    assert!(!e.dirty());
+}
+
+#[test]
+fn alt_enter_s_line_break_wraps_the_cell_and_is_saved_with_it() {
+    let original = seed_order();
+    let mut e = Editor::open("seed-order.xlsx", Format::Xlsx, &original).unwrap();
+    e.edit(0, 9, 1, "Order by Friday\nPlot 7 first").unwrap();
+    let book = e.book();
+    let c = cell(&book.sheets[0], 9, 1);
+    assert_eq!(c.text, "Order by Friday\nPlot 7 first");
+    assert!(book.styles[c.style as usize].wrap, "its text wrapped, as Excel does");
+    let Editor::Xlsx(x) = &e else { unreachable!() };
+    let written = save::xlsx_bytes(x).unwrap();
+    let styles = part(&written.bytes, "xl/styles.xml");
+    assert!(styles.contains(r#"<xf fontId="0" fillId="0" borderId="0" xfId="0" numFmtId="0" applyAlignment="1"><alignment wrapText="1"/></xf></cellXfs>"#), "{styles}");
+    let sheet1 = part(&written.bytes, "xl/worksheets/sheet1.xml");
+    assert!(sheet1.contains("<c r=\"A9\" s=\"9\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Order by Friday\nPlot 7 first</t></is></c>"), "{sheet1}");
+    let again = read_now(Format::Xlsx, &written.bytes).unwrap();
+    assert!(again.styles[cell(&again.sheets[0], 9, 1).style as usize].wrap);
+    // Undo: the text and its wrap together.
+    assert_eq!(e.undo(), Some((0, 9, 1)));
+    assert!(!e.dirty());
+    // An `<xf>` with an alignment already: wrapText set in it.
+    assert_eq!(
+        save::xf_with_wrap(r#"<xf numFmtId="0" fontId="2" applyAlignment="1"><alignment horizontal="center"/></xf>"#, 0, false, true).unwrap(),
+        r#"<xf fontId="2" numFmtId="0" applyAlignment="1"><alignment horizontal="center" wrapText="1"/></xf>"#
+    );
+}
+
+#[test]
+fn input_is_read_in_the_regions_locale() {
+    // In the UK: a date day first, a price in pounds.
+    let mut e = Editor::open_in("seed-order.xlsx", Format::Xlsx, &seed_order(), "en-GB").unwrap();
+    e.edit(0, 9, 1, "16/11/2026").unwrap();
+    e.edit(0, 9, 2, "£12.50").unwrap();
+    let Editor::Xlsx(x) = &e else { unreachable!() };
+    let m = x.model.get_model();
+    assert_eq!(held_of(m, 0, 9, 1), Held::Number(46342f64.to_bits()), "a date: 16 Nov 2026");
+    assert_eq!(held_of(m, 0, 9, 2), Held::Number(12.5f64.to_bits()));
+    let book = e.book();
+    assert_eq!(cell(&book.sheets[0], 9, 2).text, "£12.50");
+    assert!(cell(&book.sheets[0], 9, 1).text.contains("16"), "{}", cell(&book.sheets[0], 9, 1).text);
+    // Saved and read back in the same locale: what was typed.
+    let written = save::xlsx_bytes(x).unwrap();
+    assert!(part(&written.bytes, "xl/worksheets/sheet1.xml").contains("<v>46342</v>"));
+    // IronCalc's own `en`: the same text stays text, never read the wrong way round.
+    let mut us = Editor::open_in("seed-order.xlsx", Format::Xlsx, &seed_order(), "en").unwrap();
+    us.edit(0, 9, 1, "16/11/2026").unwrap();
+    let Editor::Xlsx(u) = &us else { unreachable!() };
+    assert_eq!(held_of(u.model.get_model(), 0, 9, 1), Held::Text("16/11/2026".into()));
+}
+
+#[test]
+fn a_regions_locale_is_ironcalcs_where_it_has_one() {
+    use super::super::xlsx::{locale_for_region, locale_of_file};
+    assert_eq!(locale_for_region(Some("en-GB"), Some("GB")), Some("en-GB"));
+    assert_eq!(locale_for_region(Some("en-AU"), Some("au")), Some("en-GB"), "day first, as the UK");
+    assert_eq!(locale_for_region(Some("pl-GB"), Some("GB")), Some("en-GB"), "the country's way of writing");
+    assert_eq!(locale_for_region(Some("en-US"), Some("US")), Some("en"));
+    assert_eq!(locale_for_region(Some("de-DE"), Some("DE")), Some("de"));
+    assert_eq!(locale_for_region(Some("de-CH"), Some("CH")), None, "Swiss numbers aren't Germany's");
+    assert_eq!(locale_for_region(Some("fr-CA"), Some("CA")), None);
+    assert_eq!(locale_for_region(Some("fr-BE"), Some("BE")), Some("fr"));
+    assert_eq!(locale_for_region(None, None), None);
+    // Every one it gives, IronCalc has.
+    let have = ironcalc::base::get_supported_locales();
+    for id in ["en", "en-GB", "de", "fr", "es", "it"] {
+        assert!(have.iter().any(|h| h == id), "IronCalc has {id}: {have:?}");
+    }
+    // A file's own: the language its formats name.
+    let styles = STYLES.replace(r#"formatCode="dd/mm/yyyy""#, r#"formatCode="[$-809]dd/mm/yyyy""#);
+    let gb = super::super::tests::xlsx_of(&[("Budget", "", "<sheetData/>".to_string())], &styles);
+    assert_eq!(locale_of_file(&gb), Some("en-GB"));
+    assert_eq!(locale_of_file(&seed_order()), None);
+    assert_eq!(super::super::xlsx::locale_for(&gb), "en-GB", "no Region in a test: the file's");
+    assert_eq!(super::super::xlsx::locale_for(&seed_order()), "en");
+}
+
+#[test]
+fn an_empty_cell_with_a_type_reads_as_empty() {
+    use super::super::xlsx::without_typed_empties;
+    assert_eq!(
+        without_typed_empties(r#"<sheetData><row r="2"><c r="B2" s="4" t="n"/><c r="C2" t="n"><v>3</v></c></row></sheetData>"#).as_deref(),
+        Some(r#"<sheetData><row r="2"><c r="B2" s="4"/><c r="C2" t="n"><v>3</v></c></row></sheetData>"#)
+    );
+    assert_eq!(without_typed_empties(r#"<c r="B2" s="4"/>"#), None);
+    // openpyxl's styled empty cell: nothing shown (IronCalc alone read 0), its style kept.
+    let xml = format!(r#"<sheetData><row r="2">{}<c r="B2" s="4" t="n"/></row></sheetData>"#, n("A2", 5.0, 4));
+    let bytes = super::super::tests::xlsx_of(&[("Budget", "", xml)], STYLES);
+    let book = read_now(Format::Xlsx, &bytes).unwrap();
+    let b2 = book.sheets[0].rows.iter().find(|r| r.r == 2).and_then(|r| r.cells.iter().find(|c| c.col == 2));
+    assert!(b2.is_none_or(|c| c.text.is_empty() && c.kind == super::super::Kind::Empty), "{b2:?}");
+    assert_eq!(cell(&book.sheets[0], 2, 1).text, "£5.00");
+    // Edited and saved: the untouched cell as the file wrote it.
+    let mut e = Editor::open("budget.xlsx", Format::Xlsx, &bytes).unwrap();
+    e.edit(0, 2, 1, "6").unwrap();
+    let Editor::Xlsx(x) = &e else { unreachable!() };
+    assert!(part(&save::xlsx_bytes(x).unwrap().bytes, "xl/worksheets/sheet1.xml").contains(r#"<c r="B2" s="4" t="n"/>"#));
+}

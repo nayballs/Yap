@@ -8,6 +8,9 @@
 //   offers Reload or Save as a copy.
 // - **Read only**: an attached copy (said when you try to type); and live and read only while Claude works in the
 //   chat's folder.
+// - **Rows and columns** (16 Nov 2026, chat/sheets/shift.rs): put in and taken out from a row number's or a column
+//   letter's menu, every reference moved as Excel moves it (a total over the rows grows); Alt+Enter a new line in a
+//   cell; what's typed read as the person's Region writes it (the UK here: a date day first, a price in pounds).
 //
 // Fictional workbooks made here (support/xlsx.js); the Code chat on Yap's stand-in for Claude Code.
 import fs from 'node:fs';
@@ -70,7 +73,8 @@ const test = base.extend({
       fs.rmSync(HERE, { recursive: true, force: true });
       fs.mkdirSync(path.join(HERE, 'files'), { recursive: true });
       fs.writeFileSync(ATTACHED, seedOrderXlsx());
-      await use({ name: 'chat-sheets-edit', env: fakeClaude(writeScript('idle', [{ _wait_user: true }])), config: { ...PLAN, webSearch: false, meetingReminder: 'never' } });
+      // (In the UK, as Windows would say: what's typed is read as the UK writes it.)
+      await use({ name: 'chat-sheets-edit', env: { ...fakeClaude(writeScript('idle', [{ _wait_user: true }])), YAP_E2E_LOCALE: 'en-GB' }, config: { ...PLAN, webSearch: false, meetingReminder: 'never' } });
     },
     { scope: 'worker' },
   ],
@@ -312,5 +316,127 @@ test('an attached copy is read only, and says so when you try to type', async ({
   await expect(at(main, 'C5')).toHaveText('£3.00');
   await expect(view(main).getByTestId('chat-sheet-undo')).toHaveCount(0);
   await shot(main, '07-an-attached-copy-read-only');
+  await closePanel(main);
+});
+
+test("rows and columns from their headers' menus, Alt+Enter, and a UK date and £ typed", async ({ yap, main, shot }) => {
+  fs.mkdirSync(path.dirname(WS_ORDER), { recursive: true });
+  fs.writeFileSync(WS_ORDER, seedOrderXlsx());
+  fs.writeFileSync(WS_BEDS, BEDS_CSV);
+  await openOrder(yap, main);
+  const original = partsOf(fs.readFileSync(WS_ORDER));
+  await expect(at(main, 'D6')).toHaveText('£23.00');
+  const item = (name) => main.getByRole('menuitem', { name });
+
+  // A row put in above Kale's (row 5): inside the total's D3:D5, so the total takes it in.
+  await at(main, 'A5').click();
+  await view(main).locator('[data-head="row-5"]').click({ button: 'right' });
+  await expect(item('Insert row above')).toBeVisible();
+  await expect(item('Delete row 5')).toBeVisible();
+  await shot(main, '08-a-rows-menu');
+  await item('Insert row above').click();
+  await expect(at(main, 'A6')).toHaveText('Kale');
+  await expect(at(main, 'D7')).toHaveText('£23.00');
+  await expect(where(main)).toHaveText('A5');
+  // Typed into it, as the UK writes: a price in pounds, a date day first.
+  await grid(main).press('S');
+  await editor(main).pressSequentially('hallots');
+  await editor(main).press('Tab');
+  await grid(main).press('2');
+  await editor(main).press('Tab');
+  await grid(main).press('£');
+  await editor(main).pressSequentially('1.50');
+  await editor(main).press('Tab');
+  await grid(main).press('=');
+  await editor(main).pressSequentially('B5*C5');
+  await editor(main).press('Tab');
+  await grid(main).press('1');
+  await editor(main).pressSequentially('6/11/2026');
+  await editor(main).press('Enter');
+  await expect(at(main, 'C5')).toHaveText('£1.50');
+  await expect(at(main, 'D5')).toHaveText('£3.00');
+  await expect(at(main, 'E5')).toHaveText('16/11/2026');
+  await expect(at(main, 'D7')).toHaveText('£26.00');
+  await at(main, 'D7').click();
+  await expect(formula(main)).toHaveValue('=SUM(D3:D6)');
+  await shot(main, '09-a-row-put-in-and-typed-into');
+
+  // Alt+Enter: a new line inside the cell; its text wrapped, as Excel does.
+  await at(main, 'A5').click();
+  for (let i = 0; i < 7; i++) await grid(main).press('ArrowRight');
+  await expect(where(main)).toHaveText('H5');
+  await grid(main).press('F');
+  await editor(main).pressSequentially('rom the market');
+  await editor(main).press('Alt+Enter');
+  await editor(main).pressSequentially('on Saturday');
+  await expect(editor(main)).toHaveValue('From the market\non Saturday');
+  await shot(main, '10-alt-enter-typing');
+  await editor(main).press('Enter');
+  await expect(at(main, 'H5')).toHaveText('From the market on Saturday');
+  await expect(at(main, 'H5')).toHaveClass(/wrap/);
+  await at(main, 'H5').click();
+  await expect(formula(main)).toHaveValue('From the market\non Saturday');
+
+  // Saved: the row, the total over it, the date, the line break; every other part as it was.
+  await expect(saved(main)).toHaveText('Saved', { timeout: 10_000 });
+  let parts = partsOf(fs.readFileSync(WS_ORDER));
+  let sheet = parts['xl/worksheets/sheet1.xml'];
+  expect(sheet).toContain('<f>SUM(D3:D6)</f><v>26</v>');
+  expect(sheet).toContain('<v>46342</v>');
+  expect(sheet).toContain('From the market\non Saturday');
+  expect(sheet).toContain('<mergeCell ref="A1:D1"/>');
+  expect(sheet).toContain('ySplit="2"');
+  expect(sheet).toContain('<f>D3/D$7</f>');
+  expect(parts['xl/styles.xml']).toContain('wrapText="1"');
+  for (const name of ['xl/worksheets/sheet2.xml', 'xl/worksheets/sheet3.xml', '[Content_Types].xml']) expect(parts[name], name).toBe(original[name]);
+  await theme(yap, main, 'dark');
+  await shot(main, '11-a-row-put-in-dark');
+  await theme(yap, main, 'light');
+
+  // A column taken out from its letter's menu: H goes.
+  await view(main).locator('[data-head="col-H"]').click({ button: 'right' });
+  await expect(item('Insert column left')).toBeVisible();
+  await shot(main, '12-a-columns-menu');
+  await item('Delete column H').click();
+  await expect(view(main).locator('[data-cell="H5"]')).toHaveCount(0);
+  // The row taken out again: the total back to its three rows.
+  await at(main, 'A5').click();
+  await view(main).locator('[data-head="row-5"]').click({ button: 'right' });
+  await item('Delete row 5').click();
+  await expect(at(main, 'A5')).toHaveText('Kale');
+  await expect(at(main, 'D6')).toHaveText('£23.00');
+  // Ctrl+Z: the row back, with what was typed into it.
+  await grid(main).press('Control+z');
+  await expect(at(main, 'A5')).toHaveText('Shallots');
+  await expect(at(main, 'D7')).toHaveText('£26.00');
+  await expect(saved(main)).toHaveText('Saved', { timeout: 10_000 });
+  await expect.poll(() => sheetXml(WS_ORDER)).toContain('<f>SUM(D3:D6)</f><v>26</v>');
+  expect(sheetXml(WS_ORDER)).not.toContain('r="H5"');
+
+  // A CSV: a record put in, the others as written, its line endings kept.
+  await closePanel(main);
+  await answer.locator('.md-filelink', { hasText: 'beds.csv' }).click();
+  await expect(view(main)).toHaveAttribute('data-name', 'beds.csv');
+  await at(main, 'A3').click();
+  await view(main).locator('[data-head="row-3"]').click({ button: 'right' });
+  await item('Insert row above').click();
+  await expect(at(main, 'B4')).toHaveText('Leeks');
+  await expect(saved(main)).toHaveText('Saved', { timeout: 10_000 });
+  expect(fs.readFileSync(WS_BEDS, 'utf8')).toBe('Bed,Crop,Sown\r\n1,"Broad beans","3 March, under fleece"\r\n,,\r\n2,Leeks,12 April\r\n');
+  await closePanel(main);
+});
+
+test("an attached copy's row menu says why it's read only", async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, { llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-chat' } } });
+  await openView(main, 'Chat');
+  await closePanel(main);
+  await plainSide(main);
+  await main.getByRole('button', { name: 'New chat' }).click();
+  await yap.invoke('e2e_drag_drop', { paths: [ATTACHED] });
+  await expect(view(main)).toHaveAttribute('data-name', 'seed-order.xlsx');
+  await view(main).locator('[data-head="row-4"]').click({ button: 'right' });
+  await expect(main.getByRole('menuitem', { name: 'Insert row above' })).toBeDisabled();
+  await expect(main.getByText("This is the copy attached to the chat, so it's read only.")).toBeVisible();
+  await main.keyboard.press('Escape');
   await closePanel(main);
 });

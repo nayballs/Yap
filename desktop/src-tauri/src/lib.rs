@@ -438,6 +438,7 @@ pub fn run() {
             chat::sheets::view::sheet_edit,
             chat::sheets::view::sheet_undo,
             chat::sheets::view::sheet_redo,
+            chat::sheets::view::sheet_lines,
             chat::sheets::view::sheet_save,
             chat::sheets::view::sheet_save_copy,
             chat::sheets::view::sheet_discard,

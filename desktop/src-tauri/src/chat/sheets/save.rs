@@ -90,7 +90,7 @@ fn name_of(e: &BytesStart) -> String {
     e.local_name().as_ref().to_string()
 }
 
-fn read_part(zip: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>, name: &str) -> Option<String> {
+pub(super) fn read_part(zip: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>, name: &str) -> Option<String> {
     let mut f = zip.by_name(name).ok()?;
     let mut s = String::new();
     f.read_to_string(&mut s).ok()?;
@@ -100,6 +100,11 @@ fn read_part(zip: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>, name: &str) -> O
 /// **The worksheets' parts**, in IronCalc's order (the workbook's sheets
 /// that are worksheets: `ironcalc::import`'s own reading). Pure.
 pub fn sheet_parts(workbook: &str, rels: &str) -> Vec<String> {
+    sheets_of(workbook, rels).into_iter().map(|(_, part)| part).collect()
+}
+
+/// **The worksheets, by name, and their parts**, in IronCalc's order. Pure.
+pub fn sheets_of(workbook: &str, rels: &str) -> Vec<(String, String)> {
     let mut targets: HashMap<String, (String, String)> = HashMap::new();
     let mut reader = Reader::from_str(rels);
     while let Ok(event) = reader.read_event() {
@@ -122,7 +127,8 @@ pub fn sheet_parts(workbook: &str, rels: &str) -> Vec<String> {
                 let Some(id) = attr_local(&e, "id") else { continue };
                 let Some((t, target)) = targets.get(&id) else { continue };
                 if t.ends_with("worksheet") {
-                    out.push(target.strip_prefix('/').map(str::to_string).unwrap_or_else(|| format!("xl/{target}")));
+                    let part = target.strip_prefix('/').map(str::to_string).unwrap_or_else(|| format!("xl/{target}"));
+                    out.push((attr(&e, "name").unwrap_or_default(), part));
                 }
             }
             _ => {}
@@ -202,7 +208,15 @@ fn cell_xfs(styles: &str) -> Option<CellXfs> {
 }
 
 /// An `<xf>` as written with its number format `num` and quote prefix set. Pure.
+#[cfg(test)]
 pub fn xf_with(xf: &str, num: i32, quote: bool) -> Option<String> {
+    xf_with_wrap(xf, num, quote, false)
+}
+
+/// An `<xf>` as written with its number format `num`, quote prefix, and —
+/// `wrap` — its text wrapped (`<alignment wrapText="1">`: a line break typed,
+/// Alt+Enter). Pure.
+pub fn xf_with_wrap(xf: &str, num: i32, quote: bool, wrap: bool) -> Option<String> {
     let mut reader = Reader::from_str(xf);
     let (e, end) = loop {
         let event = reader.read_event().ok()?;
@@ -217,7 +231,7 @@ pub fn xf_with(xf: &str, num: i32, quote: bool) -> Option<String> {
     let mut attrs = String::new();
     for a in e.attributes().with_checks(false).flatten() {
         let key = a.key.as_ref();
-        if matches!(key, "numFmtId" | "applyNumberFormat" | "quotePrefix") {
+        if matches!(key, "numFmtId" | "applyNumberFormat" | "quotePrefix") || (wrap && key == "applyAlignment") {
             continue;
         }
         attrs.push_str(&format!(" {key}=\"{}\"", a.value.replace('"', "&quot;")));
@@ -229,8 +243,41 @@ pub fn xf_with(xf: &str, num: i32, quote: bool) -> Option<String> {
     if quote {
         attrs.push_str(r#" quotePrefix="1""#);
     }
+    if wrap {
+        attrs.push_str(r#" applyAlignment="1""#);
+    }
     let name = e.name().as_ref().to_string();
-    Some(if empty { format!("<{name}{attrs}/>") } else { format!("<{name}{attrs}>{}", &xf[end..]) })
+    if !wrap {
+        return Some(if empty { format!("<{name}{attrs}/>") } else { format!("<{name}{attrs}>{}", &xf[end..]) });
+    }
+    let p = name.rsplit_once(':').map(|(p, _)| format!("{p}:")).unwrap_or_default();
+    if empty {
+        return Some(format!(r#"<{name}{attrs}><{p}alignment wrapText="1"/></{name}>"#));
+    }
+    // Its `<alignment>` (the first of its parts, if it has one) with `wrapText` set.
+    let body = &xf[end..];
+    let open = format!("<{p}alignment");
+    let body = match body.find(&open).filter(|i| matches!(body[i + open.len()..].chars().next(), Some(' ' | '/' | '>'))) {
+        Some(i) => {
+            let close = body[i..].find('>')? + i;
+            let self_closing = body[..close].ends_with('/');
+            let inner_end = if self_closing { close - 1 } else { close };
+            let attrs_text = &body[i + open.len()..inner_end];
+            // (Its own `wrapText` left out, then set.)
+            let kept: String = {
+                let tag = format!("<x{attrs_text}/>");
+                let mut r = Reader::from_str(&tag);
+                match r.read_event().ok()? {
+                    Event::Empty(t) => t.attributes().with_checks(false).flatten().filter(|a| a.key.as_ref() != "wrapText").map(|a| format!(" {}=\"{}\"", a.key.as_ref(), a.value.replace('"', "&quot;"))).collect(),
+                    _ => return None,
+                }
+            };
+            let end_mark = if self_closing { "/>" } else { ">" };
+            format!("{}{open}{kept} wrapText=\"1\"{end_mark}{}", &body[..i], &body[close + 1..])
+        }
+        None => format!(r#"<{p}alignment wrapText="1"/>{body}"#),
+    };
+    Some(format!("<{name}{attrs}>{body}"))
 }
 
 /// A start tag (`<cellXfs count="9">`) with its `count` set to `n`. Pure.
@@ -472,11 +519,18 @@ impl Styling<'_> {
         let xfs = &self.model.workbook.styles.cell_xfs;
         let (Some(now), Some(then)) = (xfs.get(ns.max(0) as usize).cloned(), xfs.get(was.max(0) as usize).cloned()) else { return (old, true) };
         let Some(raw) = self.file_xfs.get(old as usize).cloned() else { return (old, true) };
-        if !(now.font_id == then.font_id && now.fill_id == then.fill_id && now.border_id == then.border_id && now.alignment == then.alignment) {
+        // (Its alignment the same but for its text now wrapped: a line break typed, Alt+Enter.)
+        let unwrapped = |a: &Option<ironcalc::base::types::Alignment>| a.clone().map(|mut a| {
+            a.wrap_text = false;
+            a
+        }).filter(|a| *a != ironcalc::base::types::Alignment::default());
+        let wraps = |a: &Option<ironcalc::base::types::Alignment>| a.as_ref().is_some_and(|a| a.wrap_text);
+        let wrap = wraps(&now.alignment) && !wraps(&then.alignment);
+        if !(now.font_id == then.font_id && now.fill_id == then.fill_id && now.border_id == then.border_id && (now.alignment == then.alignment || (wrap && unwrapped(&now.alignment) == unwrapped(&then.alignment)))) {
             return (old, true);
         }
         let Some(num) = self.fmt_id(now.num_fmt_id) else { return (old, true) };
-        let Some(xf) = xf_with(&raw, num, now.quote_prefix) else { return (old, true) };
+        let Some(xf) = xf_with_wrap(&raw, num, now.quote_prefix, wrap) else { return (old, true) };
         self.new_xfs.push(xf);
         let i = (self.file_xfs.len() + self.new_xfs.len() - 1) as u32;
         self.xf_of.insert(ns, i);
@@ -606,7 +660,7 @@ pub fn xlsx_bytes(x: &Xlsx) -> Result<Written, String> {
 /// **Each cell changed, read back from `bytes`**, holds what the editor
 /// has — and, `looks`, shows it the same (its number format too).
 fn read_back(x: &Xlsx, bytes: &[u8], looks: &[(u32, i32, i32)]) -> Result<(), String> {
-    let (again, _) = super::xlsx::model_now(&super::xlsx::complete(bytes)).map_err(|_| "the saved file wouldn't read back".to_string())?;
+    let (again, _) = super::xlsx::model_now(&super::xlsx::complete(bytes), x.locale).map_err(|_| "the saved file wouldn't read back".to_string())?;
     let model = x.model.get_model();
     for (&(s, r, c), _) in x.changed() {
         let shown = |m: &ironcalc::base::Model| m.get_formatted_cell_value(s, r, c).ok();

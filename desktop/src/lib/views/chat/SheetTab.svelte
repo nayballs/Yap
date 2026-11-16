@@ -16,7 +16,11 @@
   //   a double-click) or in the formula bar; Enter, Tab and the arrows as in Excel (Enter down, Shift+Enter up,
   //   Tab right, Shift+Tab left; an arrow ends what's typed and moves, unless F2 or the bar put it in its edit mode,
   //   where it moves the caret); Esc lets it go; Delete empties the cell. Calculated on this PC by IronCalc, each
-  //   change answered with the workbook again. Ctrl+Z / Ctrl+Y, and the header's ↶ ↷.
+  //   change answered with the workbook again. Ctrl+Z / Ctrl+Y, and the header's ↶ ↷. Alt+Enter: a new line inside
+  //   the cell (its text wrapped, as Excel does); typed input read in the person's Region (16/11/2026 a date in the UK).
+  // - **Rows and columns** (16 Nov 2026): a row number's or a column letter's right-click menu inserts one above or
+  //   below (left or right) or deletes it, every reference moved as Excel moves it (chat/sheets/shift.rs), or refused
+  //   with why; Undo puts it back.
   // - **Saved** 700 ms after the last change (Ctrl+S at once; and on the way out), as Yap's Markdown files are —
   //   only while the file is what was read (chat/sheets/save.rs). Changed on disk with changes not saved here: never
   //   read over; a bar says so, with Reload and Save as a copy.
@@ -28,6 +32,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onDestroy, tick, untrack } from 'svelte';
   import { copyText } from '../../core/itemMenus.js';
+  import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { toast } from '../../ui/toast.svelte.js';
   import { windowShown } from '../../stores/windowShown.svelte.js';
   import { sheetKey } from './chatDoc.svelte.js';
@@ -350,6 +355,12 @@
     if (k === 'Escape') {
       e.preventDefault();
       cancelEdit();
+    } else if (k === 'Enter' && e.altKey && !e.ctrlKey && !e.metaKey) {
+      // Alt+Enter: a new line inside the cell (Excel's).
+      e.preventDefault();
+      const el = e.currentTarget;
+      el.setRangeText('\n', el.selectionStart, el.selectionEnd, 'end');
+      editing = { ...editing, text: el.value };
     } else if (k === 'Enter' && !e.altKey) {
       e.preventDefault();
       commit([e.shiftKey ? -1 : 1, 0]);
@@ -695,9 +706,15 @@
   const editBox = $derived.by(() => {
     if (!editing || !selBox) return null;
     const look = looks[selCell?.s || 0] || looks[0];
-    const need = textWidth(editing.text || '', look?.font || '') + 8;
-    return { ...selBox, w: Math.max(selBox.w, Math.min(need, 640)), css: look?.css || '' };
+    // As wide as its longest line needs, and as tall as its lines (Alt+Enter's).
+    const parts = String(editing.text || '').split('\n');
+    const need = Math.max(...parts.map((t) => textWidth(t, look?.font || ''))) + 8;
+    const lineH = Math.round(((Number(book?.size) || 11) * 4) / 3 * 1.2);
+    const h = Math.max(selBox.h, parts.length * lineH + 6);
+    return { ...selBox, w: Math.max(selBox.w, Math.min(need, 640)), h: Math.min(h, 400), css: look?.css || '' };
   });
+  // The formula bar: one line, up to four for a cell with line breaks.
+  const barRows = $derived(Math.min(4, String(barText || '').split('\n').length));
 
   /** Select cell (`r`, `c`): a merge's top-left cell for any of its cells; kept in view. */
   function select(r, c, { show = true } = {}) {
@@ -863,6 +880,68 @@
     select(r, c);
   }
 
+  // ---- rows and columns (chat/sheets/shift.rs) ----------------------------------------------------
+
+  /** **Rows or columns put in or taken out**: one, before line `at` (`insert`) or that line; the selection kept on its row or column. */
+  async function lines(rowsAxis, at, insert) {
+    if (!editable) return say(whyNot());
+    if (editing) await commit();
+    const id = book?.id;
+    const keep = rowsAxis ? { r: at, c: sel.c } : { r: sel.r, c: at };
+    await apply(() => invoke('sheet_lines', { id, sheet: current, rows: rowsAxis, at, count: 1, insert }).then((res) => ({ ...res, at: [current, keep.r, keep.c] })), { retry: true });
+  }
+
+  /** The row number or column letter under a right-click (none elsewhere). */
+  function headAt(e) {
+    if (!scroller || !grid) return null;
+    const rect = scroller.getBoundingClientRect();
+    const vx = e.clientX - rect.left - grid.numbers;
+    const vy = e.clientY - rect.top - HEAD_PX;
+    if (vx >= 0 && vy >= 0) return null;
+    if (vx < 0 && vy < 0) return null;
+    const fw = grid.colAt[grid.frozenCols + 1];
+    const fh = grid.rowAt[grid.frozenRows + 1];
+    if (vx < 0) return { row: indexAt(grid.rowAt, vy < fh ? vy : vy + scroller.scrollTop) };
+    return { col: indexAt(grid.colAt, vx < fw ? vx : vx + scroller.scrollLeft) };
+  }
+
+  /** **A row number's or a column letter's menu**: insert one before or after it, or delete it (Undo puts it back). */
+  function onHeadMenu(e) {
+    const at = headAt(e);
+    if (!at) return;
+    const why = editable ? '' : whyNot();
+    const off = !editable;
+    if (at.row != null) {
+      if (sel.r !== at.row) select(at.row, sel.c, { show: false });
+      const r = at.row;
+      openContextMenu(
+        e,
+        [
+          { label: 'Insert row above', icon: 'plus', disabled: off, onselect: () => lines(true, r, true) },
+          { label: 'Insert row below', icon: 'plus', disabled: off, onselect: () => lines(true, r + 1, true) },
+          { separator: true },
+          { label: `Delete row ${r}`, icon: 'trash', danger: true, disabled: off, onselect: () => lines(true, r, false) },
+          why && { note: why },
+        ],
+        { label: `Row ${r}`, row: scroller },
+      );
+    } else {
+      if (sel.c !== at.col) select(sel.r, at.col, { show: false });
+      const c = at.col;
+      openContextMenu(
+        e,
+        [
+          { label: 'Insert column left', icon: 'plus', disabled: off, onselect: () => lines(false, c, true) },
+          { label: 'Insert column right', icon: 'plus', disabled: off, onselect: () => lines(false, c + 1, true) },
+          { separator: true },
+          { label: `Delete column ${columnName(c)}`, icon: 'trash', danger: true, disabled: off, onselect: () => lines(false, c, false) },
+          why && { note: why },
+        ],
+        { label: `Column ${columnName(c)}`, row: scroller },
+      );
+    }
+  }
+
   // ---- sheets -------------------------------------------------------------------------------------
 
   async function toSheet(i) {
@@ -1014,11 +1093,12 @@
     <div class="fbar" class:editing={editing?.where === 'bar'}>
       <span class="namebox" data-testid="chat-sheet-cell">{cellName(selMerge?.row ?? sel.r, selMerge?.col ?? sel.c)}</span>
       <span class="fx" aria-hidden="true">fx</span>
-      <input
+      <textarea
         class="ftext"
         bind:this={barEl}
         readonly={!editable}
         value={barText}
+        rows={barRows}
         oninput={onEditInput}
         onfocus={onBarFocus}
         onkeydown={onEditKey}
@@ -1027,7 +1107,7 @@
         autocomplete="off"
         aria-label={`The formula or value of ${cellName(sel.r, sel.c)}`}
         data-testid="chat-sheet-formula"
-      />
+      ></textarea>
     </div>
     {#if hint}<p class="shint" role="status" data-testid="chat-sheet-hint">{hint}</p>{/if}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -1037,6 +1117,7 @@
       onscroll={onScroll}
       onpointerdown={onPointer}
       ondblclick={onDouble}
+      oncontextmenu={onHeadMenu}
       onkeydown={onKey}
       tabindex="0"
       role="grid"
@@ -1061,7 +1142,7 @@
           {#if selBox?.layer === layer}<div class="ssel" style:left={`${selBox.x - 1}px`} style:top={`${selBox.y - 1}px`} style:width={`${selBox.w + 1}px`} style:height={`${selBox.h + 1}px`}></div>{/if}
           {#if editBox?.layer === layer}
             <!-- What's typed, over its cell (Excel's in-cell editing). -->
-            <input
+            <textarea
               class="sedit"
               bind:this={editEl}
               value={editing.text}
@@ -1074,12 +1155,12 @@
               aria-label={`Editing ${cellName(editing.r, editing.c)}`}
               data-testid="chat-sheet-editor"
               style={`left:${editBox.x - 1}px;top:${editBox.y - 1}px;width:${editBox.w + 1}px;height:${editBox.h + 1}px;${editBox.css}`}
-            />
+            ></textarea>
           {/if}
         {/snippet}
         {#snippet headsOf(layer)}
           {#each drawn.heads[layer] as h (h.key)}
-            <div class="hd" class:col={h.col} class:on={h.on} style:left={`${h.x}px`} style:top={`${h.y}px`} style:width={`${h.w}px`} style:height={`${h.h}px`}>{h.text}</div>
+            <div class="hd" class:col={h.col} class:on={h.on} data-head={h.col ? `col-${h.text}` : `row-${h.text}`} style:left={`${h.x}px`} style:top={`${h.y}px`} style:width={`${h.w}px`} style:height={`${h.h}px`}>{h.text}</div>
           {/each}
         {/snippet}
         <!-- The cells that scroll. -->
@@ -1338,9 +1419,9 @@
   /* The formula bar. */
   .fbar {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0;
-    height: 28px;
+    min-height: 28px;
     border-bottom: 1px solid var(--sheet-head-rule);
     background: var(--sheet-bg);
     font-size: 12px;
@@ -1366,14 +1447,20 @@
   .ftext {
     flex: 1 1 auto;
     min-width: 0;
-    height: 100%;
-    padding: 0 8px;
+    box-sizing: border-box;
+    min-height: 28px;
+    margin: 0;
+    padding: 6px 8px 5px;
     border: none;
     background: none;
     color: var(--sheet-ink);
     font: inherit;
     font-family: ui-monospace, Consolas, monospace;
     font-size: 12px;
+    line-height: 16px;
+    resize: none;
+    overflow: hidden;
+    white-space: pre;
   }
   .ftext:focus-visible {
     outline: 2px solid var(--yap-focus-ring);
@@ -1402,6 +1489,10 @@
     user-select: text;
     outline: none;
     box-shadow: 0 1px 4px rgb(0 0 0 / 0.18);
+    /* A textarea, so Alt+Enter's lines show: no handle, no scroll bar of its own. */
+    resize: none;
+    overflow: hidden;
+    white-space: pre;
   }
 
   /* The grid. */

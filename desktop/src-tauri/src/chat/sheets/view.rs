@@ -350,6 +350,14 @@ pub fn edit_cell(id: u64, sheet: u32, row: u32, col: u32, input: &str) -> Result
     change(id, |e| e.edit(sheet, row, col, input).map(|()| None))
 }
 
+/// **Put in or take out rows or columns** of workbook `id` (`sheet` from 0):
+/// `count` rows (`rows`) or columns before line `at` (`insert`), or from it
+/// on. Blocking.
+pub fn edit_lines(id: u64, sheet: u32, rows: bool, at: u32, count: u32, insert: bool) -> Result<Edited, String> {
+    let axis = if rows { super::shift::Axis::Rows } else { super::shift::Axis::Cols };
+    change(id, |e| e.lines(sheet, axis, at, count, insert).map(|(s, r, c)| Some([s, r as u32, c as u32])))
+}
+
 /// **Undo** (`back`) or **Redo** workbook `id`'s last change. Blocking.
 pub fn step(id: u64, back: bool) -> Result<Edited, String> {
     change(id, |e| Ok(if back { e.undo() } else { e.redo() }.map(|(s, r, c)| [s, r as u32, c as u32])))
@@ -510,6 +518,15 @@ pub async fn sheet_stamp(src: Src) -> Result<Looked, String> {
 #[tauri::command]
 pub async fn sheet_edit(id: u64, sheet: u32, row: u32, col: u32, input: String) -> Result<Edited, String> {
     tauri::async_runtime::spawn_blocking(move || edit_cell(id, sheet, row, col, &input)).await.map_err(|e| e.to_string())?
+}
+
+/// **Insert or delete rows or columns** of workbook `id` (`sheet` from 0):
+/// `count` rows (`rows`) or columns before line `at` (`insert`), or from it
+/// on (a row's or a column's header's menu). Every reference moved as Excel
+/// moves it, or refused with why.
+#[tauri::command]
+pub async fn sheet_lines(id: u64, sheet: u32, rows: bool, at: u32, count: u32, insert: bool) -> Result<Edited, String> {
+    tauri::async_runtime::spawn_blocking(move || edit_lines(id, sheet, rows, at, count, insert)).await.map_err(|e| e.to_string())?
 }
 
 /// **Undo** workbook `id`'s last change.
