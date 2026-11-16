@@ -52,6 +52,28 @@ test('a cup of flour weighs about 132 g', () => {
 `,
 };
 
+/** The one remote the scratch workspace gets (`set --git <branch>`): Yap's own public repository. */
+export const LAB_REMOTE = 'https://github.com/nayballs/Yap.git';
+
+/**
+ * **The scratch workspace as a git repository on `branch`** (`set --git`,
+ * 16 Nov 2026), its one remote Yap's own public repository — so a Code chat's
+ * summary has a branch whose pull requests the lab's read-only `gh` can list
+ * (`set --gh on`). No commit is made (the branch is new and empty: Yap reads
+ * it from HEAD), nothing is fetched or pushed. Only a branch name of letters,
+ * digits and `._/-`. `{ branch, remote }`.
+ */
+export function makeGitRepo(dir, branch, { run }) {
+  if (!/^[A-Za-z0-9._/-]{1,200}$/.test(branch) || branch.startsWith('-')) throw new Error(`Not a branch name: ${branch}`);
+  const git = (...args) => run('git', ['-C', dir, ...args]);
+  if (!fs.existsSync(path.join(dir, '.git'))) git('init', '-q', '-b', branch);
+  else git('symbolic-ref', 'HEAD', `refs/heads/${branch}`);
+  const remotes = String(git('remote') ?? '').split(/\s+/).filter(Boolean);
+  if (remotes.includes('origin')) git('remote', 'set-url', 'origin', LAB_REMOTE);
+  else git('remote', 'add', 'origin', LAB_REMOTE);
+  return { branch, remote: LAB_REMOTE };
+}
+
 /** Make the workspace in `dir` (emptied first unless `keep`); its path. */
 export function makeWorkspace(dir, { keep = false } = {}) {
   if (!keep) fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

@@ -736,6 +736,30 @@ pub fn e2e_gh_script(script: Option<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// **Yap Lab's read-only `gh`** (`set --gh on`, 16 Nov 2026), only in a live
+/// lab (never the e2e suite, never a `--fake` lab): the person's own GitHub
+/// CLI from now on, behind `yap.exe lab-gh` (`agents/prs/lab.rs`) — `gh pr
+/// list` and `gh pr view` on Yap's own public repository and nothing else.
+/// `on: false`: none again (test mode's "no gh"). Where gh is, or why not.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_gh_lab(on: bool) -> Result<Option<String>, String> {
+    if !crate::shell::lab::live() {
+        return Err("Only in a live Yap Lab run (not the e2e suite, not --fake)".to_string());
+    }
+    if !on {
+        crate::agents::prs::set_test_program(None);
+        tracing::info!("lab: gh off");
+        return Ok(None);
+    }
+    let gh = crate::agents::prs::find_in(std::env::var_os("PATH").as_deref(), std::env::var_os("ProgramFiles").as_deref()).ok_or("GitHub's gh isn't on this PC")?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let program = crate::ai::claude_code::cli::Program::new(exe).with_prefix(vec!["lab-gh".into(), gh.display().to_string()]);
+    crate::agents::prs::set_test_program(Some(program));
+    tracing::info!(repo = crate::agents::prs::lab::REPO, "lab: the read-only gh on");
+    Ok(Some(gh.display().to_string()))
+}
+
 /// Test mode only: `agents` put straight into Yap Code's store (each as
 /// `agents.json` keeps it), and every window told — so a spec can show the
 /// Agent panel's rows in every Mode, model and state at once (its crew,

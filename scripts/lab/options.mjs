@@ -57,7 +57,7 @@ export function buildFresh(stamp, head) {
 // ---------------------------------------------------------------- arguments
 
 /** Flags that take no value. */
-const SWITCHES = new Set(['spoken', 'fake', 'live-web', 'stale-ok', 'no-wait', 'agents', 'keep-workspace', 'no-shots', 'while', 'retry', 'edit', 'incognito', 'keep', 'close']);
+const SWITCHES = new Set(['spoken', 'fake', 'live-web', 'stale-ok', 'no-wait', 'agents', 'keep-workspace', 'no-shots', 'while', 'retry', 'edit', 'incognito', 'keep', 'close', 'after-meeting', 'with-note', 'outside', 'away', 'undo']);
 
 /**
  * `argv` (after the command) → `{ _: [positional…], flag: value }`.
@@ -97,6 +97,20 @@ export function parseSize(v, fallback = SIZE) {
   return `${w}x${h}`;
 }
 
+/**
+ * **A routine's time `minutes` from `now`** (`routine new --in 2`), as its
+ * schedule takes it: "HH:MM" on the PC's own clock, the next whole minute at
+ * least that far on (so `--in 1` at 14:31:40 is 14:33, never a minute that's
+ * nearly gone). Pure.
+ */
+export function minutesFrom(now, minutes) {
+  const m = Number(minutes);
+  if (!Number.isFinite(m) || m < 1 || m > 720) throw new Error('--in is 1 to 720 minutes');
+  const t = new Date(now.getTime() + m * 60_000);
+  if (t.getSeconds() > 0 || t.getMilliseconds() > 0) t.setMinutes(t.getMinutes() + 1, 0, 0);
+  return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+}
+
 /** "on" / "off" (or true / false) → a boolean; `fallback` when not given. Pure. */
 export function onOff(v, fallback, name) {
   if (v === undefined) return fallback;
@@ -111,6 +125,19 @@ export function onOff(v, fallback, name) {
 export const PLAN_DEFAULT = 'claude-sonnet-5-5';
 /** Short names: the plan's models (ai/claude_plan.rs MODELS). */
 const SHORT = { haiku: 'claude-haiku-5-5', sonnet: 'claude-sonnet-5-5', opus: 'claude-opus-5-5', fable: 'claude-fable-5-2' };
+/** The on-device model's file when none is named (`--model ondevice`): Yap's own default (ai/local_llm.rs). */
+export const ONDEVICE_DEFAULT = 'Qwen_Qwen3.5-4B-Q4_K_M.gguf';
+
+/**
+ * `YAP_LAB_LOCAL_LLM` for `--model ondevice`: an OpenAI-compatible server on this PC (`http://127.0.0.1:<port>/v1`),
+ * never anywhere else (a test run refuses any other address anyway). Pure.
+ */
+export function localServer(v) {
+  const s = String(v ?? '').trim().replace(/\/+$/, '');
+  if (!/^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}\/v1$/.test(s)) throw new Error('--model ondevice needs YAP_LAB_LOCAL_LLM=http://127.0.0.1:<port>/v1: an OpenAI-compatible server on this PC (llama.cpp’s llama-server on the GGUF, started by you)');
+  return s;
+}
+
 /** The fake AI's strong model (desktop/e2e/support/fake-llm.js: every tool, the browser's too). */
 export const FAKE_MODEL = 'fake-gpt-5';
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -134,8 +161,11 @@ export function parseModel(spec, { fake = false } = {}) {
   const id = rest.join(':').trim();
   if (head === 'claude-plan' && id) return { kind: 'plan', provider: 'claude-plan', model: id };
   if (head === 'anthropic' && id) return { kind: 'api', provider: 'anthropic', model: id };
+  // The on-device model (16 Nov 2026): Yap's own tool loop on a model of this PC, served by an OpenAI-compatible
+  // server the session started itself (llama.cpp's llama-server on the GGUF: YAP_LAB_LOCAL_LLM) — free, never the plan.
+  if (head === 'ondevice') return { kind: 'local', provider: 'ondevice', model: id || ONDEVICE_DEFAULT };
   if (fake) return { kind: 'fake', provider: 'custom', model: s };
-  throw new Error(`--model is claude-plan, claude-plan:<model>, haiku, sonnet, opus, fable or anthropic:<model> — not "${s}"`);
+  throw new Error(`--model is claude-plan, claude-plan:<model>, haiku, sonnet, opus, fable, ondevice[:<gguf>] or anthropic:<model> — not "${s}"`);
 }
 
 /**
@@ -151,6 +181,9 @@ export function labConfig({ model, effort, web = true, yapCode = false, connecto
   if (model.kind === 'plan') {
     chat = { enabled: true, provider: 'claude-plan', baseUrl: 'claude-code://plan', model: model.model, apiKey: 'claude-plan', apiKeys: {}, prompt: '', disableThinking: false };
     keys['claude-plan'] = 'claude-plan';
+  } else if (model.kind === 'local') {
+    // Yap's on-device chat, its sidecar the server in YAP_LAB_LOCAL_LLM (test mode's stand-in path: YAP_E2E_LOCAL_LLM).
+    chat = { enabled: true, provider: 'ondevice', baseUrl: '', model: '', apiKey: '', apiKeys: {}, prompt: '', disableThinking: false };
   } else if (model.kind === 'api') {
     if (!key) throw new Error('An Anthropic API model needs YAP_LAB_ANTHROPIC_KEY set (the lab never reads a key from anywhere else)');
     chat = { enabled: true, provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', model: model.model, apiKey: key, apiKeys: {}, prompt: '', disableThinking: false };
@@ -171,6 +204,7 @@ export function labConfig({ model, effort, web = true, yapCode = false, connecto
     // chats (each would be a model call on the plan), no reminders, no voice.
     postProcessEnabled: false,
     ppProvider: 'ondevice',
+    ...(model.kind === 'local' ? { ppLocalModel: model.model } : {}),
     memoryLearnChats: false,
     memoryLearnMeetings: false,
     meetingReminder: 'never',

@@ -417,6 +417,24 @@ impl map::Out for ToChat<'_> {
     }
 }
 
+/// **A turn across the meetings, on the plan** (Ask across meetings, and
+/// every Skill: `chat/skills.rs`): what Chat's own prompt says in its system
+/// part — answer from the passages and cite them (`search::ask`), and the
+/// Skill's own instructions (`skills::system_block`) — goes with the
+/// question here, before its passages (already in the context). A plan
+/// turn's system prompt is the session's, the same every turn so it stays
+/// warm, and never had them: 16 Nov 2026, Yap Lab, a routine's Skill on Opus
+/// answered "There's no `/lighthouse-fact` command in Yap's Chat" — the
+/// person typing `/standup` in a plan chat got the same. Pure.
+fn across_lines(meetings: bool, skill: Option<&crate::chat::skills::SkillTurn>) -> Vec<String> {
+    if !meetings {
+        return Vec::new();
+    }
+    let mut out = vec![crate::search::ask::instructions(true)];
+    out.extend(skill.map(crate::chat::skills::system_block));
+    out
+}
+
 /// The plan's system prompt for this turn: the persona and the answering
 /// line, how to answer here (a Code chat's own words; the screen and page
 /// tools the session lists, `eyes`; and the agent tools, while offered), the
@@ -804,7 +822,8 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
     let print = fingerprint(&system, web, agents, eyes, &cwd, crate::integrations::claude_live::connectors::hash_of(connectors.as_ref()));
     // The question, its context (a question asked away from Chat told it
     // has no screen or panel) and its screenshots.
-    let mut context = built.prompt.context.clone();
+    let mut context = across_lines(t.meetings, t.skill.as_ref());
+    context.extend(built.prompt.context.iter().cloned());
     context.extend(away_line(eyes, this_turn, t.gates.screen_takes).map(str::to_string));
     // (Its attached files' text first: chat/attachments.rs.)
     let question = crate::chat::attachments::with_text(&crate::chat::chats::with_context(&context, &t.text));
@@ -1045,6 +1064,22 @@ mod tests {
 
     fn src(n: usize, url: &str, opened: bool) -> Source {
         Source { n, title: format!("T{n}"), url: url.into(), site: crate::web::site_of(url), opened, ..Default::default() }
+    }
+
+    #[test]
+    fn a_skill_on_the_plan_carries_its_instructions_and_the_meetings_rules_with_the_question() {
+        // An ordinary question: nothing added.
+        assert!(across_lines(false, None).is_empty());
+        // Ask across meetings: answer from the passages, cite them.
+        let ask = across_lines(true, None);
+        assert_eq!(ask.len(), 1);
+        assert!(ask[0].contains("cite the passage") && ask[0].contains("the context of their message"), "{ask:?}");
+        // A Skill: its own name, command and instructions too.
+        let skill = crate::chat::skills::Skill { id: "s1".into(), name: "Meeting points".into(), command: "meeting-points".into(), instructions: "List who agreed to do what, in two bullets.".into(), ..Default::default() };
+        let turn = crate::chat::skills::SkillTurn { skill, words: String::new(), meeting: None };
+        let lines = across_lines(true, Some(&turn));
+        assert_eq!(lines.len(), 2);
+        assert!(lines[1].contains("(/meeting-points)") && lines[1].contains("List who agreed to do what, in two bullets."), "{lines:?}");
     }
 
     #[test]
