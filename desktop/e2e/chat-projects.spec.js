@@ -167,7 +167,7 @@ test("a big project's steps fold into one line, and its page's line says how the
   expect(stepsSummary([used, 'Used from the project: staff-handbook.pdf, pages 23–24, “3. Annual leave”', 'Read from the project: staff-handbook.md, part 7, “4. Sick pay”', "Searched the project's files: “carry over”"])).toBe(
     "Used 2 parts of the project's files, read another part, searched the project's files"
   );
-  expect(knowledgeLine({ tokens: 18_400, searched: true, model: 'Fake Chat' }, 1)).toBe('About 18K tokens: more than Fake Chat reads at once, so each question gets the parts of these files that match it.');
+  expect(knowledgeLine({ tokens: 18_400, searched: true, model: 'Fake Chat' }, 1)).toBe('About 18K tokens: too much to send Fake Chat whole with every question, so each question gets the parts of these files that match it.');
   expect(knowledgeLine({ tokens: 900, searched: false }, 2)).toBe('About 900 tokens: every chat here reads them whole.');
   expect(knowledgeLine(null, 2)).toBe('');
   // A document's mark, never the web's ("Read …" is a page's otherwise).

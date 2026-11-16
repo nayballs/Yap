@@ -488,7 +488,7 @@ pub fn project_update(id: String, name: Option<String>, description: Option<Stri
 #[tauri::command]
 pub fn project_delete(id: String) -> Result<(), String> {
     let gone = with_store(|s| {
-        let Some(p) = s.projects.iter().find(|p| p.id == id).cloned() else { return None };
+        let p = s.projects.iter().find(|p| p.id == id).cloned()?;
         s.projects.retain(|p| p.id != id);
         s.chats.retain(|_, v| *v != id);
         write(s);

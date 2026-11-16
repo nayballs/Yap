@@ -6410,9 +6410,9 @@ reads only what a question needs. Yap does the same
 - **A side question** (Ctrl+;, no tools): the list of parts and the parts
   that match the side question (`knowledge::for_side`).
 - **The project's page** says how Chat's model reads the files, under them
-  (`project_knowledge`, `projectLines.js` `knowledgeLine`): "About 18K
-  tokens: more than Qwen3.5 4B reads at once, so each question gets the
-  parts of these files that match it", or "…: every chat here reads them
+  (`project_knowledge`, `projectLines.js` `knowledgeLine`): "About 130K
+  tokens: too much to send Claude Opus 5.5 whole with every question, so
+  each question gets the parts of these files that match it", or "…: every chat here reads them
   whole".
 - **Privacy**: the log has counts, tokens and parts, never names or words.
 - **Not done**: a part's meaning is read only with search by meaning on

@@ -209,9 +209,9 @@ pub fn rank(splits: &[Arc<Split>], query: &[String], similarity: &dyn Fn(&Key) -
     let mut places: Vec<(usize, usize)> = Vec::new();
     let mut sims: Vec<Option<f32>> = Vec::new();
     for (fi, s) in splits.iter().enumerate() {
-        for pi in 0..s.parts.len() {
+        for (pi, key) in s.keys.iter().enumerate() {
             places.push((fi, pi));
-            sims.push(similarity(&s.keys[pi]));
+            sims.push(similarity(key));
         }
     }
     let none: [String; 0] = [];

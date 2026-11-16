@@ -30,8 +30,8 @@ export function knowledgeLine(k, files) {
   const t = Number(k.tokens) || 0;
   const about = t >= 1000 ? `About ${Math.round(t / 1000)}K tokens` : `About ${t} tokens`;
   if (k.searched) {
-    const model = k.model ? ` ${k.model}` : " Chat's model";
-    return `${about}: more than${model} reads at once, so each question gets the parts of these files that match it.`;
+    const model = k.model || "Chat's model";
+    return `${about}: too much to send ${model} whole with every question, so each question gets the parts of these files that match it.`;
   }
   return `${about}: every chat here reads them whole.`;
 }
