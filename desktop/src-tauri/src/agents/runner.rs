@@ -1307,6 +1307,8 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         // The next-step box and chapters in its chat (chat/cards.rs, 15 Nov 2026), a Code chat's own
         // session's; its questions are Claude Code's own AskUserQuestion (approve.rs).
         cards: if direct && agent.conversation.is_some() { crate::chat::cards::Cards::for_code_session(phone.is_some()) } else { Default::default() },
+        // (A Code chat is in no project.)
+        projects: false,
     }) {
         Ok(r) => r,
         Err(e) => return failed_early(id, n, format!("Couldn't start the agent: {e}"), None),

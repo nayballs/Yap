@@ -34,7 +34,11 @@ it borrows is the on-device model's ([ai-models.md](./ai-models.md)).
 - **`search/store.rs`** — the vector file, `<data>/search-index/vectors.bin`.
 - **`search/index.rs`** — keeping the store up to date in the background
   over three `Kind`s (notes, chats, memory: `Library::now`), the sweep after
-  a deletion; `Status` for Settings (`yap-search-status`).
+  a deletion; `Status` for Settings (`yap-search-status`). Since 16 Nov 2026
+  also a big Chat project's files' parts (`Library::projects`, from
+  `chat/projects/knowledge.rs` `passages`: their keys and what the model
+  reads, never their own `Kind` — the project ranks them itself with
+  `rank.rs`: [chat-and-assistant.md](./chat-and-assistant.md#big-projects-searched-in-parts-2026-11-16)).
 - **`search/dates.rs`** — the dates a question names, pure.
 - **`search/rank.rs`** — hybrid ranking and the line a passage opens at, pure.
 - **`search/ask.rs`** — a question's passages (`find` / `find_waiting` /

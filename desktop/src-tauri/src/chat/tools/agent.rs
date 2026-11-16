@@ -484,7 +484,8 @@ async fn tool_loop(
         own: &own,
         empty_notes,
         messages,
-        tools_used: Vec::new(),
+        // (A big project's parts sent with the question: their chips first.)
+        tools_used: extra.project_chips.to_vec(),
         screen_seen: extra.web_question,
         agent_seen: false,
         connector_seen: false,

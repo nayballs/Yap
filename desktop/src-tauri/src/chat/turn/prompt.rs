@@ -290,6 +290,31 @@ impl Prompt {
         }
     }
 
+    /// **A big project's parts for this question** (chat/projects/knowledge.rs,
+    /// 16 Nov 2026): when `conv`'s project is searched in parts for this
+    /// model, the parts of its files that match the question (and, for a
+    /// short follow-up, the person's question before it) go in its context,
+    /// at most two thirds of the room the turn has left beside what's measured
+    /// so far (the budget: the system prompt, the context, the tools' schemas
+    /// and the question), so the history keeps some. Their chips (one a
+    /// part), to the page at once and first under the answer.
+    async fn project_parts(&mut self, t: &Asked<'_>, sizing: &Sizing, conv: &crate::chat::chats::Conversation) -> Vec<String> {
+        let fixed = crate::chat::budget::estimate(&self.system)
+            + crate::chat::chats::context_block(&self.context).map(|b| crate::chat::budget::estimate(&b)).unwrap_or(0)
+            + sizing.schemas
+            + sizing.question_tokens;
+        let left = crate::chat::budget::budget(sizing.context_size, sizing.context_known, fixed, sizing.kind, t.gates.tools, sizing.knowledge.cap).history;
+        let previous = conv.messages.iter().rev().find(|m| m.role == "user").map(|m| m.text.as_str());
+        let Some(found) = crate::chat::projects::knowledge::for_question(Some(conv.id), &t.text, previous, sizing.knowledge, left * 2 / 3, t.gates.tools).await else {
+            return Vec::new();
+        };
+        if let (Some(w), false) = (t.watcher, found.chips.is_empty()) {
+            w.send(crate::chat::stream::Event::Chips { chips: found.chips.clone(), sources: Vec::new(), web: false });
+        }
+        self.add(found.block);
+        found.chips
+    }
+
     /// **How to answer this one**: out loud (`spoken`), the Voice Assistant's
     /// line on documents, a passage selected in the panel or text selected
     /// in another app (`selection`, the turn's), and what the question means
@@ -442,14 +467,19 @@ pub(super) struct Built {
     pub(super) incognito: bool,
     /// The person's time zone, for the calendar tool.
     pub(super) calendar_zone: crate::chat::tools::calendar::Zone,
+    /// A big project's parts sent with the question
+    /// (chat/projects/knowledge.rs): a chip each, first under the answer.
+    pub(super) project_chips: Vec<String>,
 }
 
-/// **A chat's own blocks** for a model of `context` tokens: its project's
-/// (chat/projects.rs; never an `incognito` chat's), then its style's
-/// (chat/styles.rs), as the system prompt carries them and the fixed part
-/// counts them (`fit.rs`). `conv` `None`: the new chat being made.
-pub(super) fn chat_blocks(conv: Option<u64>, context: u64, incognito: bool) -> String {
-    let project = if incognito { None } else { crate::chat::projects::prompt_block(conv, context) };
+/// **A chat's own blocks** for a model with `room`: its project's
+/// (chat/projects.rs: its files whole, or a big one's list of parts, with
+/// its tools' lines for a model that calls tools; never an `incognito`
+/// chat's), then its style's (chat/styles.rs), as the system prompt carries
+/// them and the fixed part counts them (`fit.rs`). `conv` `None`: the new
+/// chat being made.
+pub(super) fn chat_blocks(conv: Option<u64>, room: crate::chat::projects::knowledge::Room, incognito: bool, tools: bool) -> String {
+    let project = if incognito { None } else { crate::chat::projects::prompt_block(conv, room, tools) };
     [project, crate::chat::styles::prompt_block(conv)].into_iter().flatten().collect::<Vec<_>>().join("
 
 ")
@@ -539,8 +569,12 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     // **This chat's own blocks** (never a Code chat's): its project's name,
     // instructions and files (chat/projects.rs; not an incognito chat's,
     // which is in none), then how its answers are written (chat/styles.rs).
-    let chat_blocks = if code { String::new() } else { chat_blocks(Some(conv.id), sizing.context_size, opened.conv.incognito) };
+    let chat_blocks = if code { String::new() } else { chat_blocks(Some(conv.id), sizing.knowledge, opened.conv.incognito, g.tools) };
     prompt.end(&about, &memory_you, &profile, &chat_blocks);
+    // **A big project's parts for this question** (chat/projects/knowledge.rs):
+    // the parts of its files that match it, in its context (never a Code or
+    // incognito chat's).
+    let project_chips = if code || opened.conv.incognito { Vec::new() } else { prompt.project_parts(t, sizing, &opened.conv).await };
     let spoken = t.by_voice && (t.scope == Some("assistant") || t.cfg.speak_replies);
     prompt.how_to_answer(t, spoken, &chat_docs, selection, sizing.context_size);
     let deep_reach = prompt.research(t, sizing, writes_doc, outline_first);
@@ -570,6 +604,7 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
         chat_blocks,
         incognito: opened.conv.incognito,
         calendar_zone,
+        project_chips,
     }
 }
 
@@ -866,6 +901,7 @@ mod tests {
             share_tools: true,
             cards: Default::default(),
             visuals: false,
+            project_files: false,
         }
     }
 
@@ -996,6 +1032,7 @@ mod tests {
             share_tools: true,
             cards: Default::default(),
             visuals: false,
+            project_files: false,
         };
         let asks = "What's the latest version of Python?";
         assert!(crate::web::needs_web(asks), "the test's question needs the web");

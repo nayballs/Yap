@@ -26,6 +26,9 @@ pub(super) struct Sizing {
     pub(super) schemas: u64,
     /// The question as sent: its text, and the screenshots it carries.
     pub(super) question_tokens: u64,
+    /// The room a project's files are sized to (chat/projects/knowledge.rs):
+    /// whole, or searched in parts.
+    pub(super) knowledge: crate::chat::projects::knowledge::Room,
 }
 
 impl Sizing {
@@ -61,11 +64,15 @@ impl Sizing {
             + crate::chat::attachments::current_tokens();
         let rate_cap = crate::chat::budget::rate_cap(provider);
         let connectors = t.gates.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, provider, model, t.scope, context_size, conversation_id)).flatten();
-        let parts = super::fit::Parts { persona: &t.ep.persona, profile: &t.profile, now: t.now, code, connectors: connectors.as_ref(), conversation: conversation_id, context: context_size };
-        let room = super::fit::Room { context: context_size, known: context_known, kind, tools: t.gates.tools, cap: rate_cap };
+        // A big project's files are searched in parts (chat/projects/knowledge.rs):
+        // its tools offered, its block the list of parts — measured as sent.
+        let knowledge = super::knowledge_room(context_size, provider, model);
+        let gates = t.gates.with_project(conversation_id, knowledge, code);
+        let parts = super::fit::Parts { persona: &t.ep.persona, profile: &t.profile, now: t.now, code, connectors: connectors.as_ref(), conversation: conversation_id, knowledge };
+        let room = super::fit::Room { context: context_size, known: context_known, kind, tools: gates.tools, cap: rate_cap };
         // (A model evaluation sending the last messages by count: no budget.)
         let fitted = if mode == crate::chat::budget::Mode::Messages {
-            super::fit::as_is(t.gates, &parts, &counter).await
+            super::fit::as_is(gates, &parts, &counter).await
         } else {
             // What the question asks for stays (read only when tools must go):
             // its words, and the answer before it (a yes to "Shall I send an
@@ -74,7 +81,7 @@ impl Sizing {
                 let previous = conversation_id.and_then(crate::chat::chats::get).and_then(|c| c.messages.iter().rev().find(|m| m.role == "assistant").map(|m| m.text.clone()));
                 super::fit::keeps(&t.text, previous.as_deref(), code, &crate::agents::workspaces::list())
             };
-            super::fit::fit(t.gates, &parts, &counter, room, question_tokens, keep).await
+            super::fit::fit(gates, &parts, &counter, room, question_tokens, keep).await
         };
         if mode != crate::chat::budget::Mode::Messages {
             let fixed_now = fitted.fixed();
@@ -83,14 +90,14 @@ impl Sizing {
                 tracing::info!(question_tokens, room = room_now, fixed = fixed_now, shed = fitted.shed.names().len(), context = context_size, "Chat: the question is too long for the model; not sent");
                 // The plan's tokens a minute, not the model's context, when
                 // that's what's short (it read "too long for … (128K context)").
-                let roomy = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, t.gates.tools, None);
+                let roomy = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, gates.tools, None);
                 if let Some(tpm) = crate::chat::budget::rate_limit(provider).filter(|_| question_tokens <= roomy.history) {
                     return Err(crate::chat::budget::too_much_a_minute(&label, provider, tpm));
                 }
                 return Err(crate::chat::budget::too_long(&label, context_size));
             }
         }
-        let sizing = Sizing { kind, mode, counter, context_size, context_known, label, schemas: fitted.schemas, question_tokens };
+        let sizing = Sizing { kind, mode, counter, context_size, context_known, label, schemas: fitted.schemas, question_tokens, knowledge };
         Ok((sizing, fitted.gates))
     }
 
@@ -113,6 +120,7 @@ impl Sizing {
             label: String::new(),
             schemas: 0,
             question_tokens: 0,
+            knowledge: crate::chat::projects::knowledge::Room::new(context, None),
         }
     }
 }

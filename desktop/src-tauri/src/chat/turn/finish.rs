@@ -77,6 +77,9 @@ pub(super) fn check(t: &Asked<'_>, answer: Answer, conv: &crate::chat::chats::Co
     } else {
         (sources, tools_used)
     };
+    // A big project's parts sent with the question (chat/projects/knowledge.rs):
+    // their chips first, once (the tool loop had them from its start).
+    let tools_used = with_first(&built.project_chips, tools_used);
     let region = &t.profile.region;
     // A price question that searched: no offer to look for prices where the
     // person is — Yap looked (and, finding only another country's, looked
@@ -112,6 +115,16 @@ pub(super) fn check(t: &Asked<'_>, answer: Answer, conv: &crate::chat::chats::Co
     // named after the answer's.
     let sources = crate::snip::turn::with_source(sources);
     Ok(Answer { reply, tools_used, sources, looked, pages, stopped, pictures, files, shown_pages, offers, browser })
+}
+
+/// `first`, then `chips` without any of them again. Pure.
+fn with_first(first: &[String], chips: Vec<String>) -> Vec<String> {
+    if first.is_empty() {
+        return chips;
+    }
+    let mut out = first.to_vec();
+    out.extend(chips.into_iter().filter(|c| !first.contains(c)));
+    out
 }
 
 /// **The answer saved** in its conversation (`opened`) with its chips, who

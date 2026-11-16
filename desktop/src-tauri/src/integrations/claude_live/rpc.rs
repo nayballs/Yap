@@ -314,6 +314,10 @@ pub fn tools(ep: &Endpoint, spec: &RunSpec) -> Vec<Value> {
             out.extend(cards::definitions(spec.cards));
             // Visuals in the answer itself, pages Yap keeps (chat/made.rs): each turn says whether it may.
             out.extend(made_tools());
+            // A big project's files, searched in parts (chat/projects/knowledge.rs): read only.
+            if spec.projects {
+                out.extend(crate::chat::projects::knowledge::mcp_definitions());
+            }
             out.extend(spec.connectors.iter().flat_map(connectors::Listed::definitions));
             out
         }
@@ -403,6 +407,15 @@ fn call(ep: &Endpoint, run: &Run, id: Value, params: &Value) -> Value {
     // the answer. It logs its own outcome.
     if run.spec.cards.offers(name) {
         return ok(id, cards::call(run, name, &args));
+    }
+    // A big project's files (a plan chat whose project is searched in parts):
+    // read for the conversation of the turn the call belongs to.
+    if run.spec.projects && crate::chat::projects::knowledge::NAMES.contains(&name) {
+        let conversation = run.turn.call().and_then(|t| t.ctx.conversation);
+        let started = std::time::Instant::now();
+        let (text, is_error) = tauri::async_runtime::block_on(crate::chat::projects::knowledge::mcp_call(name, &args, conversation));
+        tracing::info!(run = %run.id, tool = name, ok = !is_error, ms = started.elapsed().as_millis() as u64, "Claude Code: a Yap tool answered");
+        return ok(id, text_result(text, is_error));
     }
     if !preview && !tool_names(run.spec.tools, true, run.spec.agents, run.spec.memory, run.spec.eyes, run.spec.reads).contains(&name) {
         return error(id, INVALID_PARAMS, &format!("Unknown tool: {name}"));

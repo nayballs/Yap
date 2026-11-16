@@ -292,6 +292,34 @@ fn a_code_chats_run_reads_meetings_notes_and_tasks_but_never_yaps_memory() {
 }
 
 #[test]
+fn a_plan_chat_in_a_big_project_lists_and_runs_its_tools() {
+    let (ep, _) = endpoint(Duration::from_secs(5));
+    let h = ep.register(RunSpec::new("Plan chat", Tools::Chat).with_projects(true)).unwrap();
+    let mut c = Client::of(&h);
+    let list = c.request("tools/list", json!({}));
+    let listed = names(&list);
+    assert!(listed.iter().any(|n| n == "read_project_file") && listed.iter().any(|n| n == "search_project_files"), "{listed:?}");
+    for t in list["result"]["tools"].as_array().unwrap().iter().filter(|t| t["name"].as_str().unwrap().contains("project")) {
+        assert_eq!(t["annotations"]["readOnlyHint"], true, "{}", t["name"]);
+        assert!(t["inputSchema"]["required"].as_array().is_some_and(|r| !r.is_empty()));
+    }
+    assert!(h.allowed_tools().iter().any(|t| t == "mcp__yap__read_project_file"));
+    assert!(h.allowed_tools().iter().any(|t| t == "mcp__yap__search_project_files"));
+    // No turn open (no conversation): said plainly, as an error.
+    let (err, text) = c.tool("read_project_file", json!({ "file": "staff-handbook.md", "part": 1 }));
+    assert!(err && text.contains("isn't in a project"), "{text}");
+    // A run without them: neither listed nor run.
+    let plain = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
+    assert!(!plain.allowed_tools().iter().any(|t| t.contains("project_file")));
+    let mut p = Client::of(&plain);
+    assert!(!names(&p.request("tools/list", json!({}))).iter().any(|n| n.contains("project")));
+    assert_eq!(p.request("tools/call", json!({ "name": "read_project_file", "arguments": { "file": "x", "part": 1 } }))["error"]["code"], -32602);
+    // Never an agent's run.
+    let agent = ep.register(RunSpec::new("garden-planner", Tools::Agent).with_projects(true)).unwrap();
+    assert!(!agent.allowed_tools().iter().any(|t| t.contains("project_file")));
+}
+
+#[test]
 fn requests_without_the_run_s_key_or_from_another_site_are_refused() {
     let (ep, _) = endpoint(Duration::from_secs(5));
     let h = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();

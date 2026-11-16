@@ -102,6 +102,8 @@ pub(super) async fn with_tools(
         // one of Yap's own windows): web content.
         // (An element picked on a page is web content too: `pages/pick.rs`.)
         web_question: t.about_selection.as_ref().is_some_and(|s| s.web) || crate::chat::pages::pick::has_element(&t.text),
+        // A big project's parts sent with the question: their chips first.
+        project_chips: &built.project_chips,
         ..g.extra(memory, Some(conv.id), calendar, agents, connectors.as_ref())
     };
     let looped = crate::chat::tools::run_tool_loop_with(
