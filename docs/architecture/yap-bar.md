@@ -39,7 +39,13 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   (`core/working.js`) — in a
   small chip nearest the pill while the bar is idle or a meeting records, never
   during a dictation, the reading card or a first-use pointer (region
-  `agents`, `data-testid="bar-agents"`); a click (`bar_action "agents"`) opens the
+  `agents`, `data-testid="bar-agents"`), nor while one of Yap's own windows in
+  front lies under its place (16 Nov 2026: a maximised main window's message box
+  sits there, and the chip clipped its edge; Chat says what's at work itself):
+  `overlay::agents_chip` is its place on the bar's monitor (38–70 CSS px from the
+  bar's edge, 240 wide, centred), `overlay::yap_under_chip` the check, read with
+  the fullscreen check on every slow tick (never the bar itself in front),
+  `Status.overYap`, `bar_simulate {overYap}` in the e2e suite; a click (`bar_action "agents"`) opens the
   main window on the newest agent's chat and its tab (`chat::turn::open_agent`);
   **dictating** =
   the dictation overlay (waveform, live partials, Transcribing…, errors), with

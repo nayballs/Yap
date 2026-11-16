@@ -57,6 +57,10 @@ impl Rect {
     pub fn inflate(&self, by: i32) -> Rect {
         Rect::new(self.left - by, self.top - by, self.right + by, self.bottom + by)
     }
+    /// Whether the two share any pixel.
+    pub fn intersects(&self, other: &Rect) -> bool {
+        self.left < other.right && other.left < self.right && self.top < other.bottom && other.top < self.bottom
+    }
 }
 
 /// A monitor as the bar sees it.
@@ -200,6 +204,35 @@ pub fn fullscreen_on(front: Option<&Front>, quns: i32, screen: &Screen) -> Fulls
     } else {
         Fullscreen::None
     }
+}
+
+// ---- "1 agent working" over Yap's own window -----------------------------------------
+
+/// Where the bar's "1 agent working" chip sits on `screen` (physical px): centred on the
+/// work area, 38–70 CSS px from the bar's edge (the page: the cards 48 px up, the chip
+/// 6 px nearer the pill and 24 high, a few px of slack), up to 240 CSS px wide.
+pub fn agents_chip(screen: &Screen, edge: Edge) -> Rect {
+    let px = |css: f64| (css * screen.scale).round() as i32;
+    let mid = screen.work.left + screen.work.width() / 2;
+    let (left, right) = (mid - px(120.0), mid + px(120.0));
+    match edge {
+        Edge::Bottom => {
+            let base = screen.work.bottom - screen.autohide_bottom;
+            Rect::new(left, base - px(70.0), right, base - px(38.0))
+        }
+        Edge::Top => {
+            let base = screen.work.top + screen.autohide_top;
+            Rect::new(left, base + px(38.0), right, base + px(70.0))
+        }
+    }
+}
+
+/// **The chip steps aside over Yap's own window** (16 Nov 2026): one of Yap's windows
+/// in front, under the chip's place — the main window maximised, its message box at the
+/// foot of the screen, where the chip clipped the box's edge. Chat says what's at work
+/// there itself (its list's dots, the running agents above it). Never the bar itself.
+pub fn yap_under_chip(front: Option<&Front>, screen: &Screen, edge: Edge) -> bool {
+    front.is_some_and(|f| f.ours && f.rect.intersects(&agents_chip(screen, edge)))
 }
 
 // ---- the pointer -------------------------------------------------------------------
@@ -820,6 +853,37 @@ mod tests {
         let notepad = front(right().work, "Notepad");
         assert_eq!(fullscreen_on(Some(&notepad), QUNS_PRESENTATION_MODE, &right()), Fullscreen::Exclusive);
         assert_eq!(Fullscreen::from_name(Fullscreen::Borderless.as_str()), Fullscreen::Borderless);
+    }
+
+    #[test]
+    fn the_agents_chip_steps_aside_only_over_yaps_own_window_under_it() {
+        let s = primary();
+        // Where it sits: centred, 38–70 px above the taskbar.
+        assert_eq!(agents_chip(&s, Edge::Bottom), Rect::new(1160, 1322, 1400, 1354));
+        assert_eq!(agents_chip(&s, Edge::Top), Rect::new(1160, 38, 1400, 70));
+        // At 150 % with an auto-hidden taskbar kept clear.
+        let hi = Screen { scale: 1.5, autohide_bottom: 2, work: s.monitor, ..s };
+        assert_eq!(agents_chip(&hi, Edge::Bottom), Rect::new(1100, 1333, 1460, 1381));
+        // Yap's main window maximised (its invisible borders out past the work area): it steps aside.
+        let mut yap = front(s.work.inflate(8), "Tauri Window");
+        yap.ours = true;
+        yap.zoomed = true;
+        assert!(yap_under_chip(Some(&yap), &s, Edge::Bottom));
+        // Another app there: it stays.
+        let other = front(s.work, "Chrome_WidgetWin_1");
+        assert!(!yap_under_chip(Some(&other), &s, Edge::Bottom));
+        // Yap's window away from the chip (the top half, or another monitor): it stays.
+        let mut top_half = front(Rect::new(0, 0, 2560, 700), "Tauri Window");
+        top_half.ours = true;
+        assert!(!yap_under_chip(Some(&top_half), &s, Edge::Bottom));
+        assert!(yap_under_chip(Some(&top_half), &s, Edge::Top));
+        let mut elsewhere = front(right().work, "Tauri Window");
+        elsewhere.ours = true;
+        assert!(!yap_under_chip(Some(&elsewhere), &s, Edge::Bottom));
+        assert!(!yap_under_chip(None, &s, Edge::Bottom));
+        // Touching its edge only is no overlap.
+        assert!(!Rect::new(0, 0, 10, 10).intersects(&Rect::new(10, 0, 20, 10)));
+        assert!(Rect::new(0, 0, 11, 10).intersects(&Rect::new(10, 0, 20, 10)));
     }
 
     fn region(id: &str, x: f64, y: f64, w: f64, h: f64) -> Region {

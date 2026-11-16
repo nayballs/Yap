@@ -411,7 +411,7 @@ into view and clicked through DevTools' own inspect overlay (real input:
 {"ok":true,"picked":"<h1 class=\"title\">","page":"http://localhost:5180/","chips":1}
 ```
 
-### `set '<json>'` or `set [--web on|off] [--yap-code on|off] [--connectors on|off]`
+### `set '<json>'` or `set [--web on|off] [--yap-code on|off] [--connectors on|off] [--clock <time>]`
 
 Changes the running test Yap as another surface would (`save_config`, Settings told,
 checked after): `web`, `yapCode` (with it: Claude Code checked, the scratch workspace
@@ -419,6 +419,9 @@ made and added), `connectors`, `bypass` (new chats' Mode Bypass permissions, the
 or Chat's model — `start` sets those), and `files: [{path, text} | {path, png: {width,
 height, shape, color, background}}]` seeded into **the lab's scratch workspace only**
 (`shape`: circle, square, triangle, stripes; drawn by the lab, nothing from outside).
+`--clock <time>` (16 Nov 2026): a time of the lab's own for Chat's start screen greeting
+only — `23:40` (today), `2026-11-18T23:40`, or `now` for the real time again — so its
+late-night line can be shot (`window.__yapTestClock`, ChatThread.svelte).
 
 ```json
 {"ok":true,"config":{"webSearch":true},"files":["pictures/sun.png","notes.md"]}

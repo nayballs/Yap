@@ -90,6 +90,8 @@
     // A phone connected with Remote Control on (its name, link/code.rs): a
     // small phone mark beside "1 agent working".
     phone: null,
+    // One of Yap's own windows in front under "1 agent working" (bar/overlay.rs `yap_under_chip`): it steps aside.
+    overYap: false,
   });
   // The --bar-* colours (app.css): `data-bar-theme`, Match app resolved with
   // the theme of Yap's windows (lib/core/appearance.js, which also follows it as
@@ -299,9 +301,11 @@
   // at work on the person's own words — the chat's own session, never called an agent (core/working.js).
   const openAgents = () => act('agents');
   // Shown beside the idle (or meeting) pill only, never over a dictation,
-  // the reading card or a first-use pointer.
+  // the reading card or a first-use pointer — nor over Yap's own window in
+  // front (16 Nov 2026: a maximised main window's message box sits there,
+  // and Chat says what's at work itself).
   const agentsLine = $derived(
-    bar.enabled && bar.shown && bar.agents + bar.chats > 0 && (mode === 'idle' || mode === 'meeting') && !reading.active && !pointerText
+    bar.enabled && bar.shown && bar.agents + bar.chats > 0 && (mode === 'idle' || mode === 'meeting') && !reading.active && !pointerText && !bar.overYap
       ? workingLine(bar.agents, bar.chats)
       : ''
   );

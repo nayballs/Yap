@@ -19,7 +19,7 @@
 //   420), a double-click back to 224, its keys, remembered; Ctrl+B still
 //   hides it whole; the thread keeps its least in a narrow window.
 // - **The readable column**: a wide thread's messages and composer centred
-//   on one 768 px column (the scrollbar's half allowed for), with the list
+//   on one column (a plain chat's 600 px, a Code chat's 768; the scrollbar's half allowed for), with the list
 //   hidden or shown, beside a panel; a narrow thread its own width.
 // - **Every size**: 900, 1280, 1920 and 2560 px, Home and Chat (both sides,
 //   with a document and with an agent's tab): nothing overlaps, nothing cut off.
@@ -48,6 +48,8 @@ const SCRIPTS = path.join(HERE, 'scripts');
 const GARDEN = path.join(HERE, 'folders', 'garden-planner');
 /** The readable column at the default Text size (app.css --yap-thread-width). */
 const COLUMN = 768;
+/** A plain chat's column (app.css --yap-chat-width, 16 Nov 2026: the Claude app's proportions). */
+const CHAT_COLUMN = 600;
 /** The window's frame around Chat beside the rail: the view's margins (2 + 10) and its border (2). */
 const FRAME = 14;
 
@@ -732,7 +734,7 @@ async function columnBoxes(main) {
   return { col: await rect(column(main)), comp: await rect(composer(main)), thread: await rect(threadBox(main)), msgs: await msgs(main).evaluate((m) => ({ client: m.clientWidth, x: Math.round(m.getBoundingClientRect().x) })) };
 }
 
-test('a wide thread reads in one centred 768 px column, the composer on it; a narrow thread is its own width', async ({ yap, main, fakeLlm, shot }) => {
+test('a wide thread reads in one centred 600 px column, the composer on it; a narrow thread is its own width', async ({ yap, main, fakeLlm, shot }) => {
   await main.setViewportSize({ width: 1920, height: 1040 });
   await longChat(main, fakeLlm);
   // Everything collapsed: the rail (☰) and the list (Ctrl+B).
@@ -743,14 +745,14 @@ test('a wide thread reads in one centred 768 px column, the composer on it; a na
   await expect(list(main)).toBeHidden();
   await expect.poll(async () => (await rect(threadBox(main))).w).toBe(1920 - RAIL_NARROW - FRAME);
   let b = await columnBoxes(main);
-  expect(b.col.w).toBe(COLUMN);
-  expect(b.comp.w).toBe(COLUMN);
+  expect(b.col.w).toBe(CHAT_COLUMN);
+  expect(b.comp.w).toBe(CHAT_COLUMN);
   // One centre, the scrollbar's half allowed for; the same left and right edges.
   expect(Math.abs(b.col.x - b.comp.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(b.col.right - b.comp.right)).toBeLessThanOrEqual(1);
   // Centred on the thread's scroller (its scrollbar at the thread's edge).
   // (Its client box is its 2 px padding either side of the content, the scrollbar beyond.)
-  expect(Math.abs(b.col.x - (b.msgs.x + (b.msgs.client - COLUMN) / 2))).toBeLessThanOrEqual(1);
+  expect(Math.abs(b.col.x - (b.msgs.x + (b.msgs.client - CHAT_COLUMN) / 2))).toBeLessThanOrEqual(1);
   // Every bubble, the answer's line and the code label within it.
   const out = await main.evaluate(() => {
     const c = document.querySelector('[data-testid="chat-column"]').getBoundingClientRect();
@@ -773,7 +775,7 @@ test('a wide thread reads in one centred 768 px column, the composer on it; a na
   await railBtn(main).click();
   await expect.poll(() => railWidth(main)).toBe(RAIL_WIDE);
   b = await columnBoxes(main);
-  expect(b.col.w).toBe(COLUMN);
+  expect(b.col.w).toBe(CHAT_COLUMN);
   expect(Math.abs(b.col.x - b.comp.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(b.comp.x + b.comp.w / 2 - (b.thread.x + b.thread.w / 2))).toBeLessThanOrEqual(10);
 
@@ -785,9 +787,9 @@ test('a wide thread reads in one centred 768 px column, the composer on it; a na
   expect(Math.abs(d.x + d.w / 2 - (b.col.x + b.col.w / 2))).toBeLessThanOrEqual(2);
   await down.click();
 
-  // A narrow thread (a 1,000 px window): its own width, as before.
-  await main.setViewportSize({ width: 1000, height: 800 });
-  await expect.poll(async () => (await columnBoxes(main)).col.w).toBeLessThan(COLUMN);
+  // A narrow thread (a 900 px window: a plain chat's column is narrower than a Code chat's): its own width, as before.
+  await main.setViewportSize({ width: 900, height: 800 });
+  await expect.poll(async () => (await columnBoxes(main)).col.w).toBeLessThan(CHAT_COLUMN);
   b = await columnBoxes(main);
   expect(b.col.w).toBe(b.msgs.client - 4);
   expect(b.comp.w).toBe(b.thread.w - 40);
@@ -796,10 +798,10 @@ test('a wide thread reads in one centred 768 px column, the composer on it; a na
   // A larger Text size: the column grows with it (a line keeps its length).
   await main.setViewportSize({ width: 1920, height: 1040 });
   await setConfig(yap, main, { readingSize: 'larger' });
-  await expect.poll(async () => (await columnBoxes(main)).col.w).toBe(Math.round(COLUMN * 1.25));
-  expect(Math.abs((await columnBoxes(main)).comp.w - Math.round(COLUMN * 1.25))).toBeLessThanOrEqual(1);
+  await expect.poll(async () => (await columnBoxes(main)).col.w).toBe(Math.round(CHAT_COLUMN * 1.25));
+  expect(Math.abs((await columnBoxes(main)).comp.w - Math.round(CHAT_COLUMN * 1.25))).toBeLessThanOrEqual(1);
   await setConfig(yap, main, { readingSize: 'default' });
-  await expect.poll(async () => (await columnBoxes(main)).col.w).toBe(COLUMN);
+  await expect.poll(async () => (await columnBoxes(main)).col.w).toBe(CHAT_COLUMN);
 });
 
 // ---------------------------------------------------------------- every size

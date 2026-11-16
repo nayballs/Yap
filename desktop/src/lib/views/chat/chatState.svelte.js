@@ -470,8 +470,11 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   let alive = true;
 
   // ---- The Voice Assistant
-  // Its shortcut ('' = none set: the empty thread offers to set one).
+  // Its shortcut ('' = none set), named in the mic's tooltip in a plain chat.
   let assistantHotkey = $state('');
+  // What Yap calls the person (Settings → About you, `aboutName`): the start screen's greeting. null until the
+  // config is read (the greeting waits for it, so "Good afternoon" never turns into "Afternoon, Sam" in front of you).
+  let aboutName = $state(null);
   // Chat's model is set up (ai_model_status; re-read on every config save).
   let chatReady = $state(true);
   // The open conversation, while a question asked out loud is being answered there ("Thinking…").
@@ -944,8 +947,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       voiceVolume = Number.isFinite(Number(c?.ttsVolume)) ? Number(c.ttsVolume) : 0.5;
       speakWhen = c?.speakWhen || 'voice';
       assistantHotkey = c?.assistantHotkey || '';
+      aboutName = typeof c?.aboutName === 'string' ? c.aboutName : '';
     } catch {
-      /* keep */
+      /* keep (a greeting without a name if it was never read) */
+      aboutName ??= '';
     }
     // No AI model yet: the empty chat says so before a question fails.
     invoke('ai_model_status', { scope: 'chat' })
@@ -1189,13 +1194,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     setTimeout(() => inputEl?.focus(), 0);
   }
 
-  /** A new chat asked across the meetings (its questions and follow-ups). */
-  function askAcrossMeetings() {
-    newChat();
-    scope = 'meetings';
-  }
-
-  // ---- Skills (chat/skills.rs): "/" in the box, and the one-tap prompts ----
+  // ---- Skills (chat/skills.rs): "/" in the box ----
+  // (The empty chat's Ask across your meetings and one-tap prompts went with its start screen, 16 Nov 2026: the
+  // Meetings view's Ask bar and its prompts send through `chatRequest` with `scope: 'meetings'`.)
   // A Skill is asked across the meetings, its passages cited, wherever it's
   // run; a plain chat with messages stays a plain chat.
   const skills = new SkillPicker('meetings');
@@ -1213,11 +1214,6 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     else inputEl?.focus();
   }
   /**
-   * A one-tap prompt (Write my stand-up, List my open to-dos…):
-   * its question, sent at once as its Skill. On an empty chat it's asked
-   * across the meetings from then on.
-   */
-  /**
    * **A next-step box's button** (chat/cards/next_step.rs): its words sent as
    * the person's next message, as if typed (the box goes once anything follows it).
    */
@@ -1225,13 +1221,6 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const text = String(button?.reply || button?.label || '').trim();
     if (!text || sending) return;
     send({ text });
-  }
-
-  function runPrompt(skill) {
-    if (sending || !skill?.question) return;
-    if (!messages.length) scope = 'meetings';
-    input = skill.question;
-    send({ skill: skill.command });
   }
 
   /**
@@ -2750,6 +2739,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     get byVoice() { return byVoice; },
     set byVoice(v) { byVoice = v; },
     get assistantHotkey() { return assistantHotkey; },
+    get aboutName() { return aboutName; },
     get chatReady() { return chatReady; },
     get assistantPending() { return assistantPending; },
     get waitedS() { return waitedS; },
@@ -2792,11 +2782,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     selectConversation,
     reloadActive,
     newChat,
-    askAcrossMeetings,
     skills,
     skillKey,
     pickSkill,
-    runPrompt,
     sendNextStep,
     openSource,
     reportView,

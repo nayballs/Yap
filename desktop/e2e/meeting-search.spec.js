@@ -266,12 +266,12 @@ test('Ask across meetings: an answer cites passages, each pill opens the moment,
 
 test('with no AI model, Ask across meetings shows the passages themselves', async ({ yap, main, shot }) => {
   await setConfig(yap, main, { llmScopes: {}, ppProvider: 'groq', ppApiKey: '', ppApiKeys: {} });
-  await openView(main, 'Chat');
-  await main.getByRole('button', { name: 'New chat' }).click();
-  await main.getByRole('button', { name: 'Ask across your meetings' }).click();
-  await expect(main.getByText('Ask across your meetings and notes')).toBeVisible();
-  await main.getByRole('textbox', { name: 'Message' }).fill('When does the launch happen?');
-  await main.getByRole('button', { name: 'Send' }).click();
+  // (Chat's start screen has no Ask across your meetings since 16 Nov 2026: the Meetings view's Ask bar asks.)
+  await openView(main, 'Meetings');
+  const ask = main.getByRole('textbox', { name: 'Ask about your meetings' });
+  await ask.fill('When does the launch happen?');
+  await ask.press('Enter');
+  await expect(main.getByTestId('chat-across-meetings')).toContainText('Asking across your meetings and notes');
   const thread = main.locator('.msgs');
   await expect(thread).toContainText('No AI model is set up, so here are the passages that match your question');
   await expect(thread).toContainText('We agreed the launch moves to March third');
