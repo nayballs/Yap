@@ -1419,6 +1419,7 @@
   /* The formula bar. */
   .fbar {
     display: flex;
+    flex: 0 0 auto;
     align-items: flex-start;
     gap: 0;
     min-height: 28px;

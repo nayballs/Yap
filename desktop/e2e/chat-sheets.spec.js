@@ -177,7 +177,7 @@ test('a workbook dropped on Chat opens beside it as Excel draws it, and the mode
   await expect(view(main).getByTestId('chat-sheet-formula')).toHaveValue('=B5*C5');
   await expect(view(main).getByTestId('chat-sheet-facts')).toHaveText('A1:F8 · 7 formulas, calculated by Yap · 1 hidden sheet');
   // Nothing in it is editable.
-  await expect(view(main).locator('[contenteditable], textarea')).toHaveCount(0);
+  await expect(view(main).locator('[contenteditable], textarea:not([readonly])')).toHaveCount(0);
   await expect(view(main).getByTestId('chat-sheet-formula')).toHaveAttribute('readonly', '');
   await shot(main, '01-a-workbook-beside-the-chat');
   await theme(yap, main, 'dark');

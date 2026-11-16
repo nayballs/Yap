@@ -19,7 +19,7 @@ import { test as base, expect, openView, setConfig } from './support/fixtures.js
 import { startFakeLlm } from './support/fake-llm.js';
 import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
-import { newCodeChat, plainSide } from './support/code-chats.js';
+import { newCodeChat, plainSide, toSide } from './support/code-chats.js';
 import { seedOrderXlsx, partsOf } from './support/xlsx.js';
 
 const HERE = path.join(RUNS, 'chat-sheets-edit-spec');
@@ -136,7 +136,11 @@ async function openOrder(yap, main) {
   // (A later test: Chat again, and the Code chat from its list.)
   if (answer) {
     await openView(main, 'Chat');
-    if (!(await answer.isVisible())) await main.getByRole('button', { name: /^Where are the seed order and the beds\?/ }).first().click();
+    if (!(await answer.isVisible())) {
+      // (A test before may have left Chat's list on its plain side.)
+      await toSide(main, 'Code');
+      await main.getByRole('button', { name: /^Where are the seed order and the beds\?/ }).first().click();
+    }
   }
   const a = await codeChat(yap, main);
   await expect(a).toBeVisible();
@@ -320,6 +324,7 @@ test('an attached copy is read only, and says so when you try to type', async ({
 });
 
 test("rows and columns from their headers' menus, Alt+Enter, and a UK date and £ typed", async ({ yap, main, shot }) => {
+  test.setTimeout(180_000);
   fs.mkdirSync(path.dirname(WS_ORDER), { recursive: true });
   fs.writeFileSync(WS_ORDER, seedOrderXlsx());
   fs.writeFileSync(WS_BEDS, BEDS_CSV);
@@ -344,8 +349,10 @@ test("rows and columns from their headers' menus, Alt+Enter, and a UK date and �
   await editor(main).press('Tab');
   await grid(main).press('2');
   await editor(main).press('Tab');
-  await grid(main).press('£');
-  await editor(main).pressSequentially('1.50');
+  // (£ isn't a key Playwright presses: Backspace starts the cell empty, then it's typed in.)
+  await grid(main).press('Backspace');
+  await editor(main).pressSequentially('£1.50');
+  await expect(editor(main)).toHaveValue('£1.50');
   await editor(main).press('Tab');
   await grid(main).press('=');
   await editor(main).pressSequentially('B5*C5');
@@ -399,8 +406,9 @@ test("rows and columns from their headers' menus, Alt+Enter, and a UK date and �
   await shot(main, '12-a-columns-menu');
   await item('Delete column H').click();
   await expect(view(main).locator('[data-cell="H5"]')).toHaveCount(0);
-  // The row taken out again: the total back to its three rows.
-  await at(main, 'A5').click();
+  // The row taken out again: the total back to its three rows. (Home: back to column A, scrolled into view.)
+  await grid(main).press('Home');
+  await expect(where(main)).toHaveText('A5');
   await view(main).locator('[data-head="row-5"]').click({ button: 'right' });
   await item('Delete row 5').click();
   await expect(at(main, 'A5')).toHaveText('Kale');

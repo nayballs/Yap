@@ -422,6 +422,14 @@ impl Xlsx {
                 let _ = self.model.flush_send_queue();
                 calls += 1;
             }
+            // Its row as tall as its lines in the view (Excel's own fit: 15 points a line of an 11-point font;
+            // IronCalc's row heights are 25/16 of a point). The file's row isn't given a height: Excel fits it.
+            let size = self.model().get_style_for_cell(sheet, row, col).map(|s| s.font.sz).unwrap_or(11).max(1) as f64;
+            let need = input.split('\n').count() as f64 * 15.0 * size / 11.0 * 1.5625;
+            if self.model.get_row_height(sheet, row).is_ok_and(|h| h < need) && self.model.set_rows_height(sheet, row, row, need).is_ok() {
+                let _ = self.model.flush_send_queue();
+                calls += 1;
+            }
         }
         self.was.entry((sheet, row, col)).or_insert(was);
         self.undo.push(Step::Cell { at: (sheet, row, col), calls });
