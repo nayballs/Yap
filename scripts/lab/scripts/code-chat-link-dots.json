@@ -1,0 +1,91 @@
+{
+  "name": "code-chat-link-dots",
+  "about": "A file link's ⋯ never over its link (16 Nov 2026, ui/fileLinks.js `moreSpot`: a short link at the end of its line had its ⋯ over its end, so a click there opened the menu, not the file). On a real model in a Bypass Code chat on lab-sandbox: an answer with short file links and a long one that wraps, each hovered — its ⋯ shows, and nothing is over the link's start or end — then a one-line answer ending in a short link, flush with the answer's edge: hovered, then clicked at its very end, which opens the file beside the chat, no menu. Needs a live lab and Yap Code.",
+  "needs": { "yapCode": true, "live": true },
+  "steps": [
+    { "set": { "bypass": true, "config": { "agentsDirect": true, "agentsOpenFiles": "yap" } } },
+    {
+      "ask": "Create the file docs/kitchen/reference/tables/cups-spoons-and-millilitres-for-every-ingredient-on-the-shelf.md containing just the heading \"# Kitchen tables\". Then answer in two or three short sentences, writing every path as inline code: where you put the new file, that TODO.md says what's left, and that the conversions are in src/convert.js. Don't mention the README.",
+      "chat": "code:lab-sandbox",
+      "timeout": 420
+    },
+    {
+      "expect": {
+        "status": "answered",
+        "selector": [
+          { "window": "thread", "css": ".cbody .md-filelink[data-rel=\"TODO.md\"]", "count": { "min": 1 } },
+          { "window": "thread", "css": ".cbody .md-filelink[data-rel=\"src/convert.js\"]", "count": { "min": 1 } },
+          { "window": "thread", "css": ".cbody .md-filelink[data-rel^=\"docs/kitchen/\"]", "count": { "min": 1 } }
+        ]
+      },
+      "note": "Short links (TODO.md, src/convert.js) and a long one that wraps (the new file's), each a link to the workspace's file."
+    },
+
+    { "lab": "click", "args": { "window": "thread", "css": ".cbody .md-filelink[data-rel=\"TODO.md\"]", "hover": true }, "note": "A short link: its ⋯ comes up, clear of it." },
+    {
+      "expect": {
+        "selector": [
+          { "window": "thread", "css": "[data-testid=\"md-filelink-more\"]", "count": 1 },
+          { "window": "thread", "css": ".cbody .md-filelink[data-rel=\"TODO.md\"]", "covered": false, "at": "end" },
+          { "window": "thread", "css": ".cbody .md-filelink[data-rel=\"TODO.md\"]", "covered": false, "at": "start" }
+        ]
+      }
+    },
+    { "shot": "short-link-todo", "window": "main" },
+
+    { "lab": "click", "args": { "window": "thread", "css": ".cbody .md-filelink[data-rel=\"src/convert.js\"]", "hover": true } },
+    {
+      "expect": {
+        "selector": [
+          { "window": "thread", "css": "[data-testid=\"md-filelink-more\"]", "count": 1 },
+          { "window": "thread", "css": ".cbody .md-filelink[data-rel=\"src/convert.js\"]", "covered": false, "at": "end" },
+          { "window": "thread", "css": ".cbody .md-filelink[data-rel=\"src/convert.js\"]", "covered": false, "at": "start" }
+        ]
+      }
+    },
+    { "shot": "short-link-convert", "window": "main" },
+
+    { "lab": "click", "args": { "window": "thread", "css": ".cbody .md-filelink[data-rel^=\"docs/kitchen/\"]", "hover": true }, "note": "The long one, across lines: its ⋯ after its last line's end." },
+    {
+      "expect": {
+        "selector": [
+          { "window": "thread", "css": "[data-testid=\"md-filelink-more\"]", "count": 1 },
+          { "window": "thread", "css": ".cbody .md-filelink[data-rel^=\"docs/kitchen/\"]", "covered": false, "at": "end" },
+          { "window": "thread", "css": ".cbody .md-filelink[data-rel^=\"docs/kitchen/\"]", "covered": false, "at": "start" }
+        ]
+      }
+    },
+    { "shot": "long-link", "window": "main" },
+
+    {
+      "ask": "Reply with exactly this one line and nothing else, no full stop: The rest is in README.md",
+      "chat": "same",
+      "timeout": 300
+    },
+    {
+      "expect": { "status": "answered", "selector": { "window": "thread", "css": ".cbody .md-filelink[data-rel=\"README.md\"]", "count": 1 } },
+      "note": "A one-line answer ending in a short link: the link's end is the answer's edge."
+    },
+    { "lab": "click", "args": { "window": "thread", "css": ".cbody .md-filelink[data-rel=\"README.md\"]", "hover": true } },
+    {
+      "expect": {
+        "selector": [
+          { "window": "thread", "css": "[data-testid=\"md-filelink-more\"]", "count": 1 },
+          { "window": "thread", "css": ".cbody .md-filelink[data-rel=\"README.md\"]", "covered": false, "at": "end" }
+        ]
+      },
+      "note": "Its ⋯ past the answer's edge, never over the link's end."
+    },
+    { "shot": "short-link-at-the-edge", "window": "main" },
+    { "lab": "click", "args": { "window": "thread", "css": ".cbody .md-filelink[data-rel=\"README.md\"]", "at": "end" }, "note": "A click on the link's very end: the file, not the ⋯'s menu." },
+    {
+      "expect": {
+        "selector": [
+          { "window": "panel", "css": "[data-testid=\"chat-file\"][data-rel=\"README.md\"]", "count": 1 },
+          { "window": "main", "css": "[role=\"menu\"]", "present": false }
+        ]
+      }
+    },
+    { "shot": "short-link-end-opened", "window": "main" }
+  ]
+}

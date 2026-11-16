@@ -38,8 +38,8 @@ import path from 'node:path';
 import { test as base, expect, openView, setConfig, openSettings, closeSettings, closeToasts } from './support/fixtures.js';
 import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
-import { newCodeChat, toSide } from './support/code-chats.js';
-import { looksLikePath, pathsIn } from '../src/lib/ui/fileLinks.js';
+import { newCodeChat, toSide, moreClearOf } from './support/code-chats.js';
+import { looksLikePath, pathsIn, moreSpot } from '../src/lib/ui/fileLinks.js';
 import { runnable, blockLang } from '../src/lib/ui/codeRun.js';
 import { outputItems, splitPath } from '../src/lib/views/chat/outputs.js';
 import { contextView, fmtTokens, fmtShare, shortPath, prsNote, prChecks } from '../src/lib/views/chat/contextBreakdown.js';
@@ -106,6 +106,22 @@ const MAKES_COSTS = [
   result(COSTS_SAID),
   { _wait_user: true },
 ];
+/** File links of every shape, in two answers (16 Nov 2026: a short link at the end of its line had its ⋯ over its end). */
+const NOTES_MD = '# Notes\n\nThe north border has four beds.\n';
+const LONG = 'src/garden/beds/north-border/raised-beds/twenty-twenty-six/measurements-of-every-raised-bed-in-the-north-border.js';
+const SHAPES = [
+  `The beds are in notes.md, and every measurement is in \`${LONG}\` now.`,
+  '',
+  '| File | What it holds |',
+  '|---|---|',
+  '| `notes.md` | the beds |',
+  '| the converter | `src/convert.js` |',
+  '',
+  '- The lab notes: docs/lab.md',
+].join('\n');
+const ONE_LINE = 'Every bed is in notes.md';
+const SHAPED = [{ _wait_user: true }, init(), said('s1', [{ type: 'text', text: SHAPES }], 'end_turn'), result(SHAPES), { _wait_user: true }];
+const IN_ONE_LINE = [{ _wait_user: true }, init(), said('s2', [{ type: 'text', text: ONE_LINE }], 'end_turn'), result(ONE_LINE), { _wait_user: true }];
 /** A plain chat's answer: the same words (no workspace, so nothing is a link or runs). */
 const PLAIN = [{ _wait_user: true }, init(), said('p1', [{ type: 'text', text: ANSWER }], 'end_turn'), result(ANSWER), { _wait_user: true }];
 
@@ -537,6 +553,115 @@ test('a file link’s ⋯: on hover or focus, the link’s menu under it; the ne
   const said = thread(main).getByTestId('chat-agent-work-said');
   await said.locator('.md-filelink').first().hover();
   await expect(said.getByTestId('md-filelink-more')).toBeVisible();
+  await main.mouse.move(5, 5);
+  await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+});
+
+test('a file link’s ⋯ never covers its link: a short one, one that wraps, one in a table, one at the end of its line', async ({ yap, main, shot }) => {
+  fs.writeFileSync(path.join(GARDEN, 'notes.md'), NOTES_MD);
+  fs.mkdirSync(path.dirname(path.join(GARDEN, LONG)), { recursive: true });
+  fs.writeFileSync(path.join(GARDEN, LONG), 'export const beds = 4;\n');
+  await script(yap, SHAPED, 'shapes');
+  const before = (await agents(yap)).length;
+  await openView(main, 'Chat');
+  if (await panel(main).count()) await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+  await newCodeChat(main, 'garden-planner');
+  await send(main, 'Where are the beds measured? See @notes.md');
+  await expect.poll(async () => (await agents(yap)).length, { timeout: 20_000 }).toBe(before + 1);
+  const agent = (await agents(yap))[0];
+  const turnDone = (n) =>
+    expect
+      .poll(async () => {
+        const j = (await agents(yap)).find((a) => a.id === agent.id);
+        return [j?.status, j?.turnList?.length];
+      }, { timeout: 30_000 })
+      .toEqual(['done', n]);
+  await turnDone(1);
+  await expect(answer(main)).toContainText('every measurement');
+  await expect(thread(main).getByTestId('chat-streaming')).toHaveCount(0);
+  const shaped = answer(main);
+  const links = shaped.locator('.md-filelink');
+  await expect(links).toHaveText(['notes.md', LONG, 'notes.md', 'src/convert.js', 'docs/lab.md']);
+  /** Every link's line boxes, from the answer's corner: what must not move while a ⋯ shows. */
+  const places = (bubble) =>
+    bubble.locator('.cbody').evaluate((body) => {
+      const a = body.getBoundingClientRect();
+      const r1 = (v) => Math.round(v * 10) / 10;
+      return [...body.querySelectorAll('.md-filelink')].map((el) => [...el.getClientRects()].map((r) => [r1(r.left - a.left), r1(r.top - a.top), r1(r.width), r1(r.height)]));
+    });
+  const words = await shaped.locator('.cbody').evaluate((el) => el.textContent);
+  const still = await places(shaped);
+  // The long one wraps across lines.
+  expect(still[1].length).toBeGreaterThan(1);
+  // Each in turn: its ⋯ clear of every line of it, and nothing in the words moved.
+  const at = [];
+  for (let i = 0; i < still.length; i++) {
+    const got = await moreClearOf(links.nth(i));
+    at.push(got.at);
+    expect(await places(shaped)).toEqual(still);
+    if (i === 1) {
+      // The long one's: after the end of its last line, on that line.
+      const last = got.lines.at(-1);
+      expect(got.more.left).toBeGreaterThanOrEqual(last.right);
+      expect(Math.abs((got.more.top + got.more.bottom) / 2 - (last.top + last.bottom) / 2)).toBeLessThanOrEqual(2);
+      await shot(main, '02s-a-file-links-more-after-a-long-link');
+      await theme(yap, main, 'dark');
+      await shot(main, '02t-a-file-links-more-after-a-long-link-dark');
+      await theme(yap, main, 'light');
+    }
+    if (i === 3) {
+      // In the table's last column: after it, past the table's edge.
+      await shot(main, '02u-a-file-links-more-in-a-table');
+      await theme(yap, main, 'dark');
+      await shot(main, '02v-a-file-links-more-in-a-table-dark');
+      await theme(yap, main, 'light');
+    }
+  }
+  expect(at).toEqual(['after', 'after', 'after', 'after', 'after']);
+  expect(await shaped.locator('.cbody').evaluate((el) => el.textContent)).toBe(words);
+
+  // A one-line answer ending in a short link: its end is the answer's edge, so the ⋯ goes past it, never over the
+  // link — and a click on the link's end opens the file, not the menu (16 Nov 2026: it had the ⋯ over its end).
+  await main.mouse.move(5, 5);
+  await script(yap, IN_ONE_LINE, 'in-one-line');
+  await send(main, 'And in one line?');
+  await turnDone(2);
+  await expect(answer(main).locator('.cbody')).toHaveText(ONE_LINE);
+  await expect(thread(main).getByTestId('chat-streaming')).toHaveCount(0);
+  const oneLine = answer(main);
+  const short = oneLine.locator('.md-filelink');
+  await expect(short).toHaveText('notes.md');
+  const edge = await short.evaluate((el) => el.closest('.cbody').getBoundingClientRect().right - el.getBoundingClientRect().right);
+  expect(Math.abs(edge)).toBeLessThanOrEqual(1);
+  const stillShort = await places(oneLine);
+  const got = await moreClearOf(short);
+  expect(got.at).toBe('after');
+  expect(got.more.left).toBeGreaterThanOrEqual(got.lines[0].right);
+  expect(await places(oneLine)).toEqual(stillShort);
+  await shot(main, '02w-a-file-links-more-after-a-short-link-at-its-lines-end');
+  await theme(yap, main, 'dark');
+  await shot(main, '02x-a-file-links-more-after-a-short-link-at-its-lines-end-dark');
+  await theme(yap, main, 'light');
+  const { width, height } = await short.boundingBox();
+  await short.click({ position: { x: width - 2, y: height / 2 } });
+  const file = main.getByTestId('chat-file');
+  await expect(file).toHaveAttribute('data-rel', 'notes.md');
+  await expect(main.getByRole('menu')).toHaveCount(0);
+
+  // The panel open, the thread narrow: the person's own @-mention ends their message at the thread's edge, with no
+  // room after it in view — so its ⋯ goes under its end, still clear of it.
+  await main.mouse.move(5, 5);
+  const pill = thread(main).locator('.cbubble.user').first().locator('.md-filelink');
+  await expect(pill).toHaveText('@notes.md');
+  const room = await pill.evaluate((el) => el.closest('.msgs').getBoundingClientRect().right - el.getBoundingClientRect().right);
+  expect(room).toBeLessThan(25);
+  const atPill = await moreClearOf(pill);
+  expect(atPill.at).toBe('below');
+  expect(atPill.more.top).toBeGreaterThanOrEqual(atPill.lines[0].bottom);
+  await shot(main, '02y-a-mentions-more-under-it-at-the-threads-edge');
+  await theme(yap, main, 'dark');
+  await shot(main, '02z-a-mentions-more-under-it-at-the-threads-edge-dark');
+  await theme(yap, main, 'light');
   await main.mouse.move(5, 5);
   await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
 });
@@ -1003,6 +1128,26 @@ test('ui/fileLinks.js, ui/codeRun.js and outputs.js: what may be a path, which b
   expect(['src/convert.js', 'docs/lab.md:105', 'src/app.ts:12:4', 'CLAUDE.md', 'C:\\Projects\\a.rs', 'src\\x.rs#L4'].map(looksLikePath)).toEqual([true, true, true, true, true, true]);
   expect(['npm test', 'v1.2', 'hello', 'a b.js', '', 'src/'].map(looksLikePath)).toEqual([false, false, false, false, false, false]);
   expect(pathsIn('See src/convert.js:5, then CLAUDE.md. Not https://example.org/a.js or v1.2.').map((p) => p.path)).toEqual(['src/convert.js:5', 'CLAUDE.md']);
+  // A link's ⋯ (`moreSpot`): never over a line of the link, wholly in what shows of the thread.
+  const box = (left, top, right, bottom) => ({ left, top, right, bottom });
+  const size = { w: 22, h: 18 };
+  const room = box(0, 0, 600, 400);
+  // Room after its end: there, its middle on the line's.
+  expect(moreSpot([box(100, 100, 160, 116)], size, room)).toEqual({ at: 'after', x: 163, y: 99 });
+  // A short link at the edge of what shows: under its end, its right edge at the link's.
+  expect(moreSpot([box(540, 100, 590, 116)], size, room)).toEqual({ at: 'below', x: 568, y: 117 });
+  // …the last line too: over its end.
+  expect(moreSpot([box(540, 380, 590, 396)], size, room)).toEqual({ at: 'above', x: 568, y: 361 });
+  // A link that wraps, its last line ending at the edge: not over its first line's part, under the end instead.
+  const wrapped = [box(400, 100, 598, 116), box(0, 120, 597, 136)];
+  expect(moreSpot(wrapped, size, room).at).toBe('below');
+  // Wrapped onto a last line it fills, the room's foot under it: before its start (the words before it).
+  expect(moreSpot([box(400, 364, 598, 380), box(0, 382, 597, 398)], size, room)).toEqual({ at: 'before', x: 375, y: 363 });
+  // Nowhere wholly in view: the first place that, pulled into view, stays clear of the link…
+  expect(moreSpot([box(2, 100, 598, 116)], size, box(0, 90, 600, 134))).toEqual({ at: 'below', x: 576, y: 116 });
+  // …and with none, after its end as it is: cut off by the thread's edge, never over the link.
+  expect(moreSpot([box(0, 0, 600, 16)], size, box(0, 0, 600, 20))).toEqual({ at: 'after', x: 603, y: -1 });
+  expect(moreSpot([], size, room)).toBe(null);
   expect(runnable('npm test\n', 'bash')).toBe(true);
   expect(runnable('$ npm test', 'sh')).toBe(true);
   expect(runnable('Get-ChildItem', 'powershell')).toBe(true);

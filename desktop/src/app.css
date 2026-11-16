@@ -939,7 +939,7 @@ code.md-filelink {
 }
 /* A file link's ⋯ (ui/fileLinks.js, 16 Nov 2026): at the end of the link the pointer is on or the keyboard
    is at, over the words after it — out of their flow, so nothing moves — and the link's menu under it.
-   Its middle is put on the link's line by the script (`translate`). */
+   The script moves it from where it stands to a place clear of the link (`translate`, `moreSpot`). */
 .md-filemore {
   position: absolute;
   z-index: 2;
@@ -949,7 +949,7 @@ code.md-filelink {
   box-sizing: border-box;
   width: 22px;
   height: 18px;
-  margin: 0 0 0 3px;
+  margin: 0;
   padding: 0;
   border: 1px solid var(--yap-border);
   border-radius: 6px;
@@ -962,10 +962,6 @@ code.md-filelink {
 }
 .md-filemore[hidden] {
   display: none;
-}
-/* No room after the link on its line: over the link's own end instead. */
-.md-filemore.md-filemore-in {
-  margin-left: -25px;
 }
 .md-filemore:hover,
 .md-filemore[aria-expanded='true'] {

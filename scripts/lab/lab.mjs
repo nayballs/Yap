@@ -21,8 +21,8 @@
 //   cancel | state | agents | logs [--since N]
 //   shot [--window thread|main|bar|panel|page] [--theme light|dark|both]
 //        [--name <n>] [--selector <css>]
-//   probe --window <w> [--css <selector>] [--text <words>]
-//   click --window main|thread|panel|bar --css <selector> [--right|--hover]   (one of Yap's own buttons, as the person would)
+//   probe --window <w> [--css <selector>] [--text <words>] [--at end|start]
+//   click --window main|thread|panel|bar --css <selector> [--right|--hover] [--at end|start]   (one of Yap's own buttons, as the person would)
 //   spoken [--clear]                       what the test Yap's voice was given, and the reading card now
 //   type --window main|thread|panel [--css <selector>] [--text <words>] [--press Enter,Tab…]   (keys, as the person types)
 //   pick "<words on the page>" | pick --css <selector>   select an element beside the chat

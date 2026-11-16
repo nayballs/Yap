@@ -262,6 +262,12 @@ export function screenChecks(expect) {
   const out = [];
   for (const s of list(expect.selector)) {
     const window = s.window ?? 'main';
+    // `covered` (16 Nov 2026): whether something else is over it — at its centre, or `at` its end or start.
+    if (s.covered !== undefined) {
+      const where = s.at ? ` at its ${s.at}` : '';
+      out.push({ check: `${window}: ${s.css} ${s.covered ? 'covered' : 'not covered'}${where}`, args: { window, css: s.css, ...(s.at ? { at: s.at } : {}) }, want: { covered: !!s.covered } });
+      continue;
+    }
     const want = s.count !== undefined ? { count: s.count } : { present: s.present ?? true };
     out.push({ check: `${window}: ${s.css} ${want.count !== undefined ? `× ${countText(want.count)}` : want.present ? 'shows' : "doesn't show"}`, args: { window, css: s.css }, want });
   }
@@ -273,6 +279,7 @@ export function screenChecks(expect) {
 /** A probe's answer against what a screen check wants. Pure. */
 export function probePasses(want, got) {
   if (want.has !== undefined) return !!got.has === want.has;
+  if (want.covered !== undefined) return (got.visible ?? 0) > 0 && !!got.covered === want.covered;
   if (want.count !== undefined) return countMatches(want.count, got.visible ?? 0);
   return want.present ? (got.visible ?? 0) > 0 : (got.visible ?? 0) === 0;
 }

@@ -947,14 +947,15 @@ async function shot({ window: which = 'main', theme, name, selector }) {
  * in it (the words as shown: hidden text doesn't count)? `thread`: Chat's
  * thread; `panel`: the panel beside the chat; `page`: the live page.
  */
-async function probe({ window: which = 'main', css, text }) {
+async function probe({ window: which = 'main', css, text, at }) {
   if (!css && !text) throw new Error('probe needs --css or --text');
+  if (at != null && !AT_POINTS.includes(at)) throw new Error(`--at takes ${AT_POINTS.join(' or ')}`);
   const views = (await tryInvoke('e2e_page_views', {}, [])) ?? [];
   const page = which === 'bar' ? yap.overlay : which === 'page' ? livePage(yap, views) : main();
   if (!page) throw new Error('No page beside the chat');
   const scope = which === 'panel' ? '[data-testid="chat-panel-slot"]' : which === 'thread' ? '[data-testid="chat-column"]' : null;
   const got = await page.evaluate(
-    ([scope, css, text]) => {
+    ([scope, css, text, at]) => {
       const root = scope ? document.querySelector(scope) : document.body;
       if (!root) return { found: false, count: 0, visible: 0, ...(text ? { text: false } : {}) };
       const out = { found: true, theme: document.documentElement.dataset.yapTheme ?? null };
@@ -963,10 +964,16 @@ async function probe({ window: which = 'main', css, text }) {
         out.count = els.length;
         const shows = els.filter((e) => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden');
         out.visible = shows.length;
-        // Whether something else is over the first that shows, at its centre (16 Nov 2026: a toast over Send), and what.
+        // Whether something else is over the first that shows, at its centre (16 Nov 2026: a toast over Send), and what;
+        // `at` (16 Nov 2026: a file link's ⋯ over its end) its last line's end, or its first line's start, 2 px in.
         if (shows.length) {
           const r = shows[0].getBoundingClientRect();
-          const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          const lines = [...shows[0].getClientRects()].filter((l) => l.width > 0.5);
+          const line = at === 'end' ? lines.at(-1) : at === 'start' ? lines[0] : null;
+          const x = line ? (at === 'end' ? line.right - 2 : line.left + 2) : r.left + r.width / 2;
+          const y = line ? (line.top + line.bottom) / 2 : r.top + r.height / 2;
+          if (at) out.at = at;
+          const top = document.elementFromPoint(x, y);
           out.covered = !!top && !shows[0].contains(top) && !top.contains(shows[0]);
           if (out.covered) {
             const toast = top.closest('[role="status"]');
@@ -981,7 +988,7 @@ async function probe({ window: which = 'main', css, text }) {
       }
       return out;
     },
-    [scope, css ?? null, text ?? null]
+    [scope, css ?? null, text ?? null, at ?? null]
   );
   const { text: has, ...rest } = got;
   return { window: which, ...(css ? { css } : {}), ...rest, ...(text ? { words: cut(text, 120), has } : {}) };
@@ -1017,20 +1024,36 @@ async function spokenCmd({ clear = false }) {
   return { spoken: said.map((s) => ({ messageId: s.messageId ?? null, engine: s.engine, streamed: !!s.streamed, sentences: s.sentences })), reading };
 }
 
-async function click({ window: which = 'main', css, right = false, hover = false }) {
+/** Where `click --at` and `probe --at` aim: a link's last line's end, or its first line's start (2 px in). */
+const AT_POINTS = ['end', 'start'];
+
+async function click({ window: which = 'main', css, right = false, hover = false, at }) {
   if (!css) throw new Error('click needs --css');
   if (!['main', 'thread', 'panel', 'bar'].includes(which)) throw new Error("click works in Yap's own windows: main, thread, panel or bar");
+  if (at != null && !AT_POINTS.includes(at)) throw new Error(`--at takes ${AT_POINTS.join(' or ')}`);
   const scope = which === 'panel' ? '[data-testid="chat-panel-slot"] ' : which === 'thread' ? '[data-testid="chat-column"] ' : '';
   // `bar`: the Yap bar's own buttons (the reading card's ⏸, 16 Nov 2026).
   const target = (which === 'bar' ? yap.overlay : main()).locator(`${scope}${css}`).first();
+  // `--at end|start` (16 Nov 2026: a short file link's end, once under its ⋯): that point, from the box's corner.
+  let position;
+  if (at) {
+    await target.scrollIntoViewIfNeeded({ timeout: 5_000 });
+    position = await target.evaluate((el, at) => {
+      const box = el.getBoundingClientRect();
+      const lines = [...el.getClientRects()].filter((l) => l.width > 0.5);
+      const line = at === 'end' ? lines.at(-1) : lines[0];
+      return { x: (at === 'end' ? line.right - 2 : line.left + 2) - box.left, y: (line.top + line.bottom) / 2 - box.top };
+    }, at);
+  }
+  const where = position ? { position } : {};
   // `--hover`: the pointer put on it, no click (a file link's ⋯, 16 Nov 2026): what shows then, `shot` or `click` next.
   if (hover) {
-    await target.hover({ timeout: 5_000 });
-    return { window: which, css, hovered: true };
+    await target.hover({ timeout: 5_000, ...where });
+    return { window: which, css, hovered: true, ...(at ? { at } : {}) };
   }
   // `--right`: a right-click (a file link's menu, 16 Nov 2026).
-  await target.click({ timeout: 5_000, button: right ? 'right' : 'left' });
-  return { window: which, css, clicked: true, ...(right ? { right: true } : {}) };
+  await target.click({ timeout: 5_000, button: right ? 'right' : 'left', ...where });
+  return { window: which, css, clicked: true, ...(right ? { right: true } : {}), ...(at ? { at } : {}) };
 }
 
 /**
