@@ -49,7 +49,8 @@ import { runnable, blockLang } from '../src/lib/ui/codeRun.js';
 import { outputItems, splitPath } from '../src/lib/views/chat/outputs.js';
 import { contextView, fmtTokens, fmtShare, shortPath, prsNote, prChecks } from '../src/lib/views/chat/contextBreakdown.js';
 
-const HERE = path.join(RUNS, 'code-chat-files-spec');
+// Its workspaces and stand-ins, a worker's own (`--repeat-each` runs copies side by side).
+const HERE = path.join(RUNS, `code-chat-files-spec-w${process.env.TEST_WORKER_INDEX ?? 0}`);
 const SCRIPTS = path.join(HERE, 'scripts');
 const GARDEN = path.join(HERE, 'folders', 'garden-planner');
 const OUTSIDE = path.join(HERE, 'folders', 'outside');
@@ -521,7 +522,12 @@ test('a file link’s ⋯: on hover or focus, the link’s menu under it; the ne
   await shot(main, '02h-a-file-links-more-on-hover-dark');
   await theme(yap, main, 'light');
 
-  // Onto it, and a click: the link's own menu, under the ⋯.
+  // Onto it, and a click: the link's own menu, under the ⋯. Pointed at anew, from the link, as a person goes: with
+  // the pointer left still through the screenshots and theme switches above, the ⋯ had now and then gone (its link
+  // no longer under the pointer as the page saw it), and the hover onto it waited the test out (CI, 16 Nov 2026).
+  await main.mouse.move(5, 5);
+  await links.first().hover();
+  await expect(more).toBeVisible();
   await more.hover();
   await expect(more).toBeVisible();
   await more.click();

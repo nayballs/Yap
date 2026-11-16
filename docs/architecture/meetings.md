@@ -199,7 +199,11 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   in one place (`alert::show`, kind `meetingRecovery`, held while dictating
   or recording: the window's toast, the bar, a notification) with
   **Transcribe it** (`RECOVER_ACTION` → `recover_all`); the note says it
-  too (`meeting_audio_note`'s `recoverableSecs`). **Jobs** (`start_job`, one
+  too (`meeting_audio_note`'s `recoverableSecs`). What was typed in My
+  thoughts is in notes.json as it was last saved (every save written whole
+  and atomically, read as it is at the next start): at most the last two
+  seconds of typing are lost (`core/typingSave.js`, notes.md "Saving").
+  **Jobs** (`start_job`, one
   per note, refused while a meeting records — `replay` also waits for one that starts, and for a dictation —; `yap-meeting-redo {noteId, kind:
   recover|again|refine|retry|speakers, state: running|done|error|cancelled,
   percent, model, error, summary, waiting, thenSummary}`; every job has a

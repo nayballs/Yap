@@ -39,6 +39,17 @@ async function openMenu(yap) {
   return menu;
 }
 
+// The menu fades in and out (120 ms): a fade only moves on frames the bar's
+// webview draws, and a busy PC can draw none for seconds, so the checks on
+// its close could wait one out (16 Nov 2026: flaky now and then in full runs
+// at four; never alone, 80 runs at four). With reduced motion it opens and
+// closes at once, as Yap's own Motion setting makes it (docs/e2e-tests.md,
+// "Flaky under load").
+test.beforeEach(async ({ yap }) => {
+  await yap.overlay.emulateMedia({ reducedMotion: 'reduce' });
+  await expect.poll(() => yap.overlay.evaluate(() => document.documentElement.dataset.motion ?? '')).toBe('reduced');
+});
+
 test.afterEach(async ({ yap }) => {
   await simulate(yap, { pointer: 'away' }).catch(() => {});
   // The menu closes a moment after the pointer leaves: gone before the next

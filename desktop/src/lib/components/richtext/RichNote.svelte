@@ -110,11 +110,15 @@
     ctl = c;
     ed = c;
     el = m;
-    // The caret where it was: in the plain box this took the place of, or in Source.
+    // The caret where it was: in the plain box this took the place of, or in
+    // Source. The keyboard comes with it now, not on the next frame: the box
+    // is gone, and words typed before that frame went nowhere (16 Nov 2026,
+    // meeting-crash's note typed as the page came in; notes-rich-text's
+    // "typing as the page comes in").
     const at = takeHandoff() ?? carry;
     carry = null;
     if (at) {
-      c.focus();
+      c.focusNow();
       m.setSelectionRange(at.start, at.end);
     }
     return () => {

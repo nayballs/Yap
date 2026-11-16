@@ -101,9 +101,16 @@ const MEMORY = {
   ],
 };
 
-/** This week's 1:1 (recurring, about to start) and a first meeting tomorrow. */
+// The 1:1's last start: each feed's is later. A card answered is answered for
+// its start, and calendars write whole seconds, so two tests beginning within
+// one second gave the same start and the second never got its card (16 Nov
+// 2026: the Reset test, one second after the crash test's card was dismissed).
+let lastStart = 0;
+
+/** This week's 1:1 (recurring, about to start, a start no test has had) and a first meeting tomorrow. */
 function feed() {
-  const start = from(80 * SECOND);
+  const start = new Date(Math.max(from(80 * SECOND).getTime(), lastStart + SECOND));
+  lastStart = start.getTime();
   const tomorrow = from(DAY);
   return calendarFile(OWNER.email, [
     vevent({

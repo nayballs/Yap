@@ -639,8 +639,13 @@ local API and search see the same text.
   windows are made then, hidden). Until
   then, and if it can't load, the note's plain box stands in
   (`data-rich-fallback`, saving as before); the caret in it carries over to
-  the page (`takeHandoff`). The Yap bar's and the main window's first paint
-  never carry the editor (frontend.md, the main window's chunk).
+  the page (`takeHandoff`), and the keyboard with it at once (`focusNow`,
+  2026-11-16: TipTap's own `focus` waits for the next frame, and a busy PC
+  can draw none for seconds, so words typed as the page came in went to no
+  box: meeting-crash's note, now and then; notes-rich-text's "typing as the
+  page comes in" holds the chunk and the frames to check it). The Yap bar's
+  and the main window's first paint never carry the editor (frontend.md, the
+  main window's chunk).
 - **Where it is.** Notes' My thoughts (`views/notes/NoteThoughts.svelte` in
   `NoteEditor`'s place for the box: the app's colours, the reading size; the
   selection's menu and the saves as the box had them; **Preview / Source** at
@@ -652,7 +657,10 @@ local API and search see the same text.
   has its own undo history.
 - **Saving.** Every change goes out as markdown (`onchange(md, {paste})`) and
   is saved as the box's typing was: 600 ms after the last change in Notes and
-  the notepad, 400 ms in the quick note. Version history's kinds as before
+  the notepad, 400 ms in the quick note, and at least every 2 s while typing
+  goes on without a pause (`core/typingSave.js`, 2026-11-16: only a pause
+  saved, so a crash while someone typed on lost everything since the last
+  one; now at most the last two seconds). Version history's kinds as before
   (notes/versions.rs): a paste within 15 s of a dictation (`yap-transcript`) is
   "Dictated", any other change "Typed". Another window's change, a transform, a
   restore, Chat's edit come in by the blocks that differ (`load`), the caret

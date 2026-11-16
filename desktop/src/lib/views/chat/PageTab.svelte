@@ -152,7 +152,8 @@
     }
   };
   const here = $derived(st.url || went || page?.url || '');
-  const title = $derived(st.title || page?.title || page?.site || hostOf(here) || 'Page');
+  // (A tab shown again: its title as last told, until Rust tells it anew.)
+  const title = $derived(st.title || doc.pageNow[key]?.title || page?.title || page?.site || hostOf(here) || 'Page');
   const site = $derived(hostOf(here) || page?.site || '');
   // (A dev server on this PC — localhost — is a secure context, as browsers count it: no warning.)
   const insecure = $derived(/^http:\/\//i.test(here) && !/^http:\/\/(localhost|[^/]*\.localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i.test(here));
@@ -418,14 +419,16 @@
   onMount(() => {
     alive = true;
     let un = null;
-    listen('yap-page-view', (e) => {
+    const hearing = listen('yap-page-view', (e) => {
       const p = e.payload;
       if (p?.key !== key) return;
       st = { title: p.title || '', url: p.url || '', canGoBack: !!p.canGoBack, canGoForward: !!p.canGoForward, loading: !!p.loading, error: p.error || null, width: p.width || null };
       if (p.url || p.title) doc.pageMoved(key, { title: p.title || '', url: p.url || '' });
-    }).then((u) => (alive ? (un = u) : u()));
+    })
+      .then((u) => (alive ? (un = u) : u()))
+      .catch(() => {});
     let unDialog = null;
-    listen('yap-page-dialog', (e) => {
+    const hearingDialogs = listen('yap-page-dialog', (e) => {
       const p = e.payload;
       if (p?.key !== key) return;
       if (p.gone) {
@@ -434,19 +437,28 @@
       }
       dialog = { kind: p.kind || 'alert', message: p.message || '', default: p.default || '' };
       dialogText = dialog.default;
-    }).then((u) => (alive ? (unDialog = u) : u()));
+    })
+      .then((u) => (alive ? (unDialog = u) : u()))
+      .catch(() => {});
     if (blank) {
       // A new tab: the address bar waits.
       tick().then(() => addrEl?.focus());
     } else {
-      // Made (or found) with its place now, then followed.
-      const first = measure();
-      sent = JSON.stringify([first, first && layer]);
-      invoke('page_view_show', { key, url: went || page.url, section: went ? null : page.section || null, bounds: first, seq: nextSeq() })
-        .then(placed)
-        .catch((e) => {
-          if (alive) failed = String(e);
-        });
+      // Made (or found) with its place now, then followed. Asked once this
+      // tab hears Rust: a page shown again is told at once (its title, its
+      // address, Back), and what's said before the listener is in is never
+      // heard (16 Nov 2026: a tab switched back to kept its address for a
+      // title, chat-browse's tabs now and then).
+      Promise.all([hearing, hearingDialogs]).then(() => {
+        if (!alive) return;
+        const first = measure();
+        sent = JSON.stringify([first, first && layer]);
+        invoke('page_view_show', { key, url: went || page.url, section: went ? null : page.section || null, bounds: first, seq: nextSeq() })
+          .then(placed)
+          .catch((e) => {
+            if (alive) failed = String(e);
+          });
+      });
     }
     timer = setInterval(follow, 150);
     const onResize = () => follow();
