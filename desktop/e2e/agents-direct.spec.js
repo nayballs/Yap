@@ -297,7 +297,7 @@ const asks = (questions) => [
   { _wait_user: true },
 ];
 /** What Claude Code was told for each question so far (the permission prompt's own answers). */
-const decisions = () => (fs.existsSync(ANSWERS) ? fs.readFileSync(ANSWERS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(JSON.parse(l).content[0].text)) : []);
+const decisions = () => jsonLines(ANSWERS).map((l) => JSON.parse(l.content[0].text));
 
 /** A turn that lists what Yap's endpoint offers it, and reads the person's tasks with one of them. */
 const READS_YAP = [
@@ -627,9 +627,9 @@ function freshFolder(dir) {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'notes.md'), NOTES0);
 }
-const argsSeen = () => (fs.existsSync(ARGS) ? fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).args) : []);
+const argsSeen = () => jsonLines(ARGS).map((l) => l.args);
 /** The pictures each turn's messages came with, as the stand-in saw them (each its type and size, never its data). */
-const picturesSeen = () => (fs.existsSync(ARGS) ? fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).user_pictures) : []);
+const picturesSeen = () => jsonLines(ARGS).map((l) => l.user_pictures);
 const after = (args, flag) => {
   const i = args.indexOf(flag);
   return i >= 0 ? args[i + 1] : undefined;
@@ -1980,7 +1980,7 @@ test('just chatting: Claude Code gets the words as they are, and the thread is t
   const agent = await ended(yap, (await newAgent(yap, before)).id);
   // The words as they were typed: nothing of Yap's added (it used to end "When you're done, finish with a
   // short summary of what you changed…", and a hello came back as "I didn't change anything this time").
-  const wordsSeen = () => fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).user_text);
+  const wordsSeen = () => jsonLines(ARGS).map((l) => l.user_text);
   expect(wordsSeen()).toEqual([HELLO]);
   const messages = await messagesOf(yap, agent.conversation, 3);
   expect(messages[2].text).toBe(`Got: ${HELLO}`);

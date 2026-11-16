@@ -42,7 +42,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test as base, expect, openView, openSettings, closeSettings, setConfig, expectStore } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, setConfig, expectStore, jsonLines } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS, SCREENSHOTS } from './support/yap.js';
 import { newCodeChat } from './support/code-chats.js';
@@ -1065,7 +1065,7 @@ const ECHO_ARGS = [
   result('Got: {{user_text}}', 0.002, ECHO_USE),
   { _wait_user: true },
 ];
-const argsSeen = () => (fs.existsSync(SIZING_ARGS) ? fs.readFileSync(SIZING_ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).args) : []);
+const argsSeen = () => jsonLines(SIZING_ARGS).map((l) => l.args);
 const flagOf = (args, flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined);
 /** The notes of every start_agent result the fake model read. */
 const notesTold = (fakeLlm) =>

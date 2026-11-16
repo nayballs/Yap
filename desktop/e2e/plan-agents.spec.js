@@ -21,7 +21,7 @@
 //   starts).
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, setConfig } from './support/fixtures.js';
+import { test as base, expect, openView, setConfig, jsonLines } from './support/fixtures.js';
 import { fakeClaude, planConfig, SCRIPTS as PLAN_SCRIPTS } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 import { toSide, newCodeChat } from './support/code-chats.js';
@@ -161,7 +161,7 @@ const test = base.extend({
 
 /** The agent with each turn's Claude Code arguments written to `file` (the stand-in's `_dump_args`). */
 const agentDumping = (file) => [AGENT[0], AGENT[1], { _dump_args: file }, ...AGENT.slice(2)];
-const argsIn = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).args) : []);
+const argsIn = (file) => jsonLines(file).map((l) => l.args);
 const flagValue = (args, flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined);
 
 const thread = (main) => main.locator('.msgs');

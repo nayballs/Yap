@@ -28,7 +28,7 @@
 // own folder. Light and dark.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, setConfig, inAnotherApp } from './support/fixtures.js';
+import { test as base, expect, openView, setConfig, inAnotherApp, jsonLines } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat } from './support/code-chats.js';
@@ -150,7 +150,7 @@ function freshFolder(dir) {
 }
 
 /** Each turn's Claude Code arguments, as the stand-in wrote them. */
-const argsSeen = () => (fs.existsSync(ARGS) ? fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).args) : []);
+const argsSeen = () => jsonLines(ARGS).map((l) => l.args);
 const after = (args, flag) => {
   const i = args.indexOf(flag);
   return i >= 0 ? args[i + 1] : undefined;

@@ -191,11 +191,21 @@ crates they all share:
   `OUT_DIR`), with the crates built on it. Clippy is safe with it: a `cargo
   check` never answers for `cargo clippy`, and `-D warnings` still fails
   (checked on a crate with a lint, 16 Nov 2026).
-- **What it saves** (the stub e2e build, `CARGO_BUILD_JOBS=4`, the PC otherwise
-  quiet, 16 Nov 2026): SCCACHE_TABLE_TBD
+- **What it saves** (the stub e2e build in a new folder, `CARGO_BUILD_JOBS=4`,
+  the PC otherwise quiet, 16 Nov 2026):
 
-Most of a build is now Yap's own crate, which no cache shares between tasks (its
-source differs, and it's incremental).
+  | | cargo's part | the whole `npm run test:app:build` |
+  |---|---|---|
+  | no cache (before) | 209 s | 234 s |
+  | sccache, its cache empty (it fills it) | 223 s | 248 s |
+  | sccache warm, `CARGO_TARGET_DIR` in the environment | 208 s: 0 of 473 crates hit | 233 s |
+  | sccache warm, `--target-dir` (now) | 168–184 s: 335 of 473 hit | 210 s |
+  | an incremental rebuild of Yap's crate | 29.4 s without, 30.6 s with | |
+
+  The rest is Yap's own crate (106 of the 171 s in `cargo build --timings`), which
+  no cache shares between tasks (its source differs, and it's incremental), and
+  the crates that use a build script's output with the ones built on them (the
+  138 misses).
 
 ## CI on every push
 `.github/workflows/ci.yml` runs on every push/PR to `main`: `npm run build` (frontend,

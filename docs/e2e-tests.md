@@ -10,7 +10,8 @@ DevTools Protocol that WebView2 exposes. Every Yap window (the main window,
 onboarding, the meeting notepad, the overlay, the quick note) is a Playwright page. The build is the default
 **stub** build (no `engines` feature: transcription returns
 `[STT stub: received 1.5s of audio, engine=parakeet]`), so it needs no GPU,
-Vulkan SDK or model. The suite takes about 20 seconds, plus the build.
+Vulkan SDK or model. The whole suite (1,280 tests in 225 spec files, 16 Nov 2026)
+takes SUITE_MINUTES_TBD with four test Yaps at once, plus the build; one spec, seconds.
 
 ## Running it
 
