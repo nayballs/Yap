@@ -189,7 +189,7 @@ async function ask(main, text) {
   if (await show.isVisible()) await show.click();
   await main.getByRole('button', { name: 'New chat' }).click();
   await box(main).fill(text);
-  await main.getByRole('button', { name: 'Send' }).click();
+  await main.getByRole('button', { name: 'Send', exact: true }).click();
 }
 
 /** The conversation `title` open. */
