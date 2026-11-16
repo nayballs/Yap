@@ -20,13 +20,17 @@ import { newMeetingNote, meetingNote } from './support/meetings.js';
 import { writeWav } from './support/wav.js';
 import { launchYap, RUNS } from './support/yap.js';
 
-const NAME = 'meeting-crash';
-const audioDir = path.join(RUNS, 'meeting-crash-wavs');
-const options = {
-  name: NAME,
-  env: { YAP_E2E_MEETING_AUDIO: audioDir, YAP_E2E_MEETING_SPEED: '4' },
-  config: { dictionary: [{ from: 'STT stub', to: 'Heard', fuzzy: false }] },
-};
+/** Its run folder and audio, a worker's own (`--repeat-each` runs copies side by side). */
+function setup(workerIndex) {
+  const name = `meeting-crash-w${workerIndex}`;
+  const audioDir = path.join(RUNS, `${name}-wavs`);
+  const options = {
+    name,
+    env: { YAP_E2E_MEETING_AUDIO: audioDir, YAP_E2E_MEETING_SPEED: '4' },
+    config: { dictionary: [{ from: 'STT stub', to: 'Heard', fuzzy: false }] },
+  };
+  return { audioDir, options };
+}
 
 const PLAYED = 'e2e: the test audio has played to the end';
 const logCount = (yap, text) => fs.readFileSync(yap.logPath, 'utf8').split(text).length - 1;
@@ -48,7 +52,8 @@ async function store(yap, file, check, message) {
 
 test.setTimeout(180_000);
 
-test('a meeting Yap was killed during is transcribed at the next start, then summarised', async ({ shot }) => {
+test('a meeting Yap was killed during is transcribed at the next start, then summarised', async ({ shot }, testInfo) => {
+  const { audioDir, options } = setup(testInfo.workerIndex);
   // 48 s a side, with pauses where the recorder cuts.
   fs.mkdirSync(audioDir, { recursive: true });
   const them = [[4.5, 4.8], [9.5, 9.9], [14.2, 14.6], [19.5, 19.9], [24.5, 24.9], [29.4, 29.8], [34.5, 34.9], [39.4, 39.8], [44.5, 44.9]];

@@ -30,6 +30,7 @@ import { refreshAudio, stopLine } from '../../stores/meetingAudio.svelte.js';
 import { speech, initSpeech, readAloud, stopReading } from '../../stores/speech.svelte.js';
 import { displayTitle } from './noteFormat.js';
 import { markWords, selectWords } from '../../core/findWords.js';
+import { saveDelay } from '../../core/typingSave.js';
 
 /** This window's label: the `origin` of its saves and stops. */
 export const LABEL = 'settings';
@@ -49,6 +50,8 @@ export function createNotesState() {
   let enhancing = $state(new Set()); // note ids with an enhancement in flight
   let error = $state(null);
   let saveTimer = null;
+  // When the first change not saved yet was made (core/typingSave.js).
+  let unsavedSince = 0;
   // The new folder's name, typed in the list's + or the folder chip's menu.
   let newFolderName = $state('');
   // Actions (named prompt fragments) — the picker + manager dialog.
@@ -528,7 +531,8 @@ export function createNotesState() {
     }
   }
 
-  // Debounced autosave of title + content while typing. flushSave() only
+  // Autosave of title + content while typing: once it pauses, and at least
+  // every two seconds while it goes on (core/typingSave.js). flushSave() only
   // sends a pending edit (an armed timer) — switching notes or leaving Notes
   // must not re-save a note that was merely viewed, which would also clobber
   // edits made to it meanwhile through the local API. And only the fields
@@ -549,8 +553,9 @@ export function createNotesState() {
       dictated = true;
       transcriptAt = 0;
     }
+    if (saveTimer === null) unsavedSince = Date.now();
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(flushSave, 600);
+    saveTimer = setTimeout(flushSave, saveDelay(unsavedSince));
   }
   function flushSave() {
     if (saveTimer === null) return; // nothing typed since the last save

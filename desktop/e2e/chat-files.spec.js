@@ -21,7 +21,8 @@ import { writePng } from './support/png.js';
 import { zip } from './support/docx.js';
 import { badgeOf, fileSize, filesTokens, isPicturePath, fileTitle, filesPrompt, skippedLine, ocrLine } from '../src/lib/views/chat/chatFiles.js';
 
-const HERE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'test-results', 'chat-files');
+// The files dropped in, a worker's own (`--repeat-each` runs copies side by side).
+const HERE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'test-results', `chat-files-w${process.env.TEST_WORKER_INDEX ?? 0}`);
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src-tauri', 'src', 'chat', 'attachments', 'fixtures');
 const SEEDS = path.join(HERE, 'seed-list.txt');
 const ORDER = path.join(HERE, 'seed-order.pdf');
@@ -377,7 +378,11 @@ test("Edit sends a question's files again, once, and the question keeps them", a
   await expect(answers).toHaveText(['Three crops are on it.']);
   fakeLlm.scriptChat([{ content: 'Runner beans, sweet peas and courgettes: three.' }]);
   await thread(main).locator('.cbubble.user').first().hover();
-  await thread(main).getByTestId('chat-edit-message').first().click();
+  // Edit is dimmed ("Not saved yet") until the question is kept, a moment after its answer shows: a click before
+  // that does nothing (16 Nov 2026: flaky under four test Yaps).
+  const edit = thread(main).getByTestId('chat-edit-message').first();
+  await expect(edit).not.toHaveAttribute('aria-disabled', 'true');
+  await edit.click();
   await thread(main).getByTestId('chat-edit-input').fill('Which crops are on my list?');
   await thread(main).getByTestId('chat-edit-save').click();
   await expect(answers).toHaveText(['Runner beans, sweet peas and courgettes: three.']);

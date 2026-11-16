@@ -76,7 +76,9 @@ export const test = base.extend({
   },
 
   shot: async ({}, use, testInfo) => {
-    const spec = path.basename(testInfo.file).replace(/\.spec\.js$/, '');
+    // (`--repeat-each`: each copy its own folder, as copies may run side by side.)
+    const copy = testInfo.repeatEachIndex ? `-repeat${testInfo.repeatEachIndex}` : '';
+    const spec = path.basename(testInfo.file).replace(/\.spec\.js$/, '') + copy;
     await use(async (page, name) => {
       const file = path.join(SCREENSHOTS, spec, `${name}.png`);
       fs.mkdirSync(path.dirname(file), { recursive: true });

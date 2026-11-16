@@ -400,6 +400,15 @@ export function createRichEditor({
     focus(at = null) {
       if (!editor.isDestroyed) editor.commands.focus(at);
     },
+    /**
+     * The keyboard on the page at once. TipTap's `focus` waits for the next
+     * frame, and a busy PC can draw none for seconds: a key pressed meanwhile
+     * goes to no box at all. A page taking the place of the box being typed
+     * in (RichNote's handover) needs the very next key.
+     */
+    focusNow() {
+      if (!editor.isDestroyed) editor.view.focus();
+    },
     /** The page has the keyboard. */
     get focused() {
       return !editor.isDestroyed && editor.isFocused;

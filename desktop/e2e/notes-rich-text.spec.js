@@ -57,6 +57,85 @@ test.afterEach(async ({ yap }) => {
   }
 });
 
+// First: the page's chunk must not have loaded in this window yet (a retry
+// starts a fresh test Yap).
+test('Notes: typing as the page comes in: the keyboard goes with it, nothing typed is lost', async ({ yap, main }) => {
+  // 16 Nov 2026: meeting-crash's note, typed into the plain box as the page
+  // came in, was lost now and then. The page took the caret but the keyboard
+  // only on the next frame (TipTap's focus waits for one), and a busy PC can
+  // draw none for seconds: what was typed meanwhile went to no box. Here the
+  // page's chunk is held (CDP's Fetch domain) while the plain box is typed
+  // in, frames are held as a busy PC's are, and the next words go in the
+  // moment the page is there.
+  const cdp = await main.context().newCDPSession(main);
+  const held = [];
+  cdp.on('Fetch.requestPaused', (e) => held.push(e.requestId));
+  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*NoteThoughts*', requestStage: 'Request' }] });
+  const release = async () => {
+    for (const requestId of held.splice(0)) await cdp.send('Fetch.continueRequest', { requestId });
+  };
+  const frames = (on) =>
+    main.evaluate((on) => {
+      if (on) {
+        if (window.__heldRaf) window.requestAnimationFrame = window.__heldRaf;
+        window.__heldRaf = null;
+      } else {
+        window.__heldRaf = window.requestAnimationFrame;
+        window.requestAnimationFrame = () => 0;
+      }
+    }, on);
+  try {
+    const n = await yap.invoke('note_create', { title: 'Seed order' });
+    await openNote(main, 'Seed order', { page: false });
+    // The plain box stands in while the page loads: typed in.
+    const box = main.locator('textarea[data-rich-fallback]');
+    await expect(box).toBeVisible();
+    await expect.poll(() => held.length, { message: "the page's chunk, held" }).toBeGreaterThan(0);
+    await box.focus();
+    await main.keyboard.insertText('Order beans');
+    // No frame drawn for a while; the page comes in, and the next words straight away.
+    await frames(false);
+    await release();
+    await pageIn(raw(main));
+    await main.keyboard.insertText(' and peas');
+    await frames(true);
+    await expectText(raw(main), 'Order beans and peas');
+    await saved(yap, n.id, 'Order beans and peas');
+  } finally {
+    await frames(true).catch(() => {});
+    await release().catch(() => {});
+    await cdp.send('Fetch.disable').catch(() => {});
+    await cdp.detach().catch(() => {});
+  }
+});
+
+test('Notes: typing that goes on without a pause is saved as it goes, not only once it stops', async ({ yap, main }) => {
+  // Saved only after a pause, a note typed without one was on disk only once
+  // it stopped: a crash meanwhile lost all of it. Now at most the last two
+  // seconds (core/typingSave.js). A key every 200 ms for four seconds.
+  const n = await yap.invoke('note_create', { title: 'Allotment diary' });
+  await openNote(main, 'Allotment diary');
+  await selectText(raw(main), 0);
+  const keys = 'abcdefghijklmnopqrst';
+  // (A read as Yap replaces the file can fail: not saved yet, as far as this knows.)
+  const onDisk = () => {
+    try {
+      return noteIn(yap.readJson('notes.json'), n.id)?.content || '';
+    } catch {
+      return '';
+    }
+  };
+  let savedAt = -1;
+  for (const [i, k] of [...keys].entries()) {
+    await main.keyboard.insertText(k);
+    await main.waitForTimeout(200);
+    if (savedAt < 0 && onDisk()) savedAt = i;
+  }
+  expect(savedAt, 'saved while the typing went on').toBeGreaterThanOrEqual(0);
+  expect(savedAt).toBeLessThan(keys.length - 3);
+  await saved(yap, n.id, keys);
+});
+
 test('Notes: typed and formatted on the page, saved as exact markdown; a box ticked; each a typed version', async ({ yap, main, shot }) => {
   const n = await yap.invoke('note_create', { title: 'Garden plan', content: 'Beds by the fence\nBeans in March' });
   await openNote(main, 'Garden plan');

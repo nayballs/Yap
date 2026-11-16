@@ -41,10 +41,11 @@
   import { menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
   import { richtext, loadRichtext } from '../components/richtext/richtext.svelte.js';
   import { dictationPiece, withPiece, statusLine, tabLabel, nextTab, afterClose, sendText } from './quickNote.js';
+  import { saveDelay } from '../core/typingSave.js';
 
   /** This window's label: the `origin` of its saves. */
   const LABEL = 'quick-note';
-  /** Saved this long after the last keystroke. */
+  /** Saved this long after the last keystroke, and at least every two seconds while typing goes on (core/typingSave.js). */
   const SAVE_MS = 400;
   /** "Not now" on the bar offer, remembered in this window only. */
   const OFFER_KEY = 'yap.quickNote.barOfferDismissed';
@@ -78,6 +79,7 @@
   let offerDismissed = $state(readDismissed());
 
   let saveTimer = null;
+  let unsavedSince = 0;
   // Typed since the last save went out.
   let dirty = false;
   // The saves (and the tabs for Rust), one after another: a new note's first
@@ -226,8 +228,9 @@
     if (cur) cur.text = text;
     dirty = true;
     saveState = 'saving';
+    if (saveTimer === null) unsavedSince = Date.now();
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(flush, SAVE_MS);
+    saveTimer = setTimeout(flush, saveDelay(unsavedSince, Date.now(), SAVE_MS));
   }
 
   /** Save what's typed now, for the tab it's in (after any save on its way); resolves once it's saved. */

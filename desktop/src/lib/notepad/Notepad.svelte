@@ -35,6 +35,7 @@
   import { actionMatchesKeydown, actionMatchesKeyup } from '../core/hotkeys.js';
   import { withLineSpeakers, withLineSplice, hasLine, withLineEdit } from '../core/notepadText.js';
   import { askReplaceSummary } from '../core/noteEdits.js';
+  import { saveDelay } from '../core/typingSave.js';
   import { loadRichtext } from '../components/richtext/richtext.svelte.js';
   import { LABEL } from './actions.js';
   import { TranscriptView } from './transcriptView.svelte.js';
@@ -240,15 +241,18 @@
     briefFold = false;
   }
 
-  // Debounced autosave of whatever was typed. Only the edited fields are
+  // Autosave of whatever was typed: once it pauses, and at least every two
+  // seconds while it goes on (core/typingSave.js). Only the edited fields are
   // sent, so a title the AI just wrote (or an edit made in the Notes view)
   // is never overwritten by a stale copy here.
   let saveTimer = null;
+  let unsavedSince = 0;
   let dirty = { title: false, content: false };
   function queueSave(field) {
     dirty[field] = true;
+    if (saveTimer === null) unsavedSince = Date.now();
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(flushSave, 600);
+    saveTimer = setTimeout(flushSave, saveDelay(unsavedSince));
   }
   function flushSave() {
     if (saveTimer === null) return;
