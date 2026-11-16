@@ -1005,7 +1005,10 @@ test('an agent reads like Claude Code: its to-do list, what it says, commands by
     ['planting-guide.md', 'new'],
     ['notes.md', 'rewrite'],
   ]);
-  expect(log.filter((e) => e.todos)).toHaveLength(4);
+  // (Its four lists — and the one its stopped turn ended with, the to-do it was on stopped, never turning on: 16 Nov 2026.)
+  const lists = log.filter((e) => e.todos);
+  expect(lists).toHaveLength(5);
+  expect(lists.filter((e) => e.status === 'stopped').map((e) => e.todos.map((t) => t.status))).toEqual([['stopped', 'pending', 'pending']]);
 });
 
 // ---------------------------------------------------------------- asking
