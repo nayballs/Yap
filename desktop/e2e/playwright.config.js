@@ -29,7 +29,11 @@ export default defineConfig({
   ],
   timeout: 60_000,
   expect: { timeout: 10_000 },
-  retries: process.env.CI ? 1 : 0,
+  // One retry, as on CI (2026-11-16): a test that fails and then passes is
+  // reported as flaky, by name, in the summary; one failing twice fails.
+  // Some fail now and then on a busy PC, one Yap at a time too (meeting-crash,
+  // chat-browse's tabs, the bar's menu: 16 Nov 2026); `--retries=0` for none.
+  retries: 1,
   // On CI, a broken environment (say, no DevTools port) should fail in
   // minutes rather than retrying every test until the job times out.
   maxFailures: process.env.CI ? 4 : 0,

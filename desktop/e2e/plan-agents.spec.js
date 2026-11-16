@@ -238,8 +238,10 @@ test('typed on the plan: asked first in the thread, the agent runs in the named 
   await shot(main, '01-plan-chat-asks-before-a-agent');
   await card.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(card).toHaveAttribute('data-state', 'allowed');
-  await expect(lastAnswer(main)).toHaveText(STARTED, { timeout: 20_000 });
-  await expect(chipsOfLast(main)).toHaveText(['Sent an agent to garden-planner']);
+  // The chat's first answer (by the time it's looked at, the agent may have
+  // reported already, its answer the last: a busy PC, 16 Nov 2026).
+  await expect(thread(main).locator('.cbubble.assistant').first()).toHaveText(STARTED, { timeout: 20_000 });
+  await expect(thread(main).locator('.toolchips').first().locator('.toolchip')).toHaveText(['Sent an agent to garden-planner']);
   // Its tab opened from the plan turn's stream (`Event::Agent`), as the tool loop's does.
   await expect(main.getByTestId('chat-agent')).toBeVisible();
 

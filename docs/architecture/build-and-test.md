@@ -364,7 +364,7 @@ the update toast / meetings and the meeting notepad (its own
 page, `yap.notepad`), and save **named screenshots** to
 `test-results/app/screenshots/<spec>/` (git-ignored; HTML report in
 `test-results/app/report/`, each instance's logs + data in `test-results/app/runs/`).
-Any uncaught JS error in any webview fails the test. ~20 s plus the build
+Any uncaught JS error in any webview fails the test. ~25 min for all of it plus the build
 (`npm run test:app:build`, own target dir `desktop/src-tauri/target/e2e` or
 `YAP_E2E_TARGET_DIR`). Safe beside the installed app and a dev build: portable
 data dir, own WebView2 profile + CDP port, F24 hotkey, test mode (`shell/e2e.rs`),

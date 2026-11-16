@@ -10,8 +10,8 @@ DevTools Protocol that WebView2 exposes. Every Yap window (the main window,
 onboarding, the meeting notepad, the overlay, the quick note) is a Playwright page. The build is the default
 **stub** build (no `engines` feature: transcription returns
 `[STT stub: received 1.5s of audio, engine=parakeet]`), so it needs no GPU,
-Vulkan SDK or model. The whole suite (1,280 tests in 225 spec files, 16 Nov 2026)
-takes SUITE_MINUTES_TBD with four test Yaps at once, plus the build; one spec, seconds.
+Vulkan SDK or model. The whole suite (about 1,300 tests in 225 spec files, 16 Nov
+2026) takes about 25 minutes with four test Yaps at once, plus the build; one spec, seconds.
 
 ## Running it
 
@@ -167,15 +167,23 @@ into shards instead (below). What lets several run side by side on one PC:
   `solo` project in `playwright.config.js`: one at a time, beside the rest.
   A new spec that needs such a thing (a fixed port, a real screen position)
   goes on that list.
+- **One retry, as on CI**: a test that fails is run once more on a fresh
+  test Yap; one that passes then is listed as **flaky** in the summary
+  (read those too: meeting-crash, chat-browse's tabs and the bar's menu
+  failed now and then on 16 Nov, one test Yap at a time too). `--retries=0`
+  for none.
 - **Files a stand-in is still writing**: the fake Claude and fake MCP
   servers append a JSON line in more than one write, so a spec reading one
   while it polls can catch half a line. `jsonLines(file)` (fixtures.js)
   returns only whole lines; read them with it.
 
-Four test Yaps make the PC busier, so what "Flaky under load" (below) says
-applies; the suite's checks wait long enough for that. On this PC (16
-threads) the whole suite went from about 35 minutes at one at a time to
-SUITE_MINUTES_TBD at four.
+Four test Yaps make the PC busier (about 70 % of 16 threads), so what "Flaky
+under load" (below) says applies; the suite's checks wait long enough for
+that. On this PC the whole suite (1,282 tests, 16 Nov 2026) took 24–27 minutes
+at four; one at a time it would take about 88 (31 minutes of it measured,
+the rest by each spec's share of the work). Every test Yap is idle for a part
+of each test (waits, timers, the fake AI's pace), which is why four at once
+pay off.
 
 ## Where the results go
 

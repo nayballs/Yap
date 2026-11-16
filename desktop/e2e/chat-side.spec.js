@@ -114,7 +114,13 @@ async function newChatWith(main, fakeLlm, question, answer) {
   await box(main).fill(question);
   await main.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(thread(main).locator('.cbubble.assistant').last()).toContainText(answer);
-  return main.evaluate((title) => window.__TAURI_INTERNALS__.invoke('chats_list').then((l) => l.find((c) => c.title === title)?.id), question);
+  const id = await main.evaluate((title) => window.__TAURI_INTERNALS__.invoke('chats_list').then((l) => l.find((c) => c.title === title)?.id), question);
+  // Its answer kept, not only shown: the bubble shows it as it streams, a moment
+  // before the turn saves it (a test counting the chat's messages then counted
+  // one short on a busy PC, 16 Nov 2026).
+  const last = () => main.evaluate((i) => window.__TAURI_INTERNALS__.invoke('chat_get', { id: i }).then((c) => c?.messages?.at(-1)?.role), id);
+  await expect.poll(last).toBe('assistant');
+  return id;
 }
 
 async function askSide(main, question) {
