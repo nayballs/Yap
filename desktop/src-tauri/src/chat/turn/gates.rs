@@ -269,6 +269,7 @@ impl Gates {
             share: crate::chat::shares::Offer::of(self.pictures, self.files, self.share_tools && self.tools),
             cards: self.cards,
             visuals: self.visuals && self.tools,
+            research: None,
         }
     }
 

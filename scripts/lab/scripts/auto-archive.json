@@ -1,0 +1,38 @@
+{
+  "name": "auto-archive",
+  "about": "Auto-archive on the lab's own chats (16 Nov 2026, chat/auto_archive.rs; built 15 Nov in #125, until now only its e2e spec): two real chats, each made 40 days older (`age --chat same`, test mode's e2e_chat_age), then the rule set to 30 days, as Settings does — the chat not shown is archived, the one the Chat view shows is kept; the quiet notice in Yap's window and its Undo; the next run archives it again (Undo brings it back as it was); then the shown one too once another chat is shown. Any lab: on the plan the questions are Claude Code's, on --fake the fake AI's.",
+  "steps": [
+    { "ask": "In one sentence: what is a haiku?", "timeout": 300 },
+    { "expect": { "status": "answered" } },
+    { "lab": ["age", "40"], "args": { "chat": "same" }, "note": "Its last use moved back 40 days (only this chat: a lab's other chats stay as they are)." },
+    { "ask": "Name one colour of the rainbow. One word.", "timeout": 300 },
+    { "expect": { "status": "answered" } },
+    { "lab": ["age", "40"], "args": { "chat": "same" } },
+    {
+      "lab": "archive",
+      "args": { "days": 30, "undo": true },
+      "note": "Setting it runs it at once (as Settings does); the notice says so in Yap's window, then Undo."
+    },
+    {
+      "expect": {
+        "status": "answered",
+        "result": [
+          { "path": "days", "equals": 30 },
+          { "path": "archived.length", "equals": 1 },
+          { "path": "notice", "matches": "/Archived a chat you hadn't used in 30 days/" },
+          { "path": "undone", "equals": true }
+        ]
+      },
+      "note": "The haiku chat archived; the colour chat, shown in Chat, kept; Undo brought it back."
+    },
+    { "lab": "archive", "note": "The next run: the same chat again (Undo doesn't make it newer)." },
+    { "expect": { "result": [{ "path": "archived.length", "equals": 1 }, { "path": "notice", "matches": "/Archived a chat/" }] } },
+    { "ask": "Say hello in French. One word.", "timeout": 300, "note": "Another chat shown: the colour chat is no longer the one in view." },
+    { "lab": ["age", "1"], "args": { "chat": "same" }, "note": "This one only a day older: never due." },
+    { "lab": "archive" },
+    {
+      "expect": { "result": [{ "path": "archived.length", "equals": 1 }, { "path": "notice", "matches": "/Archived a chat/" }] },
+      "note": "The colour chat goes now; the new one stays (a day old, and shown)."
+    }
+  ]
+}

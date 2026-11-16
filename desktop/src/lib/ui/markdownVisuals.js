@@ -20,7 +20,14 @@
 //   as its code. Drawn again when the theme changes.
 // - **Pictures** (`a.md-image`): a "Show image" box naming the site; only a
 //   click fetches it (Rust `markdown_picture`, through privacy/net.rs), and
-//   the picture is shown from memory, never kept.
+//   the picture is shown from memory, never kept. (`pictureBox` and
+//   `pictureOf` are shared with the editor's page, richVisuals.js.)
+//
+// Also on the Yap bar's cards, toasts and update notes (16 Nov 2026). A view
+// in other colours than the app's (the bar's own Light / Dark, a toast's
+// dark card) says which with `theme`, for its diagrams:
+//
+//   <div use:markdownVisuals={{ theme: () => 'dark' }}>…</div>
 import { invoke } from '@tauri-apps/api/core';
 import { mathOf } from '../core/markdown.js';
 
@@ -141,12 +148,26 @@ const hostOf = (url) => {
 function drawPicture(a, shown) {
   const url = a.getAttribute('href') || '';
   const alt = a.textContent || 'Picture';
-  const host = hostOf(url);
   if (shown.has(url)) {
     a.replaceWith(pictureOf(shown.get(url), alt, url));
     return;
   }
-  // The box is the button: "Show image", and the site it would come from.
+  const box = pictureBox(url, alt, (src) => {
+    shown.set(url, src);
+    if (box.isConnected) box.replaceWith(pictureOf(src, alt, url));
+  });
+  a.replaceWith(box);
+}
+
+/**
+ * The "Show image" box for the picture at `url` (a web address): the box is
+ * the button, "Show image" and the site it would come from. Only a click
+ * fetches it (Rust `markdown_picture`); `onShown(src)` then gets its
+ * in-memory address (a `blob:` one, for the caller to free). It failing
+ * says so, and another click tries again.
+ */
+export function pictureBox(url, alt, onShown) {
+  const host = hostOf(url);
   const box = document.createElement('button');
   box.type = 'button';
   box.className = 'md-imgbox';
@@ -171,9 +192,7 @@ Yap fetches it only when you click.`;
     label.textContent = 'Loading…';
     try {
       const bytes = await invoke('markdown_picture', { url });
-      const src = URL.createObjectURL(new Blob([bytes]));
-      shown.set(url, src);
-      if (box.isConnected) box.replaceWith(pictureOf(src, alt, url));
+      onShown(URL.createObjectURL(new Blob([bytes])));
     } catch (err) {
       box.classList.add('failed');
       label.textContent = "Couldn't load it";
@@ -183,10 +202,11 @@ Click to try again.`;
       box.classList.remove('loading');
     }
   });
-  a.replaceWith(box);
+  return box;
 }
 
-function pictureOf(src, alt, url) {
+/** A picture shown from its in-memory address `src` (`pictureBox`'s), named by its alt text. */
+export function pictureOf(src, alt, url) {
   const img = document.createElement('img');
   img.className = 'md-img';
   img.dataset.drawn = 'true';
@@ -199,8 +219,19 @@ function pictureOf(src, alt, url) {
 
 // ---- the action ------------------------------------------------------------------------
 
-export function markdownVisuals(node) {
+/** 'light' | 'dark' from an attribute on the page's root: `themeFrom('data-bar-theme')`, the Yap bar's own colours. */
+export const themeFrom = (attr) => () => (globalThis.document.documentElement.getAttribute(attr) === 'dark' ? 'dark' : 'light');
+
+/**
+ * The action. `options.theme` (`() => 'light' | 'dark'`): the colours the
+ * view is drawn in when they aren't the app's (the Yap bar's own, a toast's
+ * dark card): its diagrams are drawn in those.
+ */
+export function markdownVisuals(node, options = {}) {
   let here = true;
+  let opts = options || {};
+  /** The theme a diagram is drawn in (`undefined`: the app's, ui/diagrams.js `themeNow`). */
+  const themeOf = () => opts.theme?.() || undefined;
   /** Diagrams shown as their code (`</>`), by source: kept while this view lasts. */
   const showingCode = new Set();
   /** Pictures shown here, by address: their in-memory address (drawn again as an answer re-renders). */
@@ -225,7 +256,7 @@ export function markdownVisuals(node) {
     }
     for (const box of boxes) {
       const source = sourceOf(box);
-      const now = diagrams.drawnNow(source);
+      const now = diagrams.drawnNow(source, themeOf());
       if (now) {
         paintDiagram(box, now, showingCode);
         continue;
@@ -237,7 +268,7 @@ export function markdownVisuals(node) {
         setTimeout(() => {
           waiting.delete(source);
           if (!here || ![...node.querySelectorAll(DIAGRAMS)].some((b) => sourceOf(b) === source)) return;
-          diagrams.drawDiagram(source).then(look, () => {});
+          diagrams.drawDiagram(source, themeOf()).then(look, () => {});
         }, SETTLE_MS)
       );
     }
@@ -249,17 +280,22 @@ export function markdownVisuals(node) {
   seen.observe(node, { childList: true, subtree: true });
   // The theme changed: each diagram in its colours — at once when it was
   // drawn ahead for it (ui/diagrams.js draws both), else as soon as it is.
+  // (The app's theme, or the bar's own colours.)
   const theme = new MutationObserver(() => {
     if (!diagrams) return;
+    const t = themeOf();
     for (const box of node.querySelectorAll('.md-diagram[data-drawn="true"]')) {
       const source = sourceOf(box);
-      const now = diagrams.drawnNow(source);
+      const now = diagrams.drawnNow(source, t);
       if (now?.svg) redrawDiagram(box, now.svg);
-      else diagrams.drawDiagram(source).then((r) => r.svg && box.isConnected && redrawDiagram(box, r.svg), () => {});
+      else diagrams.drawDiagram(source, t).then((r) => r.svg && box.isConnected && redrawDiagram(box, r.svg), () => {});
     }
   });
-  theme.observe(document.documentElement, { attributes: true, attributeFilter: ['data-yap-theme'] });
+  theme.observe(document.documentElement, { attributes: true, attributeFilter: ['data-yap-theme', 'data-bar-theme'] });
   return {
+    update(next) {
+      opts = next || {};
+    },
     destroy() {
       here = false;
       seen.disconnect();

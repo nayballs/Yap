@@ -1,0 +1,42 @@
+{
+  "name": "kept-page-outside",
+  "about": "A kept page outside Yap (16 Nov 2026, chat/made/pages.rs; built 15 Nov in #130): Chat's model keeps a small page (save_page), then its ⋯ beside the chat — Save as…, with Windows' dialog answered by the lab (the dialog plugin's IPC: a file in the lab's own saved/ folder, what the dialog suggested kept), and Open in browser, which test mode keeps as an address instead of opening the person's browser: the copy is read back and opened in the lab's own headless browser, light and dark. Both files carry the sandbox's policy and the page's own title; the copy runs with no console errors and nothing refused by its policy.",
+  "steps": [
+    {
+      "ask": "Make me a tip calculator page I can keep: a bill amount, a tip percentage slider from 0 to 30, and the tip and the total shown as you move it. Keep it small, with no libraries.",
+      "timeout": 420
+    },
+    { "expect": { "status": "answered", "used": "/^(save_page)$/" }, "note": "A page Yap keeps (not a visual in the thread)." },
+    { "expect": { "selector": { "window": "main", "css": "[data-testid=\"chat-kept-page\"]", "count": 1 } }, "note": "Beside the chat, with its ⋯." },
+    { "lab": ["kept", "save"], "args": { "name": "tip-calculator" } },
+    {
+      "expect": {
+        "status": "answered",
+        "result": [
+          { "path": "dialog.defaultPath", "matches": "/\\.html$/" },
+          { "path": "dialog.filters.0.extensions", "matches": "html" },
+          { "path": "toast", "matches": "/Page saved/" },
+          { "path": "file", "matches": "/tip-calculator\\.html$/" },
+          { "path": "page.policy", "equals": true },
+          { "path": "page.title", "matches": "/\\S/" },
+          { "path": "page.bytes", "gt": 200 }
+        ]
+      },
+      "note": "Save as… suggested the page's own name, .html added to a name with no ending; the file works on its own (the sandbox's policy, a title)."
+    },
+    { "lab": ["kept", "open"] },
+    {
+      "expect": {
+        "status": "answered",
+        "result": [
+          { "path": "opened", "matches": "/^file:/" },
+          { "path": "file", "matches": "/yap-pages/" },
+          { "path": "page.policy", "equals": true },
+          { "path": "outside.shots.length", "gte": 1 }
+        ]
+      },
+      "note": "A copy in Yap's own temp folder, its file: address handed to the browser (here: kept by test mode)."
+    },
+    { "expect": { "result": [{ "path": "outside.errors.length", "equals": 0 }, { "path": "outside.refused.length", "equals": 0 }] }, "soft": true, "note": "The copy runs outside Yap: no console errors, nothing its own policy refuses (the model's page decides)." }
+  ]
+}

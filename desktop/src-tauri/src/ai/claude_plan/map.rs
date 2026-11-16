@@ -143,6 +143,11 @@ pub struct Mapper {
     model: String,
     /// The last model call's prompt and answer so far, in tokens.
     last_call: Option<(u64, u64)>,
+    /// The calls before it, their prompts and answers added up (a
+    /// research's token cap, `chat/research.rs`).
+    earlier_calls: u64,
+    /// The `WebSearch` and `WebFetch` calls begun (a research's caps).
+    begun: (usize, usize),
 }
 
 impl Mapper {
@@ -179,6 +184,22 @@ impl Mapper {
     /// (how full the conversation is now). `None` when it didn't say.
     pub fn last_call_tokens(&self) -> Option<u64> {
         self.last_call.map(|(prompt, answer)| prompt + answer)
+    }
+
+    /// **Every model call's tokens so far**, prompts and answers added up (a
+    /// research's cap: the session's usage is only recorded at the turn's end).
+    pub fn tokens(&self) -> u64 {
+        self.earlier_calls + self.last_call_tokens().unwrap_or(0)
+    }
+
+    /// The searches and page fetches the turn has begun (a research's caps).
+    pub fn web_calls(&self) -> (usize, usize) {
+        self.begun
+    }
+
+    /// A chip of Yap's own for the turn (a research stopped at a cap).
+    pub fn add_chip(&mut self, chip: String) {
+        self.chips.push(chip);
     }
 
     /// One event: what it says to `out`, and whether the turn goes on.
@@ -234,7 +255,8 @@ impl Mapper {
     fn stream(&mut self, kind: &StreamKind, out: &mut dyn Out) {
         match kind {
             StreamKind::MessageStart { id, prompt, .. } => {
-                // A new model call: what it read.
+                // A new model call: what it read (the one before, added up).
+                self.earlier_calls += self.last_call_tokens().unwrap_or(0);
                 self.last_call = prompt.map(|p| (p, 0));
                 // This message streams: its whole copy after says nothing new.
                 self.open.clear();
@@ -299,6 +321,11 @@ impl Mapper {
     fn announce(&mut self, id: String, tool: Tool, input: Value, out: &mut dyn Out) {
         if !matches!(tool, Tool::Other(_)) {
             out.delta(Delta::ServerInput { name: tool.name(), input: &input });
+        }
+        match tool {
+            Tool::Search => self.begun.0 += 1,
+            Tool::Fetch => self.begun.1 += 1,
+            _ => {}
         }
         self.said.insert(id.clone());
         self.calls.insert(id, (tool, input));

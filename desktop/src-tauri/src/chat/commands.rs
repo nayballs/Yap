@@ -177,6 +177,10 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// `feedbackFrom` (with `edit`; 16 Nov 2026, a Code chat's Retry with the
 /// note on 👎's card): that answer's 👎 goes to Claude after the message,
 /// this turn only (`chat/feedback.rs`); the message is saved as it is.
+///
+/// `research`: the Research switch under the box was on (chat/research.rs):
+/// this question researched — its plan first, then many searches and page
+/// reads, then a report as a document beside the chat.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -202,6 +206,7 @@ pub async fn chat_send(
     incognito: Option<bool>,
     project: Option<String>,
     feedback_from: Option<usize>,
+    research: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     // The files attached in the box (chat/attachments.rs): each still there,
     // and out of the box now (a question asked out loud can't take them too).
@@ -281,6 +286,8 @@ pub async fn chat_send(
     // never an incognito or a Code chat.
     let in_project = project.filter(|p| conversation_id.is_none() && code_folder_none && !ghost && !p.trim().is_empty());
     let send = Box::pin(crate::chat::projects::with_new(in_project, send));
+    // The Research switch (chat/research.rs).
+    let send = Box::pin(crate::chat::research::scoped(research.unwrap_or(false), send));
     // A Retry with its 👎's note: given to the model (or the Code chat's session) this turn only.
     let send = Box::pin(crate::chat::feedback::with_note(note, send));
     // Chat's own turn: Think pressed (the model on this PC), or a cloud

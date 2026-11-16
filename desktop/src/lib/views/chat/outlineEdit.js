@@ -57,6 +57,18 @@ export function answerOf(rows, sections, note = '') {
 /** What the card says once answered, under the headings. */
 export function endingOf(state, outline = {}) {
   const changed = (outline.changed || []).length > 0;
+  // A research's plan (chat/research.rs): researched, not written.
+  if (outline.research) {
+    return (
+      {
+        allowed: 'Researched as planned',
+        changed: 'Researched with your changes',
+        redo: 'Researched with what you said',
+        refused: 'Not researched',
+        timedOut: 'Not answered in time: researched as planned',
+      }[state] || (changed ? 'Researched with your changes' : '')
+    );
+  }
   return (
     {
       allowed: 'Written as outlined',

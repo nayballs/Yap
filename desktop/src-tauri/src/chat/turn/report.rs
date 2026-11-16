@@ -562,6 +562,8 @@ fn notice(agent: &Agent, reply: &str) {
             icon: if status == Status::Failed { "error" } else { "agent" },
             title: title.clone(),
             body: body.clone(),
+            // (Claude's words: drawn as its answer in Chat is, maths and all.)
+            markdown: true,
             primary: Some(primary),
             secondary,
             timeout_ms: Some(12_000),

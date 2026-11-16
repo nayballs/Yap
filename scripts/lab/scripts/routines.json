@@ -1,0 +1,38 @@
+{
+  "name": "routines",
+  "about": "Routines on the chat's own model (16 Nov 2026, chat/routines.rs; built 15 Nov in #131, until now only its e2e spec): a made-up meeting first; then a Skill of the person's own (a Skill runs on the meetings) on a schedule two minutes away, run by the scheduler with the person in another app — its own chat, named after the Skill and marked in Chat's list, its one quiet card on the Yap bar — following its instructions (on the plan they never reached Claude Code before: \"There's no /… command\", fixed in chat/turn/plan.rs `across_lines`); then Run now into the same chat; then a Skill on one meeting after another made-up meeting ends, with the meeting's note (a new Ask thread there). On the plan its calls are Claude Code's; on --fake the fake AI answers.",
+  "steps": [
+    { "lab": ["meeting", "Budget check-in"], "note": "A made-up meeting, recorded and ended (test mode's lines, fictional people): the revised budget by Friday, the launch on the third of March." },
+    {
+      "lab": ["routine", "new"],
+      "args": { "skill": "latest-points", "name": "Latest points", "instructions": "From my latest meeting, list who agreed to do what and by when, in at most two short bullets.", "in": 2, "away": true },
+      "note": "A schedule two minutes away (the scheduler looks every 30 s): the run is a turn of the lab's own."
+    },
+    { "wait": "turn", "timeout": 420 },
+    {
+      "expect": { "status": "answered", "result": [{ "path": "run.state", "equals": "done" }, { "path": "run.cause", "equals": "schedule" }, { "path": "run.chat", "gt": 0 }], "answerMatches": "/budget|friday|alice|march/i" },
+      "note": "Its time came, it ran in its own chat, on the meeting's words."
+    },
+    { "expect": { "answerNotContains": "command" }, "note": "The Skill's instructions reached the model: no \"There's no /latest-points command\"." },
+    { "expect": { "selector": { "window": "main", "css": "[data-testid=\"chat-routine-mark\"]", "count": { "min": 1 } } }, "note": "Its chat marked in Chat's list with the clock-arrow." },
+
+    { "lab": ["routine", "now"], "args": { "timeout": 420 }, "note": "Settings' Run now, on the same routine." },
+    {
+      "expect": { "status": "answered", "result": [{ "path": "run.state", "equals": "done" }, { "path": "run.cause", "equals": "now" }, { "path": "run.sameChat", "equals": true }], "answerNotContains": "command" },
+      "note": "A second run goes to the same chat."
+    },
+
+    {
+      "lab": ["routine", "new"],
+      "args": { "skill": "meeting-points", "name": "Meeting points", "instructions": "From this meeting, list who agreed to do what and by when, in at most three short bullets.", "runs-on": "meeting", "after-meeting": true, "with-note": true },
+      "note": "After any meeting, with the meeting's note."
+    },
+    { "lab": ["meeting", "Supplier follow-up"], "args": { "lines": "them: The packaging quote is final now.|you: Thanks. Sam, can you send it to finance by Wednesday?|them: Yes, I will send it to finance on Wednesday morning." } },
+    { "wait": "turn", "timeout": 420 },
+    {
+      "expect": { "status": "answered", "result": [{ "path": "run.state", "equals": "done" }, { "path": "run.cause", "equals": "meeting" }, { "path": "run.note", "gt": 0 }, { "path": "run.thread", "gt": 0 }, { "path": "run.about", "matches": "Supplier follow-up" }] },
+      "note": "Run on the meeting that ended once its summary was written (or couldn't be), into a new Ask thread on its note."
+    },
+    { "expect": { "answerMatches": "/finance|wednesday|sam/i" }, "soft": true, "note": "That meeting's words: the quote to finance by Wednesday." }
+  ]
+}

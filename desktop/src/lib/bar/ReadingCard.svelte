@@ -12,16 +12,25 @@
   // The whole card is a `data-region` (Rust makes the click-through window
   // take clicks only over it); no backdrop-filter, a 1–2 px shadow, as every
   // card on the transparent bar window.
+  //
+  // Maths in the sentence (an answer's, read aloud) is drawn by KaTeX, as
+  // Chat draws it (readingPieces.js finds it; ui/markdownVisuals.js draws
+  // it, its chunk loaded the first time maths shows), lit as one while any
+  // word of it is said.
   import { reading, readAction } from './reading.svelte.js';
+  import { readingPieces } from './readingPieces.js';
   import { fillHotkey } from '../core/hotkeys.js';
+  import { markdownVisuals } from '../ui/markdownVisuals.js';
 
   let textEl = $state(null);
+  const pieces = $derived(readingPieces(reading.parts));
 
   // Keep the word being said in view (a long sentence in a large font scrolls).
   $effect(() => {
     const w = reading.word;
     if (w == null || !textEl) return;
-    const el = textEl.querySelector(`[data-w="${w}"]`);
+    // (A formula's piece holds several words: `data-w="3 4 5"`.)
+    const el = textEl.querySelector(`[data-w~="${w}"]`);
     if (!el) return;
     const box = textEl.getBoundingClientRect();
     const r = el.getBoundingClientRect();
@@ -77,8 +86,13 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
       </button>
     </div>
-    <p class="text" bind:this={textEl} aria-live="off">
-      {#each reading.parts as part, i (`${reading.session}:${reading.index}:${i}`)}{#if part.w != null}<span
+    <p class="text" bind:this={textEl} aria-live="off" use:markdownVisuals>
+      {#each pieces as part, i (`${reading.session}:${reading.index}:${i}`)}{#if part.maths}<span
+            class="w md-math"
+            class:md-math-display={part.display}
+            class:now={part.ws.includes(reading.word)}
+            data-w={part.ws.join(' ')}>{part.text}</span
+          >{:else if part.w != null}<span
             class="w"
             class:now={part.w === reading.word}
             data-w={part.w}>{part.text}</span
@@ -236,6 +250,9 @@
     color: var(--bar-text);
     overflow-wrap: anywhere;
     user-select: none;
+    /* Its scrollbars (a long sentence's, a wide formula's) on the bar's colours. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--bar-text-faint) transparent;
   }
   /* The word being said: an amber mark, drawn with a box-shadow so lighting
      it never moves the words. */
@@ -250,6 +267,24 @@
     background: var(--bar-chip);
     box-shadow: 0 0 0 2px var(--bar-chip);
     color: var(--bar-chip-text);
+  }
+  /* A formula (readingPieces.js): drawn by KaTeX in the sentence's colour,
+     lit as a whole while any word of it is said; one on lines of its own
+     ($$…$$) centred on a line of its own, scrolling sideways when wide. */
+  .w.md-math {
+    padding: 0 1px;
+  }
+  .w.md-math.md-math-display {
+    display: block;
+    margin: 4px 0;
+    padding: 2px 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    text-align: center;
+  }
+  .w.md-math :global(.katex-display) {
+    margin: 0;
   }
   .controls {
     display: flex;
