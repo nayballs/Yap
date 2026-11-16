@@ -3,7 +3,8 @@
 //! says "twelve thousand four hundred pounds" for "£12,400" (the research
 //! measured Kokoro saying "pound twelve thousand four hundred" without it).
 //! UK style: "the eighteenth of October", "two thirty p.m.", "one hundred
-//! and five".
+//! and five". Maths goes first (`maths.rs`: "$\pi r^2$" → "pi r squared",
+//! in the Region's words).
 //!
 //! Conservative on purpose: a wrong expansion is worse than none, so every
 //! rule needs a clear pattern (a currency sign, a month name, am/pm, a known
@@ -341,8 +342,11 @@ fn year_context(before: &str) -> bool {
 }
 
 /// Text written for the eye, made ready to say. See the module docs.
+/// Maths first (`maths.rs`: "$\pi r^2$" → "pi r squared"), so no rule here
+/// reads a formula's `$` as money.
 pub fn for_speech(text: &str) -> String {
-    let s = EMAIL.replace_all(text, |c: &Captures| {
+    let text = super::maths::in_words(text, super::maths::variety());
+    let s = EMAIL.replace_all(&text, |c: &Captures| {
         let local = c[1].replace('.', " dot ").replace('_', " underscore ");
         format!("{local} at {}", c[2].to_ascii_lowercase().replace('.', " dot "))
     });

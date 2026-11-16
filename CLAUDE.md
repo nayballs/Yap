@@ -224,7 +224,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `apps.rs` (+ `apps/`) — opens Start-menu apps on request.
 
 **Spoken replies** — [spoken-replies.md](./docs/architecture/spoken-replies.md)
-- `voice/tts.rs` (+ `voice/tts/`, `voice/tts/marks.rs`) — the voices, the speaker queue, word timing.
+- `voice/tts.rs` (+ `voice/tts/`, `voice/tts/marks.rs`, `voice/tts/maths.rs`) — the voices, the speaker queue, word timing; maths said in words ("$\pi r^2$" → "pi r squared", the Region's words), lit as one formula on the reading card.
 - `voice/duck.rs` / `voice/read_aloud.rs` — other apps turned down while Yap speaks; Read aloud anywhere.
 
 **Notes** — [notes.md](./docs/architecture/notes.md)

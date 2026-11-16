@@ -42,7 +42,7 @@ command is waiting on it.
 **Cost.** A real run's Chat is the person's own Claude Code on their own Claude plan:
 each question uses their plan's usage (a `report` uses a lot). **Ask the maintainer
 before any real `ask`, `report` or `run`.** `start`, `check`, `state`, `shot`, `probe`,
-`set`, `sheet`, `logs` and `stop` ask the model nothing. `--fake` runs cost nothing at all. An API model
+`spoken`, `set`, `sheet`, `logs` and `stop` ask the model nothing. `--fake` runs cost nothing at all. An API model
 (`--model anthropic:…`) costs money and only works with a key the person set in
 `YAP_LAB_ANTHROPIC_KEY` themselves.
 
@@ -324,16 +324,33 @@ uses it.
 {"ok":true,"window":"thread","found":true,"theme":"light","words":"THE END","has":true}
 ```
 
-### `click --window main|thread|panel --css <selector> [--right]`
+### `click --window main|thread|panel|bar --css <selector> [--right]`
 
 Clicks one of the test Yap's own buttons, as the person would (14 Nov 2026, for the
 message box's queue: a queued message's **Send now** — `[data-testid="chat-queued-send-now"]`
 — and **Cancel and edit** — `[data-testid="chat-queued-cancel"]`): the first match that
-shows, in Yap's own window only, never a page beside the chat. `--right` right-clicks
-(16 Nov 2026: a file link's menu, `.md-filelink`).
+shows, in Yap's own windows only, never a page beside the chat. `--right` right-clicks
+(16 Nov 2026: a file link's menu, `.md-filelink`). `--window bar` (16 Nov 2026): the Yap
+bar's own buttons, the reading card's ⏸ (`[aria-label="Pause"]`) or ⏭.
 
 ```json
 {"ok":true,"window":"thread","css":"[data-testid=\"chat-queued-send-now\"]","clicked":true}
+```
+
+### `spoken [--clear]`
+
+What the test Yap's voice was given (16 Nov 2026, for maths said in words:
+`voice/tts/maths.rs`). Test mode plays nothing, so this is the words each spoken reply,
+Voice Assistant answer or read-aloud was handed (`tts_e2e_spoken`: its sentences, the
+engine, the message id), and the reading card as it is now (`read_aloud_state`: the
+sentence as shown, the word lit, how it was timed). `--clear` forgets them after
+reading, so the next `spoken` shows only what's new. An answer's ▶ is `click --window
+thread --css '[aria-label="Read aloud"]'`, the card's ⏸ `click --window bar --css
+'[aria-label="Pause"]'` (`set '{"config":{"ttsRate":0.5}}'` first gives time to catch a
+sentence), and the reading card is `shot --window bar`. Asks the model nothing.
+
+```json
+{"ok":true,"spoken":[{"messageId":"chat:1:2","engine":"windows","streamed":false,"sentences":["The area of a circle is A equals pi r squared, where r is the radius."]}],"reading":{"phase":"paused","index":0,"count":3,"shown":"The area of a circle is $A = \\pi r^2$, where $r$ is the radius.","word":7,"lit":"pi","timing":"estimate","messageId":"chat:1:2"}}
 ```
 
 ### `type --window main|thread|panel [--css <selector>] [--text <words>] [--press <keys>]`

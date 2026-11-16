@@ -19,7 +19,8 @@
 //! - **Text prep** ([`utterances`], `tts/text.rs`, pure): an answer's markdown as something
 //!   to say — marks out, a code block as "(code block)", a link as its text,
 //!   a bare URL as its domain, headings and bullets each their own sentence,
-//!   emoji out — then numbers, money, dates, times, units and abbreviations
+//!   emoji out — then maths said in words (`tts/maths.rs`: "$\pi r^2$" →
+//!   "pi r squared"), numbers, money, dates, times, units and abbreviations
 //!   written as words (`tts/normalize.rs`, UK style), then cut into
 //!   sentences (abbreviations and initials kept together, long ones cut at a
 //!   comma).
@@ -59,6 +60,7 @@ pub mod hosted;
 pub mod kokoro;
 pub mod openai;
 pub mod marks;
+pub mod maths;
 mod normalize;
 mod playback;
 pub mod registry;

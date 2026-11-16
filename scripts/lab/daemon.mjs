@@ -989,11 +989,37 @@ async function probe({ window: which = 'main', css, text }) {
  * (14 Nov 2026, the message box's queue: a queued message's Send now and Cancel and edit). Only Yap's own windows,
  * never a page beside the chat (that's Claude's to act on, with its rules); the first match that shows.
  */
+/**
+ * **What the test Yap's voice was given** (16 Nov 2026, voice/tts/maths.rs): test mode plays nothing, so this is
+ * the words each spoken reply or read-aloud was handed (`tts_e2e_spoken`: its sentences, engine, message id), and
+ * the reading card as it is now (`read_aloud_state`: its sentence as shown, the word lit, how it was timed).
+ * `--clear`: forgotten after reading them, so the next `spoken` shows only what's new.
+ */
+async function spokenCmd({ clear = false }) {
+  const said = (await tryInvoke('tts_e2e_spoken', clear ? { clear: true } : {}, [])) ?? [];
+  const r = await tryInvoke('read_aloud_state', {}, null);
+  const parts = r?.parts ?? [];
+  const reading = r?.active
+    ? {
+        phase: r.phase,
+        index: r.index,
+        count: r.count,
+        shown: parts.map((p) => p.text).join(''),
+        word: r.word ?? null,
+        lit: parts.find((p) => p.w != null && p.w === r.word)?.text ?? null,
+        timing: r.timing ?? null,
+        messageId: r.messageId ?? null,
+      }
+    : null;
+  return { spoken: said.map((s) => ({ messageId: s.messageId ?? null, engine: s.engine, streamed: !!s.streamed, sentences: s.sentences })), reading };
+}
+
 async function click({ window: which = 'main', css, right = false }) {
   if (!css) throw new Error('click needs --css');
-  if (!['main', 'thread', 'panel'].includes(which)) throw new Error("click works in Yap's own window: main, thread or panel");
+  if (!['main', 'thread', 'panel', 'bar'].includes(which)) throw new Error("click works in Yap's own windows: main, thread, panel or bar");
   const scope = which === 'panel' ? '[data-testid="chat-panel-slot"] ' : which === 'thread' ? '[data-testid="chat-column"] ' : '';
-  const target = main().locator(`${scope}${css}`).first();
+  // `bar`: the Yap bar's own buttons (the reading card's ⏸, 16 Nov 2026).
+  const target = (which === 'bar' ? yap.overlay : main()).locator(`${scope}${css}`).first();
   // `--right`: a right-click (a file link's menu, 16 Nov 2026).
   await target.click({ timeout: 5_000, button: right ? 'right' : 'left' });
   return { window: which, css, clicked: true, ...(right ? { right: true } : {}) };
@@ -1853,6 +1879,7 @@ const COMMANDS = {
   agents: async () => agentsView(),
   probe: async (a) => probe(a),
   click: async (a) => click(a),
+  spoken: async (a) => spokenCmd(a),
   type: async (a) => typeKeys(a),
   side: async (a) => side(a),
   pick: async (a) => pick(a),

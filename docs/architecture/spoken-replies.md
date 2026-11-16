@@ -43,8 +43,14 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, ElevenLabs on the 
   row / paragraph, each ending like a sentence; a fenced code block →
   "(code block)", links → their text, bare URLs → their domain, `[x]`/☑ →
   "Done: …", emphasis, HTML, emoji and arrows out, "→" read "to", a web
-  answer's `[1]` / `[2, 3]` / gpt-oss `【…】` markers never read), then
-  **`voice/tts/normalize.rs`** (`for_speech`, every engine, UK style,
+  answer's `[1]` / `[2, 3]` / gpt-oss `【…】` markers never read; a
+  formula untouched by any of it — `inline_text` keeps each as one
+  private-use character while the rules run, and display maths over lines
+  of its own keeps its lines as written in its paragraph (so the Voice
+  Assistant's short answer keeps "The formula:" with its formula), a `|x|`
+  or a `- 1` in it no table or list; `sentences` never cuts inside one), then
+  **`voice/tts/normalize.rs`** (`for_speech`, every engine, UK style — maths
+  first, `voice/tts/maths.rs` below, so no rule reads a formula's `$` as money —,
   conservative — a clear pattern or nothing: £ $ € amounts incl. pence/cents
   and k/m/bn ("twelve thousand four hundred pounds", "three dollars fifty"),
   numbers with separators, decimals ("three point one four"), percentages,
@@ -404,9 +410,72 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, ElevenLabs on the 
     said isn't always what's shown ("£12,400" → "twelve thousand four
     hundred pounds"): `align` pairs the words the same on both sides (LCS,
     lower case, letters and digits) and gives the said words between two
-    pairs to the shown words between them; `shown_starts` → each shown
+    pairs to the shown words between them; a sentence with maths in it
+    (2026-11-16) goes through `align_maths` instead: the said words are
+    matched to the shown text with each formula written out
+    (`maths::in_words_mapped`, which says where each formula went), and
+    from there exactly — a formula's words only ever to the shown words
+    inside it ("A", "pi" pair with their own, the rest spread), every other
+    word to itself, so "a over b" never lends its "a" to a word round the
+    formula and the reading card lights the formula as one while it's
+    said (`bar/readingPieces.js`); a formula with no word on the card
+    (`$+$`) gives its words to the word before; `shown_starts` → each shown
     word's start, forwards in time; `word_at(starts, t)` the word being
     said. `utf16_to_char` for Windows' cues.
+  - **`voice/tts/maths.rs`** — **maths said in words** (2026-11-16; since
+    #144 the reading card drew an answer's maths but the voice read its TeX,
+    "dollar r dollar"). Every voice, every way in: spoken replies, the
+    Voice Assistant (streamed or not), the phone, Read aloud on the bar and
+    Chat's ▶ (`normalize::for_speech` calls `in_words` first). Formulas
+    found exactly as Chat and the reading card find them (`at` / `find`, a
+    port of `core/markdown.js` `mathAt`: `$…$` only as Pandoc reads it, so
+    "$5 and $10", "US$5" and "$HOME/$USER" stay text; `$$…$$`, `\(…\)`,
+    `\[…\]`; at most 4,000 characters). **Why our own converter**: the one
+    maintained engine, MathCAT (Rust; NVDA's and Orca's maths speech,
+    ClearSpeak and MathSpeak), reads MathML, not TeX (a second crate to
+    convert), and loads its rule files (YAML, a folder per language) from
+    disk at run time; it's made for a screen reader stepping through a
+    formula ("end fraction"). A voice reply wants the short spoken form of
+    a chat answer's formulas, so a small TeX reader (tokens → atoms with
+    their scripts → words, pure) with **ClearSpeak's default wording**
+    where it has one: "x squared", "x cubed", "x to the fourth", "x to the
+    n", "x to the power of n plus one" for a longer exponent, "the square
+    root of", "the cube root of", "the nth root of", simple fractions "a
+    over b", common ones (numerator under 20, denominator 2–10) "one half",
+    "two thirds", "the fraction a plus b, over two" for the rest, "the sum
+    from i equals one to n of", "the integral from zero to one of x
+    squared, d x", "the limit as x approaches zero of", "the absolute value
+    of", "the set of x such that", "sine of x", "log base two of",
+    "inverse sine", "f of x", "P of A given B", "x sub one", "v max",
+    "x hat", "vector v", "n choose k", cases ("x if x is greater than or
+    equal to zero; minus x otherwise"), matrices ("the two by two matrix
+    with rows one, two; and three, four", "the column vector"), Greek
+    letters ("capital delta"), relations, `\pm`, `\times`, `\le` / `\ge`,
+    numbers as numbers ("one million", never digit by digit), Unicode maths
+    too (π, ², ₁, ≤, √, ∑). A comma's pause stands where ClearSpeak would say
+    "end fraction" or "end exponent". **The Region's words** (Settings →
+    About you → Region; `sync(cfg)` at start and on every save, `variety()`
+    — the region's English spelling: American or Canadian → American):
+    British "minus three", "three quarters", "a plus b, all squared", "d y
+    by d x", "one hundred and five"; American "negative three", "three
+    fourths", "the quantity a plus b, squared", "d y d x", "one hundred
+    five". **Anything it doesn't know is said simply**: an unknown symbol
+    by its name (`\aleph` → "aleph"), an unknown command round braces by
+    what's in them, sizes, colours, labels and spacing as nothing; the
+    words never hold a backslash, a brace, `^`, `_`, `$`, `&` or `#`
+    (tested on broken TeX too). Kokoro reads a lone "a" as the article:
+    `g2p.rs` says it as the letter before punctuation, a lone small letter
+    or "equals", "squared", "cubed", "over", "to", "and", "or", "is",
+    "times", "transpose" ("a squared plus b squared"), never before a
+    capital ("a C compiler"). Tests: unit (powers, brackets, fractions,
+    Leibniz, roots, Greek, relations, minus signs, subscripts, sums,
+    integrals and limits, functions, fences, accents and text, numbers,
+    environments, the unknown, never a symbol, formulas in a sentence, both
+    regions), text prep's (`maths_is_said_in_words_and_kept_whole_for_the_card`),
+    the word timing's (`marks::a_formulas_words_light_the_formula_and_nothing_else`,
+    the speaker's `a_formula_is_said_in_words_and_timed_on_its_own_words`),
+    and `desktop/e2e/read-aloud.spec.js` (what the voice is given for an
+    answer's maths, the formula lit while it's said, American words).
   - **`voice/read_aloud.rs`** — **Read aloud, anywhere** (2026-10-22; the
     maintainer asked for reading help, dyslexia in mind; Wispr Flow has
     none). Ways in: the **Read aloud shortcut** (`config.read_hotkey`,

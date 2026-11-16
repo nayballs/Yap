@@ -537,6 +537,24 @@ describe('a --fake run, end to end', { timeout: 900_000 }, () => {
     assert.match(index.question, /^Tell me about lighthouses/);
   });
 
+  test('an answer read aloud: what the voice was given (spoken), its maths in words, the card keeping the formula', () => {
+    script([{ content: 'The area of a circle is $A = \\pi r^2$, where $r$ is the radius. It grows with the square of $r$. Double $r$ and the area is four times as big.' }]);
+    const out = ok(lab('ask', 'What is the area of a circle?', '--timeout', '120', '--no-shots'), 'ask');
+    assert.equal(out.status, 'answered');
+    ok(lab('spoken', '--clear'), 'spoken --clear');
+    assert.deepEqual(ok(lab('spoken'), 'spoken').spoken, []);
+    ok(lab('click', '--window', 'thread', '--css', '[aria-label="Read aloud"]'), 'click ▶');
+    const now = ok(lab('spoken'), 'spoken');
+    assert.deepEqual(now.spoken.at(-1).sentences, [
+      'The area of a circle is A equals pi r squared, where r is the radius.',
+      'It grows with the square of r.',
+      'Double r and the area is four times as big.',
+    ]);
+    assert.ok(now.spoken.every((s) => s.sentences.every((x) => !/[$\\^]/.test(x))), JSON.stringify(now.spoken));
+    // The reading card, if still up, shows the formula as written (it draws it).
+    if (now.reading?.index === 0) assert.equal(now.reading.shown, 'The area of a circle is $A = \\pi r^2$, where $r$ is the radius.');
+  });
+
   test('a card: the turn waits, the lab answers Don’t, the click is refused', () => {
     script([{ tools: [{ name: 'browser_navigate', args: { url: RAIL } }] }, { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] }, { tools: [{ name: 'browser_click', args: { ref: 1 } }] }, { content: 'I didn’t buy it.' }]);
     const asked = ok(lab('ask', `Buy me a ticket for the 09:42: ${RAIL}`, '--timeout', '120'), 'ask');

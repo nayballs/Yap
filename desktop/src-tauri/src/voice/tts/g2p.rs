@@ -711,6 +711,20 @@ pub fn espeak_text(espeak: &Espeak, voice: &str, text: &str, map: fn(&str) -> St
     out
 }
 
+/// "a" is the letter, never the article, before these (an article is never
+/// followed by them, by punctuation or by a lone small letter — "a C
+/// compiler" keeps its article): maths said in words (`maths.rs`).
+fn letter_a_before(next: Option<&Piece>) -> bool {
+    match next {
+        Some(Piece::Punct(_)) => true,
+        Some(Piece::Word(w)) => {
+            let small_letter = w.chars().count() == 1 && w.chars().all(|c| c.is_ascii_lowercase()) && w != "a" && w != "i";
+            small_letter || matches!(w.as_str(), "equals" | "squared" | "cubed" | "over" | "to" | "and" | "or" | "is" | "times" | "transpose")
+        }
+        None => false,
+    }
+}
+
 fn english(lexicon: &Lexicon, espeak: Option<&Espeak>, text: &str) -> Phonemes {
     let british = lexicon.british();
     // Split digits off letters ("mp3" → "mp", "3") and write any number
@@ -810,7 +824,10 @@ fn english(lexicon: &Lexicon, espeak: Option<&Espeak>, text: &str) -> Phonemes {
             }
             Piece::Word(w) => {
                 if CONTEXTUAL.contains(&w.as_str()) {
-                    phon[i] = lexicon.word(w, next);
+                    // "a" said as the letter: maths said in words ("a
+                    // squared plus b squared", "a over b", "a, b and c").
+                    let letter = matches!(w.as_str(), "a" | "A") && letter_a_before(ps.get(i + 1));
+                    phon[i] = lexicon.word(w, if letter { None } else { next });
                 }
                 if let Some(p) = &phon[i] {
                     next = first_sound(p).or(next);
@@ -891,6 +908,12 @@ mod tests {
         assert_eq!(ph("want to.").text, "wˈɑnt tˈu.");
         assert_eq!(ph("a book").text, "ɐ bˈʊk");
         assert_eq!(ph("I am").text, "ˌI ˈæm");
+        // Maths said in words: "a" the letter, not the article.
+        assert_eq!(ph("a to B").text, "ˈA tə bˈi");
+        assert_eq!(ph("A, B").text, "ˈA, bˈi");
+        // An article before a capital letter ("a C compiler") or a word stays one.
+        assert_eq!(ph("a B").text, "ɐ bˈi");
+        assert_eq!(ph("a apple").text, "ɐ ˈæpᵊl");
     }
 
     #[test]
