@@ -488,10 +488,10 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   await expect(editedTurn.getByTestId('question-versions').getByTestId('version-count')).toHaveText('2/2', { timeout: 10_000 });
   await expect.poll(async () => (await snapshot(page)).phase, { timeout: 15_000 }).toBe('idle');
   await expect(page.getByTestId('editing')).toBeHidden();
-  const asked = fakeLlm.requests.slice(editedAt).find((r) => JSON.stringify(r.messages).includes(EDITED_Q));
-  expect(asked, 'the new words went to the model').toBeTruthy();
-  expect(JSON.stringify(asked.messages), 'the old question and its answer are a version now').not.toContain(TYPED);
-  expect(JSON.stringify(asked.messages)).not.toContain(RETRY_ANSWER);
+  const editAsked = fakeLlm.requests.slice(editedAt).find((r) => JSON.stringify(r.messages).includes(EDITED_Q));
+  expect(editAsked, 'the new words went to the model').toBeTruthy();
+  expect(JSON.stringify(editAsked.messages), 'the old question and its answer are a version now').not.toContain(TYPED);
+  expect(JSON.stringify(editAsked.messages)).not.toContain(RETRY_ANSWER);
   await expectStore(yap, 'chats.json', (store) => {
     const conv = store.conversations.find((c) => c.id === first);
     // The new words and their answer shown; the question as it was kept as a version.
