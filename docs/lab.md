@@ -288,6 +288,17 @@ shows, in Yap's own window only, never a page beside the chat.
 {"ok":true,"window":"thread","css":"[data-testid=\"chat-queued-send-now\"]","clicked":true}
 ```
 
+### `type --window main|thread|panel [--css <selector>] [--text <words>] [--press <keys>]`
+
+Types into the test Yap's own window as the person would (16 Nov 2026, for the sheet
+view's cells): `--css` clicked first (the first match that shows), then `--text` typed
+as real key presses, then each of `--press` (`Enter`, `Tab`, `Escape`, `Control+z`…,
+comma-separated). Yap's own windows only, never a page beside the chat.
+
+```json
+{"ok":true,"window":"panel","css":"[data-cell=\"B4\"]","typed":2,"pressed":["Enter"]}
+```
+
 ### `side "<question>" [--keep] [--close] [--timeout 180]`
 
 A side question (Ctrl+;, 15 Nov 2026, `chat/side.rs`) about the chat shown, asked as the

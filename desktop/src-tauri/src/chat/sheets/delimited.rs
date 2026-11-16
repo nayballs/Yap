@@ -10,11 +10,26 @@ use super::{fit_columns, keep_rows, Book, Cell, Format, Kind, Row, Sheet, Why, M
 /// **Read one.** Pure.
 pub fn read(bytes: &[u8], format: Format) -> Result<Book, Why> {
     let text = crate::chat::attachments::decode(bytes).ok_or(Why::Failed)?;
-    let sep = match format {
+    Ok(read_text(&text, format))
+}
+
+/// The separator a file of `format` with `text` is split on. Pure.
+pub fn separator_of(text: &str, format: Format) -> u8 {
+    match format {
         Format::Tsv => b'\t',
-        _ => separator(&text),
-    };
-    let mut reader = csv::ReaderBuilder::new().has_headers(false).flexible(true).delimiter(sep).from_reader(text.as_bytes());
+        _ => separator(text),
+    }
+}
+
+/// How the file is read: the same for the view and the editor (`edit.rs`).
+pub fn reader_of(text: &str, sep: u8) -> csv::Reader<&[u8]> {
+    csv::ReaderBuilder::new().has_headers(false).flexible(true).delimiter(sep).from_reader(text.as_bytes())
+}
+
+/// **One read from its text** (`\n` line breaks). Pure.
+pub fn read_text(text: &str, format: Format) -> Book {
+    let sep = separator_of(text, format);
+    let mut reader = reader_of(text, sep);
     let mut sheet = Sheet { name: "Sheet1".into(), grid: true, ..Default::default() };
     let mut rows: Vec<Row> = Vec::new();
     for (i, record) in reader.records().enumerate() {
@@ -24,7 +39,7 @@ pub fn read(bytes: &[u8], format: Format) -> Result<Book, Why> {
             .iter()
             .enumerate()
             .filter(|(_, v)| !v.is_empty())
-            .map(|(c, v)| Cell { col: c as u32 + 1, text: v.to_string(), kind: kind_of(v), formula: None, style: 0 })
+            .map(|(c, v)| Cell { col: c as u32 + 1, text: v.to_string(), kind: kind_of(v), formula: None, input: None, style: 0 })
             .collect();
         if cells.is_empty() {
             continue;
@@ -41,7 +56,7 @@ pub fn read(bytes: &[u8], format: Format) -> Result<Book, Why> {
     fit_columns(&mut sheet);
     let mut book = Book::new(format);
     book.sheets.push(sheet);
-    Ok(book)
+    book
 }
 
 /// A CSV's separator: `;` when the first line has more of those than

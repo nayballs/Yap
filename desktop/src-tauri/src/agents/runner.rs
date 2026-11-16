@@ -752,6 +752,15 @@ pub fn working_chats() -> Vec<u64> {
     with_state(|s| mine.into_iter().filter(|(id, _)| s.live.contains_key(id) || s.queue.iter().any(|(q, _, _)| q == id)).map(|(_, c)| c).collect())
 }
 
+/// **Whether an agent works in `folder` now** (starting or working, not
+/// finishing or stopped; any chat's, a Code chat's own Claude too): the
+/// sheet view is live and read only then (`chat/sheets/view.rs`), so the
+/// person's edits and Claude's never cross.
+pub fn working_in(folder: &str) -> bool {
+    let folder = workspaces::norm(folder);
+    with_state(|s| s.live.values().any(|l| l.folder == folder && !l.input_over && l.stopping.is_none()))
+}
+
 /// **A turn began**: the plans in its chat nobody acted on set aside
 /// (`store::plans_aside`), and every page told ("planUnused").
 fn plans_aside_told() {

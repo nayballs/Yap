@@ -864,6 +864,22 @@ async function click({ window: which = 'main', css }) {
 }
 
 /**
+ * **Types into the test Yap's own window** as the person would (16 Nov 2026, for the sheet view's cells): `--css`
+ * clicked first (in `--window` main / thread / panel), then `--text` typed as real key presses, then each key of
+ * `--press` (`Enter`, `Tab`, `Control+z`, comma-separated). Never a page beside the chat: that's Claude's to act on.
+ */
+async function typeKeys({ window: which = 'main', css, text, press }) {
+  if (!['main', 'thread', 'panel'].includes(which)) throw new Error("type works in Yap's own window: main, thread or panel");
+  if (!css && text == null && !press) throw new Error('type needs --css, --text or --press');
+  const scope = which === 'panel' ? '[data-testid="chat-panel-slot"] ' : which === 'thread' ? '[data-testid="chat-column"] ' : '';
+  if (css) await main().locator(`${scope}${css}`).first().click({ timeout: 5_000 });
+  if (text != null && String(text) !== '') await main().keyboard.type(String(text), { delay: 25 });
+  const keys = String(press ?? '').split(',').map((k) => k.trim()).filter(Boolean);
+  for (const k of keys) await main().keyboard.press(k);
+  return { window: which, ...(css ? { css } : {}), typed: text == null ? 0 : String(text).length, pressed: keys };
+}
+
+/**
  * **A side question** (Ctrl+;, chat/side.rs, 15 Nov 2026): asked about the chat shown, in the box over its thread, as
  * the person asks one — the key, the words, Enter — and its answer read back from the box. Nothing of it is in the
  * chat (the next `state` or `ask` shows so) unless `keep`: Keep it, once it can be pressed (the chat's own answer,
@@ -1199,6 +1215,7 @@ const COMMANDS = {
   agents: async () => agentsView(),
   probe: async (a) => probe(a),
   click: async (a) => click(a),
+  type: async (a) => typeKeys(a),
   side: async (a) => side(a),
   pick: async (a) => pick(a),
   set: async (a) => setThings(a),

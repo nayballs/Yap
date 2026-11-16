@@ -45,7 +45,7 @@ pub fn read(bytes: &[u8], format: Format) -> Result<Book, Why> {
                     continue;
                 }
                 let (row, col) = (top + r as u32 + 1, left + c as u32 + 1);
-                let cell = Cell { col, text, kind, formula: None, style: 0 };
+                let cell = Cell { col, text, kind, formula: None, input: None, style: 0 };
                 sheet.used.take(row, col);
                 match rows.last_mut() {
                     Some(last) if last.r == row => last.cells.push(cell),
@@ -94,7 +94,7 @@ fn put_formula(rows: &mut Vec<Row>, row: u32, col: u32, formula: String) {
     let cells = &mut rows[at].cells;
     match cells.binary_search_by_key(&col, |c| c.col) {
         Ok(i) => cells[i].formula = Some(formula),
-        Err(i) => cells.insert(i, Cell { col, text: String::new(), kind: Kind::Text, formula: Some(formula), style: 0 }),
+        Err(i) => cells.insert(i, Cell { col, text: String::new(), kind: Kind::Text, formula: Some(formula), input: None, style: 0 }),
     }
 }
 
