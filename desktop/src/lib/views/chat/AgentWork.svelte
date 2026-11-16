@@ -58,8 +58,11 @@
   //
   // **The transcript view** (`view`, threadView.svelte.js: the chat's ⋯):
   // Normal, Thinking — its thinking too, between the stretches, quiet and
-  // italic (the log's `thought`) — or Verbose: that, and every stretch and
-  // row open.
+  // italic (the log's `thought`), under "Thought for 4s" (`thoughtMs`) — or
+  // Verbose: that, and every stretch and row open. Opus 5.5's and Sonnet
+  // 5.5's thinking comes with no words in a Claude Code run like Yap's (no
+  // flag, setting or variable asks for them: yap-code.md): its line is the
+  // time alone, the first saying plainly why.
   //
   // **A picture opens the viewer, paged** (`onpaged(list, at)`): ‹ 2 of 4 ›
   // across the whole turn's pictures, each captioned with its step, as
@@ -67,7 +70,7 @@
   // panel's picture tab: `onview`.)
   //
   // Its own small chunk (ChatThread and AgentPanel import it lazily).
-  import { workOf, workSummary, turnsOf, turnEnd, groupPictures, shownStepPicture, turnParts, turnPictures, todosIn } from '../../core/agents.js';
+  import { workOf, workSummary, turnsOf, turnEnd, groupPictures, shownStepPicture, turnParts, turnPictures, todosIn, thoughtFor, THOUGHT_NOT_SENT } from '../../core/agents.js';
   import { isLive } from '../../core/agentNow.js';
   import { renderMarkdown } from '../../core/markdown.js';
   import { colourCode } from '../../ui/colourCode.js';
@@ -145,6 +148,8 @@
   const onStep = $derived(working && !saying);
   const thinking = $derived(showsThinking(view));
   const items = $derived(!part ? [] : events != null ? workOf(events, '', onStep, { thinking }) : note?.startedTs || live ? workOf(part.events, final, onStep, { thinking }) : []);
+  /** The first thought here whose words weren't sent: it says why, the rest their time alone. */
+  const firstUnsent = $derived(items.findIndex((it) => it.kind === 'thought' && !it.text));
   /** **The lead**: in the thread it's the chat's own Claude at work (an agent's row in the Agent panel has its own walking crew). */
   const lead = $derived(events == null);
   let now = $state(Date.now() / 1000);
@@ -196,10 +201,15 @@
       {#if it.kind === 'said'}
         <div class="wsaid" data-testid="chat-agent-work-said" use:colourCode use:codeCopy use:markdownVisuals use:fileLinks={codeFiles}>{@html renderMarkdown(it.text)}</div>
       {:else if it.kind === 'thought'}
-        <!-- Its thinking (the Thinking and Verbose views): quieter than its words. -->
-        <div class="wthought" data-testid="chat-agent-work-thought">
-          <span class="wthink">Thinking</span>
-          <div class="wthoughttext">{@html renderMarkdown(it.text)}</div>
+        <!-- Its thinking (the Thinking and Verbose views): quieter than its words, with how long it took. Words
+             Claude Code didn't send (Opus 5.5, Sonnet 5.5): its time alone, and the first such line says why. -->
+        <div class="wthought" class:unsent={!it.text} data-testid="chat-agent-work-thought" data-sent={it.text ? 'true' : 'false'} title={it.text ? null : THOUGHT_NOT_SENT}>
+          <span class="wthink">{thoughtFor(it.ms)}</span>
+          {#if it.text}
+            <div class="wthoughttext">{@html renderMarkdown(it.text)}</div>
+          {:else if i === firstUnsent}
+            <span class="wnotsent" data-testid="chat-agent-work-thought-not-sent">{THOUGHT_NOT_SENT}</span>
+          {/if}
         </div>
       {:else}
         {@const busy = onStep && i === items.length - 1}
@@ -312,6 +322,17 @@
     letter-spacing: 0.01em;
   }
   .wthoughttext {
+    font-style: italic;
+  }
+  /* A thought whose words weren't sent: its time on one quiet line, the first one saying why. */
+  .wthought.unsent .wthink {
+    display: inline;
+    margin: 0;
+  }
+  .wnotsent {
+    display: block;
+    color: var(--yap-muted-70);
+    font-size: 11px;
     font-style: italic;
   }
   .wthoughttext :global(p) {
