@@ -24,6 +24,9 @@
 //! **Privacy**: never logged but counts and kinds (no names, no cells).
 
 pub mod delimited;
+pub mod edit;
+pub mod patch;
+pub mod save;
 pub mod view;
 pub mod xls;
 pub mod xlsx;
@@ -111,6 +114,10 @@ pub struct Cell {
     /// Its formula (`=B2*C2`), when it has one.
     #[serde(rename = "f", skip_serializing_if = "Option::is_none")]
     pub formula: Option<String>,
+    /// What the formula bar edits when it isn't what's shown: a number as
+    /// typed ("7.5" for "£7.50").
+    #[serde(rename = "i", skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
     /// Its style ([`Book::styles`]; 0: none).
     #[serde(rename = "s", skip_serializing_if = "is_zero")]
     pub style: u32,

@@ -38,17 +38,17 @@ pub(crate) fn xlsx_of(sheets: &[(&str, &str, String)], styles: &str) -> Vec<u8> 
 /// The styles of [`seed_order`]: 0 plain, 1 bold, 2 the title (bold 14,
 /// a blue fill, centred), 3 a header (bold, a thin line under it), 4 pounds,
 /// 5 a date, 6 a percentage, 7 italic red, 8 an accent colour of the theme.
-const STYLES: &str = r#"<numFmts count="2"><numFmt numFmtId="164" formatCode="&quot;£&quot;#,##0.00"/><numFmt numFmtId="165" formatCode="dd/mm/yyyy"/></numFmts><fonts count="5"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font><font><b/><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font><font><b/><sz val="14"/><color theme="1"/><name val="Calibri"/><family val="2"/></font><font><i/><sz val="11"/><color rgb="FFFF0000"/><name val="Calibri"/><family val="2"/></font><font><sz val="11"/><color theme="4"/><name val="Calibri"/><family val="2"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDDEBF7"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color auto="1"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="9"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf><xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="9" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>"#;
+pub(crate) const STYLES: &str = r#"<numFmts count="2"><numFmt numFmtId="164" formatCode="&quot;£&quot;#,##0.00"/><numFmt numFmtId="165" formatCode="dd/mm/yyyy"/></numFmts><fonts count="5"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font><font><b/><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font><font><b/><sz val="14"/><color theme="1"/><name val="Calibri"/><family val="2"/></font><font><i/><sz val="11"/><color rgb="FFFF0000"/><name val="Calibri"/><family val="2"/></font><font><sz val="11"/><color theme="4"/><name val="Calibri"/><family val="2"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDDEBF7"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color auto="1"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="9"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf><xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="9" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>"#;
 
-fn s(r: &str, text: &str, style: u32) -> String {
+pub(crate) fn s(r: &str, text: &str, style: u32) -> String {
     let st = if style > 0 { format!(r#" s="{style}""#) } else { String::new() };
     format!(r#"<c r="{r}"{st} t="inlineStr"><is><t>{text}</t></is></c>"#)
 }
-fn n(r: &str, v: f64, style: u32) -> String {
+pub(crate) fn n(r: &str, v: f64, style: u32) -> String {
     let st = if style > 0 { format!(r#" s="{style}""#) } else { String::new() };
     format!(r#"<c r="{r}"{st}><v>{v}</v></c>"#)
 }
-fn f(r: &str, formula: &str, style: u32) -> String {
+pub(crate) fn f(r: &str, formula: &str, style: u32) -> String {
     let st = if style > 0 { format!(r#" s="{style}""#) } else { String::new() };
     format!(r#"<c r="{r}"{st}><f>{formula}</f></c>"#)
 }
@@ -98,7 +98,7 @@ pub(crate) fn tiny_ods() -> Vec<u8> {
     zip_of(&[("mimetype", "application/vnd.oasis.opendocument.spreadsheet"), ("META-INF/manifest.xml", manifest), ("content.xml", content)])
 }
 
-fn cell(sheet: &Sheet, r: u32, c: u32) -> &Cell {
+pub(crate) fn cell(sheet: &Sheet, r: u32, c: u32) -> &Cell {
     sheet.rows.iter().find(|row| row.r == r).and_then(|row| row.cells.iter().find(|x| x.col == c)).unwrap_or_else(|| panic!("no cell at row {r}, column {c}"))
 }
 
@@ -189,6 +189,23 @@ fn a_workbook_missing_optional_style_parts_is_still_calculated() {
     assert_eq!(cell(&book.sheets[0], 1, 3).text, "6");
 }
 
+/// Lab, 16 Nov 2026: openpyxl's `£#,##0.00` (the pound sign bare, as Excel
+/// takes it) showed every price as `#VALUE!`. Read as Excel shows it now.
+#[test]
+fn a_bare_pound_sign_in_a_format_reads_as_excel_shows_it() {
+    assert_eq!(xlsx::quoted_literals("£#,##0.00").as_deref(), Some("\"£\"#,##0.00"));
+    assert_eq!(xlsx::quoted_literals("#,##0.00 ₹;[Red]-£#,##0").as_deref(), Some("#,##0.00 \"₹\";[Red]-\"£\"#,##0"));
+    assert_eq!(xlsx::quoted_literals("\"£\"#,##0.00"), None, "quoted already");
+    assert_eq!(xlsx::quoted_literals("[$£-809]#,##0.00"), None, "a locale's code in brackets");
+    assert_eq!(xlsx::quoted_literals("\\£0"), None, "escaped");
+    assert_eq!(xlsx::quoted_literals("€#,##0;$0"), None, "the two IronCalc takes bare");
+    let styles = STYLES.replace(r#"<numFmt numFmtId="164" formatCode="&quot;£&quot;#,##0.00"/>"#, r#"<numFmt numFmtId="164" formatCode="£#,##0.00"/>"#);
+    let rows = format!("<sheetData><row r=\"1\">{}{}{}</row></sheetData>", n("A1", 4.0, 0), n("B1", 6.5, 4), f("C1", "A1*B1", 4));
+    let book = read_now(Format::Xlsx, &xlsx_of(&[("Budget", "", rows)], &styles)).unwrap();
+    assert_eq!(cell(&book.sheets[0], 1, 2).text, "£6.50");
+    assert_eq!(cell(&book.sheets[0], 1, 3).text, "£26.00");
+}
+
 #[test]
 fn missing_style_parts_are_added_in_the_roots_own_prefix() {
     let plain = r#"<?xml version="1.0"?><styleSheet xmlns="m"><fonts count="1"><font/></fonts><cellXfs count="1"><xf/></cellXfs></styleSheet>"#;
@@ -254,7 +271,7 @@ fn a_big_sheet_is_read_and_asked_for_a_stretch_at_a_time() {
 #[test]
 fn a_merge_reaching_into_the_rows_asked_for_brings_its_cell() {
     let mut sheet = Sheet { name: "S".into(), ..Default::default() };
-    sheet.rows = vec![Row { r: 2, cells: vec![Cell { col: 1, text: "Beds".into(), kind: Kind::Text, formula: None, style: 0 }] }, Row { r: 40, cells: vec![Cell { col: 2, text: "x".into(), kind: Kind::Text, formula: None, style: 0 }] }];
+    sheet.rows = vec![Row { r: 2, cells: vec![Cell { col: 1, text: "Beds".into(), kind: Kind::Text, formula: None, input: None, style: 0 }] }, Row { r: 40, cells: vec![Cell { col: 2, text: "x".into(), kind: Kind::Text, formula: None, input: None, style: 0 }] }];
     sheet.merges = vec![Merge { row: 2, col: 1, rows: 30, cols: 2 }];
     let rows = view::rows_of(&sheet, 20, 50);
     assert_eq!(rows.iter().map(|r| r.r).collect::<Vec<_>>(), vec![2, 40]);
@@ -263,7 +280,7 @@ fn a_merge_reaching_into_the_rows_asked_for_brings_its_cell() {
 
 #[test]
 fn a_workbook_too_big_keeps_its_first_rows_and_counts_the_rest() {
-    let rows: Vec<Row> = (1..=10).map(|r| Row { r, cells: (1..=4).map(|c| Cell { col: c, text: "x".into(), kind: Kind::Text, formula: None, style: 0 }).collect() }).collect();
+    let rows: Vec<Row> = (1..=10).map(|r| Row { r, cells: (1..=4).map(|c| Cell { col: c, text: "x".into(), kind: Kind::Text, formula: None, input: None, style: 0 }).collect() }).collect();
     let (kept, cut, cells) = keep_rows(rows.clone(), 20);
     assert_eq!((kept.len(), cut, cells), (5, 5, 20));
     let (kept, cut, _) = keep_rows(rows.clone(), 0);

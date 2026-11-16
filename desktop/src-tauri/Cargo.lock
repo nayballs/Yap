@@ -7649,6 +7649,7 @@ dependencies = [
  "png",
  "process-wrap",
  "qrcode",
+ "quick-xml 0.42.0",
  "rcgen",
  "regex",
  "reqwest 0.12.28",

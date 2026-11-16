@@ -170,6 +170,10 @@ pdf-extract = "0.12"
 # keeps them). Both pure Rust, on the zip 9 above.
 ironcalc = "0.9.1"
 calamine = "0.38"
+# A workbook edited in the sheet view is saved by writing the cells changed
+# into its own XML, every other byte kept (chat/sheets/patch.rs, save.rs):
+# read with positions by quick-xml (MIT), already in the tree through IronCalc.
+quick-xml = "0.42"
 # A .csv / .tsv attached or shown beside the chat (chat/sheets/delimited.rs):
 # RFC 4180 quoting. Already in the tree through IronCalc.
 csv = "1"

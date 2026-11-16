@@ -1,7 +1,30 @@
 // Small workbooks (.xlsx) for the spreadsheet specs, made here as openpyxl writes them: inline strings, and
 // formulas with no results (Yap calculates them: chat/sheets/xlsx.rs). The same fictional seed order as the
 // Rust tests' (chat/sheets/tests.rs). Excel opens them too.
+import zlib from 'node:zlib';
 import { zip } from './docx.js';
+
+/** **A zip's parts** (an .xlsx read back from disk): name → its text. */
+export function partsOf(buf) {
+  const out = {};
+  let end = buf.length - 22;
+  while (end >= 0 && buf.readUInt32LE(end) !== 0x06054b50) end--;
+  if (end < 0) throw new Error('not a zip');
+  const count = buf.readUInt16LE(end + 10);
+  let p = buf.readUInt32LE(end + 16);
+  for (let i = 0; i < count; i++) {
+    const method = buf.readUInt16LE(p + 10);
+    const size = buf.readUInt32LE(p + 20);
+    const [nameLen, extraLen, noteLen] = [buf.readUInt16LE(p + 28), buf.readUInt16LE(p + 30), buf.readUInt16LE(p + 32)];
+    const local = buf.readUInt32LE(p + 42);
+    const name = buf.toString('utf8', p + 46, p + 46 + nameLen);
+    const from = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const data = buf.subarray(from, from + size);
+    out[name] = (method === 8 ? zlib.inflateRawSync(data) : data).toString('utf8');
+    p += 46 + nameLen + extraLen + noteLen;
+  }
+  return out;
+}
 
 const MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';

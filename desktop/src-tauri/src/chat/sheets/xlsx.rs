@@ -47,14 +47,79 @@ pub fn read(bytes: &[u8]) -> Result<Book, Why> {
 
 /// IronCalc reading and calculating `bytes`, its panic an error.
 fn load(bytes: &[u8]) -> Result<Book, Why> {
+    let (model, kept) = model_now(bytes)?;
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| book_of(&model, &kept))).map_err(|_| Why::Failed)
+}
+
+/// **The workbook `bytes` as IronCalc's model, calculated**, and the
+/// results the file kept (a function IronCalc doesn't know keeps the
+/// file's): the sheet view's editor's (`edit.rs`). `bytes` with its style
+/// parts filled in already ([`complete`]). A panic is an error.
+pub(super) fn model_now(bytes: &[u8]) -> Result<(Model<'static>, Kept), Why> {
     std::panic::catch_unwind(|| {
         let workbook = ironcalc::import::load_from_xlsx_bytes(bytes, "workbook", LOCALE, TZ).map_err(|_| Why::Failed)?;
         let mut model = Model::from_workbook(workbook, LANGUAGE).map_err(|_| Why::Failed)?;
+        for f in model.workbook.styles.num_fmts.iter_mut() {
+            if let Some(q) = quoted_literals(&f.format_code) {
+                f.format_code = q;
+            }
+        }
         let kept = file_results(&model);
         model.evaluate();
-        Ok(book_of(&model, &kept))
+        Ok((model, kept))
     })
     .unwrap_or(Err(Why::Failed))
+}
+
+/// **A number format with its bare currency signs quoted** (`£#,##0.00` →
+/// `"£"#,##0.00`): Excel shows `£`, `¥`, `₹`… as they are, unquoted, and a
+/// script writes them so (openpyxl, exceljs), but IronCalc only takes `$`
+/// and `€` bare and shows every other one's number as `#VALUE!` (Lab, 16 Nov
+/// 2026: a budget in pounds, every price `#VALUE!`). Any character past
+/// ASCII but `€`, outside quotes and `[…]` and not after `\`, is quoted;
+/// `None`: nothing to quote. Pure.
+pub fn quoted_literals(code: &str) -> Option<String> {
+    let mut out = String::with_capacity(code.len() + 4);
+    let (mut quoted, mut bracket, mut escaped, mut run, mut changed) = (false, false, false, String::new(), false);
+    let flush = |out: &mut String, run: &mut String| {
+        if !run.is_empty() {
+            out.push('"');
+            out.push_str(run);
+            out.push('"');
+            run.clear();
+        }
+    };
+    for ch in code.chars() {
+        let bare = !quoted && !bracket && !escaped && !ch.is_ascii() && ch != '€';
+        if bare {
+            run.push(ch);
+            changed = true;
+            continue;
+        }
+        flush(&mut out, &mut run);
+        if escaped {
+            escaped = false;
+        } else if ch == '\\' && !quoted {
+            escaped = true;
+        } else if ch == '"' && !bracket {
+            quoted = !quoted;
+        } else if ch == '[' && !quoted {
+            bracket = true;
+        } else if ch == ']' && !quoted {
+            bracket = false;
+        }
+        out.push(ch);
+    }
+    flush(&mut out, &mut run);
+    changed.then_some(out)
+}
+
+/// **The package IronCalc reads**: `bytes` with its missing style parts
+/// filled in ([`with_full_styles`]), or as it is. A save writes into the
+/// file's own (`save.rs`): the parts filled in never reach it (they'd be
+/// out of the stylesheet's order).
+pub(super) fn complete(bytes: &[u8]) -> Vec<u8> {
+    with_full_styles(bytes).unwrap_or_else(|| bytes.to_vec())
 }
 
 /// The parts of `xl/styles.xml` IronCalc can't do without, each with the
@@ -132,7 +197,7 @@ fn with_full_styles(bytes: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// What a formula's result says, as the file kept it: `(text, kind)`.
-type Kept = HashMap<(u32, i32, i32), (String, Kind)>;
+pub(super) type Kept = HashMap<(u32, i32, i32), (String, Kind)>;
 
 /// **The results the file kept** for its formulas (before Yap calculates):
 /// none for a result that's no result (a script's file: none, or 0).
@@ -162,7 +227,7 @@ fn file_results(model: &Model) -> Kept {
 }
 
 /// Whether a cell's calculated result is IronCalc not knowing the function.
-fn not_known(cell: &CalcCell) -> bool {
+pub(super) fn not_known(cell: &CalcCell) -> bool {
     match cell {
         CalcCell::CellFormula { v: FormulaValue::Error { ei, .. }, .. } | CalcCell::ArrayFormula { v: FormulaValue::Error { ei, .. }, .. } => matches!(ei, CalcError::NIMPL | CalcError::NAME),
         _ => false,
@@ -170,7 +235,7 @@ fn not_known(cell: &CalcCell) -> bool {
 }
 
 /// **The workbook as Yap draws it**, calculated.
-fn book_of(model: &Model, kept: &Kept) -> Book {
+pub(super) fn book_of(model: &Model, kept: &Kept) -> Book {
     let theme = model.get_theme();
     let mut book = Book::new(Format::Xlsx);
     book.calculated = true;
@@ -238,14 +303,17 @@ fn book_of(model: &Model, kept: &Kept) -> Book {
             if formula.is_some() {
                 sheet.formulas += 1;
             }
+            // What the formula bar edits, when it isn't what's shown ("7.5" for "£7.50").
+            let input = if formula.is_none() && kind == Kind::Number { model.get_localized_cell_content(sheet_no, r, c).ok().filter(|i| *i != text) } else { None };
             let (r, c) = (r as u32, c as u32);
             if kind != Kind::Empty {
                 sheet.used.take(r, c);
             }
             sheet.drawn.take(r, c);
+            let cell = Cell { col: c, text, kind, formula, input, style };
             match rows.last_mut() {
-                Some(row) if row.r == r => row.cells.push(Cell { col: c, text, kind, formula, style }),
-                _ => rows.push(Row { r, cells: vec![Cell { col: c, text, kind, formula, style }] }),
+                Some(row) if row.r == r => row.cells.push(cell),
+                _ => rows.push(Row { r, cells: vec![cell] }),
             }
         }
         let (rows, cut, cells) = keep_rows(rows, room);
