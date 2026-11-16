@@ -318,7 +318,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `config.rs` — `YapConfig`, saved one at a time (`config::update`), migrations.
 - `shell/saving.rs` — every JSON store's writes and reads: a failed write retried; an unreadable file never written over.
 - `shell/credentials.rs` — every secret in Windows Credential Manager (session, calendars, ChatGPT, connectors): writes one at a time across Yaps (`Local\YapCredentials`), each read back.
-- `shell/e2e.rs` / `shell/realtest.rs` / `shell/lab.rs` — test mode, robot mode, Yap Lab's record, live web and fixed window size ([`docs/lab.md`](./docs/lab.md)).
+- `shell/e2e.rs` / `shell/realtest.rs` / `shell/lab.rs` — test mode, robot mode, Yap Lab's record, live web and fixed window size; the Lab's read-only `gh` (`agents/prs/lab.rs`: `gh pr list`/`view` on Yap's repo only) ([`docs/lab.md`](./docs/lab.md)).
 - `privacy/log_privacy.rs` — a test: no user content in the log at `info` and above.
 
 ## Frontend index (`desktop/src/`)

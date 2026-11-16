@@ -5632,7 +5632,14 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   prompt with Yap's added, read only (`Read`, `Grep`, `Glob`), no memory
   ([yap-code.md](./yap-code.md#memory-and-the-plan-in-a-code-chat), [ai-models.md](./ai-models.md#a-chat-turn-chatturnplanrs)).
 - **The question**: the turn's context and the question
-  (`chats::with_context`), its screenshots as image blocks.
+  (`chats::with_context`), its screenshots as image blocks. **Across the
+  meetings** (Ask across meetings, and every Skill: a routine's, or `/name`
+  typed) the context starts with what Chat's own prompt says in its system
+  part — answer from the passages and cite them, and the Skill's own
+  instructions (`plan.rs` `across_lines`, 16 Nov 2026) — since the plan's
+  system prompt is the session's and stays the same every turn. Before,
+  they never reached Claude Code: Yap Lab's routine on Opus answered
+  "There's no `/lighthouse-fact` command in Yap's Chat".
 - **Its events → Chat's stream** (`claude_plan/map.rs`, pure): text deltas as
   `Delta::Content`, a step per model message (text written before a tool
   call is taken back, never the answer: so the Voice Assistant never says
@@ -6383,7 +6390,11 @@ a chat whose last message is that many days old or more moves to
   `chat-auto-archive.spec.js` (archived at start, a newer chat and a
   meeting's Ask kept, the setting on its page, Undo; a run's notice with
   Undo, a Code chat with a ▶ Run running kept until it's stopped, then
-  archived).
+  archived); Yap Lab's `auto-archive` script (16 Nov 2026) on real chats,
+  made older by test mode's `e2e_chat_age` (`chats::age_by`: their start,
+  last use and messages' times moved back; `lab age`), the run asked for
+  with `e2e_chat_auto_archive` (`lab archive`: what it took, the notice, its
+  Undo; [lab.md](../lab.md#the-labs-own-turns-16-nov-2026)).
 
 ## Side questions (Ctrl+;, 2026-11-15)
 

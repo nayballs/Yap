@@ -125,3 +125,26 @@ test('a run says what it archived, with Undo; a Code chat with a ▶ Run running
   expect(await yap.invoke('e2e_chat_auto_archive')).toEqual([]);
   await closeToasts(main);
 });
+
+test('test mode’s aging (Yap Lab’s `age`): a chat made 40 days older is archived by the next run; a meeting’s Ask stays as it was', async ({ yap, main }) => {
+  await openView(main, 'Chat');
+  await closeToasts(main);
+  // (A new chat in view: the chat the Chat view shows is never archived.)
+  await main.getByRole('button', { name: 'New chat' }).first().click();
+  // "Holiday plans", two days old: not due.
+  expect(await yap.invoke('e2e_chat_auto_archive')).toEqual([]);
+  const before = yap.readJson('chats.json').conversations.find((c) => c.id === 103);
+  // Every chat (none named): only the meeting's Ask is left alone; already-archived ones age too, and stay archived.
+  const aged = await yap.invoke('e2e_chat_age', { ids: null, days: 40 });
+  expect(aged).toContain(103);
+  expect(aged).not.toContain(104);
+  await expect.poll(() => yap.readJson('chats.json').conversations.find((c) => c.id === 103).updatedTs).toBe(before.updatedTs - 40 * DAY);
+  expect(yap.readJson('chats.json').conversations.find((c) => c.id === 103).messages[0].ts).toBe(before.messages[0].ts - 40 * DAY);
+  expect(yap.readJson('chats.json').conversations.find((c) => c.id === 104).updatedTs).toBe(NOW - 50 * DAY);
+  expect(await yap.invoke('e2e_chat_auto_archive')).toEqual([103]);
+  await expect(notice(main)).toContainText("Archived a chat you hadn't used in 30 days");
+  await expect(yap.invoke('e2e_chat_age', { ids: [103], days: 0 })).rejects.toThrow(/1 to 3650 days/);
+  // Back, for any test after this one.
+  await yap.invoke('chats_auto_archive_undo', { ids: [103] });
+  await closeToasts(main);
+});

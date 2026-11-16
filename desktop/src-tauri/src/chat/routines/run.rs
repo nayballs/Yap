@@ -372,9 +372,8 @@ pub fn notice_body(reply: &str, max: usize) -> String {
     let plain = lines
         .iter()
         .map(|l| {
-            // (Its citations, "[1]", are for the chat: the card has no pills.)
-            let words: Vec<String> = l.trim_start_matches(['#', '-', '*', '>', ' ']).replace("**", "").split_whitespace().filter(|w| !is_citation(w)).map(strip_citation).collect();
-            let line = words.join(" ");
+            // (Its citations, "[1]" or "[1, 3]", are for the chat: the card has no pills.)
+            let line = drop_citations(&l.trim_start_matches(['#', '-', '*', '>', ' ']).replace("**", "")).split_whitespace().collect::<Vec<_>>().join(" ");
             // Each bullet a sentence of its own.
             if line.is_empty() || line.ends_with(['.', '!', '?', ':', ';', ',']) {
                 line
@@ -393,18 +392,32 @@ pub fn notice_body(reply: &str, max: usize) -> String {
     format!("{cut}…")
 }
 
-/// A word that's only a citation ("[1]", "[2].").
-fn is_citation(w: &str) -> bool {
-    let w = w.trim_end_matches(['.', ',', ';', ':']);
-    w.len() > 2 && w.starts_with('[') && w.ends_with(']') && w[1..w.len() - 1].chars().all(|c| c.is_ascii_digit())
-}
-
-/// A word with a citation at its end ("budget[1].") without it.
-fn strip_citation(w: &str) -> String {
-    match w.find('[') {
-        Some(i) if i > 0 && is_citation(&w[i..]) => format!("{}{}", &w[..i], w[i..].trim_start_matches(|c: char| c != ']').trim_start_matches(']')),
-        _ => w.to_string(),
+/// **`s` without its citations** ("[1]", "[1, 3]"), each with the space
+/// before it; what follows one stays, so a sentence it ends keeps its full
+/// stop ("send it [1]. The reply" → "send it. The reply": Yap Lab, 16 Nov
+/// 2026, read "send it The reply"). Other brackets stay. Pure.
+fn drop_citations(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('[') {
+        let after = &rest[i + 1..];
+        let cite = after.find(']').filter(|&e| {
+            let inner = &after[..e];
+            inner.chars().any(|c| c.is_ascii_digit()) && inner.chars().all(|c| c.is_ascii_digit() || c == ',' || c == ' ')
+        });
+        match cite {
+            Some(e) => {
+                out.push_str(rest[..i].trim_end_matches(' '));
+                rest = &after[e + 1..];
+            }
+            None => {
+                out.push_str(&rest[..=i]);
+                rest = after;
+            }
+        }
     }
+    out.push_str(rest);
+    out
 }
 
 /// **The one quiet notice**: a card on the Yap bar under the notice policy
@@ -485,6 +498,9 @@ mod tests {
         // A heading left out; citations too; each bullet a sentence.
         assert_eq!(notice_body("### Follow-up email\n- Draft the finance request, due Wednesday [1].\n- Send the quote[2]", 140), "Draft the finance request, due Wednesday. Send the quote.");
         assert_eq!(notice_body("## Only a heading", 140), "Only a heading.");
+        // A citation that ends a sentence mid-line: its full stop stays.
+        assert_eq!(notice_body("- Revised budget: you asked Alice to send it [1]. The reply came on Friday [1, 2].", 140), "Revised budget: you asked Alice to send it. The reply came on Friday.");
+        assert_eq!(notice_body("Sent it [1], then[2]: done. See [the list] too.", 140), "Sent it, then: done. See [the list] too.");
         let long = "word ".repeat(60);
         let body = notice_body(&long, 40);
         assert!(body.ends_with('…') && body.chars().count() <= 41, "{body}");

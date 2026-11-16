@@ -1,0 +1,32 @@
+{
+  "name": "code-chat-prs",
+  "about": "A Code chat summary's Changes from the real gh (16 Nov 2026, agents/prs.rs; built 15 Nov in #128): test mode never runs the person's gh, so the summary said \"Install GitHub's gh\". Here the lab's read-only gh is on (`set --gh on`: agents/prs/lab.rs — only gh pr list / gh pr view, only on Yap's own public repository, every other command or flag refused before gh starts) and the scratch workspace is on a merged branch of that repository (`set --git`: no commit, nothing fetched). The summary lists the branch's pull requests — merged, with Archive — then, gh off again, says so quietly. Needs a live lab and Yap Code; one short question to the Code chat's Claude.",
+  "needs": { "yapCode": true, "live": true },
+  "steps": [
+    { "set": { "git": "claude/elastic-heyrovsky-69fd45", "gh": "on", "config": { "agentsDirect": true } }, "note": "A branch of Yap's own repository whose pull requests are merged (#139, #140)." },
+    { "ask": "What does src/convert.js export? One line, no changes.", "chat": "code:lab-sandbox", "timeout": 300 },
+    { "expect": { "status": "answered" } },
+    { "lab": "summary", "args": { "chat": "same" } },
+    {
+      "expect": {
+        "status": "answered",
+        "result": [
+          { "path": "prs.status", "equals": "ok" },
+          { "path": "prs.branch", "equals": "claude/elastic-heyrovsky-69fd45" },
+          { "path": "prs.list.length", "gte": 1 },
+          { "path": "rows.length", "gte": 1 },
+          { "path": "rows.0.state", "equals": "merged" },
+          { "path": "rows.0.archive", "equals": true },
+          { "path": "rows.0.text", "matches": "/nayballs\\/Yap #\\d+/" }
+        ]
+      },
+      "note": "Its pull requests, newest first, each owner/repo #N, merged ones with Archive."
+    },
+    { "set": { "gh": "off" } },
+    { "lab": "summary", "args": { "chat": "same" } },
+    {
+      "expect": { "result": [{ "path": "prs.status", "equals": "no-gh" }, { "path": "rows.length", "equals": 0 }, { "path": "note", "matches": "/gh/i" }] },
+      "note": "No gh: one quiet line, never an error."
+    }
+  ]
+}

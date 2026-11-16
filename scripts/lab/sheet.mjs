@@ -51,6 +51,9 @@ function setLabel(set) {
   if (!set || set === 'end') return 'After the turn';
   if (set.startsWith('card:')) return `While card ${set.slice(5)} waited`;
   if (set.startsWith('named:')) return `Shot “${set.slice(6)}”`;
+  // A routine's quiet card on the Yap bar; a kept page's copy in the lab's own browser (16 Nov 2026).
+  if (set === 'notice') return 'The Yap bar as the run ended';
+  if (set === 'outside') return 'Outside Yap: the copy in a browser of the lab’s own';
   return set;
 }
 
@@ -108,7 +111,9 @@ export function sheetHtml({ title = 'Yap Lab', subtitle = '', turns, dir }) {
       return `<h3>${esc(setLabel(set))}</h3><div class="grid">${cells.join('')}</div>`;
     });
     const status = t.status ? `<span class="st st-${esc(t.status)}">${esc(t.status)}</span>` : '';
-    const how = [t.spoken ? 'spoken' : '', t.conversation != null ? `conversation ${t.conversation}` : ''].filter(Boolean).join(' · ');
+    // (A turn of the lab's own — auto-archive, a kept page outside Yap — or a routine's run says so.)
+    const kind = t.kind === 'lab' ? "the lab's own" : t.kind === 'routine' ? 'a routine' : '';
+    const how = [kind, t.spoken ? 'spoken' : '', t.conversation != null ? `conversation ${t.conversation}` : ''].filter(Boolean).join(' · ');
     return `<section class="turn"><h2>Turn ${esc(t.turn)} ${status}${how ? `<span class="how">${esc(how)}</span>` : ''}</h2><p class="q">“${esc(firstWords(t.question))}”</p>${blocks.join('')}</section>`;
   });
   return `<!doctype html>
@@ -162,7 +167,7 @@ export function runShots(lab, which = () => true) {
 }
 
 /** The lab's own headless browser: Playwright's Chromium when it's installed, else Edge (YAP_LAB_CHANNEL to choose). */
-async function browser() {
+export async function labBrowser() {
   const { chromium } = await import('@playwright/test');
   let channel = process.env.YAP_LAB_CHANNEL || undefined;
   if (!channel) {
@@ -208,7 +213,7 @@ export function pageCuts(height, tops, max = PAGE_MAX) {
  * `{ width, height, pages }`.
  */
 export async function renderSheet(html, png) {
-  const b = await browser();
+  const b = await labBrowser();
   try {
     const page = await b.newPage({ viewport: { width: WIDTH, height: 900 }, deviceScaleFactor: 1 });
     await page.goto(pathToFileURL(html).href, { waitUntil: 'load' });
