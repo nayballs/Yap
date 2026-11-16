@@ -12,7 +12,11 @@ import { drawPng } from './png.mjs';
 export const SCRIPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'scripts');
 
 /** The kinds of step, by their key. */
-export const KINDS = ['ask', 'answer', 'wait', 'shot', 'set', 'expect', 'fake', 'note'];
+// (`note` last: any step may carry one, and is still its own kind.)
+export const KINDS = ['ask', 'answer', 'wait', 'shot', 'set', 'expect', 'fake', 'lab', 'note'];
+
+/** The lab's own commands a `lab` step may send (16 Nov 2026): each a turn of the lab's own, or a routine's. */
+export const LAB_STEPS = ['routine', 'meeting', 'age', 'archive', 'summary', 'kept'];
 
 /** Which kind a step is: its first key that's a kind. Pure. */
 export function kindOf(step) {
@@ -114,6 +118,20 @@ export function at(obj, p) {
   return String(p).split('.').reduce((v, k) => (v === null || v === undefined ? undefined : v[k]), obj);
 }
 
+/** A value against a check's `equals`, `gt`, `gte`, `lt`, `lte`, `matches`, `notMatches` (none: there at all). Pure. */
+export function valueHolds(want, v) {
+  if (want.equals !== undefined && !valueMatches(want.equals, v)) return false;
+  if (want.gt !== undefined && !(Number(v) > want.gt)) return false;
+  if (want.gte !== undefined && !(Number(v) >= want.gte)) return false;
+  if (want.lt !== undefined && !(Number(v) < want.lt)) return false;
+  if (want.lte !== undefined && !(Number(v) <= want.lte)) return false;
+  const text = typeof v === 'string' ? v : JSON.stringify(v ?? '');
+  if (want.matches !== undefined && !textMatches(want.matches, text)) return false;
+  if (want.notMatches !== undefined && textMatches(want.notMatches, text)) return false;
+  if (['equals', 'gt', 'gte', 'lt', 'lte', 'matches', 'notMatches'].every((k) => want[k] === undefined) && (v === undefined || v === null)) return false;
+  return true;
+}
+
 /** Does `call` match the tool check `want`? Each field it names must hold. Pure. */
 export function callMatches(want, call) {
   if (want.name !== undefined && !nameMatches(want.name, call.name)) return false;
@@ -176,7 +194,7 @@ export function checkTurn(expect, { result: turnResult, calls = turnResult?.tool
   const out = [];
   const result = turnResult ?? {};
   const add = (check, pass, detail) => out.push({ check, pass: !!pass, ...(pass ? {} : { detail }) });
-  const needTurn = ['status', 'used', 'notUsed', 'refused', 'failed', 'card', 'answerContains', 'answerMatches', 'answerNotContains', 'pictures', 'files', 'documents', 'pagesShown', 'sources', 'questionImages', 'tools', 'tool'];
+  const needTurn = ['status', 'used', 'notUsed', 'refused', 'failed', 'card', 'answerContains', 'answerMatches', 'answerNotContains', 'pictures', 'files', 'documents', 'pagesShown', 'sources', 'questionImages', 'tools', 'tool', 'result'];
   if (!turnResult && needTurn.some((k) => expect[k] !== undefined)) {
     add('a turn to check', false, 'no turn yet: ask first');
     return out;
@@ -213,6 +231,12 @@ export function checkTurn(expect, { result: turnResult, calls = turnResult?.tool
     add(`${k} ${countText(expect[k])}`, countMatches(expect[k], n), `${n}${n ? `: ${JSON.stringify(items).slice(0, 300)}` : ''}`);
   }
   for (const want of list(expect.tool)) add(`a call: ${toolWords(want)}`, calls.some((c) => callMatches(want, c)), callsDetail(calls, want.name));
+  // The turn's JSON at a path (a lab command's own fields: `archived.length`, `run.state`, `page.policy`…).
+  for (const want of list(expect.result)) {
+    const v = at(result, want.path);
+    const how = ['equals', 'gt', 'gte', 'lt', 'lte', 'matches', 'notMatches'].filter((k) => want[k] !== undefined).map((k) => `${k} ${JSON.stringify(want[k])}`);
+    add(`${want.path} ${how.join(' ') || 'there'}`, valueHolds(want, v), `it was ${v === undefined ? 'not there' : JSON.stringify(v).slice(0, 300)}`);
+  }
   for (const want of list(expect.agent)) {
     const all = agents?.agents ?? [];
     const hit = all.filter((a) =>
@@ -256,7 +280,7 @@ export function probePasses(want, got) {
 // ---------------------------------------------------------------- the runner
 
 /** The steps that the rest depend on: when one fails, the script stops. */
-const STOPS = new Set(['ask', 'answer', 'wait', 'set', 'fake']);
+const STOPS = new Set(['ask', 'answer', 'wait', 'set', 'fake', 'lab']);
 
 /**
  * A turn's tool calls whole (its transcript), else as `ask` summed them up —
@@ -292,6 +316,16 @@ export async function runScript(script, { send, state, options = {} }) {
   const lab = state.lab ?? {};
   const needs = script.needs ?? {};
   const missing = [needs.yapCode && !lab.yapCode ? '--yap-code on' : '', needs.web && !lab.web ? '--web on' : '', needs.connectors && !lab.connectors ? '--connectors on' : ''].filter(Boolean);
+  // A model of Yap's own tool loop (`--fake`, or an API model): a plan chat is Claude Code's, which makes no documents.
+  if (needs.toolLoop && lab.model?.kind === 'plan') {
+    out.failures.push({ step: 0, error: 'This script needs a model of Yap’s own tool loop: start --fake (or --model anthropic:…); a plan chat makes no documents' });
+    return out;
+  }
+  // The real web and the person's own Claude Code and gh (`--fake` has stand-ins).
+  if (needs.live && lab.fake) {
+    out.failures.push({ step: 0, error: 'This script needs a live lab: start without --fake' });
+    return out;
+  }
   if (missing.length) {
     out.failures.push({ step: 0, error: `This script needs the lab started with ${missing.join(' ')}: npm run -s lab -- stop, then start ${missing.join(' ')}` });
     return out;
@@ -325,6 +359,10 @@ export async function runScript(script, { send, state, options = {} }) {
             // Style under the box, and a new chat made incognito (chat/styles.rs, chat/incognito.rs).
             ...(step.style ? { style: step.style } : {}),
             ...(step.incognito ? { incognito: true } : {}),
+            ...(step.research ? { research: true } : {}),
+            // ↻ Retry the last answer, or Edit the last message to these words (chat/chats/branches.rs; a Code chat's Rewind).
+            ...(step.retry ? { retry: true } : {}),
+            ...(step.edit ? { edit: true } : {}),
             // A new chat in a project (chat/projects.rs), made first if need be, its files added once.
             ...(step.project
               ? {
@@ -345,7 +383,9 @@ export async function runScript(script, { send, state, options = {} }) {
       } else if (kind === 'answer') {
         // The cards waiting now (a turn's, an agent's): the lab's state has them.
         const id = typeof step.answer === 'string' && step.answer !== 'next' ? step.answer : cardFor(step.answer, (await send('state', {})).pending ?? []);
-        const r = must(await send('answer', { _: [id, step.how ?? 'allow'], timeout: step.timeout ?? 600 }));
+        // (`with`: what an edit, a pick or words said carry — an outline's sections as JSON, an option, the words.)
+        const extra = step.with === undefined ? [] : [typeof step.with === 'string' ? step.with : JSON.stringify(step.with)];
+        const r = must(await send('answer', { _: [id, step.how ?? 'allow', ...extra], timeout: step.timeout ?? 600 }));
         rec.answered = r.answered;
         if (r.turn !== undefined) last = r;
         if (r.agents) agents = r;
@@ -360,6 +400,18 @@ export async function runScript(script, { send, state, options = {} }) {
         }
       } else if (kind === 'set') {
         rec.set = must(await send('set', step.set));
+      } else if (kind === 'lab') {
+        // One of the lab's own commands: `"lab": "archive"` or `["routine", "new"]` (its words), `args` its flags.
+        const [cmd, ...words] = (Array.isArray(step.lab) ? step.lab : [step.lab]).map(String);
+        if (!LAB_STEPS.includes(cmd)) throw new Error(`A lab step is one of ${LAB_STEPS.join(', ')}, not ${cmd}`);
+        const shots = step.shots ?? options.shots;
+        const r = must(await send(cmd, { _: words, ...(step.args ?? {}), ...(shots === false ? { 'no-shots': true } : {}), ...((step.theme ?? options.theme) ? { theme: step.theme ?? options.theme } : {}) }));
+        rec.lab = [cmd, ...words].join(' ');
+        if (r.turn !== undefined) {
+          last = r;
+          if (!out.turns.includes(r.turn)) out.turns.push(r.turn);
+          Object.assign(rec, { turn: r.turn, status: r.status });
+        } else rec.result = r;
       } else if (kind === 'shot') {
         const r = await send('shot', { window: step.window ?? 'thread', name: step.shot || 'shot', ...((step.theme ?? options.theme) ? { theme: step.theme ?? options.theme } : { theme: 'both' }), ...(step.selector ? { selector: step.selector } : {}) });
         if (!r.ok) {

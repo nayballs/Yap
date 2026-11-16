@@ -19,6 +19,8 @@
   let { card } = $props();
 
   const o = $derived(card.outline || { title: card.label || '', sections: [] });
+  // A research's plan (chat/research.rs), not a document's outline: its own words.
+  const research = $derived(!!o.research);
   // Answered here, before Rust's next event says so.
   let sent = $state('');
   const phase = $derived(card.state === 'asking' && sent ? sent : card.state);
@@ -66,10 +68,14 @@
 </script>
 
 {#if asking}
-  <div class="coutline asking" role="group" aria-label="The outline, before the writing" data-testid="chat-outline-card" data-state={phase}>
-    <svg class="oicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h8" /><path d="M4 6h.01M4 12h.01M4 18h.01" /></svg>
+  <div class="coutline asking" role="group" aria-label={research ? 'The research plan, before any search' : 'The outline, before the writing'} data-testid="chat-outline-card" data-research={research || null} data-state={phase}>
+    {#if research}
+      <svg class="oicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" /><path d="m15 15 5 5" /><path d="M8 10.5h5M10.5 8v5" /></svg>
+    {:else}
+      <svg class="oicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h8" /><path d="M4 6h.01M4 12h.01M4 18h.01" /></svg>
+    {/if}
     <div class="obody">
-      <p class="otitle"><strong>The outline</strong> · <span class="oname">{o.title}</span>{#if o.voice}<span class="osay"> · Say go ahead, or what to change</span>{/if}</p>
+      <p class="otitle"><strong>{research ? 'Research plan' : 'The outline'}</strong> · <span class="oname">{o.title}</span>{#if o.voice}<span class="osay"> · Say go ahead, or what to change</span>{/if}</p>
       {#if !editing}
         {#if o.summary}<p class="osum">{o.summary}</p>{/if}
         <ol class="olist" data-testid="chat-outline-sections">
@@ -80,9 +86,9 @@
             </li>
           {/each}
         </ol>
-        <p class="owhy">Nothing is written until you say. Edit to change, reorder or take out a heading, or add a note.</p>
+        <p class="owhy">{research ? 'Nothing is looked up until you say. Edit to change, reorder or take out a part, or add a note for the research.' : 'Nothing is written until you say. Edit to change, reorder or take out a heading, or add a note.'}</p>
         <div class="obtns">
-          <button type="button" class="ogo" onclick={() => answer(null)} disabled={phase === 'sending'}>Go</button>
+          <button type="button" class="ogo" onclick={() => answer(null)} disabled={phase === 'sending'}>{research ? 'Start research' : 'Go'}</button>
           <button type="button" onclick={startEdit} disabled={phase === 'sending'}>Edit</button>
         </div>
       {:else}
@@ -112,11 +118,11 @@
           <button type="button" class="oadd" onclick={addRow}>+ Add a section</button>
         {/if}
         <label class="onote">
-          <span>A note for the writing <span class="oopt">(optional)</span></span>
-          <textarea bind:value={note} rows="2" maxlength="2000" placeholder="Keep it short, for a beginner…" data-testid="chat-outline-note"></textarea>
+          <span>{research ? 'A note for the research' : 'A note for the writing'} <span class="oopt">(optional)</span></span>
+          <textarea bind:value={note} rows="2" maxlength="2000" placeholder={research ? 'Focus on the 1870s, leave out modern keyboards…' : 'Keep it short, for a beginner…'} data-testid="chat-outline-note"></textarea>
         </label>
         <div class="obtns">
-          <button type="button" class="ogo" onclick={goEdited} disabled={phase === 'sending' || !left.length}>Go with these changes</button>
+          <button type="button" class="ogo" onclick={goEdited} disabled={phase === 'sending' || !left.length}>{research ? 'Start with these changes' : 'Go with these changes'}</button>
           <button type="button" onclick={() => (editing = false)} disabled={phase === 'sending'}>Cancel</button>
         </div>
       {/if}
@@ -124,8 +130,8 @@
   </div>
 {:else}
   <!-- Answered: the headings it was written with, what changed and the note, quiet (as a question card keeps its answer). -->
-  <div class="coutline done" role="group" aria-label="The outline" data-testid="chat-outline-card" data-state={phase}>
-    <p class="dtitle">Outline · {o.title}</p>
+  <div class="coutline done" role="group" aria-label={research ? 'The research plan' : 'The outline'} data-testid="chat-outline-card" data-research={research || null} data-state={phase}>
+    <p class="dtitle">{research ? 'Research plan' : 'Outline'} · {o.title}</p>
     <p class="dkeys" data-testid="chat-outline-written">{written.map((s) => s.key).join(' · ')}</p>
     {#if o.note}<p class="dline" data-testid="chat-outline-note-kept">Your note: “{o.note}”</p>{/if}
     {#if o.said}<p class="dline">You said: “{o.said}”</p>{/if}

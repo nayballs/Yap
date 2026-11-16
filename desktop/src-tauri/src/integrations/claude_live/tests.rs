@@ -496,6 +496,23 @@ fn waiting(ep: &Endpoint) -> Pending {
     }
 }
 
+/// **The `yap-claude-approve` event of card `id`**, once it's out. `approve`
+/// puts its card in the pending list *before* it says so (`approve.rs` `ask`:
+/// a card is answerable before anyone hears of it, never the other way
+/// round), so a test that has just seen the card in [`waiting`] can be a
+/// moment ahead of its event — reading the events then found the card
+/// before's (16 Nov 2026: `multiSelect` read as null, 1 run in 3).
+fn announced(events: &Events, id: u64) -> Value {
+    let start = Instant::now();
+    loop {
+        if let Some(v) = events.lock().unwrap().iter().find(|(n, v)| n == "yap-claude-approve" && v["id"].as_u64() == Some(id)).map(|(_, v)| v.clone()) {
+            return v;
+        }
+        assert!(start.elapsed() < Duration::from_secs(10), "card {id} said in time");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 #[test]
 fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
     let folder = temp("approve");
@@ -517,7 +534,7 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
         (card.run.as_str(), card.conversation, card.origin, card.tool.as_str(), card.summary.as_str(), card.detail.as_str(), card.label.as_str()),
         ("agent-7", Some(42), Origin::Voice, "Bash", "Run a command: npm test", "npm test", "Update the guide")
     );
-    let sent = events.lock().unwrap().iter().find(|(n, _)| n == "yap-claude-approve").map(|(_, v)| v.clone()).unwrap();
+    let sent = announced(&events, card.id);
     assert_eq!((sent["id"].as_u64(), sent["run"].as_str(), sent["origin"].as_str(), sent["summary"].as_str()), (Some(card.id), Some("agent-7"), Some("voice"), Some("Run a command: npm test")));
     assert!(ep.approvals.answer(card.id, true));
     assert!(!ep.approvals.answer(card.id, false), "answered once");
@@ -570,7 +587,7 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
     assert_eq!(card.questions.len(), 2);
     assert_eq!(card.questions[0].options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(), ["Summary", "Detailed"]);
     assert!(card.questions[1].multi_select && !card.questions[0].multi_select);
-    let shown = events.lock().unwrap().iter().rev().find(|(n, _)| n == "yap-claude-approve").map(|(_, v)| v.clone()).unwrap();
+    let shown = announced(&events, card.id);
     assert_eq!(shown["questions"][1]["multiSelect"], true);
     assert_eq!(shown["questions"][0]["options"][0], json!({ "label": "Summary", "description": "Brief overview" }));
     // Nothing of it answered: still waiting. Another card's question: never its answer.

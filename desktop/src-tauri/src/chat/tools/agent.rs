@@ -306,6 +306,9 @@ struct Loop<'a> {
     /// A new document's first step answered in words: asked once to outline
     /// it (`web::Turn::outline_first`).
     outline_nudged: bool,
+    /// A research turn answered in words before any search: asked once to
+    /// research first (chat/research.rs).
+    research_nudged: bool,
     /// Claude's own tools in the step before (the Messages API's steps):
     /// when they change, its earlier thinking is left out (`step.rs`
     /// `claude_step`).
@@ -446,8 +449,10 @@ async fn tool_loop(
     // `web_search` and `read_page` aren't offered beside them.
     let claude_web = web.as_deref().is_some_and(|t| t.server_tools().is_some());
     // A cloud model on its provider's own search: no `read_page` beside it.
-    let own_search = web.as_deref().is_some_and(crate::web::Turn::own_search);
-    let extra = Extra { own_search: extra.own_search || own_search, ..extra };
+    // (A research turn reads pages itself whatever its search: its report
+    // cites only the pages read, chat/research.rs.)
+    let own_search = web.as_deref().is_some_and(crate::web::Turn::own_search) && extra.research.is_none();
+    let extra = Extra { own_search: (extra.own_search || own_search) && extra.research.is_none(), ..extra };
     let tools = offered_tools(open_apps, web.is_some() && !claude_web, extra);
     // A question that carries another app's or a page's selected words
     // (`Extra::web_question`) is web content from the start.
@@ -494,13 +499,21 @@ async fn tool_loop(
         rejected: 0,
         finish_nudges: 0,
         outline_nudged: false,
+        research_nudged: false,
         claude_tools: None,
     };
     // Yap searches first: the results go to the model as its own call's.
     if let FirstStep::YapSearches(query) = &first {
         turn.search_for(query).await;
     }
-    for _step in 0..MAX_TOOL_STEPS {
+    // A research turn has more steps, and past its time the report with no
+    // tools (chat/research.rs).
+    let steps = if extra.research.is_some() { crate::chat::research::STEPS } else { MAX_TOOL_STEPS };
+    for _step in 0..steps {
+        if extra.research.is_some_and(|b| b.overdue()) {
+            tracing::info!("Chat: the research is past its time; the report now");
+            break;
+        }
         match turn.step().await? {
             Step::Again => continue,
             Step::Answer(content) => return Ok((content, turn.tools_used)),
@@ -1152,6 +1165,54 @@ mod tests {
         // Every page kept with the answer, the one the document cites marked.
         let kept = turn.sources_for(&reply);
         assert_eq!(kept.iter().map(|s| (s.n, s.cited)).collect::<Vec<_>>(), [(1, true), (2, false)]);
+    }
+
+    /// **A research turn** (chat/research.rs): asked to search first when it
+    /// answers before any search, the web's tools run and an app doesn't, the
+    /// report is its answer; past its time and grace the last call has no
+    /// tools and asks for the report.
+    #[tokio::test]
+    async fn a_research_turn_searches_first_runs_only_the_web_and_ends_with_the_report() {
+        use crate::chat::research::{Budget, Caps};
+        let exa = json!({ "results": [{ "title": "QWERTY", "url": "https://keyboards.example/qwerty", "highlights": ["Made for the typewriter."] }] });
+        let report = "# QWERTY\n\n## Summary\n\nIt came from the typewriter [1].";
+        let fake = fake_server(
+            vec![
+                json!({ "role": "assistant", "content": "I'll research this for you." }),
+                calls(&[("web_search", json!({ "query": "qwerty history" })), ("open_app", json!({ "name": "Calculator" }))]),
+                json!({ "role": "assistant", "content": report }),
+            ],
+            exa.clone(),
+        );
+        let settings = crate::web::Settings { service: crate::web::Service::Exa, key: "fake-key".into(), lang: "en".into(), native: None, country: None, local: None, units: None };
+        let endpoints = crate::web::Endpoints { exa: format!("{}/exa", fake.base), tavily: String::new(), standin: None, offline: false };
+        let budget = Budget::start(Caps::USUAL);
+        let mut turn = crate::web::Turn::new(settings.clone(), endpoints.clone(), "research qwerty", &[]).research(budget);
+        let extra = Extra { research: Some(budget), strong: true, ..Default::default() };
+        let (reply, chips) = tool_loop("You are helpful.", &[], "research qwerty", &[], &format!("{}/v1", fake.base), "", "fake-gpt-5", "custom", false, true, &|_| {}, Some(&mut turn), FirstStep::Model, extra, None)
+            .await
+            .expect("the report");
+        assert_eq!(reply, report);
+        assert_eq!(chips.iter().filter(|c| c.starts_with("Searched the web")).count(), 1, "{chips:?}");
+        let requests = fake.requests.lock().unwrap().clone();
+        let chat: Vec<&Value> = requests.iter().filter(|(u, _)| u.ends_with("/chat/completions")).map(|(_, b)| b).collect();
+        assert_eq!(chat.len(), 3);
+        assert_eq!(chat[1]["messages"].as_array().unwrap().last().unwrap()["content"], json!(crate::chat::research::SEARCH_FIRST));
+        let refused = chat[2]["messages"].as_array().unwrap().iter().find(|m| m["role"] == "tool" && m["content"].as_str().unwrap_or("").contains("open_app doesn't run in a research turn"));
+        assert!(refused.is_some(), "{:?}", chat[2]["messages"]);
+        // Past its time and grace: the report, with no tools.
+        let fake = fake_server(vec![json!({ "role": "assistant", "content": report })], exa);
+        let late = Budget::started_ago(Caps::USUAL, Caps::USUAL.time + crate::chat::research::GRACE);
+        let mut turn = crate::web::Turn::new(settings, crate::web::Endpoints { exa: format!("{}/exa", fake.base), ..endpoints }, "research qwerty", &[]).research(late);
+        let extra = Extra { research: Some(late), ..Default::default() };
+        let (reply, _) = tool_loop("You are helpful.", &[], "research qwerty", &[], &format!("{}/v1", fake.base), "", "fake-gpt-5", "custom", false, false, &|_| {}, Some(&mut turn), FirstStep::Model, extra, None)
+            .await
+            .expect("the report");
+        assert_eq!(reply, report);
+        let requests = fake.requests.lock().unwrap().clone();
+        let last = &requests.iter().find(|(u, _)| u.ends_with("/chat/completions")).unwrap().1;
+        assert!(last.get("tools").is_none(), "no tools: {last}");
+        assert_eq!(last["messages"].as_array().unwrap().last().unwrap()["content"], json!(crate::chat::research::WRITE_NOW));
     }
 
     #[tokio::test]

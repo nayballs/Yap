@@ -258,7 +258,8 @@ unchanged).
   dialog: Esc, ✕, the scrim), **Microphone help** (Settings → Dictation at
   the mic quiz, `dictation#mic-quiz`), **Languages** (`dictation#languages`),
   **Report a problem** (`about#report`), **What's new** (`WhatsNew.svelte`:
-  the release notes Yap has here — an update's, `updates.notes` — rendered;
+  the release notes Yap has here — an update's, `updates.notes` — rendered,
+  maths, diagrams and pictures drawn (`use:markdownVisuals`, as About's);
   without any, the release page on GitHub) and **GitHub**. `help.spec.js`.
 - **"Set up meeting notes" (2026-10-29, `lib/views/MeetingSetup.svelte`)**
   — a small card in the sidebar above Settings (Wispr Flow's "Set up
@@ -317,7 +318,9 @@ unchanged).
   `onExpire` (timer ran out, or waited too long) callbacks, copyable mono
   error boxes, progress hairlines (`duration <= 0` sticky), plus a
   determinate `progress` bar, a `busy` chip spinner and an `expand` "What's
-  new" toggle that unfolds markdown in the card; `updateToast(id, patch)`
+  new" toggle that unfolds markdown in the card (its maths, diagrams and
+  pictures drawn by `ui/markdownVisuals.js` on the card's dark colours, 16
+  Nov 2026: notes.md "Maths, diagrams, diffs and pictures"); `updateToast(id, patch)`
   changes a toast in place (on screen or waiting); `isToastLive` = not
   closed. It runs **Yap's notice policy** (`ui/noticePolicy.js`, the page's
   half of `notices/policy.rs`): every toast has a `kind` (prompt | offer | alert |

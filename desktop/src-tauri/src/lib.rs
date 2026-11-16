@@ -128,6 +128,15 @@ pub fn run_fake_gh() -> i32 {
     agents::prs::fake::main(std::env::args().skip(2).collect())
 }
 
+/// `yap.exe lab-gh <gh.exe> …` (main.rs, debug builds): Yap Lab's
+/// read-only GitHub CLI — only `gh pr list` and `gh pr view`, only on Yap's
+/// own public repository (`agents/prs/lab.rs`). Nothing of the app itself
+/// starts.
+#[cfg(debug_assertions)]
+pub fn run_lab_gh() -> i32 {
+    agents::prs::lab::main(std::env::args().skip(2).collect())
+}
+
 /// `yap.exe eval …` (main.rs): the model evaluation harness (`eval.rs`,
 /// docs/model-evals.md). Debug builds only; a release build says so and
 /// exits. Returns the exit code (0 = every scenario passed).
@@ -551,6 +560,7 @@ pub fn run() {
             chat::documents::chat_document_save,
             chat::documents::chat_quote_set,
             chat::think::chat_think_info,
+            chat::research::chat_research_info,
             chat::stream::stream_stop,
             chat::stream::stream_stop_conversation,
             chat::stream::chat_answering,
@@ -927,6 +937,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_gh_script,
             #[cfg(debug_assertions)]
+            shell::e2e::e2e_gh_lab,
+            #[cfg(debug_assertions)]
             shell::e2e::e2e_agents_seed,
             #[cfg(debug_assertions)]
             ai::claude_plan::spare::e2e_claude_spares,
@@ -1000,6 +1012,8 @@ pub fn run() {
             notices::policy::e2e_notice_reset,
             #[cfg(debug_assertions)]
             chat::auto_archive::e2e_chat_auto_archive,
+            #[cfg(debug_assertions)]
+            chat::auto_archive::e2e_chat_age,
             #[cfg(debug_assertions)]
             notices::policy::e2e_notice,
             #[cfg(debug_assertions)]

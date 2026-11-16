@@ -9,8 +9,9 @@
 //         [--stale-ok] [--fake [--live-web]] [--idle <min>]
 //         [--size 1280x860] [--no-shots] [--theme light|dark]
 //   check                                  is Claude Code here and signed in?
-//   ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>]
+//   ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>]
 //       [--timeout 600] [--no-shots] [--theme light|dark]
+//       (--away: asked from another app, so the answer is a card on the Yap bar)
 //   wait [--timeout 600] [--agents [--cards allow|deny]]
 //   answer <card-id> allow|deny|always [--timeout 600] [--no-wait]
 //   answer <card-id> pick "<option>"       a question card ("A|B": several questions, "A,B": several picks)
@@ -24,7 +25,14 @@
 //   click --window main|thread|panel --css <selector>   (one of Yap's own buttons, as the person would)
 //   pick "<words on the page>" | pick --css <selector>   select an element beside the chat
 //   side "<question>" [--keep] [--close] [--timeout 180]   a side question (Ctrl+;) about the chat shown
-//   set '<json>' | set [--web on|off] [--yap-code on|off] [--connectors on|off]
+//   set '<json>' | set [--web on|off] [--yap-code on|off] [--connectors on|off] [--gh on|off] [--git <branch>]
+//   routine new --skill <cmd> [--instructions "<…>"] [--in <min> | --at HH:MM | --after-meeting [--with-note]] [--away]
+//   routine now <id> | routine wait | routine list | routine on|off|delete <id>
+//   meeting "<title>" [--folder <f>] [--lines "them: …|you: …"]   a made-up meeting, recorded and ended
+//   age <days> [--chat <id>|same|all]      chats made older (auto-archive)
+//   archive [--days 7|30|90] [--undo]      auto-archive's run now, its notice and Undo
+//   summary [--chat <id>|same]             a Code chat's summary: its branch's pull requests (set --gh on)
+//   kept save [--name <file>] | kept open  a kept page's Save as… / Open in browser, no dialog, not your browser
 //   report <prompt> [--timeout 540] [--cards deny|allow] [--no-wait]
 //   sheet [--turns 1-3] [--out <png>]      a contact sheet of the run's shots
 //   run <script.json|.mjs> [--no-shots] [--theme light|dark]
@@ -35,7 +43,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { APP, REPO, buildFresh, exeIn, headCommit, labDir, onOff, parseArgs, parseModel, parseSize, stampIn, targetDir } from './options.mjs';
+import { APP, REPO, buildFresh, exeIn, headCommit, labDir, localServer, onOff, parseArgs, parseModel, parseSize, stampIn, targetDir } from './options.mjs';
 import { loadScript, runScript, scriptFile } from './script.mjs';
 import { makeSheet, runShots } from './sheet.mjs';
 import { themesOf } from './shots.mjs';
@@ -119,6 +127,8 @@ async function start(args, { check = false } = {}) {
   if (model.kind === 'api' && !process.env.YAP_LAB_ANTHROPIC_KEY) {
     return { ok: false, error: 'An Anthropic API model needs YAP_LAB_ANTHROPIC_KEY set by the person (it costs money; the lab never reads a key from anywhere else)' };
   }
+  // The on-device model: Yap's tool loop on a server of this PC's (said before anything starts).
+  if (model.kind === 'local') localServer(process.env.YAP_LAB_LOCAL_LLM);
   const web = onOff(args.web, true, 'web');
   const yapCode = onOff(args['yap-code'], false, 'yap-code');
   const connectors = onOff(args.connectors, false, 'connectors');
@@ -248,9 +258,15 @@ async function main() {
     case 'agents':
     case 'logs':
     case 'report':
+    case 'routine':
+    case 'meeting':
+    case 'age':
+    case 'archive':
+    case 'summary':
+    case 'kept':
       return send(command, args);
     default:
-      return { ok: false, error: `Commands: build, start, check, ask, side, wait, answer, cancel, shot, probe, click, pick, set, state, agents, logs, report, sheet, run, fake, stop (docs/lab.md)` };
+      return { ok: false, error: `Commands: build, start, check, ask, side, wait, answer, cancel, shot, probe, click, pick, set, state, agents, logs, report, sheet, run, fake, routine, meeting, age, archive, summary, kept, stop (docs/lab.md)` };
   }
 }
 

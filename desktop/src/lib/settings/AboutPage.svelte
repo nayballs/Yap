@@ -16,8 +16,11 @@
   import ReportProblem from './ReportProblem.svelte';
   import { updates, installUpdate, checkForUpdates, openRelease, formatAgo } from '../stores/updates.svelte.js';
   import { renderMarkdown } from '../core/markdown.js';
+  import { markdownVisuals } from '../ui/markdownVisuals.js';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
 
+  // An update's notes: markdown as Chat renders it, its maths, diagrams and
+  // pictures drawn (ui/markdownVisuals.js; a picture only when clicked).
   let { cfg, version = '', goto = null } = $props();
 </script>
 
@@ -104,7 +107,7 @@
         <div class="upd-notes">
           <div class="upd-notes-h">What’s new in {updates.version}</div>
           <!-- renderMarkdown passes no raw HTML and sanitises its output (lib/core/markdown.js). -->
-          <div class="upd-notes-b">{@html renderMarkdown(updates.notes)}</div>
+          <div class="upd-notes-b" use:markdownVisuals>{@html renderMarkdown(updates.notes)}</div>
         </div>
       {/if}
       {#if updates.version && ['ready', 'available', 'downloading'].includes(updates.status)}
@@ -243,6 +246,16 @@
   }
   .upd-notes-b :global(:last-child) {
     margin-bottom: 0;
+  }
+  .upd-notes-b :global(pre.md-code) {
+    margin: 0 0 6px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: var(--yap-s1);
+    white-space: pre-wrap;
+  }
+  .upd-notes-b :global(img.md-img) {
+    max-height: 240px;
   }
   .upd-bar {
     margin-top: 10px;

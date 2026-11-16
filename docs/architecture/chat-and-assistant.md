@@ -1988,6 +1988,11 @@ one side.
   written (Normal, Concise, Explanatory, Formal, your own), picked from the
   composer's Style chip, a block in the system prompt
   ([below](#styles-2026-11-15)).
+- **`chat/research.rs`** (+ `chat/turn/research.rs`) — **Research** (16 Nov
+  2026, the Claude app's Research mode): the composer's Research switch or a
+  plain "research …"; a plan to approve first, many searches and page reads
+  within hard caps, then a long report as a document beside the chat citing
+  only the pages read ([below](#research-2026-11-16)).
 - **`chat/auto_archive.rs`** — **Auto-archive** (15 Nov 2026, the Claude
   app's): chats not used in 7, 30 or 90 days moved to Archived by
   themselves, at start and once a day, never one at work; off by default
@@ -5638,7 +5643,14 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   prompt with Yap's added, read only (`Read`, `Grep`, `Glob`), no memory
   ([yap-code.md](./yap-code.md#memory-and-the-plan-in-a-code-chat), [ai-models.md](./ai-models.md#a-chat-turn-chatturnplanrs)).
 - **The question**: the turn's context and the question
-  (`chats::with_context`), its screenshots as image blocks.
+  (`chats::with_context`), its screenshots as image blocks. **Across the
+  meetings** (Ask across meetings, and every Skill: a routine's, or `/name`
+  typed) the context starts with what Chat's own prompt says in its system
+  part — answer from the passages and cite them, and the Skill's own
+  instructions (`plan.rs` `across_lines`, 16 Nov 2026) — since the plan's
+  system prompt is the session's and stays the same every turn. Before,
+  they never reached Claude Code: Yap Lab's routine on Opus answered
+  "There's no `/lighthouse-fact` command in Yap's Chat".
 - **Its events → Chat's stream** (`claude_plan/map.rs`, pure): text deltas as
   `Delta::Content`, a step per model message (text written before a tool
   call is taken back, never the answer: so the Voice Assistant never says
@@ -6276,6 +6288,127 @@ Claude Code's own).
   block in the request, kept per chat and for a new one; one written from a
   description, edited, used and deleted; light and dark).
 
+## Research (2026-11-16)
+
+The Claude app's Research mode, matched from Anthropic's help pages ("Use
+research on Claude": turned on under the message box with web search on,
+"multiple searches that build on each other", deciding what to look into
+next from what it finds, a thorough answer "with easy-to-check
+citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
+
+- **Asked for**: the **Research** chip under the message box beside Style
+  (`ResearchChip.svelte`, `chatResearch.svelte.js`): on, it's in the accent
+  and every question from the box is researched, until it's turned off (as
+  the Claude app's stays; for this run of Yap, never saved). Greyed, its
+  tooltip saying why, when Chat's model can't (`chat_research_info`: web
+  search off, a model that can't call tools); a click then says so. Or a
+  message that plainly asks (`research::asks`: "research the history of…",
+  "can you research…", "do some research on…", "deep research", "a deep dive
+  into…", "a research report on…"; never "what does the research say",
+  "research shows…"). Typed or dictated in Chat only: never a Code chat,
+  across the meetings, a Skill, a passage selected or the Voice Assistant
+  (`turn/research.rs` `wanted`); the page sends `research` with `chat_send`
+  (`research::scoped`, a task-local).
+- **The model decides, in its plan step** (`PLAN_PROMPT`, one call with no
+  tools on Chat's model — your Claude plan's one-shot run too —, counted as
+  any): JSON `{research, title, summary, sections: [{key, intent}]}`, 3 to 6
+  parts (at most `MAX_PARTS`), each a question the research answers; `{"research":
+  false}` for a greeting, a thanks, a question about the chat — then the
+  turn goes on as any other. A reply with no plan (or a failed call): a plan
+  from the question's words (`fallback_plan`: "Background", "What the
+  sources say", "What it means").
+- **The plan the person sees first**: the outline card's
+  (`cards/outline.rs` `review`, [The outline before the
+  writing](#the-outline-before-the-writing-2026-11-15)) with
+  `OutlineCard::research`: "Research plan · *title*", the parts, **Start
+  research** and **Edit** (rename, reorder, take out, add, "A note for the
+  research"), the line "Waiting for you: the research plan". Shown whatever
+  "Show the outline before writing" says; nobody watching (an evaluation):
+  researched as planned. Answered: "Researched as planned", "Researched with
+  your changes"; a no (out loud) or ■ Stop: nothing researched. An older
+  Yap's save drops `research` and the card reads as an outline.
+- **The loop**, once they say go: the question's context gets the plan and
+  how to research it (`research::instructions`: searches that build on each
+  other, read the pages the facts come from — a result's snippet isn't a
+  source —, each part of the plan; then the report as the answer: # title,
+  ## Summary of two to four sentences, a ## section per part, every fact
+  cited by the number of a page **read**, no sources list, no note or
+  document of its own). **Yap's tool loop** (`run::with_tools` with a
+  `Budget`): `web::Turn::research` — its reach the caps', Claude's own web
+  tools the deeper ones (`max_uses`, its fetches as many as the reads), a
+  provider's own search gets Yap's `read_page` beside it too (the report
+  cites only pages read; decided 16 Nov 2026, against "own tools only" for
+  this one mode) —; the gate runs only the web's tools and the notes' reads
+  (`research::allows`; anything else — an app, the clipboard, memory, a
+  note, a document, an agent, a page click — refused with
+  `research::refusal`); `STEPS` (40) steps; a first step that answers before
+  any search is asked once to search first (`SEARCH_FIRST`); past its time
+  and `GRACE` the last call has no tools and says `WRITE_NOW`. **Your Claude
+  plan** (`plan::answer` with a `Budget`): the conversation's warm Claude Code
+  session (its fingerprint unchanged: the research's words go in the
+  question's context), `WebSearch` and `WebFetch` and Yap's read-only tools,
+  none of the screen, the pages beside the chat, agents, connectors, cards
+  or visuals this turn; Claude Code's own tools can't be refused one at a
+  time, so Yap stops its turn at the first call past a cap (`research::past`:
+  `Mapper::web_calls`, the searches and fetches begun, a fetch that failed
+  not counted; both caps reached; the
+  time — a timer of its own —, or the tokens: `Mapper::tokens`, the
+  session's calls so far, plus the turn's), interrupts it, counts its usage,
+  and asks for the report on the same session (`write_now_after`), chip
+  "Stopped researching: research limit: 20 searches".
+- **Hard caps** (`research::Caps`): `SEARCHES` 20, `READS` 12 (as many as half
+  the model's request holds in pages of 3,000 tokens, or Claude's fetch's
+  8,000: at least `MIN_READS` 4), `TIME` 10 minutes (+ `GRACE` 3 for the
+  report), `TOKENS` 1,000,000 read and written by the turn's calls together —
+  every call counted where `ai/usage.rs` counts it (`llm::post_chat_request`'s
+  `usage::record_response`), its turn's sum `usage::turn_tokens` (the
+  `tallied` turn's every call, a provider's search sub-call too). A search or
+  read past a cap is refused with what ran out and "write the report now…"
+  (`Spent::line`), its chip "Didn't search for "…": research limit: 20
+  searches".
+- **Progress**: the report's words never stream into the thread
+  (`research::Quiet`, over the page's stream): the activity line says what's
+  under way with the count so far ("Reading en.wikipedia.org/wiki/QWERTY ·
+  6 searches, 3 pages read"), then "Writing the report · …"; each search and
+  read a chip as ever. **■ Stop** at any point (the plan, the card, the
+  loop): "Research stopped before the report was written.", the pages read
+  kept as its sources, no document.
+- **The report** (`research::report`, pure): its # title (else the plan's),
+  a byline ("*Researched 16 November 2026 · 12 searches, 8 pages read*"), the
+  sections, and every `[n]` kept only for a page the turn **read** (Yap's
+  `read_page`, Claude's fetch, Claude Code's `WebFetch`: `Source::opened`) —
+  a page only seen in results, or a number that's none, goes, with its space
+  —, renumbered 1, 2, 3… as the report first cites them, each a link to its
+  page (`[[1]](https://…)`); a sources list of its own ("## Sources",
+  "References"…) goes; Yap's **## Sources** follows, numbered, each the page's
+  title, link and site. It's a document (`documents::create_report`: a note
+  in Chat documents, Chat's version, `Event::Document` opens the panel, the
+  turn's `doc_turn` keeps its pill). **In the thread**: the report's
+  ## Summary (else its first paragraph) with the same numbers as pills, then
+  "The full report is open on the right.", the document's card, the chips
+  with "Researched for 6 min: 12 searches, 8 pages read" and "Wrote the
+  report “…”" (folded: "…, researched it, wrote the report"), and the Sources
+  row: the cited pages as numbered, then the others read — never a result
+  nobody opened (a Lab run on Opus found 103 pages and read 8).
+- **The outside-content rules hold**: it's Chat's own loop, so the safety
+  rule runs on every call as ever (`tools::refused_after_outside`) — and a
+  research runs none of the tools it locks anyway. The plan step has no
+  tools and reads no outside content.
+- **Retry and Edit**: a question that plainly asks ("research …") researches
+  again; one researched by the switch alone is answered as an ordinary
+  question (the switch isn't kept with the question).
+- The log has counts, caps and times, never the question, a plan's words, a
+  query or an address.
+- Tests: `cargo test chat::research` (a plain ask, the caps, the reads sized
+  to the request, the plan read, the loop's words, citations only to pages
+  read and numbered as first cited, progress, the quiet stream, a plan turn's
+  caps); `chat::tools::agent` (a research turn's gate); e2e
+  `chat-research.spec.js` (the switch, the plan before any search, the loop on
+  the free sources with its progress, an app and memory refused, the report
+  beside the chat with its citations and Sources, ■ Stop, a plain ask, a
+  greeting, web search off; light and dark); Yap Lab on Opus on the plan
+  (`research the history of the QWERTY keyboard layout`).
+
 ## Projects (2026-11-15)
 
 The Claude app's projects, from Anthropic's help pages: a named group of
@@ -6482,7 +6615,11 @@ a chat whose last message is that many days old or more moves to
   `chat-auto-archive.spec.js` (archived at start, a newer chat and a
   meeting's Ask kept, the setting on its page, Undo; a run's notice with
   Undo, a Code chat with a ▶ Run running kept until it's stopped, then
-  archived).
+  archived); Yap Lab's `auto-archive` script (16 Nov 2026) on real chats,
+  made older by test mode's `e2e_chat_age` (`chats::age_by`: their start,
+  last use and messages' times moved back; `lab age`), the run asked for
+  with `e2e_chat_auto_archive` (`lab archive`: what it took, the notice, its
+  Undo; [lab.md](../lab.md#the-labs-own-turns-16-nov-2026)).
 
 ## Side questions (Ctrl+;, 2026-11-15)
 

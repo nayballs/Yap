@@ -64,6 +64,13 @@ maintainer's keeps every build there), else `desktop/src-tauri/target/lab`. A ke
 cache: leave it there. Writes `lab-build.json` beside `debug/` (the commit it was built
 from). The build's output goes to `test-results/lab/build.log`.
 
+**From a git worktree** (a session's own checkout), `E:\Builds\yap-lab` is refused
+(16 Nov 2026): it's the main checkout's kept cache, which a branch's build would
+overwrite and whose build a lab started there would run. Set `YAP_LAB_TARGET_DIR` to a
+folder of the task's own (`E:\Builds\yap\<task>\lab`) for **every** `lab` and
+`test:lab` command (`build`, `start`, `check`, `run` look there); `build`, `start` and
+`npm run test:lab` say so and stop otherwise.
+
 ```json
 {"ok":true,"exe":"E:\\Builds\\yap-lab\\debug\\yap.exe","commit":"29e5e3917919a1a430e3ac9e69395ac8a69ae038","dirty":true,"log":"…\\test-results\\lab\\build.log","ms":58891}
 ```
@@ -76,7 +83,7 @@ token in `control.json`). Returns once the test Yap is ready.
 
 | Option | |
 |---|---|
-| `--model <m>` | `claude-plan` (the default: the plan's Claude Sonnet 5.5), `claude-plan:<model id>`, or `haiku` / `sonnet` / `opus` / `fable` (Claude Fable 5.2) — all on the person's Claude plan. `anthropic:<model id>`: the Anthropic API on `YAP_LAB_ANTHROPIC_KEY` (money; refused without it). |
+| `--model <m>` | `claude-plan` (the default: the plan's Claude Sonnet 5.5), `claude-plan:<model id>`, or `haiku` / `sonnet` / `opus` / `fable` (Claude Fable 5.2) — all on the person's Claude plan. `anthropic:<model id>`: the Anthropic API on `YAP_LAB_ANTHROPIC_KEY` (money; refused without it). `ondevice[:<gguf file>]` (16 Nov 2026): Yap's own tool loop on the on-device model, free — its sidecar an OpenAI-compatible server **you** started on this PC, named in `YAP_LAB_LOCAL_LLM=http://127.0.0.1:<port>/v1` (test mode's stand-in path, `YAP_E2E_LOCAL_LLM`, with an empty model file of that name in the lab's data folder): see [A model of Yap's own tool loop](#a-model-of-yaps-own-tool-loop-the-on-device-one). |
 | `--effort <e>` | `low`, `medium`, `high`, `xhigh`, `max`: Chat's effort for that model. |
 | `--web on\|off` | Web search and the pages beside the chat (default on). |
 | `--yap-code on\|off` | Yap Code: agents, Code chats (default off). With it, the scratch workspace `lab-sandbox` is made (a tiny made-up project) and added, unless `--workspace <dir>` names another; `--keep-workspace` keeps the scratch one's changes from last time. |
@@ -97,12 +104,28 @@ old or **not signed in, it says so and stops** — the lab never signs in.
 {"ok":true,"pid":30064,"model":{"kind":"plan","provider":"claude-plan","model":"claude-sonnet-5-5"},"dataDir":"…\\test-results\\lab\\runs\\lab\\app\\Data","windows":["onboarding","settings","notepad","quick-note","overlay"],"window":{"width":1280,"height":860,"dpr":1},"yapPid":49136,"claudeCode":{"installed":true,"version":"2.1.296","tooOld":false,"signedIn":true,"plan":"max","authMethod":"claude.ai","error":null,"standIn":false},"lab":"…\\test-results\\lab"}
 ```
 
+### A model of Yap's own tool loop: the on-device one
+
+A plan chat is the person's own Claude Code: Yap's tool loop never runs there, so what
+only the tool loop has — documents beside the chat and their outline card, among others —
+can't be tried on the plan. `--model ondevice` tries them on a real model for free: the
+on-device Qwen, served by llama.cpp's own `llama-server` that **you** start (the lab never
+starts or downloads one), with Yap's own sidecar arguments:
+
+```bash
+# a copy of the engine Yap downloaded (never run from %APPDATA%\yap), the model read where it is
+llama-server.exe --host 127.0.0.1 --port 8791 -m "%APPDATA%\yap\llm\Qwen_Qwen3.5-4B-Q4_K_M.gguf" -ngl 999 -c 16384 --reasoning off --alias Qwen_Qwen3.5-4B-Q4_K_M --no-webui
+YAP_LAB_LOCAL_LLM=http://127.0.0.1:8791/v1 npm run -s lab -- start --model ondevice
+```
+
+It reads the model file and writes nothing of Yap's. Stop the server when you're done.
+
 ### `check`
 
 `start` on the plan, then `stop`: is Claude Code on this PC and signed in, as Yap sees
 it? Asks the model nothing.
 
-### `ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry] [--edit] [--style <name>] [--incognito] [--project <name> [--project-instructions <text>] [--project-page] [--project-files <path>[,<path>…]]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
+### `ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry] [--edit] [--style <name>] [--research] [--incognito] [--project <name> [--project-instructions <text>] [--project-page] [--project-files <path>[,<path>…]]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
 
 Puts a question to Chat and waits until the turn ends (answered, stopped or failed),
 **or a card waits for the person**, or `--timeout` seconds pass.
@@ -110,7 +133,11 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
 - Typed: in Chat's own box and Send, as a person would (Playwright over CDP: the
   same `chat_send` and stream the Chat view uses). `--spoken`: through the Voice
   Assistant's path (`e2e_assistant_ask`: its shortcut's steps with the words in place
-  of the microphone).
+  of the microphone). The test Yap's window counts as in front, so a spoken answer
+  shows in Chat; `--spoken --away` (16 Nov 2026) asks it from another app instead
+  (`e2e_focus`, as the e2e suite's `inAnotherApp`): the answer is the Voice
+  Assistant's card on the Yap bar, for `shot --window bar` (or `probe --window bar`).
+  It stays so until a question is asked without `--away`.
 - `--chat new` (default) a new chat; `same` the last turn's conversation (left as it
   is when Chat still shows it: a follow-up in a Code chat too); `<id>` that
   conversation (Chat opens on it); `code:<workspace>` a new Code chat there
@@ -131,6 +158,11 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   in view instead of pressing its New chat — with `--spoken`, the Voice Assistant's new
   chat starts in it. A feature script's `ask` step takes `style`, `incognito`,
   `project`, `projectInstructions`, `projectFiles` (a list) and `projectPage` too.
+- `--research` (16 Nov 2026): Research under the message box switched on first
+  (`chat/research.rs`; refused when it can't be, its tooltip saying why). Its plan is a
+  card (`kind: "outline"`, its `outline` the plan): `answer confirm:<n> allow` clicks
+  **Start research**, `edit` changes it, as a document's outline. A plain "research …"
+  researches without the switch. A feature script's `ask` step takes `research` too.
 - `--while`: typed and sent in the chat shown **while a turn still goes**, as the person
   would mid-answer (14 Nov 2026, the message box's queue), with no turn of the lab's
   own: returns at once; the queued bubble, its ✓✓ and the answers show in the thread
@@ -142,9 +174,12 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   person's last message to `<text>` — the pencil, the words in place, Save and send —
   a new version from there. Both are turns of the lab's own, waited on as `ask` is.
   In a Code chat both go through Rewind (no versions kept) and ask first ("Retry from
-  this message?"): the lab presses its confirm, as the person would. There the turn's
-  `answer` comes back empty (the session's new answer isn't read back yet): `shot
-  --window thread` or `probe --text` shows it.
+  this message?"): the lab presses its confirm, as the person would. The turn starts at
+  the person's message it answers again (`turns.mjs` `branchFrom`), so its `answer` is
+  the new one — in a Code chat too, where Rewind cuts the thread there and asks again
+  (16 Nov 2026: before, the lab looked after the conversation's length when asked and
+  came back empty). A Retry's `question` is that message; the JSON says `branch:
+  "retry"` or `"edit"`. A script's `ask` step takes `retry: true` / `edit: true`.
 - `--cards allow|deny`: answer every card this turn asks at once (otherwise `ask`
   returns `status: "waiting"` and you `answer` it).
 - `shots`: the turn's screenshots ([Screenshots](#screenshots)) — after it ends, and
@@ -238,8 +273,9 @@ or the same as `ask "the second one" --spoken --chat same` while the card waits.
 Edit's Go (each section a heading, or `{key, intent}`), and `said "drop the second part"`
 (or `ask "…" --spoken --chat same`) answers it out loud. The lab seeds the e2e suite's
 config, which has "Show the outline before writing" off: `set '{"config":{"chatOutlineReview":true}}'`
-first. A plan chat makes no documents: the outline needs a model of the tool loop (`--fake`,
-or `--model anthropic:…`).
+first. A plan chat makes no documents (it's Claude Code's: no `create_document`): the outline
+needs a model of the tool loop — `--model ondevice` (free: [below](#a-model-of-yaps-own-tool-loop-the-on-device-one)),
+`--fake`, or `--model anthropic:…` (money). The `outline-card` script.
 
 **Comments on an agent's plan** (`claude_live/approve.rs`, 15 Nov 2026): `answer approve:<n>
 revise "seedlings every morning::Every other morning is enough|::Water the herbs too"` sends
@@ -332,6 +368,115 @@ height, shape, color, background}}]` seeded into **the lab's scratch workspace o
 ```json
 {"ok":true,"config":{"webSearch":true},"files":["pictures/sun.png","notes.md"]}
 ```
+
+Two more (16 Nov 2026), for a Code chat summary's Changes (`summary` below):
+
+- `--gh on|off`: **the lab's read-only `gh`** (`agents/prs/lab.rs`, only in a live lab:
+  never the e2e suite, never `--fake`). Test mode never runs the person's GitHub CLI, so
+  a test Yap's summary says "Install GitHub's gh". With it on, Yap's calls go through
+  `yap.exe lab-gh <gh.exe> …`, which runs the person's own `gh` (their own sign-in, as
+  the app does) **only** for `gh pr list` and `gh pr view`, **only** with their reading
+  flags (`--head`, `--state`, `--limit`, `--json`; one pull request for `view`), and
+  **only** on Yap's own public repository (`--repo nayballs/Yap` added; another `--repo`
+  refused). Anything else — `--web` (the person's browser), `--jq`, `--template`, another
+  command — is refused before `gh` starts. Off: test mode's "no gh" again.
+- `--git <branch>`: the scratch workspace made a git repository on that branch, its one
+  remote `https://github.com/nayballs/Yap.git` — no commit, nothing fetched or pushed (Yap
+  reads the branch from HEAD). Only the lab's own scratch workspace.
+
+```json
+{"ok":true,"gh":{"on":true,"exe":"C:\\Program Files\\GitHub CLI\\gh.exe"},"git":{"branch":"claude/elastic-heyrovsky-69fd45","remote":"https://github.com/nayballs/Yap.git"}}
+```
+
+### The lab's own turns (16 Nov 2026)
+
+Some features aren't a question to Chat: a routine that runs by itself, auto-archive, a
+Code chat's summary, a kept page saved. Each of these commands is **a turn of the lab's
+own**: numbered with the questions, with a transcript (`turns/NNN.json`), shots in both
+themes (`shots/NNN/`), a section on the sheet ("the lab's own", "a routine"), and a
+script's `expect` on it — `status` (`answered`, or `failed` with its `error`), and its
+own fields with `result` ([Feature scripts](#feature-scripts)). `--chat same` after one
+is still the last question's chat. `--no-shots` and `--theme` as for `ask`.
+
+#### `routine new|now|wait|list|on|off|delete`
+
+Routines (`chat/routines.rs`): Skills that run by themselves, on the test Yap's own clock.
+
+- `routine new --skill <command> [--instructions "<what it does>" --name <n> --runs-on
+  meeting|meetings|both] [--in <minutes> | --at HH:MM | --after-meeting [--with-note]
+  [--folder <f>] [--outside]] [--words "<…>"] [--away]`: the Skill (made first as one of
+  the person's own with `--instructions`, as Settings → Skills makes one), then the
+  routine saved as Settings' form saves it — every day at a time (`--in 2`, the default:
+  the next whole minute at least two away; the scheduler looks every 30 s), or after
+  each meeting (`--with-note`: the answer goes with the meeting's note, a new Ask thread
+  there). Its next run is a turn that's running now: `wait` (or `routine wait`) until
+  Settings' runs list says it's over (`done` → `answered`; `failed` or `skipped` →
+  `failed`, its `why` the error). Then the turn's `answer`, `model` and `tools` are the
+  run's, and `run` says what ran: `{id, routine, command, cause, state, why, chat, note,
+  thread, about, queued, started, ended, sameChat}`. `--away`: the person in another app
+  while it runs (test mode's focus), so its one quiet card goes on the Yap bar — shot
+  first ("The Yap bar as the run ended") — then they're back in Yap.
+- `routine now [<id>]`: Settings' Run now (no id: the routine `routine new` made last),
+  waited on the same way (`--no-wait`).
+- `routine list`: Settings' list (`routines_list`); `on|off|delete <id>`.
+
+```json
+{"ok":true,"turn":2,"status":"answered","conversation":1,"question":"/latest-points","answer":"From **Budget check-in** (Mon 16 Nov):
+
+- **Revised budget, due Friday afternoon:** …","model":{"provider":"claude-plan","id":"claude-opus-5-5"},"run":{"id":1794793391540,"routine":"r1794793232630","command":"latest-points","cause":"schedule","state":"done","why":null,"chat":1,"note":null,"thread":null,"about":null,"queued":"2026-11-16T01:43:11.000Z","started":"2026-11-16T01:43:11.000Z","ended":"2026-11-16T01:43:17.000Z","slot":"2026-11-16T01:43:00.000Z"},"shots":[…]}
+```
+
+#### `meeting "<title>" [--folder <f>] [--lines "them: …|you: …"]`
+
+A made-up meeting recorded and ended in the test Yap, as the routines spec does it: a
+note, the recorder started, test mode's lines fed in (fictional ones by default: a
+budget to send by Friday), ended. An "after a meeting" routine then runs on it once its
+summary is written, or couldn't be. Not a turn: `{note, title, lines}`.
+
+#### `age <days> [--chat <id>|same|all]` and `archive [--days 7|30|90] [--undo]`
+
+Auto-archive (`chat/auto_archive.rs`) without waiting days. `age`: chats made that many
+days older (`e2e_chat_age`, test mode only: when they started, were last used and each
+message's time moved back) — `--chat same` the last turn's, `all` (the default) every
+chat but a meeting's Ask thread or an incognito one. Not a turn: `{aged, days}`.
+
+`archive`: auto-archive's run now, as the daily one runs (`e2e_chat_auto_archive`), with
+Chat's list on screen; `--days` sets "Archive chats you haven't used in" first (which, as
+in Settings, runs it at once). A turn of the lab's own: `archived` (the chats it moved
+this time), `notice` (the quiet toast in Yap's window, or `null`), `list` and
+`archivedList` after; `--undo` presses the notice's Undo (`undone`). Shots: the main
+window.
+
+```json
+{"ok":true,"turn":5,"kind":"lab","status":"answered","question":"Auto-archive (30 days), then Undo","days":30,"archived":[1],"lastRun":[],"notice":"Chat Archived a chat you hadn't used in 30 days It's in Archived, at the foot of Chat's list. A new message brings one back. Undo","list":[{"id":2,"title":"Name one colour of the rainbow"},{"id":1,"title":"In one sentence: what is a haiku"}],"archivedList":[],"undone":true}
+```
+
+#### `summary [--chat <id>|same]`
+
+A Code chat's summary beside it (the title bar's Summary), opened afresh: its branch, its
+Changes — `prs` (`code_chat_pull_requests`, asked afresh: `{status, branch, list}`,
+`status` `ok`, `no-gh`, `no-remote`, `signed-out`…), the `rows` it draws (`{text, state,
+checks, archive}`) or its one quiet `note`. Shots: the panel. With `set --gh on` and the
+scratch workspace on a branch of Yap's repository (`set --git`), the rows are that
+branch's real pull requests.
+
+#### `kept save [--name <file>]` and `kept open`
+
+A kept page beside the chat (`chat/made/pages.rs`, a page Chat's model keeps with
+`save_page`), outside Yap, through its ⋯ as the person does it:
+
+- **save**: Save as…, with **Windows' dialog answered by the lab**: the dialog plugin's
+  IPC (`plugin:dialog|save`, a fetch to `ipc.localhost` in Yap's main window — Tauri's
+  `invoke` itself can't be replaced) is answered with a file in the lab's own `saved/`
+  folder, and what the dialog was asked is kept (`dialog: {defaultPath, filters}`). No
+  dialog opens. Then the toast (`toast`) and the file read back (`file`, `page: {bytes,
+  title, policy, scripts, integrity, sendPrompt}`: `policy` is the sandbox's
+  Content-Security-Policy `<meta>`).
+- **open**: Open in browser. Test mode keeps the copy's `file:` address instead of
+  opening the person's browser (`e2e_opened_urls`); the lab reads the copy back and opens
+  it in **its own headless browser** (the sheet's), light and dark — `outside: {errors,
+  refused, shots}`: its console errors, what its policy refused, and its shots (the sheet's
+  "Outside Yap" set, window `browser`).
 
 ### `state`
 
@@ -503,20 +648,22 @@ one`), in `scripts/lab/scripts/`:
 }
 ```
 
-`needs`: what the lab must have been started with (`web`, `yapCode`, `connectors`):
+`needs`: what the lab must have been started with (`web`, `yapCode`, `connectors`;
+`live`: not `--fake`; `toolLoop`: a model of Yap's own tool loop, not the plan):
 `run` says how to start it otherwise. `todo`: a line `run` repeats as a warning. Every
 step can carry a `note` (shown with its failures) and `soft: true` (its failures only
 warn).
 
 | Step | |
 |---|---|
-| `ask` | `"ask": "<text>"`, with `spoken`, `chat` (`new`, `same`, an id, `code:<workspace>`), `cards` (`allow`/`deny`), `timeout`, `shots: false`, `theme`, `pictures` (made-up pictures put in the message box with a typed question, as a person drops a picture file there: a list of `{ width, height, shape, color, background }`, drawn here, nothing from outside). |
-| `answer` | `"answer": "next"` (the first card waiting), a card's id, or `{ "kind": "page", "label": "…" }`; `how`: `allow` (default), `deny`, `always`. |
+| `ask` | `"ask": "<text>"`, with `spoken`, `chat` (`new`, `same`, an id, `code:<workspace>`), `retry: true` / `edit: true` (↻ Retry the last answer; Edit the last message to the text), `cards` (`allow`/`deny`), `timeout`, `shots: false`, `theme`, `pictures` (made-up pictures put in the message box with a typed question, as a person drops a picture file there: a list of `{ width, height, shape, color, background }`, drawn here, nothing from outside). |
+| `answer` | `"answer": "next"` (the first card waiting), a card's id, or `{ "kind": "page", "label": "…" }`; `how`: `allow` (default), `deny`, `always`, `pick`, `said`, `edit`, `revise`; `with`: what `pick`, `said`, `edit` or `revise` carry (an outline's `{ "sections": […], "note": "…" }`, an option, the words). |
 | `wait` | `"wait": "turn"` or `"agents"` (with `cards`: answer the agents' cards on the way). |
 | `shot` | `"shot": "<name>"`, `window` (`thread` default, `main`, `panel`, `page`, `bar`), `theme` (both by default), `selector`, `optional: true` (nothing to shoot is a skip, not a failure). |
 | `set` | As the `set` command: `{ "web": true, "yapCode": true, "config": {…}, "files": [ … ] }`. |
 | `expect` | Checks on the last turn (below). |
 | `fake` | The fake AI's next calls (as `fake`): played only in a `--fake` lab, skipped otherwise, so one script can be checked offline too. |
+| `lab` | One of the lab's own commands (16 Nov 2026): `"lab": "archive"` or `["routine", "new"]` / `["age", "40"]` (its words), `args` its flags (`{ "skill": "…", "in": 2 }`). `routine`, `meeting`, `age`, `archive`, `summary`, `kept`. One that's a turn is the last turn after it (`routine new`'s is still running: `wait` next). |
 | `note` | Just words, in the summary. |
 
 | `expect` | Passes when |
@@ -532,6 +679,7 @@ warn).
 | `agent` | an agent (from the last `wait agents`, else now) has `status`, `files` (a count), `folder`, `error` (`null`: none), `mode` (`bypassPermissions`…), `plan`, `readOnly` (its latest turn read only), `model` (its latest turn's: an id, a list, or `"/regex/"`), `effort` (a level, or a list: any of them); `count` how many must (one by default). The summary shows each agent's model, effort and why Chat sized it so (`sizing`). |
 | `selector` | `{ "window": "main", "css": "…" }` shows (`present: false`: doesn't; `count`: how many show), over CDP (`probe`). |
 | `visible` / `notVisible` | the thread's visible words have / haven't these. |
+| `result` | the turn's JSON at a `path` (a list: each) — a lab command's own fields, `"archived.length"`, `"run.state"`, `"page.policy"`, `"rows.0.state"` — with `equals`, `gt`, `gte`, `lt`, `lte`, `matches` or `notMatches` (none: there at all). |
 
 **The scripts there:**
 
@@ -547,6 +695,12 @@ warn).
 | `direct-screenshot` | `start --yap-code on` (the real Claude Code) | A screenshot goes straight to a Code chat's session (12 Nov 2026, `agents/direct.rs`): a made-up picture is put in the message box of a Bypass Code chat that works directly and the session is asked what it shows. No tool of Chat's is used (no model of Chat's read the picture and sent an agent), the session answers in its own words, and those say what the picture is (soft: its own words). |
 | `question-card` | `start --yap-code on` (the real Claude Code) | Claude Code's own question is a card (12 Nov 2026, `integrations/claude_live/approve.rs`): in a Code chat at Auto that works directly the session is asked to put a two-option question to the person with its AskUserQuestion tool; the Lab answers the card with the first option (`cards: allow`), the session carries on and says which was picked. That its words name the option is a soft check. |
 | `tool-lines` | `start --yap-code on` (the real Claude Code) | Another tool's call is a line in the thread (11 Nov 2026, `core/agents.js` `stepKind`): a Bypass Code chat that works directly is asked to hand a small look-up to a subagent; its work shows as a line under the message and it answers. That the line says "a helper" is a soft check (using a subagent is the model's own choice). |
+| `routines` | the default `start` (`--fake` passes too) | Routines (16 Nov 2026; #131 had only its e2e spec): a made-up meeting (`meeting`), then a Skill of the person's own on a schedule two minutes away, run by the scheduler with the person in another app — its own chat, marked in Chat's list, its one quiet card on the bar (shot) — following its instructions (on the plan they never reached Claude Code before: fixed, `chat/turn/plan.rs` `across_lines`); Run now into the same chat (`run.sameChat`); then a Skill on one meeting after another made-up meeting, with the meeting's note: a new Ask thread on it. |
+| `auto-archive` | any `start` | Auto-archive (16 Nov 2026; #125 had only its e2e spec) on the lab's own chats: two real chats made 40 days older one by one (`age --chat same`), the rule set to 30 days — the chat not shown archived, the one Chat shows kept; the notice in Yap's window and its Undo; the next run takes it again; then the other once another chat is shown, a day-old one kept. |
+| `code-chat-prs` | `start --yap-code on` (live) | A Code chat summary's Changes from the real `gh` (16 Nov 2026; #128): the lab's read-only `gh` on, the scratch workspace on a merged branch of Yap's repository (`set --git`, `--gh`), one short question, then `summary`: the branch's pull requests, merged, each `nayballs/Yap #N` with Archive; `gh` off, the quiet line. |
+| `kept-page-outside` | the default `start` | A kept page outside Yap (16 Nov 2026; #130): Chat's model keeps a tip calculator (`save_page`), then `kept save` (Windows' dialog answered by the lab: the suggested `.html` name, the toast, the file with the sandbox's policy and a title) and `kept open` (the copy test mode would have opened, run in the lab's own browser, light and dark; no console errors or policy refusals: soft). |
+| `outline-card` | `start --model ondevice` (or `--fake`) | A new document's outline before the writing on a real model (16 Nov 2026; #129 was checked on `--fake` only: a plan chat makes no documents): asked for a short guide, its `create_document` is a card first, nothing written; Edit's Go with a section renamed, one taken out and a note; the document made with those sections. Its `fake` steps make it pass on `--fake` too. |
+| `code-chat-retry` | `start --yap-code on` (live) | ↻ Retry and Edit in a Code chat that works directly (16 Nov 2026): the new answer read back — it came back empty before, Rewind having cut the thread where the old one was — with `branch` and the question it answered again. |
 | `agent-sizing` | `start --yap-code on` | Chat sizes each agent (8 Nov 2026, `agents/sizing.rs`): in a Code chat on `lab-sandbox`, a trivial change ("rename the variable x to count in convert.js"), then a hard one ("the tests fail intermittently, find the root cause and fix it"). Soft checks on each turn's `model` and `effort` (the model's judgement): the first small (Haiku or Sonnet, low or medium), the second big (Opus or Fable, high or above); the panel's rows shot. Its `fake` steps size them as the guide says, so `--fake` checks the plumbing. |
 
 ## Checking that it looks right
@@ -605,7 +759,7 @@ numbers start at 1 again); reports, sheets and `shot`'s own files stay.
 - **The test Yap** is the e2e harness's (`desktop/e2e/support/yap.js` `launchYap`):
   a copy of the build in portable mode with its own data folder, WebView2 profile and
   CDP port, in **test mode** (`YAP_E2E=1`, `shell/e2e.rs`), seeded with the e2e suite's
-  base config plus the lab's: Chat's model, the switches asked for, debug logging, and
+  base config plus the lab's: Chat's model (a meeting's summary on it too), the switches asked for, debug logging, and
   nothing that spends the model's time behind the lab's back (no cleanup, no learning
   from chats, no meeting reminders, no spoken replies). Nothing of the person's is
   copied: no config, keys, memory or chats.
@@ -646,7 +800,12 @@ that hits one should say so, and it isn't a bug in the tool:
   front) sees test mode's made-up monitors (`e2e_snip`), never the person's real
   screen, so nothing on it ever goes to the model.
 - **Apps**: `open_app` records the app (`state`'s `appsOpened`) instead of launching
-  it; the person's browser is never opened ("Search in your browser", "Open in …").
+  it; the person's browser is never opened ("Search in your browser", "Open in …", a
+  kept page's Open in browser: `kept open` runs the copy in the lab's own browser).
+- **Windows' file dialogs** open only if something asks for one: `kept save` answers
+  its Save as itself, in the lab's folder.
+- **GitHub's `gh`**: none (a Code chat's summary says "Install GitHub's gh"), unless
+  `set --gh on`: then the person's own, read only, on Yap's public repository only.
 - **Other apps' text**: no reading the window in front, the selection or the text
   around the cursor in another app; no pastes, no keys into other apps.
 - **Claude Code's own copies of plan chats**: a test run never looks in the person's
@@ -672,6 +831,9 @@ that hits one should say so, and it isn't a bug in the tool:
   into the test Yap's config in the lab's folder, for an `anthropic:` model.
 - Never the person's screen, apps, mouse or keyboard (test mode; Playwright works on
   the test Yap's own webviews).
+- The person's `gh` only through `yap.exe lab-gh` (`set --gh on`): `gh pr list` and
+  `gh pr view` on `nayballs/Yap`, nothing that writes, opens a browser or reads another
+  repository (each refused before `gh` starts; `agents/prs/lab.rs`'s tests list them).
 - The prompts and anything you ask: public, neutral pages (example.com, Wikipedia,
   MDN) or the scratch workspace; no logins, purchases, bookings, messages, or forms
   with personal details. The repo is public: no personal details in prompts or
@@ -682,7 +844,7 @@ that hits one should say so, and it isn't a bug in the tool:
 
 Offline, ~1 minute plus the incremental build (`YAP_LAB_NO_BUILD=1` skips it; the
 build goes where `lab build` puts it, so set `YAP_LAB_TARGET_DIR` when that's someone
-else's): the pure parts (options, the model, the config, the build's freshness, a
+else's — from a worktree it must be set: [`build`](#build---target-dir)): the pure parts (options, the model, the config, the build's freshness, a
 turn's record summed up, shot names and themes, PNG stitching, the sheet's layout, a
 script's checks), then a `--fake` run end to end — build, start (its own data folder,
 the scratch workspace, the window at 1280 × 860, one lab at a time), a typed question

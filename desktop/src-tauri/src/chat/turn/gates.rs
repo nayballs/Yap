@@ -278,6 +278,7 @@ impl Gates {
             visuals: self.visuals && self.tools,
             project: self.project_files && self.tools,
             project_chips: &[],
+            research: None,
         }
     }
 

@@ -61,6 +61,22 @@ impl Activity {
     fn new(mark: &'static str, line: impl Into<String>) -> Activity {
         Activity { mark, line: line.into() }
     }
+
+    /// A research's own line (chat/research.rs): "Writing the report · 6
+    /// searches, 3 pages read".
+    pub fn research(line: impl Into<String>) -> Activity {
+        Activity::new("search", line)
+    }
+}
+
+/// A research's plan being made, before anything's looked up (chat/research.rs).
+pub fn research_plans() -> Activity {
+    Activity::new("search", "Planning the research")
+}
+
+/// A research's plan waits for the person (`cards/outline.rs`).
+pub fn research_waits() -> Activity {
+    Activity::new("search", "Waiting for you: the research plan")
 }
 
 /// The step goes to the page (and the Voice Assistant's capsule): the one

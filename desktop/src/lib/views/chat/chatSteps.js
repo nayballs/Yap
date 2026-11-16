@@ -11,12 +11,12 @@
 // A chip about the web (web.rs), a page beside the chat (chat/pages.rs, and
 // acting on one: chat/pages/act.rs) or the safety rule (chat/tools.rs).
 const WEB_CHIP =
-  /^(Searched the web|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from |Brought up |Couldn't bring up |Didn't bring up |Took a shot of |Couldn't take a shot of |Didn't take a shot of |Offered to open |Didn't offer |(Double-|Triple-|Right-|Middle-)?[Cc]licked |Dragged |Set tab \d+ (to a desktop width|back to the panel)|Typed in |Scrolled |Went to |Went (back|forward) in tab |Opened a search in tab |Showed tab |Closed tab |Listed the tabs |Looked at the page · |Zoomed in on the page · |Found (\d+ match(es)?|no match) for|Waited |Pressed |Hovered over |(Un)?[Tt]icked |Chose |Couldn't (click|type|scroll|go|switch|look at|zoom in|press|hover|set|open a tab|close tab|run|search|find|wait|act|drag)|Didn't (click|type|press|go|open|act|switch|look|zoom|tick|run|use|see|find|drag))/;
+  /^(Searched the web|Researched for |Stopped researching|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from |Brought up |Couldn't bring up |Didn't bring up |Took a shot of |Couldn't take a shot of |Didn't take a shot of |Offered to open |Didn't offer |(Double-|Triple-|Right-|Middle-)?[Cc]licked |Dragged |Set tab \d+ (to a desktop width|back to the panel)|Typed in |Scrolled |Went to |Went (back|forward) in tab |Opened a search in tab |Showed tab |Closed tab |Listed the tabs |Looked at the page · |Zoomed in on the page · |Found (\d+ match(es)?|no match) for|Waited |Pressed |Hovered over |(Un)?[Tt]icked |Chose |Couldn't (click|type|scroll|go|switch|look at|zoom in|press|hover|set|open a tab|close tab|run|search|find|wait|act|drag)|Didn't (click|type|press|go|open|act|switch|look|zoom|tick|run|use|see|find|drag))/;
 // The calendar's (chat/tools/calendar.rs).
 const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meetings with|Free |Busy |No calendar connected|Couldn't read the (day|time) )/;
 // A document's (chat/documents.rs, and the rich tools': documents/rich.rs).
 const DOC_CHIP =
-  /^(Started "|(Re)?[Ww]rote (\d+ sections|"[^"]*") in "|Added "[^"]*" to "|Didn't (re)?write "|"[^"]*" is already written in "|Couldn't (start a document|rewrite a section)|Read (the document|what changed in) "|Changed (a table in|a part of) "|Added to "|Took a part out of "|Moved a part of "|Made \d+ changes in "|Didn't (change|restore) "|Couldn't (change|restore) ("|a document)|Looked at the history of "|Restored version \d+ of "|"[^"]*" is already as version )/;
+  /^(Started "|Wrote the report “|(Re)?[Ww]rote (\d+ sections|"[^"]*") in "|Added "[^"]*" to "|Didn't (re)?write "|"[^"]*" is already written in "|Couldn't (start a document|rewrite a section)|Read (the document|what changed in) "|Changed (a table in|a part of) "|Added to "|Took a part out of "|Moved a part of "|Made \d+ changes in "|Didn't (change|restore) "|Couldn't (change|restore) ("|a document)|Looked at the history of "|Restored version \d+ of "|"[^"]*" is already as version )/;
 
 // A big project's files (chat/projects/knowledge.rs): a document's mark, never the web's.
 const PROJECT_CHIP = /^((Used|Read) from the project: |Searched the project's files)/;
@@ -53,6 +53,10 @@ const STEPS = [
   [/^Didn't search the web for "/, 'notSearched'],
   [/^(Couldn't|Didn't) |: not after reading the web$/, 'failed'],
   [/^Searched the web/, 'web'],
+  // A research (chat/research.rs): its time, where it stopped, its report.
+  [/^Researched for (.+?):/, 'research', () => 1],
+  [/^Stopped researching/, 'researchCap'],
+  [/^Wrote the report “/, 'report'],
   [/^Answered from (\d+) web pages?/, 'pages', (m) => Number(m[1])],
   [/^(Read (the document|what changed in) "|Looked at the history of ")/, 'readDoc'],
   [/^Read "/, 'readNote'],
@@ -112,6 +116,9 @@ const SAY = {
   projectRead: (n) => n1(n, 'read another part', 'read {n} more parts'),
   projectSearched: (n) => times(n, "searched the project's files"),
   web: (n) => times(n, 'searched the web'),
+  research: () => 'researched it',
+  researchCap: () => 'stopped at the research limit',
+  report: () => 'wrote the report',
   notSearched: () => "didn't search the web",
   pages: (n) => n1(n, 'read a page', 'read {n} pages'),
   readDoc: (n) => times(n, 'read the document'),

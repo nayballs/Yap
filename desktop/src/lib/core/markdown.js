@@ -41,7 +41,9 @@
 // **What a view draws afterwards** (15 Nov 2026, after the Claude app's
 // answers; ui/markdownVisuals.js, a Svelte action on the rendered element):
 // the HTML made here only marks them, its text as the model wrote it, so a
-// view without the action (a toast, the bar, an email) shows that text:
+// view without the action (an email copy) shows that text; every view of
+// Yap's that renders markdown has it (the bar's cards, toasts and update
+// notes too, since 16 Nov 2026):
 // - maths, `span.md-math` (`$…$`, `\(…\)`) and `.md-math.md-math-display`
 //   (`$$…$$`, `\[…\]`; a `div` on lines of its own), drawn by KaTeX. `$`
 //   before a digit, a price ("$5 and $10"), a shell variable ("$HOME/$USER")

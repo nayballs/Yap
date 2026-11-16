@@ -17,6 +17,12 @@ use crate::notes::commands::note_changed;
 /// `yap-notes-changed`). Stopped: what was shown so far is the answer (a
 /// step's text that came before a tool call was never shown);
 /// superseded: no answer.
+///
+/// **A research turn** (`research`: its caps and clock, chat/research.rs):
+/// its web as far as the caps reach, its loop running only the web's tools
+/// and the notes' reads, and every source the turn found kept with the
+/// answer (the report's are picked from them, `turn/research.rs`).
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn with_tools(
     t: &Asked<'_>,
     conv: &crate::chat::chats::Conversation,
@@ -25,6 +31,7 @@ pub(super) async fn with_tools(
     sizing: &Sizing,
     live: Option<crate::chat::stream::Live<'_>>,
     watch: Option<&crate::chat::stream::Watch<'_>>,
+    research: Option<crate::chat::research::Budget>,
 ) -> Result<Answer, String> {
     let (cfg, g, ep) = (&t.cfg, t.gates, &t.ep);
     let notify = |id: u64| {
@@ -61,6 +68,10 @@ pub(super) async fn with_tools(
             if built.outline_first {
                 turn = turn.outline_first();
             }
+        }
+        // A research: as far as its caps reach, no further.
+        if let Some(b) = research {
+            turn = turn.research(b);
         }
         turn
     });
@@ -104,6 +115,7 @@ pub(super) async fn with_tools(
         web_question: t.about_selection.as_ref().is_some_and(|s| s.web) || crate::chat::pages::pick::has_element(&t.text),
         // A big project's parts sent with the question: their chips first.
         project_chips: &built.project_chips,
+        research,
         ..g.extra(memory, Some(conv.id), calendar, agents, connectors.as_ref())
     };
     let looped = crate::chat::tools::run_tool_loop_with(
@@ -143,7 +155,8 @@ pub(super) async fn with_tools(
     // A meeting the answer names without its number gets it.
     let reply = crate::chat::tools::calendar::cite_mentions(&reply, &calendar_log.all());
     let looked = web.as_ref().is_some_and(crate::web::Turn::looked);
-    let mut sources = web.as_ref().map(|w| w.sources_for(&reply)).unwrap_or_default();
+    // (A research's: every page it found, the report's picked from them.)
+    let mut sources = web.as_ref().map(|w| if research.is_some() { w.sources.clone() } else { w.sources_for(&reply) }).unwrap_or_default();
     // The pictures it showed (chat/pictures.rs): each one's page is a
     // source of the answer too, so its number means something.
     let mut shown = web.as_ref().map(|w| w.pictures.shown.clone()).unwrap_or_default();

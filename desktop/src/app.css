@@ -987,8 +987,8 @@ pre.md-code[data-run=''] > .md-codecopy {
 
 /* What ui/markdownVisuals.js draws in rendered markdown (15 Nov 2026, after
    the Claude app's answers): maths, diagrams, a diff's lines and pictures.
-   Until it has (or where it never does: a toast, the bar), each shows as
-   the model wrote it. */
+   Until it has, each shows as the model wrote it. (The Yap bar's cards and
+   toasts restyle them on their own colours: BarCard.svelte, ToastHost.svelte.) */
 .md-math-display {
   display: block;
   margin: 8px 0;
@@ -1063,6 +1063,17 @@ pre.md-code[data-run=''] > .md-codecopy {
   margin: 6px 0 2px;
   cursor: pointer;
   user-select: none;
+}
+/* A picture on the editor's page: its "Show image" box, or the picture
+   (a click on it shows its text to edit). */
+.rich-picture {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+  user-select: none;
+}
+.rich-picture > img.md-img {
+  cursor: text;
 }
 /* A ```diff fence: a line each, removed in red and added in green across
    the block (its widest line), as a Code chat's diffs are. */
