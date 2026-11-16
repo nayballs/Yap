@@ -707,8 +707,10 @@ local API and search see the same text.
   with a heading…) is a raw block on the page — drawn as the page draws it,
   kept exactly, read-only ("Edit this part in Source"; in the notepad and the
   quick note "…in Notes, in Source").
-- **Not done**: the summary's Edit box (still its markdown), pictures,
-  column alignment from the toolbar.
+- **Not done**: the summary's Edit box (still its markdown), inserting a
+  picture from the toolbar (a web picture written as markdown shows since
+  16 Nov 2026: "Maths, diagrams, diffs and pictures" below), column
+  alignment from the toolbar.
 - **Tests**: `note-markdown.spec.js` (no app: summaries with tasks and My
   thoughts as typed in the box read and written back exactly; a tick, a word
   and Enter changing only their lines; pasted text; the source map: every
@@ -1078,13 +1080,26 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
 
   **Maths, diagrams, diffs and pictures** (15 Nov 2026, after the Claude
   app's answers). `markdown.js` only marks them, their text as the model
-  wrote it, so a view that doesn't draw them (a toast, the bar's card, an
-  email copy) shows that text; **`ui/markdownVisuals.js`**, a Svelte action
-  on the rendered element (`use:markdownVisuals`), draws them — in Chat's
-  answers and a Code chat's (the thread, the Agent tab, its work), a
-  meeting's Ask thread, a note's summary (Notes and the notepad), the
-  notepad's Ask sheet and a document's page while Chat writes it (its
-  editor, the Preview at rest, draws maths and diagrams its own way: below).
+  wrote it, so a view that doesn't draw them (an email copy) shows that
+  text; **`ui/markdownVisuals.js`**, a Svelte action on the rendered element
+  (`use:markdownVisuals`), draws them — in Chat's answers and a Code chat's
+  (the thread, the Agent tab, its work), a meeting's Ask thread, a note's
+  summary (Notes and the notepad), the notepad's Ask sheet and a document's
+  page while Chat writes it (its editor, the Preview at rest, draws maths,
+  diagrams and pictures its own way: below); and since 16 Nov 2026 on **the
+  Yap bar's cards** (the Voice Assistant's answer, and a notice whose body
+  is a model's words: `bar::Card.markdown`, an agent's reply or a routine's
+  answer; [yap-bar.md](./yap-bar.md#the-bars-page)), **the reading card**
+  (an answer's maths read aloud: `bar/readingPieces.js`), **toasts' unfolded
+  notes** (`ui/ToastHost.svelte`: the update toast's What's new) and **an
+  update's notes** (Settings → About, Help → What's new). A view in other
+  colours than the app's says so (`use:markdownVisuals={{ theme }}`: the
+  bar's own Light / Dark, `themeFrom('data-bar-theme')`; a toast's card,
+  always dark), and its diagrams are drawn in those; the bar and the toast
+  restyle the boxes on their own tokens (`BarCard.svelte`, `ToastHost.svelte`;
+  the bar with no shadow or backdrop-filter, its window being transparent,
+  and its card's region following a picture shown in it: a ResizeObserver in
+  `Overlay.svelte`).
   - **Maths**: `$…$` / `\(…\)` → `span.md-math`, `$$…$$` / `\[…\]` →
     `.md-math.md-math-display` (a `div` on lines of their own, breaking into
     a paragraph as models write it; no blank line inside; unclosed stays
@@ -1168,9 +1183,21 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
     beside a formula, or in the diagram's code (a click on the diagram or its
     `</>` puts it there), the text shows to edit; the diagram stays up,
     drawn again once the code has stood still. Until KaTeX and mermaid have
-    loaded, or when one can't be drawn, the text shows as it is. Pictures
-    stay links there (Ctrl+click opens the browser, as any link). So a
+    loaded, or when one can't be drawn, the text shows as it is. So a
     document Chat wrote keeps its diagrams once Chat stops writing.
+    **Pictures** (16 Nov 2026): `![alt](https://…)`, which the editor reads
+    as a "!" and a link (written back exactly), is found there as a render
+    reads it (`picturesIn`: the "!" right before a `[…](…)` link to a web
+    address, in the same marks, never in code; a bare address or a mail link
+    isn't one) and shows as its "Show image" box with its text hidden — the
+    same box as an answer's (`markdownVisuals.js` `pictureBox`), fetched
+    only when clicked, through `markdown_picture` —, then the picture itself,
+    from memory (kept for the window's life, at most 100, on every page in
+    it; never on disk). The box's clicks are its own (`stopEvent`: no caret
+    moved, no link opened); a click on a shown picture puts the caret just
+    after its text, which shows beside it to edit, as a formula's does. A
+    picture that isn't on the web (a relative path, `file:`) isn't a link in
+    the editor at all, so it stays text.
   - A document's page (`docPieces.js` `drawParts`) remembers each block's
     HTML as it was made, so a block whose maths was drawn isn't taken for a
     changed one when a change lands.
@@ -1181,4 +1208,12 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   `markdown-visuals.spec.js` in the app (an answer's maths, diagram, `</>`,
   diff, headings and a picture fetched only on its click; dark; KaTeX's
   sheet and fonts loaded, a diagram with maths in its labels still drawn,
-  light and dark; a note's summary).
+  light and dark; a note's summary; the editor's picture, fetched on its
+  click, the note unchanged), `markdown-everywhere.spec.js` (the bar's
+  answer card — maths, a diagram in the bar's own Dark over a light app, a
+  picture and the region following it —, a notice with a model's words,
+  an update card's text left as text, the reading card's maths lit as one,
+  display maths, a price as words) and `update-notes-visuals.spec.js` (the
+  update toast's What's new on its dark card, About's notes and a picture
+  fetched on its click, Help → What's new light and dark); `picturesIn` and
+  `readingPieces` on their own in `doc-markdown.spec.js`.

@@ -68,7 +68,10 @@ with `--features engines`, producing a custom **NSIS installer** (normal/portabl
 WebView2 bootstrap) + a signed `latest.json` on a draft GitHub Release. The in-app
 updater (`tauri-plugin-updater`, driven by `updates.rs`) checks that endpoint ~30 s
 after launch and every ~4 h while Yap runs, pre-downloads, and installs when the user
-clicks "Restart to update". Its "What's new" comes from latest.json's `notes`:
+clicks "Restart to update". Its "What's new" (the update toast's, Settings → About's,
+Help → What's new) is rendered as Chat renders markdown, maths, diagrams and a
+picture's "Show image" box included (notes.md "Maths, diagrams, diffs and pictures",
+16 Nov 2026). It comes from latest.json's `notes`:
 both workflows run `scripts/release-notes.mjs`, the app's feat/fix commit subjects
 since the previous release (stable: the previous `v*` tag, via tauri-action's
 `releaseBody`, so polish the draft's text by hand; nightly: since the commit the
