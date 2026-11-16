@@ -327,7 +327,12 @@ export async function runScript(script, { send, state, options = {} }) {
             ...(step.incognito ? { incognito: true } : {}),
             // A new chat in a project (chat/projects.rs), made first if need be, its files added once.
             ...(step.project
-              ? { project: step.project, ...(step.projectInstructions ? { 'project-instructions': step.projectInstructions } : {}), ...(Array.isArray(step.projectFiles) ? { 'project-files': step.projectFiles } : {}) }
+              ? {
+                  project: step.project,
+                  ...(step.projectInstructions ? { 'project-instructions': step.projectInstructions } : {}),
+                  ...(Array.isArray(step.projectFiles) ? { 'project-files': step.projectFiles } : {}),
+                  ...(step.projectPage ? { 'project-page': true } : {}),
+                }
               : {}),
             ...(shots === false ? { 'no-shots': true } : {}),
             ...((step.theme ?? options.theme) ? { theme: step.theme ?? options.theme } : {}),

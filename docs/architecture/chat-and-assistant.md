@@ -1623,7 +1623,7 @@ one side.
   Chat & Voice Assistant; a model that fails → `assistantFailed`, the
   reason + "Your question is in Chat."); else **`choose_conversation(viewing,
   open_exists, latest, now)`** (pure): the conversation open in the Chat
-  view (`chat_view_state {open, conversationId, newChat, codeFolder}`: ChatView
+  view (`chat_view_state {open, conversationId, newChat, codeFolder, incognito, project}`: ChatView
   reports it), a new one if "New chat" was clicked there, else the last
   updated if under `RECENT_SECS` (30 min) — so pressing again asks a
   follow-up — else a new one; then `turn::chat_turn` (the Chat view's
@@ -1763,6 +1763,53 @@ one side.
   key joins it and its release ends it (`gesture::State::Joinable`); Esc in
   Chat (`assistantListening`) or ✕ cancel it; never while the assistant is
   off (`is_off`). Test runs stage its transcript (`e2e_snip_question`).
+  **What else waits in Chat's box, and a project** (16 Nov 2026, the
+  parity round's follow-ups): a question asked **with Chat in view** takes
+  what the person sees there, as a typed one would:
+  - **The files attached in the box** (`chat/attachments.rs`, [Files
+    attached to a question](#files-attached-to-a-question-2026-11-15)): the
+    page reports them each time they change (`chat_files_waiting`, ids only;
+    none while a Projects page covers the box; `chat_send` takes the ids it
+    sends out at once, `sent_from_box`; Chat closed, `box_closed`), and they
+    go **when Chat in view shows the box they wait in** (`box_files_go`,
+    pure: `answer_in_view`, and the question's conversation the one shown,
+    or the new chat it makes): `take_waiting` → `attachments::with` around
+    its turn, so the question carries them on every path a typed one's do
+    (their text before its words, kept with it, a Code chat's session after
+    its words) — `yap-chat-files {taken}` and the chips go; no answer →
+    `put_back_waiting` (`{back}`, first in the box), a ■ before the question
+    was saved too (once saved they stay with it, as a typed one's). With
+    files the question never waits in a Code chat's queue (a typed one with
+    files doesn't), and the window in front isn't looked at (they're what
+    it's about). Not with "Open Teams", a selection or a Skill. **Asked from
+    another app they stay** for the box, as the quote does (`quote_goes`).
+    Screenshots are the one thing taken from anywhere — snip, then ask
+    (2026-10-25, above) — and the quote and files only in view.
+  - **A project** (`chat/projects.rs`, [Projects](#projects-2026-11-15)):
+    with a project's page in view, or the new chat its New chat started
+    ("New chat in <project>"), the page reports it (`chat_view_state`'s
+    `project`; a project's page counts as its new chat: `conversationId`
+    none, `newChat`), and the question's new conversation is in it
+    (`new_in_project`, pure: the shortcut's, a new conversation, never a
+    Code chat or an incognito one, as `chat_send`'s `project` is;
+    `projects::with_new` around its turn). The page gives way to the chat
+    as it's asked (`followAssistant` closes `page`). (An answer that lands
+    while the view is still reading the new chat for "asked" — a quick one —
+    has that chat read again: before, the thread kept the question alone;
+    seen in this work's e2e.) The Projects list shows
+    no chat either: as Chat with nothing chosen (the recent conversation,
+    else a new one), never the chat behind the page — nor does Snip to Chat
+    over a Projects page land in that hidden chat's box: a new chat, in the
+    project when it's a project's page (`takeSnip`).
+  - The Voice Assistant's turn is type-erased after `WINDOW_LOOK` (as
+    `chat_send`'s is): one more layer pushed a phone's turn
+    (`link/session.rs`) past the compiler's recursion limit for proving it
+    Send. Box every new layer.
+  Unit-tested (`assistant`: `box_files_go`, `new_in_project`; `attachments`:
+  the box's ids, given back first); e2e `chat-files.spec.js` (from another
+  app the file stays; in view it goes, its chip with the question, kept
+  `voice`) and `chat-projects.spec.js` (on a project's page and in its new
+  chat: in the project, its block in the prompt; a plain new chat: none).
   **Asked from a phone** (Yap Link, 2026-10-31, [link.md](./link.md)):
   `ask_from_phone(app, question, phone)` runs the same `answer` with an
   `Asker::Phone` in the shortcut's `Asker::Shortcut(generation)` place — the
@@ -4597,15 +4644,19 @@ already takes (`chat/attachments.rs`, `views/chat/FileChip.svelte`,
   and they're put back the same way (`restore_from`).
 - **Never queued** (a Code chat while Claude works): a message with files
   goes as one with a screenshot does.
+- **Asked out loud** (16 Nov 2026): a Voice Assistant question asked with
+  Chat in view, on the chat the box is in, takes the box's files as a typed
+  one does (`assistant::box_files_go`, `attachments::take_waiting`); from
+  another app they stay ([the Voice Assistant](#modules), "What else waits
+  in Chat's box").
 - **Privacy**: names, text and paths are never logged (kinds, counts,
   sizes, tokens); a file leaves the PC only inside the Chat request it's
   sent with and that chat's follow-ups.
-- **Not done**: a question asked out loud doesn't take the files waiting
-  in the box (typed questions only; screenshots it does take); an older
+- **Not done**: an older
   `.ppt`, an OpenDocument or Keynote presentation and an `.odt` aren't
   read; a scan's pictures past 20 pages aren't read; a `.doc`'s headers,
   footnotes and comments aren't read.
-- e2e: `chat-files.spec.js` (drop, chips, what the model gets now and in a
+- e2e: `chat-files.spec.js` (drop, chips, asked out loud in view and from another app, what the model gets now and in a
   follow-up, Open, ✕, too long, deleted with its chat, Settings; a PDF
   with a typed and a scanned page — the OCR's text faked, the page drawn
   by Windows for real —, a `.pptx` with notes made in the test,
@@ -5823,6 +5874,15 @@ Only the screenshot sweep and deleting look further: a version not shown
 keeps its screenshots (`Conversation::every_message`: `image_ids`,
 `delete_many`, `unshown`), and they go with it.
 
+**On a paired phone** (Yap Link, 16 Nov 2026: [link.md](./link.md#retry-and-versions-on-the-phone-16-nov-2026)):
+the same versions, the version shown being this one — one a conversation,
+the last switch winning wherever it was made. A phone's ‹ › is `switch_branch`
+(`link/session.rs` `show_version`), its ↻ in a plain chat `begin_retry` with
+the question asked the phone's way under `turn::again`; a change here
+(`chat_branch`, `chat_retry`, an edit's end) tells the phones
+(`link::versions_changed`), and one there tells this view
+(`yap-chat-versions` → `chatState.onVersions`, the chat open read again).
+
 **An older Yap on the same data** (the nightly and the dev build share
 `%APPDATA%\yap`): it reads and keeps the branch shown — it's `messages` — and
 drops `branches` when it saves. So every chats.json save also writes the
@@ -6260,8 +6320,10 @@ never an incognito chat.
   A file gone from the disk is a line. The fixed part a question must fit
   beside counts the block (`fit::Parts::texts`, with the model's room), so a
   chat in a big project leaves out older messages as it must. On your Claude
-  plan the session's prompt has it; the small web pipeline's too. (A
-  question asked out loud into a new chat doesn't start it in a project.)
+  plan the session's prompt has it; the small web pipeline's too. **Asked out
+  loud** (16 Nov 2026) with a project's page or its new chat in view, the Voice
+  Assistant's new chat is in it too (`assistant::new_in_project`; the page
+  reports it in `chat_view_state`'s `project`, and gives way to the chat).
 - **Kept** in `projects.json` ([config-and-data.md](./config-and-data.md)),
   never chats.json. A deleted chat leaves its project; Delete some of your
   data → Chats takes every chat out; the projects stay, as Skills do.
@@ -6269,8 +6331,8 @@ never an incognito chat.
 - Tests: `cargo test chat::projects`; `chat-projects.spec.js` (a project
   made, its instructions saved, a Markdown file read and a broken spreadsheet
   refused (a whole one is read: `chat-sheets.spec.js`), a new chat in it carrying its block, another chat moved in from
-  its ⋯, its page listing both, deleted with its chats kept; a big project
-  searched in parts; light and dark).
+  its ⋯, its page listing both, deleted with its chats kept; asked out loud on its page and in its new
+  chat; a big project searched in parts; light and dark).
 
 ### Big projects, searched in parts (2026-11-16)
 
