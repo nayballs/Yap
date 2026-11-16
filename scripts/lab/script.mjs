@@ -359,6 +359,7 @@ export async function runScript(script, { send, state, options = {} }) {
             // Style under the box, and a new chat made incognito (chat/styles.rs, chat/incognito.rs).
             ...(step.style ? { style: step.style } : {}),
             ...(step.incognito ? { incognito: true } : {}),
+            ...(step.research ? { research: true } : {}),
             // ↻ Retry the last answer, or Edit the last message to these words (chat/chats/branches.rs; a Code chat's Rewind).
             ...(step.retry ? { retry: true } : {}),
             ...(step.edit ? { edit: true } : {}),

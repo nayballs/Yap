@@ -178,6 +178,10 @@ pub struct Turn {
     /// **The pages this turn brought up**, the buttons it offered and the
     /// shots it took (`chat/pages.rs`).
     pub pages: crate::chat::pages::TurnPages,
+    /// **A research turn** (chat/research.rs, [`Turn::research`]): its caps
+    /// and clock — every search and read refused once its time or tokens
+    /// are spent, and the refusals say to write the report.
+    research: Option<crate::chat::research::Budget>,
 }
 
 impl Turn {
@@ -213,7 +217,36 @@ impl Turn {
             pictures: TurnPictures::default(),
             handoff: None,
             pages: Default::default(),
+            research: None,
         }
+    }
+
+    /// **A research turn** (chat/research.rs): as far as its caps reach —
+    /// their searches and reads, Claude's own web tools the deeper ones and
+    /// as many fetches as it reads — and no further, its time and tokens
+    /// checked before every search and read.
+    pub fn research(mut self, budget: crate::chat::research::Budget) -> Turn {
+        self.reach = budget.caps.reach();
+        self.deep_reach = None;
+        self.outline_first = false;
+        if let Some(n) = self.settings.native.as_mut() {
+            n.deep = true;
+            n.deep_fetches = Some(budget.caps.reads as u32);
+        }
+        self.research = Some(budget);
+        self
+    }
+
+    /// The research's time or tokens, spent (`None`: not a research, or
+    /// there's more).
+    fn research_spent(&self) -> Option<crate::chat::research::Spent> {
+        self.research.and_then(|b| b.out(crate::ai::usage::turn_tokens()))
+    }
+
+    /// The searches and page reads this turn made.
+    #[cfg(test)]
+    pub fn counts(&self) -> (usize, usize) {
+        (self.searches, self.reads)
     }
 
     /// **"Search in your browser" under the answer** (`sources::Handoff`):
@@ -330,7 +363,23 @@ impl Turn {
 
     pub fn server_tools(&self) -> Option<Vec<Value>> {
         let n = self.settings.native.as_ref().filter(|n| n.in_chat)?;
-        Some(if self.outline_first { Vec::new() } else { n.server_tools() })
+        if self.outline_first {
+            return Some(Vec::new());
+        }
+        let mut tools = n.server_tools();
+        // A research's caps (chat/research.rs): none once its time or tokens
+        // are spent; no search past its searches, no fetch past its reads.
+        if let Some(b) = self.research {
+            if self.research_spent().is_some() {
+                return Some(Vec::new());
+            }
+            tools.retain(|t| match t["name"].as_str() {
+                Some("web_search") => self.searches < b.caps.searches,
+                Some("web_fetch") => self.reads < b.caps.reads,
+                _ => true,
+            });
+        }
+        Some(tools)
     }
 
     /// **What Claude's own web tools did in one reply** (`llm::anthropic`'s
@@ -602,7 +651,16 @@ impl Turn {
             return failed("query is empty: say what to search for.".into(), "Couldn't search the web: no query".into());
         }
         let q = tidy(&query, 60);
+        // A research's time or tokens spent, or its searches: the report now
+        // (chat/research.rs).
+        if let (Some(why), Some(b)) = (self.research_spent(), self.research) {
+            return failed(why.line(&b.caps), format!("Didn't search for \"{q}\": {}", why.chip(&b.caps)));
+        }
         let most = self.reach.searches;
+        if let (true, Some(b)) = (self.searches >= most, self.research) {
+            let why = crate::chat::research::Spent::Searches;
+            return failed(why.line(&b.caps), format!("Didn't search for \"{q}\": {}", why.chip(&b.caps)));
+        }
         if self.searches >= most {
             // A document's turn: write it now, from the pages it read — its
             // own knowledge for advice only, a fact no page gave said to be
@@ -733,7 +791,15 @@ impl Turn {
             );
         }
         let offset = args["offset"].as_u64().or_else(|| args["offset"].as_str().and_then(|s| s.trim().parse().ok())).unwrap_or(0) as usize;
+        // A research's time or tokens spent, or its reads: the report now.
+        if let (Some(why), Some(b)) = (self.research_spent(), self.research) {
+            return failed(why.line(&b.caps), format!("Didn't read {shown}: {}", why.chip(&b.caps)));
+        }
         let most = self.reach.reads;
+        if let (true, Some(b)) = (self.reads >= most, self.research) {
+            let why = crate::chat::research::Spent::Reads;
+            return failed(why.line(&b.caps), format!("Didn't read {shown}: {}", why.chip(&b.caps)));
+        }
         if self.reads >= most {
             let then = if self.deep() {
                 "write the document from the pages you read (a fact none of them gave: not confirmed, never guessed)"
@@ -1081,6 +1147,45 @@ mod tests {
         let e = r["error"].as_str().unwrap();
         assert!(e.contains("write the document from the pages you read") && e.contains("not confirmed, never guessed"), "{r}");
         assert!(!e.contains("filling in the rest"), "{r}");
+    }
+
+    /// **A research turn** (chat/research.rs): its caps' searches, then "write
+    /// the report"; its time spent stops every search and read; Claude's own
+    /// web tools drop each as its cap is reached.
+    #[tokio::test]
+    async fn a_research_turn_searches_to_its_caps_then_the_report() {
+        use crate::chat::research::{Budget, Caps};
+        let f = fake((500, Value::Null), json!({ "results": [{ "title": "QWERTY", "url": "https://keyboards.example/qwerty", "highlights": ["Designed for the typewriter."] }] }));
+        let search = |n: usize| json!({ "query": format!("qwerty history part {n}") });
+        let caps = Caps { searches: 4, reads: 2, ..Caps::USUAL };
+        let mut turn = Turn::new(settings("exa-key"), endpoints_of(&f), "research qwerty", &[]).research(Budget::start(caps));
+        assert_eq!(turn.reach(), Reach { searches: 4, reads: 2 });
+        for n in 0..4 {
+            assert_eq!(turn.execute("web_search", &search(n)).await["success"], json!(true), "search {n}");
+        }
+        let r = turn.execute("web_search", &search(9)).await;
+        assert_eq!(r["displayText"], json!("Didn't search for \"qwerty history part 9\": research limit: 4 searches"));
+        assert!(r["error"].as_str().unwrap().contains("write the report now"), "{r}");
+        assert_eq!(turn.counts(), (4, 0));
+        // Past its time: nothing more, searches or reads.
+        let late = Budget::started_ago(caps, caps.time + std::time::Duration::from_secs(1));
+        let mut turn = Turn::new(settings("exa-key"), endpoints_of(&f), "research qwerty", &[]).research(late);
+        let r = turn.execute("web_search", &search(1)).await;
+        assert_eq!(r["displayText"], json!("Didn't search for \"qwerty history part 1\": research limit: 10 minutes"));
+        // Claude's own web tools: deeper, then each gone at its cap, both once the time is spent.
+        let mut n = native::NativeSearch::new(native::Provider::Anthropic, "claude-opus-5-5", "https://api.anthropic.com/v1", "k");
+        n.in_chat = true;
+        let mut turn = Turn::new(Settings { native: Some(n.clone()), ..settings("") }, offline(), "research qwerty", &[]).research(Budget::start(caps));
+        let tools = turn.server_tools().unwrap();
+        assert_eq!(tools.iter().map(|t| t["name"].as_str().unwrap()).collect::<Vec<_>>(), ["web_search", "web_fetch"]);
+        assert_eq!(tools[0]["max_uses"], json!(native::DEEP_SERVER_USES));
+        assert_eq!(tools[1]["max_uses"], json!(2));
+        let searches: Vec<Value> = (0..4).map(|i| json!({ "query": format!("q{i}"), "results": [{ "url": format!("https://k.example/{i}"), "title": "K" }] })).collect();
+        turn.took_server(&json!({ "searches": searches }));
+        let tools = turn.server_tools().unwrap();
+        assert_eq!(tools.iter().map(|t| t["name"].as_str().unwrap()).collect::<Vec<_>>(), ["web_fetch"]);
+        let turn = Turn::new(Settings { native: Some(n), ..settings("") }, offline(), "research qwerty", &[]).research(late);
+        assert_eq!(turn.server_tools(), Some(Vec::new()));
     }
 
     #[test]

@@ -565,6 +565,7 @@ pub fn run() {
             chat::documents::chat_document_save,
             chat::documents::chat_quote_set,
             chat::think::chat_think_info,
+            chat::research::chat_research_info,
             chat::stream::stream_stop,
             chat::stream::stream_stop_conversation,
             chat::stream::chat_answering,

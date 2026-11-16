@@ -1421,6 +1421,27 @@ pub fn name_citations(markdown: &str, labels: &[(usize, String)]) -> String {
     out
 }
 
+/// **A research's report as a document** (chat/research.rs): a note in the
+/// Chat documents folder, `body` its whole Markdown, Chat's first version of
+/// it (Undo goes back to nothing). Its note's id.
+pub fn create_report(title: &str, body: &str) -> Result<u64, String> {
+    let title = clean(title, 120);
+    let folder = crate::notes::find_folder(FOLDER).unwrap_or_else(|| {
+        crate::notes::folder_create(FOLDER);
+        FOLDER.to_string()
+    });
+    let note = crate::notes::create(&title, "", "chat", &folder);
+    let chat = versions::How::new(versions::kind::CHAT);
+    versions::by(chat, || {
+        crate::notes::modify(note.id, |n| {
+            n.content = body.to_string();
+            Ok(((), true))
+        })
+    })?;
+    tracing::info!(note_id = note.id, chars = body.chars().count(), "Chat: a research's report made a document");
+    Ok(note.id)
+}
+
 fn create(args: &Value) -> Value {
     const CHIP: &str = "Couldn't start a document";
     let title = clean(args["title"].as_str().unwrap_or(""), 120);
