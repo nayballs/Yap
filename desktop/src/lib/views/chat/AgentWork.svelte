@@ -50,11 +50,14 @@
   // under the message read there (`notes`, `after`); only the last has the
   // lead, its words as written and its final words.
   //
-  // **Its to-do list** (the thread's, `cards`): live at the top of the part
-  // that's last, as Claude Code's app keeps the plan under the latest
-  // message; a part followed by a message it read keeps the list as it stood
-  // at its end — "Plan from before your last message" — and the live one
-  // goes on under that message once Claude writes it again (AgentTodoCard).
+  // **Its to-do list** (the thread's, `cards`; 16 Nov 2026, as the Claude
+  // app has it): while the turn works, the live list isn't here but at the
+  // thread's foot, the last thing above the message box (ChatThread,
+  // core/agents.js `todoAtFoot`); once it ends, the list stays as the turn's
+  // record at the end of its last part's work, folded. A part followed by a
+  // message it read keeps the list as it stood at its end — "Plan from
+  // before your last message" — and the live one goes on at the foot once
+  // Claude writes it again after that message (AgentTodoCard).
   //
   // **The transcript view** (`view`, threadView.svelte.js: the chat's ⋯):
   // Normal, Thinking — its thinking too, between the stretches, quiet and
@@ -176,8 +179,9 @@
   const split = $derived(parts.length > 1);
   /** The turn has a to-do list (the store keeps its latest: AgentTodoCard's). */
   const hasTodos = $derived((((agent?.turnList || []).find((t) => t.n === turn) ?? (agent?.turnList?.length ? null : agent))?.todos?.length ?? 0) > 0);
-  /** The live list, at the top: unsplit, as ever; split, under the latest message once Claude wrote it again there. */
-  const liveCard = $derived(cards && !!part && hasTodos && (!split || (latest && !!todosIn(part.events)?.length)));
+  /** The turn's list as its record, at the end of its last part, once it's over (while it works it's at the thread's
+   *  foot: `todoAtFoot`); split, only once Claude wrote it again after the message it read. */
+  const recordCard = $derived(cards && !!part && hasTodos && latest && !live && (!split || !!todosIn(part.events)?.length));
   /** The list as it stood at this part's end, before the message after it. */
   const beforeList = $derived(cards && part && !latest ? todosIn(part.events) : null);
   const beforeLabel = $derived(at === parts.length - 2 ? 'Plan from before your last message' : 'Plan from before your message');
@@ -189,14 +193,11 @@
     if (onpaged && k >= 0) onpaged(pictures, k);
     else onview?.(shownStepPicture(p, agent?.folder));
   }
-  const hasCard = $derived(liveCard || !!beforeList?.length);
+  const hasCard = $derived(recordCard || !!beforeList?.length);
 </script>
 
 {#if items.length || saying || hasCard}
   <div class="agentwork" class:wide data-testid="chat-agent-work" data-agent={agent?.id} data-turn={turn} data-part={at} data-live={working ? 'true' : 'false'} data-view={view}>
-    {#if liveCard}
-      <div class="wcard"><AgentTodoCard {agent} {turn} {line} /></div>
-    {/if}
     {#each items as it, i (i)}
       {#if it.kind === 'said'}
         <div class="wsaid" data-testid="chat-agent-work-said" use:colourCode use:codeCopy use:markdownVisuals use:fileLinks={codeFiles}>{@html renderMarkdown(it.text)}</div>
@@ -244,6 +245,10 @@
         <span class="wtext">{saying ? 'Writing' : line || 'Thinking'}</span>
         {#if clock}<span class="wclock" data-testid="chat-lead-clock">{clock}</span>{/if}
       </div>
+    {/if}
+    {#if recordCard}
+      <!-- The turn's list, its record now it's over (folded), at the end of its work. -->
+      <div class="wcard"><AgentTodoCard {agent} {turn} {line} /></div>
     {/if}
     {#if beforeList?.length}
       <!-- The plan as it stood when the person wrote: it stays here, above their message. -->

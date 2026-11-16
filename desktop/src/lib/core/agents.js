@@ -470,6 +470,24 @@ export function todosIn(events) {
   return null;
 }
 
+/**
+ * **A turn's live to-do list goes at the thread's foot** (16 Nov 2026, as the Claude app keeps its plan under the
+ * latest thing in the thread, just above the message box): true while turn `agent.turn` works and has a list — and,
+ * once the person's message was read into it (`notes`: `notesAfter`'s), once Claude wrote the list again after that
+ * message (until then the list as it stood is the "Plan from before your last message" card, above it). Once the turn
+ * ends, its card is the record at the end of its work (AgentWork). `log`: the agent's (`agentLogs`). Pure.
+ */
+export function todoAtFoot(agent, log, notes = []) {
+  if (!agent) return false;
+  const n = agent.turn ?? 1;
+  const record = (agent.turnList || []).find((t) => t.n === n) ?? (agent.turnList?.length ? null : agent);
+  if (!record?.todos?.length) return false;
+  const note = turnsOf(agent, log || []).find((t) => t.n === n) ?? null;
+  if (!note || !isLive(note.status) || turnEnd(note.events).over) return false;
+  const parts = turnParts(note.events || [], notes);
+  return parts.length === 1 || !!todosIn(parts[parts.length - 1].events)?.length;
+}
+
 const fileName = (f) => String(f || '').split(/[\\/]/).pop();
 const some = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
 

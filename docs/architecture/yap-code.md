@@ -319,9 +319,10 @@ workspace, word for word, and no model of Chat's is asked.
   a model wording a brief from what it read ([The safety
   rule](#the-safety-rule)). The instruction is the person's own typed words;
   what the session may do is the Mode's business.
-- **In the thread** (`core/agents.js` `pillsByQuestion`): its to-do card
-  and its work ([Around the tab](#around-the-tab)) hang under the person's
-  message, with no bubble of Chat's between, then — when there's something
+- **In the thread** (`core/agents.js` `pillsByQuestion`): its work
+  ([Around the tab](#around-the-tab)) hangs under the person's message (its
+  to-do card at the thread's foot while it works, then at the work's end),
+  with no bubble of Chat's between, then — when there's something
   to report — its quiet line and report line, and the answer. The page keeps the question as saved when
   `chat_send` answers `direct` (no tab opens: the chat talking, not an
   agent sent).
@@ -1978,10 +1979,10 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   turn's `todos` from `yap-agent`); once it ends it stays as its record,
   folded to "7 to-dos · all done" ("5 done", "none done yet") with ▸ to
   open. No list, no card; a plain chat's thread is as it was. In a Code
-  chat that works directly it's drawn by its work (`AgentWork`), and once
-  the person writes mid-turn the list as it stood stays above their
-  message as **"Plan from before your last message"**
-  ([The thread in order](#the-thread-in-order)).
+  chat that works directly it's at the thread's foot while the turn works
+  and its record at the end of the work after, and once the person writes
+  mid-turn the list as it stood stays above their message as **"Plan from
+  before your last message"** ([The thread in order](#the-thread-in-order)).
 - **Whose work shows where** (2026-11-12, the maintainer, on a chat whose
   model had sent an agent: "if you send out an agent I don't think I see the
   work the agent does in the main chat window, only if you yourself do
@@ -2197,14 +2198,28 @@ what didn't was the person.
   message sent and not read yet shows under the work, which grows above it
   until Claude takes it in (a moment, at its tool call's end); one it never
   read is the next turn's, as ever.
+- **The live list at the thread's foot** (16 Nov 2026, the maintainer, from
+  the Claude app: its plan card sits under the latest message, just above
+  the message box, and moves down as messages come). While a direct turn
+  works its to-do card is the thread's last thing — under the person's
+  latest message, Claude's words or the work line, after a queued message
+  too — the column's whole width (`ChatThread`'s `footTodos`, `core/agents.js`
+  `todoAtFoot`, `data-testid chat-todo-foot`). It's part of the thread,
+  never floating over it, so the thread's following the bottom keeps it in
+  view as the work grows (before, at the top of the work, it scrolled out of
+  sight). Once the turn ends the list is its record at the end of the turn's
+  work, folded (AgentWork's `recordCard`, before the answer). Its sizes are
+  the app's proportions to the reading text: rows about 1.85× the text
+  apart, circles and padding about its size. An agent Chat sent out keeps
+  its card under its pill.
 - **The plan from before your last message** (AgentTodoCard's `list` and
-  `before`): the list at the top of the part that's last, live, as the
-  Claude app keeps the plan under the latest message; a part followed by a
-  message it read keeps the list as it stood at its end (`todosIn` that
-  part's events) just above that message, "Plan from before your last
-  message" (an older one "…your message"), never ticked on after; the live
-  one goes on under the message once Claude writes it again. Both open
-  while the turn works and fold once it's over, as the card ever did.
+  `before`): a part followed by a message it read keeps the list as it stood
+  at its end (`todosIn` that part's events) just above that message, "Plan
+  from before your last message" (an older one "…your message"), never
+  ticked on after; the live one goes on at the foot once Claude writes it
+  again after the message (until then the plan from before is all there
+  is). Both open while the turn works and fold once it's over, as the card
+  ever did.
   - **The list is on in every run** (`runner::TODO_ENV`): Yap Lab on Opus
     5.5 found its session had no to-do tool at all ("TodoWrite isn't among
     my tools"). Claude Code's tools reference says why: since 2.1.268 the
