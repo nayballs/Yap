@@ -381,7 +381,10 @@ workspace, word for word, and no model of Chat's is asked.
   - **✓ Sent, then ✓✓ Read and the time** under a message sent from the
     queue or while a call was out: read when Claude Code echoes it back
     (`yap-agent`'s `read`, the message's id, on its "Read your note" step)
-    or, as a turn of its own, once that turn begins.
+    or, as a turn of its own, once that turn begins. The ✓ / ✓✓ shows at
+    rest under the bubble's edge, WhatsApp's way, ✓✓ in the read blue
+    (`--yap-tick-read`); the time and the buttons on hover
+    ([chat-and-assistant.md](./chat-and-assistant.md#the-rows-under-a-message-2026-11-16-the-claude-apps)).
   - **Another chat shown** as its turn ends: it waits until its own chat is
     shown again, however that comes up (a click in the list, the bar's
     "Claude replied" Open, Open in Chat: an `$effect` on the chat shown,

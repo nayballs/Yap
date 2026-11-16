@@ -11,9 +11,11 @@
   // it found online (PicturePills, its own chunk), each opening the panel
   // beside the chat; and its row, as the Claude app's (16 Nov 2026): Copy,
   // Fork from here, Pin as chapter, Read aloud, its time and the model that
-  // wrote it. Under the person's message (on hover): ✓✓ and its time in a
-  // Code chat, Copy, then Edit — or in a Code chat Rewind to here and Fork
-  // from here. Its right-click menu: Copy / Copy as Markdown / Read aloud,
+  // wrote it. Under the person's message: ✓✓ and its time in a Code chat,
+  // Copy, then Edit — or in a Code chat Rewind to here and Fork from here.
+  // Both rows on hovering the message or its keyboard focus, as the app's (or
+  // always: Settings → Appearance → Message actions); a Code chat's ✓ / ✓✓
+  // always, as a status. Its right-click menu: Copy / Copy as Markdown / Read aloud,
   // Fork from here and Pin as chapter (ChatThread's), a question's Copy.
   import { renderMarkdown, markdownToText } from '../../core/markdown.js';
   import { colourCode } from '../../ui/colourCode.js';
@@ -60,7 +62,7 @@
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
   const codeFiles = getContext(CODE_FILES) ?? null;
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, answer = null, visuals = null, onvisualprompt = null, keptPages = null, onkept = null, branch = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false, latestAsk = false } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, answer = null, visuals = null, onvisualprompt = null, keptPages = null, onkept = null, branch = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false } = $props();
   // `visuals`: what the answer made to be seen, not read (chat/made.rs: "Made a visual", above its words;
   // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends. `keptPages`: the
   // pages it saved (chat/made/pages.rs: `[{page, version}]`, a card each, PageCard); `onkept(page, n)` opens one.
@@ -71,8 +73,11 @@
   // **Under the person's message in a Code chat** (14 Nov 2026, the Claude Code app's: ✓✓ and its time, Copy, Rewind to
   // here, Fork from here; `actions`: `{ rewind, fork }` — why each can't run now, '' when it can —, `onrewind`, `onfork`,
   // `code: true`; agents/rewind.rs).
-  // `latestAsk`: the person's latest message in the thread — its row always shown, as the Claude app shows it; the
-  // others' on hovering them.
+  // **When the rows show** (16 Nov 2026, the Claude app's): on hovering the message — its bubble, its row or anything
+  // of its between — or on its keyboard focus (Tab to the bubble or a button); always with Settings → Appearance →
+  // Message actions → Always show (`messageActions`, <html data-message-actions>: core/appearance.js). A Code chat's
+  // ✓ / ✓✓ is a status and always shows, under the bubble's edge as WhatsApp's ticks (✓✓ in --yap-tick-read once read);
+  // on hover it's the row's own, first, as the app's ("✓✓ 12 minutes ago · …"). Its ‹ 1/2 › always.
   // **Under an answer** (16 Nov 2026, the Claude app's row; no 👍 / 👎 or ↻ Retry): `answer` — `{ fork, onfork, code,
   // pinned, onpin, pinning }` — Copy, Fork from here (why it can't now; a Code chat's through its session), Pin as
   // chapter (on: the answer starts a chapter, a second click takes it off), Read aloud, then its time and its model.
@@ -159,6 +164,19 @@
   }
 </script>
 
+{#snippet tickMark()}
+  {#if tickState === 'read'}
+    <svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12.5l4.5 4.5L17 7.5" /><path d="M12.5 16l1 1L23 7.5" /></svg>
+    <span class="vh">Read</span>
+  {:else}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+    Sent
+  {/if}
+{/snippet}
+
+<!-- The message and everything under it, one box-less group (display: contents, so the thread's layout is as
+     before): hovering any of it, or a keyboard focus in it, shows its rows. -->
+<div class="chatmsg">
 {#if m.role === 'assistant' && !(m.streaming && !m.text) && (m.thinking || m.liveThinking)}
   <!-- Thought through (Think, chat/think.rs): the thinking, folded above
        the answer; only the time when the model doesn't send it back. -->
@@ -321,10 +339,10 @@
 </div>
 {/if}
 {#if m.role === 'user' && !editing && (actions || branch || tick)}
-  <!-- Under the person's message, as the Claude app's (16 Nov 2026): on hovering the message (or the row, or its
-       focus) — in a Code chat "✓✓ 12 minutes ago ·", then Copy, Rewind to here (unavailable while Claude works) and Fork
-       from here; in Chat, Copy and Edit. Its versions' ‹ 1/2 › always, and a queued message's ✓ while it waits. -->
-  <div class="uacts" class:forked={!!branch} class:waiting={tick?.state === 'sent'} class:latest={latestAsk} data-testid="chat-message-actions">
+  <!-- Under the person's message, as the Claude app's (16 Nov 2026): on hovering the message (or its keyboard focus) —
+       in a Code chat "✓✓ 12 minutes ago ·", then Copy, Rewind to here (unavailable while Claude works) and Fork from
+       here; in Chat, Copy and Edit. Its versions' ‹ 1/2 › always, and a Code chat's ✓ / ✓✓ always (.rest). -->
+  <div class="uacts" class:forked={!!branch} data-testid="chat-message-actions">
     {#if branch}
       <BranchSwitch fork={branch.fork} why={branch.why} onbranch={branch.onbranch} />
     {/if}
@@ -337,13 +355,7 @@
         data-state={tickState}
         use:actionTip={{ title: tickState === 'read' ? 'Claude has read it' : 'Sent', text: tickState === 'read' ? (readAt ? `At ${readAt}` : '') : 'Claude reads it at its next step' }}
       >
-        {#if tickState === 'read'}
-          <svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12.5l4.5 4.5L17 7.5" /><path d="M12.5 16l1 1L23 7.5" /></svg>
-          <span class="vh">Read</span>
-        {:else}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
-          Sent
-        {/if}
+        {@render tickMark()}
       </span>
       {#if when}<time class="when" datetime={new Date(saidAt * 1000).toISOString()} title={whenFull(saidAt)}>{when}</time>{/if}
       {#if actions}<span class="dot" aria-hidden="true">·</span>{/if}
@@ -400,6 +412,11 @@
       {/if}
     {/if}
     </span>
+    {#if actions?.code || tick}
+      <!-- The ✓ / ✓✓ at rest, under the bubble's edge as WhatsApp's ticks: a status, shown while the row isn't (the
+           row's own, above, is the one read out). -->
+      <span class="ticks rest" data-state={tickState} data-testid="chat-ticks-rest" aria-hidden="true">{@render tickMark()}</span>
+    {/if}
   </div>
 {/if}
 {#if shared.length}
@@ -466,12 +483,14 @@
 {/if}
 {#if m.role === 'assistant' && !m.streaming}
   <!-- Under an answer, as the Claude app's (16 Nov 2026): Copy, Fork from here, Pin as chapter, Read aloud, then its
-       time and the model that wrote it (cut short when the row's narrow). No 👍 / 👎, no ↻ Retry. -->
-  <div class="msgfoot" data-testid="chat-answer-actions">
+       time and the model that wrote it (cut short when the row's narrow). No 👍 / 👎, no ↻ Retry. On hovering the
+       answer or its keyboard focus, and while it's read aloud or its chapter named (.held). -->
+  <div class="msgfoot" class:held={reading || !!answer?.pinning} data-testid="chat-answer-actions">
     {#if branch}
       <!-- Its versions (an older Retry's): ‹ 2/2 ›. -->
       <BranchSwitch fork={branch.fork} why={branch.why} onbranch={branch.onbranch} />
     {/if}
+    <span class="reveal">
     {#if m.text?.trim()}
       <!-- Copy, as the right-click menu's Copy (markdown marks dropped; Copy as Markdown stays in the menu). -->
       <button type="button" class="act" aria-label="Copy" use:actionTip={{ title: copied ? 'Copied' : 'Copy' }} data-testid="chat-answer-copy" onclick={() => copyIt(m.plain ? m.text : markdownToText(m.text))}>
@@ -546,6 +565,7 @@
     {#if m.stopped}
       <span class="byline stopped" title="You stopped this answer while it was being written">· Stopped</span>
     {/if}
+    </span>
   </div>
 {/if}
 {#if m.role === 'assistant' && m.nextStep?.recap && last && !m.streaming}
@@ -555,6 +575,7 @@
     <NextStepBox next={m.nextStep} onpick={onnext} {busy} />
   {/await}
 {/if}
+</div>
 
 <style>
   /* A workspace file the message mentions (@path, a Code chat's: agents/mention.rs). */
@@ -651,25 +672,51 @@
     line-height: 1.2;
   }
   .uacts {
+    position: relative;
     justify-content: flex-end;
     gap: 0;
     /* (The last icon's ink under the bubble's text edge: the square's half less the glyph's.) */
     margin: 3px calc(13px - 5.9px * var(--row)) 0 auto;
   }
-  /* (On hovering the message, the row or its focus; its ‹ 1/2 › always, and a queued message's ✓ while it waits.) */
+  /* The message and what's under it: no box of its own (the thread's flex column lays its parts out as before). */
+  .chatmsg {
+    display: contents;
+  }
+  /* **On hover, as the Claude app's** (16 Nov 2026): a row shows on hovering its message — the bubble, the row, or
+     anything of the message's between —, on a keyboard focus in it (not a click's), and while an answer's read aloud
+     or its chapter named; always with Message actions → Always show. Its ‹ 1/2 › always. It goes a moment after the
+     pointer leaves, so the pointer can cross from the bubble to its row. */
   .reveal {
     display: inline-flex;
     align-items: center;
     gap: 0;
     opacity: 0;
-    transition: opacity 120ms ease;
+    transition: opacity 120ms ease 160ms;
   }
-  .cbubble.user:hover + .uacts .reveal,
-  .uacts:hover .reveal,
-  .uacts:focus-within .reveal,
-  .uacts.waiting .reveal,
-  .uacts.latest .reveal {
+  .chatmsg:hover .reveal,
+  .chatmsg:has(:global(:focus-visible)) .reveal,
+  .held .reveal,
+  :global(:root[data-message-actions='always']) .reveal {
     opacity: 1;
+    transition-delay: 0s;
+  }
+  /* A Code chat's ✓ / ✓✓ at rest: under the bubble's edge (its ink at the text's edge, as the row's last icon's), in
+     the row's place; it gives way to the row's own when the row shows. */
+  .ticks.rest {
+    position: absolute;
+    top: 50%;
+    right: calc(5.9px * var(--row) - 0.23em);
+    transform: translateY(-50%);
+    pointer-events: none;
+    transition: opacity 120ms ease 160ms;
+  }
+  .chatmsg:hover .ticks.rest,
+  .chatmsg:has(:global(:focus-visible)) .ticks.rest {
+    opacity: 0;
+    transition-delay: 0s;
+  }
+  :global(:root[data-message-actions='always']) .ticks.rest {
+    display: none;
   }
   .act {
     flex: 0 0 auto;
@@ -750,6 +797,10 @@
     align-items: center;
     gap: 0.25em;
     color: var(--yap-muted);
+  }
+  /* Read: ✓✓ in WhatsApp's read blue (the ticks alone, nothing behind them); ✓ Sent stays grey. */
+  .ticks[data-state='read'] {
+    color: var(--yap-tick-read);
   }
   .ticks + .when {
     margin-left: 0.35em;
@@ -942,6 +993,11 @@
     gap: 0;
     min-height: calc(24px * var(--row));
     margin: -2px 0 2px calc(13px - 5.9px * var(--row));
+  }
+  /* (Its shown part shrinks, so the model's name is cut short in a narrow row.) */
+  .msgfoot .reveal {
+    flex: 0 1 auto;
+    min-width: 0;
   }
   /* (Being read: Read aloud's square in the primary colour.) */
   .msgfoot .act.reading {

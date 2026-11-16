@@ -147,6 +147,8 @@ export const FIELD_DEFAULTS = {
   readingFont: 'default',
   readingSize: 'default',
   motion: 'system',
+  // The rows under Chat's messages: 'hover' (as the Claude app's) or 'always'.
+  messageActions: 'hover',
   inputDevice: null,
   // Settings → Dictation → Microphone (MicOrder.svelte, dictation/mics.rs):
   // the microphones in order ([{ id, name }]; empty: Windows' default), and

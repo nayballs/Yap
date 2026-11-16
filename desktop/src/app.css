@@ -139,6 +139,9 @@ body {
   --yap-syn-type: #17757d;
   --yap-syn-attr: #86600f;
   --yap-syn-meta: #a86a1c;
+  /* A message Claude has read: its ✓✓ in WhatsApp's read blue (#53bdeb, as dark has it), a little deeper on the
+     light page so the ticks read there (3.1:1 on --yap-s1; #53bdeb is 2.0:1) */
+  --yap-tick-read: #2196d3;
   --yap-code: #2a7684;
   --yap-code-line: rgba(42, 118, 132, 0.55);
   --yap-code-ring: rgba(42, 118, 132, 0.12);
@@ -596,6 +599,8 @@ body {
   --yap-syn-type: #74cdd2;
   --yap-syn-attr: #dcc089;
   --yap-syn-meta: #e2b36e;
+  /* ✓✓ read: WhatsApp's own read blue (8.2:1 on --yap-s1) */
+  --yap-tick-read: #53bdeb;
   --yap-code: #6cc0cc;
   --yap-code-line: rgba(108, 192, 204, 0.5);
   --yap-code-ring: rgba(108, 192, 204, 0.1);

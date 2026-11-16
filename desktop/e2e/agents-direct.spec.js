@@ -1474,8 +1474,8 @@ test('a Code chat’s rows are the Claude app’s: ✓✓ time, Copy, Rewind to 
   const divider = thread(main).getByTestId('chat-chapter');
   await expect(divider).toHaveCount(1);
   await expect(divider.locator('.ctitle')).not.toHaveText('');
-  // (Under "Two", before its answer.)
-  expect(await divider.evaluate((d) => !!(d.previousElementSibling?.matches('[data-testid="chat-message-actions"]')))).toBe(true);
+  // (Under "Two", before its answer: each message's parts in one box-less group, .chatmsg.)
+  expect(await divider.evaluate((d) => d.previousElementSibling?.querySelector('.cbubble.user')?.innerText.trim())).toBe('Two');
   await expect(main.getByTestId('chat-chapters')).toBeVisible();
   const kept = (await yap.invoke('chat_get', { id: original.conversation })).messages.at(-1);
   expect(kept.chapter).toMatchObject({ pinned: true });
@@ -1548,13 +1548,32 @@ test('Fork from here: a new Code chat with the conversation up to that message�
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(2);
   const original = await ended(yap, agent.id);
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two']);
-  // The latest message's row always shown (as Claude Code's app has it); an earlier one's as it's hovered.
-  await expect(actionsOf(main, 'Two').locator('.reveal')).toHaveCSS('opacity', '1');
+  // Every message's row on hover, the latest's too (as Claude Code's app has it); its ✓✓ always, in the read blue —
+  // the ticks alone, nothing behind them.
   await main.getByRole('textbox', { name: 'Message' }).hover();
-  await expect(actionsOf(main, 'One').locator('.reveal')).toHaveCSS('opacity', '0');
+  for (const said of ['One', 'Two']) {
+    await expect(actionsOf(main, said).locator('.reveal')).toHaveCSS('opacity', '0');
+    const rest = actionsOf(main, said).getByTestId('chat-ticks-rest');
+    await expect(rest).toHaveAttribute('data-state', 'read');
+    await expect(rest).toHaveCSS('opacity', '1');
+    await expect(rest).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  }
+  const blue = () => main.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--yap-tick-read').trim());
+  expect(await blue()).toBe('#2196d3');
+  await expect(actionsOf(main, 'Two').getByTestId('chat-ticks-rest')).toHaveCSS('color', 'rgb(33, 150, 211)');
+  await shot(main, '98-message-ticks-at-rest');
   await thread(main).locator('.cbubble.user', { hasText: 'One' }).hover();
   await expect(actionsOf(main, 'One').locator('.reveal')).toHaveCSS('opacity', '1');
+  await expect(actionsOf(main, 'One').getByTestId('chat-ticks-rest')).toHaveCSS('opacity', '0');
+  await expect(actionsOf(main, 'One').getByTestId('chat-read')).toHaveCSS('color', 'rgb(33, 150, 211)');
+  await expect(actionsOf(main, 'Two').locator('.reveal')).toHaveCSS('opacity', '0');
   await shot(main, '98-message-actions');
+  // Dark: WhatsApp's own read blue.
+  await setConfig(yap, main, { theme: 'dark' });
+  await expect.poll(blue).toBe('#53bdeb');
+  await expect(actionsOf(main, 'Two').getByTestId('chat-ticks-rest')).toHaveCSS('color', 'rgb(83, 189, 235)');
+  await shot(main, '98-message-actions-dark');
+  await setConfig(yap, main, { theme: 'light' });
   await actionsOf(main, 'One').getByTestId('chat-fork').click();
   // The fork is shown: "One" and its answer, nothing after.
   await expect.poll(async () => Number(await main.locator('.conv.active').getAttribute('data-conv')), { timeout: 10_000 }).not.toBe(original.conversation);
