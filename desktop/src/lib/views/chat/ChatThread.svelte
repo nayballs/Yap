@@ -175,10 +175,28 @@
   // drawn at exactly their device pixels: chatImages.js `sentPlaced`). The
   // column's content box, not its clientWidth: Svelte reads clientWidth
   // when the border box resizes, which a scrollbar appearing never does.
+  // **The column as it is with the thread's scrollbar, shown or not** (16
+  // Nov 2026), so the scrollbar coming or going never changes the room. It
+  // did: a picture grown to a wider room made the thread scroll, the
+  // scrollbar took its width off the column, and a moment later the room
+  // and every picture in it shrank again (a second jump, which shut a ⋯
+  // menu just opened on it; a thread just that much taller than its box
+  // went back and forth).
   let msgsBox = $state(null);
   let colBox = $state(null);
   const colWidth = $derived(colBox?.width ?? 0);
   let room = $state(0);
+  /** The column's width (CSS px; `width` as it is now) with a scrollbar beside it. */
+  function withScrollbar(width) {
+    const el = chat.threadEl;
+    if (!el || !contentEl || el.offsetWidth > el.clientWidth) return width;
+    // None shown: measured with one for the moment, put back before anything is drawn.
+    const was = el.style.overflowY;
+    el.style.overflowY = 'scroll';
+    const w = contentEl.getBoundingClientRect().width;
+    el.style.overflowY = was;
+    return w;
+  }
   // **The readable column** (2026-11-07, as the Claude app's and ChatGPT's
   // 48rem): the messages at most `--yap-thread-width` wide, centred in a
   // wide thread, the composer on the same column (Composer.svelte); the
@@ -190,7 +208,7 @@
     chat.threadGutter = el ? Math.max(0, el.offsetWidth - el.clientWidth) : 0;
   });
   $effect(() => {
-    const next = colWidth > 0 ? Math.floor(colWidth * 0.78) : 0;
+    const next = colWidth > 0 ? Math.floor(withScrollbar(colWidth) * 0.78) : 0;
     if (!untrack(() => room) || !next) {
       room = next;
       return;
