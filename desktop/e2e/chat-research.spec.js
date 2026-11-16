@@ -207,7 +207,7 @@ test('Research: the plan first, then searches and page reads on the free sources
   await expect(card(main)).toContainText('Researched as planned');
   await expect(panel(main)).toBeVisible();
   const body = panel(main).locator('.docbody');
-  await expect(body.locator('h1, h2').first()).toContainText('How QWERTY came about');
+  await expect(body.locator('.docname')).toHaveText('How QWERTY came about');
   await expect(body).toContainText('Researched');
   await expect(body).toContainText('2 searches, 2 pages read');
   await expect(body).toContainText('The Dvorak layout came in 1936.');
@@ -217,7 +217,7 @@ test('Research: the plan first, then searches and page reads on the free sources
   expect(links).toContainEqual(['[2]', QWERTY_URL]);
   expect(links.some(([, href]) => href === DVORAK_URL)).toBe(false);
   await expect(body.locator('li').filter({ hasText: 'Sholes and Glidden typewriter' })).toHaveCount(1);
-  await expect(body.locator('li').filter({ hasText: 'QWERTY - Wikipedia' }).or(body.locator('li').filter({ hasText: /^QWERTY/ }))).not.toHaveCount(0);
+  await expect(body.locator('li').filter({ hasText: 'QWERTY' })).toHaveCount(1);
   // The thread: the summary and its two pills, the document's card, the research's chip.
   await expect(lastAnswer(main)).toContainText('QWERTY was laid out for the Sholes and Glidden typewriter');
   await expect(lastAnswer(main).locator('a.md-cite')).toHaveCount(2);
