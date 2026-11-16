@@ -388,8 +388,9 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 GPU policy: **universal, no CUDA** (Whisper → Vulkan, ONNX → DirectML); building
 `engines` needs the **Vulkan SDK**. Details: [build-and-test.md](./docs/architecture/build-and-test.md).
 
-**Shared compile cache:** on the maintainer's PC every `cargo` (dev.bat's included) goes
-through **sccache** (`~/.cargo/config.toml`'s `rustc-wrapper`; cache `E:\Builds\sccache`,
+**Shared compile cache:** on the maintainer's PC every `cargo` run inside Yap's checkout
+and its worktrees (dev.bat's included) goes through **sccache** (a local, git-excluded
+`E:\Projects\Yap\.cargo\config.toml`'s `rustc-wrapper`, Yap only; cache `E:\Builds\sccache`,
 30 GiB). Give cargo a task's own target dir as **`--target-dir`, never `CARGO_TARGET_DIR`**:
 sccache keys crates on every `CARGO_*` variable, so a per-task one shares nothing
 (the e2e/robot/eval builds do it themselves) — [build-and-test.md](./docs/architecture/build-and-test.md#the-shared-compile-cache-sccache-2026-11-16).
