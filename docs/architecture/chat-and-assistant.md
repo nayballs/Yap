@@ -4889,7 +4889,7 @@ commands); the page: `SheetTab.svelte`.
   that wraps itself). **Rows fitted as Excel fits them** (`xlsx::fit_wrapped_rows`,
   in every read, not only an edit's): a row with no height of its own is as
   tall as the most lines a wrapped cell in it takes at its column's width
-  (`edit::wrapped_lines`: the lines typed, words laid in at about 5.6 px a
+  (`edit::wrapped_lines`: the lines typed, words laid in at about 6.6 px a
   character of an 11-point font, erring tall), 15 points a line; a merge's
   cell isn't fitted (nor is it in Excel). The row being typed in grows at
   once (IronCalc's own fit is too short for two lines of Calibri).

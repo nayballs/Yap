@@ -550,10 +550,12 @@ impl Xlsx {
 
 /// **How many lines `text` takes wrapped in a column `px` wide** (font
 /// `size` points): each line typed, its words laid in greedily at about
-/// 5.6 px a character of an 11-point font (Calibri's), a word too long for
-/// a line its own lines. An estimate — Excel measures — erring tall. Pure.
+/// 6.6 px a character of an 11-point font (Calibri's, a little wide: the
+/// Lab's "Read the meter" wrapped where 5.6 said it wouldn't), a word too
+/// long for a line its own lines. An estimate — Excel measures — erring
+/// tall. Pure.
 pub fn wrapped_lines(text: &str, px: f64, size: f64) -> usize {
-    let per_line = ((px - 7.0).max(7.0) / (5.6 * size / 11.0)).max(1.0);
+    let per_line = ((px - 8.0).max(7.0) / (6.6 * size / 11.0)).max(1.0);
     text.split('\n')
         .map(|line| {
             let mut lines = 1usize;
