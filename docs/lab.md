@@ -159,7 +159,9 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   chat starts in it. A feature script's `ask` step takes `style`, `incognito`,
   `project`, `projectInstructions`, `projectFiles` (a list) and `projectPage` too.
 - `--research` (16 Nov 2026): Research under the message box switched on first
-  (`chat/research.rs`; refused when it can't be, its tooltip saying why). Its plan is a
+  (`chat/research.rs`; refused when it can't be, its tooltip saying why — waited on up to
+  5 s: the chip asks Yap whether Chat's model can research before it turns on, and read
+  at once it said "can't" though it came on a moment later). Its plan is a
   card (`kind: "outline"`, its `outline` the plan): `answer confirm:<n> allow` clicks
   **Start research**, `edit` changes it, as a document's outline. A plain "research …"
   researches without the switch. A feature script's `ask` step takes `research` too.
@@ -434,7 +436,10 @@ Routines (`chat/routines.rs`): Skills that run by themselves, on the test Yap's 
   while it runs (test mode's focus), so its one quiet card goes on the Yap bar — shot
   first ("The Yap bar as the run ended") — then they're back in Yap.
 - `routine now [<id>]`: Settings' Run now (no id: the routine `routine new` made last),
-  waited on the same way (`--no-wait`).
+  waited on the same way (`--no-wait`). A routine's turn still waiting for its time (no run
+  yet: `routine new --at 23:50`) gives way to it, set aside as `stopped` — so a routine made
+  for later can be run now (16 Nov 2026: refused until its time before). Any other turn still
+  going is waited on first.
 - `routine list`: Settings' list (`routines_list`); `on|off|delete <id>`.
 
 ```json
