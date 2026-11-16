@@ -503,6 +503,19 @@ mod tests {
             vec!["The area of a circle is A equals pi r squared, where r is the radius."]
         );
         assert_eq!(utterances("It costs $5 and $10 at most."), vec!["It costs five dollars and ten dollars at most."]);
+        // Opus's answer (Yap Lab, 16 Nov 2026): display maths, then Unicode maths as plain text.
+        let opus = "The area of a circle is:\n\n$$A = \\pi r^2$$\n\n- **A** is the area\n- **r** is the radius\n\n**From the diameter:** the radius is half the diameter (r = d/2), so the formula becomes A = πd²/4.\n\n**Example:** a circle with radius 5 cm has an area of π × 5² = 25π ≈ 78.54 cm².";
+        assert_eq!(
+            utterances(opus),
+            vec![
+                "The area of a circle is:",
+                "A equals pi r squared.",
+                "A is the area.",
+                "r is the radius.",
+                "From the diameter: the radius is half the diameter (r equals d over two), so the formula becomes A equals pi d squared over four.",
+                "Example: a circle with radius five centimetres has an area of pi times five squared equals twenty-five pi is approximately seventy-eight point five four square centimetres.",
+            ]
+        );
         // The markdown rules never reach inside a formula: underscores,
         // stars, brackets and a citation-looking [1] stay for the card.
         assert_eq!(inline_text("**Sum** $x_1 + y_1$ and $a*b*c$ on $[0, 1]$ or $v[1]$"), "Sum $x_1 + y_1$ and $a*b*c$ on $[0, 1]$ or $v[1]$");

@@ -198,6 +198,161 @@ pub fn in_words_mapped(text: &str, v: Variety) -> (String, Vec<Placed>) {
     (out, map)
 }
 
+// ---- maths written as plain text ----------------------------------------------------------
+
+/// Characters that make a run of plain text maths ("πd²/4", "≈ 78.5").
+/// Not μ or Ω (units: "5 μm", "10 Ω"), not arrows (prose: "Friday → Monday").
+fn plain_trigger(c: char) -> bool {
+    matches!(c, 'π' | 'θ' | '²' | '³' | '⁴' | '⁵' | '⁶' | '⁷' | '⁸' | '⁹' | '⁰' | '¹' | 'ⁿ' | '×' | '÷' | '±' | '∓' | '≈' | '≤' | '≥' | '≠' | '√' | '∛' | '∞' | '∑' | '∫' | '∂' | '∝' | '≡')
+}
+
+/// A token's edges: (leading punctuation, the token, trailing punctuation).
+fn edges(token: &str) -> (&str, &str, &str) {
+    let lead = token.len() - token.trim_start_matches(['(', '[', '"', '“', '\'']).len();
+    let rest = &token[lead..];
+    let core = rest.trim_end_matches([',', '.', ';', ':', '!', '?', ')', ']', '"', '”', '\'']);
+    (&token[..lead], core, &rest[core.len()..])
+}
+
+/// An operand of plain-text maths: a number, a lone letter, or a term of
+/// them with maths characters ("25π", "πd²/4", "5²") — never a word.
+fn plain_operand(core: &str) -> bool {
+    if core.is_empty() || core.chars().count() > 16 {
+        return false;
+    }
+    // Letters side by side: one ("x", "2x"), or up to three with a maths
+    // character beside them ("mc²", "πr²", "sin²θ").
+    let most = if core.chars().any(plain_trigger) { 3 } else { 1 };
+    let mut letters = 0;
+    for c in core.chars() {
+        if c.is_ascii_alphabetic() {
+            letters += 1;
+            if letters > most {
+                return false;
+            }
+            continue;
+        }
+        letters = 0;
+        if !(c.is_ascii_digit() || matches!(c, '.' | ',' | '/' | '^' | '(' | ')' | '+' | '-' | '−') || plain_trigger(c)) {
+            return false;
+        }
+    }
+    // Not just punctuation ("-", "/").
+    core.chars().any(|c| c.is_ascii_alphanumeric() || plain_trigger(c))
+}
+
+/// An operator or relation standing alone between operands ("=", "×", "≈").
+fn plain_operator(core: &str) -> bool {
+    matches!(core, "=" | "≈" | "≤" | "≥" | "≠" | "<" | ">" | "±" | "×" | "÷" | "+" | "-" | "−" | "/" | "*")
+}
+
+/// **Maths written as plain text** (16 Nov 2026), outside any `$…$`: models
+/// often write "A = πd²/4" or "π × 5² = 25π ≈ 78.54" as Unicode. A run of
+/// operands and operators ([`plain_operand`], [`plain_operator`]) is said
+/// through the same converter when it holds a maths character (π, ², ≈, ×,
+/// √…) or an "=" between two operands: "A equals pi d squared over four".
+/// Conservative: a word ends a run, a comma or full stop after a token ends
+/// it there, and "3 × 4" alone (a size, `normalize.rs`: "three by four") is
+/// left as it is. Pure.
+pub fn plain_in_words(text: &str, v: Variety) -> String {
+    if !text.chars().any(|c| plain_trigger(c) || c == '=') {
+        return text.to_string();
+    }
+    // Tokens with their byte offsets.
+    let mut toks: Vec<(usize, &str)> = Vec::new();
+    let mut start = None;
+    for (i, c) in text.char_indices() {
+        match (c.is_whitespace(), start) {
+            (false, None) => start = Some(i),
+            (true, Some(s)) => {
+                toks.push((s, &text[s..i]));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = start {
+        toks.push((s, &text[s..]));
+    }
+    let kind = |t: &str| {
+        let (_, core, _) = edges(t);
+        (plain_operand(core), plain_operator(core))
+    };
+    let ends_clause = |t: &str| !edges(t).2.is_empty();
+    let opens = |t: &str| !edges(t).0.is_empty();
+    let mut out = String::with_capacity(text.len() + 32);
+    let mut last = 0;
+    let mut i = 0;
+    while i < toks.len() {
+        let (operand, operator) = kind(toks[i].1);
+        let (_, core, _) = edges(toks[i].1);
+        // A maths character, or "=" between two operands ("r = d/2"); never
+        // "-" or "/" alone ("10 - 15" is a range, "and/or" words).
+        let trigger = (operand && core.chars().any(plain_trigger))
+            || (operator
+                && core == "="
+                && i > 0
+                && i + 1 < toks.len()
+                && kind(toks[i - 1].1).0
+                && !ends_clause(toks[i - 1].1)
+                && kind(toks[i + 1].1).0
+                && !opens(toks[i + 1].1));
+        if !trigger {
+            i += 1;
+            continue;
+        }
+        // The run round it. A lone "a", "A" or "I" is a word ("a 3 × 4 grid")
+        // unless an operator is beside it ("a = 5", "x + a").
+        let article = |t: &str| matches!(edges(t).1, "a" | "A" | "I");
+        let mut a = i;
+        while a > 0 && a > last_token(&toks, last) {
+            let (o, op) = kind(toks[a - 1].1);
+            if !(o || op) || ends_clause(toks[a - 1].1) || opens(toks[a].1) || (article(toks[a - 1].1) && !kind(toks[a].1).1) {
+                break;
+            }
+            a -= 1;
+        }
+        let mut b = i;
+        while b + 1 < toks.len() && !ends_clause(toks[b].1) {
+            let (o, op) = kind(toks[b + 1].1);
+            if !(o || op) || opens(toks[b + 1].1) || (article(toks[b + 1].1) && !kind(toks[b].1).1) {
+                break;
+            }
+            b += 1;
+        }
+        // Never starting or ending on an operator.
+        while a < b && kind(toks[a].1).1 {
+            a += 1;
+        }
+        while b > a && kind(toks[b].1).1 {
+            b -= 1;
+        }
+        let run: Vec<&str> = toks[a..=b].iter().map(|t| t.1).collect();
+        let (lead, _, _) = edges(run[0]);
+        let (_, _, trail) = edges(run[run.len() - 1]);
+        let from = toks[a].0 + lead.len();
+        let to = toks[b].0 + toks[b].1.len() - trail.len();
+        let body = &text[from..to];
+        // "3 × 4" alone is a size.
+        let size = run.len() == 3 && edges(run[1]).1 == "×" && [run[0], run[2]].iter().all(|t| edges(t).1.chars().all(|c| c.is_ascii_digit()));
+        let words = if size || from >= to { String::new() } else { say(body, v) };
+        if !words.is_empty() {
+            out.push_str(&text[last..from]);
+            out.push_str(&words);
+            last = to;
+        }
+        i = b + 1;
+    }
+    out.push_str(&text[last..]);
+    out
+}
+
+/// The index of the first token at or after byte `at` (a run never reaches
+/// back over text already said).
+fn last_token(toks: &[(usize, &str)], at: usize) -> usize {
+    toks.iter().position(|t| t.0 >= at).unwrap_or(toks.len())
+}
+
 // ---- reading TeX ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2732,6 +2887,31 @@ mod tests {
         let (text, map) = in_words_mapped("Café: $π$ ok", v);
         assert_eq!(text, "Café: pi ok");
         assert_eq!(map, vec![(6..9, 6..8)]);
+    }
+
+    #[test]
+    fn maths_written_as_plain_text() {
+        let v = Variety::British;
+        // Opus's circle answer, 16 Nov 2026 (Yap Lab), its plain-text lines.
+        assert_eq!(plain_in_words("so the formula becomes A = πd²/4.", v), "so the formula becomes A equals pi d squared over four.");
+        assert_eq!(plain_in_words("half the diameter (r = d/2), so", v), "half the diameter (r equals d over two), so");
+        assert_eq!(
+            plain_in_words("an area of π × 5² = 25π ≈ 78.54 square centimetres.", v),
+            "an area of pi times five squared equals twenty-five pi is approximately seventy-eight point five four square centimetres."
+        );
+        assert_eq!(plain_in_words("π (pi) is about 3.14159.", v), "pi (pi) is about 3.14159.");
+        assert_eq!(plain_in_words("E = mc² says it", v), "E equals m c squared says it");
+        assert_eq!(plain_in_words("so a = 5 and x ≤ 3", v), "so a equals five and x is less than or equal to three");
+        assert_eq!(plain_in_words("about √2, or 1.41", v), "about the square root of two, or 1.41");
+        assert_eq!(us_plain("x = −3"), "x equals negative three");
+        // Left alone: prose, a size, a range, code, units, arrows.
+        for s in ["Set width = 100 in the file.", "a 3 × 4 grid", "from 10 - 15 people", "and/or", "Friday → Monday", "5 μm and 10 Ω", "x=1 in code", "It's 5 = good"] {
+            assert_eq!(plain_in_words(s, v), s);
+        }
+    }
+
+    fn us_plain(s: &str) -> String {
+        plain_in_words(s, Variety::American)
     }
 
     /// Formulas as chat answers write them (physics, finance, statistics,

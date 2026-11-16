@@ -459,7 +459,18 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, ElevenLabs on the 
     British "minus three", "three quarters", "a plus b, all squared", "d y
     by d x", "one hundred and five"; American "negative three", "three
     fourths", "the quantity a plus b, squared", "d y d x", "one hundred
-    five". **Anything it doesn't know is said simply**: an unknown symbol
+    five". **Maths written as plain text** (`plain_in_words`, after `$…$`;
+    Opus answered the Lab's circle question with "A = πd²/4" and "π × 5² =
+    25π ≈ 78.54 cm²" outside any delimiters): a run of operands (numbers,
+    lone letters, terms like "25π", "πd²/4", "mc²", never a word) and
+    operators is said through the same converter when it holds a maths
+    character (π θ ² ³ × ÷ ± ≈ ≤ ≥ ≠ √ ∞ ∑ ∫ ∂ ∝ ≡; not μ or Ω, units, nor
+    arrows, prose) or an "=" between two operands — "A equals pi d squared
+    over four"; a word or a comma ends a run, a lone "a" / "I" is a word
+    unless an operator is beside it, "3 × 4" alone stays a size ("three by
+    four"), "10 - 15" a range; and before it `normalize.rs` says "78.54 cm²"
+    as "square centimetres" (`AREA`: mm, cm, m, km, ft; ² square, ³ cubic).
+    **Anything it doesn't know is said simply**: an unknown symbol
     by its name (`\aleph` → "aleph"), an unknown command round braces by
     what's in them, sizes, colours, labels and spacing as nothing; the
     words never hold a backslash, a brace, `^`, `_`, `$`, `&` or `#`
