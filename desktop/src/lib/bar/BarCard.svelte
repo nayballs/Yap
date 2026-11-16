@@ -20,9 +20,16 @@
   // body that scrolls past ~10 lines, a `status` note under it ("Not read
   // aloud while a meeting records"), Open in Chat. It goes when its voice
   // ends (Rust), or on ✕ / Esc, which stop the voice.
+  //
+  // A body that's markdown — the answer's, or a notice's with `markdown`
+  // (a model's words: an agent's reply, a routine's answer) — is rendered as
+  // Chat renders it, its maths, diagrams and pictures drawn
+  // (ui/markdownVisuals.js, KaTeX and mermaid in chunks of their own, loaded
+  // the first time one shows), in the bar's colours. Any other body is text.
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
   import { fillHotkey } from '../core/hotkeys.js';
   import { renderMarkdown } from '../core/markdown.js';
+  import { markdownVisuals, themeFrom } from '../ui/markdownVisuals.js';
   import { FEATURE_NAME } from '../core/codeChats.js';
 
   /** @type {{ card: any, paused?: boolean, onaction: (action: string) => void }} */
@@ -75,6 +82,8 @@
   // A card naming a hotkey (the push-to-talk hints) says `{key}`.
   const title = $derived(card.hotkey ? fillHotkey(card.title, card.hotkey) : card.title);
   const body = $derived(card.hotkey ? fillHotkey(card.body, card.hotkey) : card.body);
+  // Its diagrams in the bar's own colours (Settings → Yap bar → Colours).
+  const visuals = { theme: themeFrom('data-bar-theme') };
 </script>
 
 <div class="card" data-region={`card:${card.id}`} role="status" aria-live="polite">
@@ -139,11 +148,15 @@
     <!-- The question, then the answer (renderMarkdown passes no raw HTML and sanitises its output). -->
     <div class="asked">“{title}”</div>
     <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-    {#if body}<div class="body answer">{@html renderMarkdown(body)}</div>{/if}
+    {#if body}<div class="body answer rendered" use:markdownVisuals={visuals}>{@html renderMarkdown(body)}</div>{/if}
     {#if card.status}<div class="note">{card.status}</div>{/if}
   {:else}
     <div class="title" class:under={card.countdown?.headline}>{title}</div>
-    {#if body}<div class="body">{body}</div>{/if}
+    {#if body && card.markdown}
+      <!-- A model's words (renderMarkdown passes no raw HTML and sanitises its output). -->
+      <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+      <div class="body rendered" data-testid="bar-card-markdown" use:markdownVisuals={visuals}>{@html renderMarkdown(body)}</div>
+    {:else if body}<div class="body">{body}</div>{/if}
   {/if}
   {#if card.countdown && !card.countdown.headline}
     <div class="countdown">
@@ -352,34 +365,92 @@
     font-size: 14px;
     overscroll-behavior: contain;
   }
-  .body.answer :global(p) {
+  /* A markdown body (the answer's, a model's words on a notice): compact, in
+     the bar's colours; its maths, diagrams and pictures drawn
+     (ui/markdownVisuals.js) on the bar's tokens, never the app's (the bar
+     has its own Light / Dark). No shadows, no backdrop-filter: the window
+     is transparent. */
+  .body.rendered {
+    align-self: stretch;
+    overflow-wrap: anywhere;
+    /* Its scrollbars (the answer's, a wide diagram's or formula's) on the
+       bar's colours: the window has no color-scheme of its own. (A notice's
+       body is short — a model's words cut at 160 characters — so it never
+       scrolls itself.) */
+    scrollbar-width: thin;
+    scrollbar-color: var(--bar-text-faint) transparent;
+  }
+  .body.rendered :global(:is(.md-diagram-view, .md-math-display, pre)) {
+    scrollbar-width: thin;
+  }
+  .body.rendered :global(p) {
     margin: 0 0 6px;
   }
-  .body.answer :global(p:last-child) {
+  .body.rendered > :global(:last-child) {
     margin-bottom: 0;
   }
-  .body.answer :global(ul),
-  .body.answer :global(ol) {
+  .body.rendered :global(ul),
+  .body.rendered :global(ol) {
     margin: 0 0 6px;
     padding-left: 20px;
   }
-  .body.answer :global(h1),
-  .body.answer :global(h2),
-  .body.answer :global(h3) {
+  .body.rendered :global(:is(h1, h2, h3, h4, h5)) {
     margin: 0 0 4px;
     font-size: 14px;
     font-weight: 650;
+    color: var(--bar-text);
   }
-  .body.answer :global(pre),
-  .body.answer :global(code) {
+  .body.rendered :global(pre),
+  .body.rendered :global(code) {
     font-size: 12px;
   }
-  .body.answer :global(pre) {
+  .body.rendered :global(pre) {
     margin: 0 0 6px;
     padding: 6px 8px;
     border-radius: 6px;
     background: var(--bar-hover);
     white-space: pre-wrap;
+  }
+  .body.rendered :global(a.md-link) {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--bar-text-faint);
+  }
+  .body.rendered :global(.md-math-display) {
+    margin: 6px 0;
+  }
+  .body.rendered :global(.md-diagram[data-drawn='true']:not(.md-diagram-code)) {
+    padding: 10px 30px 10px 10px;
+    border-color: var(--bar-border);
+    background: var(--bar-hover);
+  }
+  .body.rendered :global(.md-diagram-switch),
+  .body.rendered :global(.md-diagram.md-diagram-code > .md-diagram-switch) {
+    top: 4px;
+    right: 4px;
+    color: var(--bar-text-muted);
+  }
+  .body.rendered :global(.md-diagram-switch:hover) {
+    background: var(--bar-active);
+    color: var(--bar-text);
+  }
+  .body.rendered :global(.md-diagram-switch[aria-pressed='true']) {
+    color: var(--bar-accent);
+  }
+  .body.rendered :global(.md-imgbox) {
+    border-color: var(--bar-border);
+    background: var(--bar-hover);
+    color: var(--bar-text-soft);
+  }
+  .body.rendered :global(.md-imgbox:hover) {
+    border-color: var(--bar-text-faint);
+    color: var(--bar-text);
+  }
+  .body.rendered :global(.md-imghost) {
+    color: var(--bar-text-muted);
+  }
+  .body.rendered :global(img.md-img) {
+    max-height: 180px;
   }
   .note {
     margin-top: 8px;

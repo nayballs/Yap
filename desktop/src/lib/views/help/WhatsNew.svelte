@@ -6,6 +6,7 @@
   // release page instead.) Esc, ✕ or the scrim close it.
   import { onMount, tick } from 'svelte';
   import { renderMarkdown } from '../../core/markdown.js';
+  import { markdownVisuals } from '../../ui/markdownVisuals.js';
   import { openExternalLink } from '../../core/externalLinks.js';
   import { updates, releaseUrlFor } from '../../stores/updates.svelte.js';
 
@@ -42,8 +43,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
       </button>
     </header>
-    <!-- Sanitised by renderMarkdown (DOMPurify). -->
-    <div class="notes md">{@html html}</div>
+    <!-- Sanitised by renderMarkdown (DOMPurify); maths, diagrams and pictures drawn (ui/markdownVisuals.js). -->
+    <div class="notes md" use:markdownVisuals>{@html html}</div>
     <footer>
       <button type="button" class="link" onclick={() => openExternalLink(updates.releaseUrl || releaseUrlFor(updates.version))}>Release page on GitHub</button>
     </footer>
