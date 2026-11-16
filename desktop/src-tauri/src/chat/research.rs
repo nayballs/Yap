@@ -129,8 +129,6 @@ pub fn spent(caps: &Caps, searches: usize, reads: usize, elapsed: Duration, toke
         Some(Spent::Time)
     } else if tokens >= caps.tokens {
         Some(Spent::Tokens)
-    } else if searches >= caps.searches && reads >= caps.reads {
-        Some(Spent::Searches)
     } else if searches >= caps.searches {
         Some(Spent::Searches)
     } else if reads >= caps.reads {
@@ -702,7 +700,7 @@ pub fn report(written: &str, sources: &[Source], plan_title: &str, byline: &str)
     let summary = summary_of(&rest);
     let mut again = fixed_order.clone();
     let (short, _) = renumber(&summary, &read, &mut again, &|new| new.iter().map(|n| format!("[{n}]")).collect());
-    // The answer's sources: the cited first, as numbered; then the rest.
+    // The answer's sources: the cited first, as numbered; then the other pages read.
     let mut out: Vec<Source> = Vec::new();
     for (i, n) in order.iter().enumerate() {
         if let Some(s) = sources.iter().find(|s| s.n == *n) {
@@ -710,10 +708,8 @@ pub fn report(written: &str, sources: &[Source], plan_title: &str, byline: &str)
         }
     }
     let cited = out.len();
-    let mut next = cited;
-    for s in sources.iter().filter(|s| s.opened && !order.contains(&s.n)) {
-        next += 1;
-        out.push(Source { n: next, cited: false, ..s.clone() });
+    for (i, s) in sources.iter().filter(|s| s.opened && !order.contains(&s.n)).enumerate() {
+        out.push(Source { n: cited + i + 1, cited: false, ..s.clone() });
     }
     // The document.
     let mut body = format!("# {title}\n");

@@ -957,7 +957,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
             let why = *why;
             tracing::info!(cap = ?why, "Claude plan: the research reached a cap; the report next");
             mapper.add_chip(format!("Stopped researching: {}", why.chip(&b.caps)));
-            map::Out::chips(&mut out, &mapper.chips().to_vec(), &mapper.sources().to_vec(), mapper.looked());
+            map::Out::chips(&mut out, mapper.chips(), mapper.sources(), mapper.looked());
             match stopped_for_report(&w, &mut rx).await {
                 Some(first) => {
                     let answered = if mapper.model().is_empty() { model.as_str() } else { mapper.model() };
