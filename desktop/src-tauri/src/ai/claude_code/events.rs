@@ -38,7 +38,11 @@
 //!   process it ran in had gone). The process stays up while one runs, even
 //!   with stdin closed, and when it ends Claude Code starts a turn of its own:
 //!   its `result` says `origin: {kind: "task-notification"}`
-//!   ([`TurnResult::own_turn`]). Resumed with a task still noted as running
+//!   ([`TurnResult::own_turn`]). A helper may instead send its report back
+//!   as a message (seen on an agent run, 16 Nov 2026): a synthetic message
+//!   echoed (`isSynthetic`), and the turn on it says `origin: {kind:
+//!   "peer", handback: true}`, before the task's own (then empty)
+//!   notification turn. Resumed with a task still noted as running
 //!   in an ended process, it says it `stopped` and ends such a turn with no
 //!   model call before it reads the new message: `num_turns` 0, `result`
 //!   "", no `terminal_reason` ([`TurnResult::empty`]). A `ScheduleWakeup`'s
@@ -358,7 +362,8 @@ pub struct TurnResult {
     pub model_usage: Vec<ModelUse>,
     /// `origin.kind`: what started the turn when it wasn't a message written
     /// to it — `task-notification` for one Claude Code started on a task's
-    /// end ([`TurnResult::own_turn`]). None for a message's.
+    /// end, `peer` on a helper's report sent back as a message
+    /// ([`TurnResult::own_turn`]). None for a message's.
     pub origin: Option<String>,
 }
 
@@ -392,11 +397,12 @@ impl TurnResult {
         self.terminal_reason.as_deref().is_some_and(|r| r.starts_with("aborted"))
     }
 
-    /// **A turn Claude Code started by itself** on a task's end (`origin`
-    /// `task-notification`, 2.1.296): never the answer to a message written
-    /// to it.
+    /// **A turn Claude Code started by itself** (2.1.296): on a task's end
+    /// (`origin.kind` `task-notification`), or on a helper's report sent back
+    /// to it as a message (`peer`, with `handback: true`; its message echoed
+    /// as `isSynthetic`) — never the answer to a message written to it.
     pub fn own_turn(&self) -> bool {
-        self.origin.as_deref() == Some("task-notification")
+        matches!(self.origin.as_deref(), Some("task-notification" | "peer"))
     }
 
     /// **No model call and no words**: `num_turns` 0, `result` "", not an
@@ -1451,6 +1457,12 @@ pub(crate) mod tests {
         assert_eq!((results[0].own_turn(), results[0].origin.as_deref()), (false, None));
         assert_eq!((results[1].own_turn(), results[1].num_turns, results[1].empty()), (true, 1, false));
         assert_eq!(results[1].text, "The helper is back: Hedgerow is cheapest, at 1.95 a pack.");
+        // A helper's report sent back as a message (seen on an agent run): the turn on it is Claude Code's own too.
+        let peer = parse_line(r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Four files.","origin":{"kind":"peer","handback":true,"from":"a4f1c9e27b3d50816"},"session_id":"s"}"#);
+        assert!(matches!(peer, Some(Event::Result(r)) if r.own_turn() && !r.empty()));
+        // Anything else (or none) answers a message.
+        let other = parse_line(r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Hi.","origin":{"kind":"something-new"},"session_id":"s"}"#);
+        assert!(matches!(other, Some(Event::Result(r)) if !r.own_turn() && r.origin.as_deref() == Some("something-new")));
         // A wake-up's turn is bracketed.
         assert!(matches!(parse_line(r#"{"type":"command_lifecycle","command_uuid":"c1","state":"started","session_id":"s"}"#), Some(Event::Lifecycle(Lifecycle { started: true }))));
         assert!(matches!(parse_line(r#"{"type":"command_lifecycle","command_uuid":"c1","state":"completed","session_id":"s"}"#), Some(Event::Lifecycle(Lifecycle { started: false }))));

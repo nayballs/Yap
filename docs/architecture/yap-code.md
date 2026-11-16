@@ -1640,7 +1640,11 @@ ids made up):
   `task_notification` (`completed`, or `stopped`). The process stays up for
   them, **even with its input closed**, and when one ends it starts a turn
   of its own on it: the model reads the notice and answers, and that
-  result says `origin: {kind: "task-notification"}`. A notice that comes
+  result says `origin: {kind: "task-notification"}`. A helper may instead
+  send its report back as a message (seen in Yap Lab on an agent run): a
+  synthetic message echoed (`isSynthetic`) and a turn on it whose result
+  says `origin: {kind: "peer", handback: true}`, then the task's own
+  notification turn, empty. A notice that comes
   while a turn works joins it at its next tool call's end (one result).
   `ScheduleWakeup`'s turn has no origin: `command_lifecycle` `started` and
   `completed` bracket it, and its call's record says when it's due
@@ -1655,8 +1659,10 @@ ids made up):
   counted results), closed the input and ended the process 15 s later,
   mid-work: the reply cut off, the report Yap's own.
 - **Only an answer to Yap's message ends a turn** (`Follow::take_result`):
-  a turn of Claude Code's own (`TurnResult::own_turn`, or a wake-up's while
-  its `command_lifecycle` runs) never counts as a message's answer
+  a turn of Claude Code's own (`TurnResult::own_turn`: `task-notification`
+  or `peer`, exactly those — any other origin is logged and taken as an
+  answer, so a newer Claude Code never leaves a turn open — or a wake-up's
+  while its `command_lifecycle` runs) never counts as a message's answer
   (`Live::results`), and one with no model call and no words
   (`TurnResult::empty`) — Claude Code's own, or any before the turn's first
   message was even echoed back — is nothing at all ("Agents: a turn of

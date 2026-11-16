@@ -2558,6 +2558,9 @@ impl Follow {
     fn take_result(&mut self, r: &TurnResult) -> After {
         // (A wake-up's turn, started by Claude Code itself, says no origin: its `command_lifecycle` does.)
         let own = r.own_turn() || self.woken;
+        if let Some(kind) = r.origin.as_deref().filter(|_| !r.own_turn()) {
+            tracing::info!(id = %self.id, turn = self.n, kind, "Agents: a result says a start Yap doesn't know; taken as an answer");
+        }
         // (It echoes each message as it takes it in: none yet, the turn's first is still to be read.)
         let first_unread = with_state(|s| s.live.get(&self.id).is_some_and(|l| !l.written.is_empty() && l.taken == 0));
         if r.empty() && (own || first_unread) {
