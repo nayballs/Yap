@@ -422,10 +422,11 @@ has the teardown and the numbers) and ported, not copied:
   lined up at the foot. Each as wide as **its own pixels over the device
   pixel ratio** — one image pixel per device pixel, so a snip comes back the
   size it was on screen — at most 480 × 320 px, 240 wide each of several,
-  never wider than a bubble (78 % of the thread's content box, so a
-  scrollbar's width is left out; settled 250 ms after a resize or the
-  scrollbar showing) and never under a 120 px frame (a small snip sits on
-  the fill).
+  never wider than a bubble (78 % of the column as it is with the thread's
+  scrollbar, shown or not, so a scrollbar's width is always left out and
+  its coming or going never moves a picture — 16 Nov 2026: it did, a second
+  jump a moment after the first; settled 250 ms after a resize) and never
+  under a 120 px frame (a small snip sits on the fill).
 - **Opened large** (ShotViewer.svelte): a darker scrim
   (`--yap-shot-scrim`), the whole picture 1:1 when it fits the window less
   32 px all round, else as big as fits; the frame and the modal shadow.

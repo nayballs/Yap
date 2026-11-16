@@ -204,12 +204,37 @@ async function loaded(img) {
   await expect.poll(() => img.evaluate((el) => el.complete && el.naturalWidth > 0), { message: 'the picture to load' }).toBe(true);
 }
 
-/** An <img>'s box on screen (CSS px), its natural size and the pixel ratio. */
+/** An <img>'s box on screen (CSS px), its natural size and the pixel ratio, and its frame's box, all at one moment. */
 const placement = (img) =>
   img.evaluate((el) => {
     const r = el.getBoundingClientRect();
-    return { w: r.width, h: r.height, nw: el.naturalWidth, nh: el.naturalHeight, src: el.getAttribute('src'), dpr: window.devicePixelRatio };
+    const frame = el.closest('.sharedpic').getBoundingClientRect().toJSON();
+    return { w: r.width, h: r.height, nw: el.naturalWidth, nh: el.naturalHeight, src: el.getAttribute('src'), dpr: window.devicePixelRatio, loaded: el.complete && el.naturalWidth > 0, frame };
   });
+
+/**
+ * `placement(img)` once the picture has settled where a person sees it: the
+ * same, loaded, over two looks 400 ms apart. The thread's pictures take
+ * their new width a moment after the column's changes (ChatThread's `room`,
+ * 250 ms after the panel opens or closes), so a look in between sees the old.
+ */
+async function settled(img) {
+  let last = '';
+  let p = null;
+  await expect
+    .poll(
+      async () => {
+        p = await placement(img);
+        const now = JSON.stringify(p);
+        const same = p.loaded && now === last;
+        last = now;
+        return same;
+      },
+      { intervals: [400], message: 'the picture to settle' },
+    )
+    .toBe(true);
+  return p;
+}
 
 const answerWith = (s, id, pred) => s.conversations.find((c) => c.id === id)?.messages.find((m) => m.role === 'assistant' && pred(m));
 
@@ -237,17 +262,16 @@ test('one picture: copied, kept, large in the thread; a click opens the viewer, 
   await expect(main.getByTestId('chat-share-caption')).toHaveText(CAPTION);
   await expect(main.getByText('Here is the first concept')).toBeVisible();
   const img = pic.locator('img');
-  await loaded(img);
-  // Large: as wide as it is (640 px fits the column), its shape kept, at its device pixels.
-  const p = await placement(img);
+  // Large: as wide as it is (640 px fits the column), its shape kept, at its device pixels —
+  // once settled beside the panel the answer opened.
+  const p = await settled(img);
   expect(p.w).toBeGreaterThan(300);
   expect(p.h).toBeLessThanOrEqual(480);
   expect(Math.abs(p.w / p.h - 640 / 400)).toBeLessThan(0.02);
   expect(Math.abs(p.w * p.dpr - p.nw)).toBeLessThan(0.6);
   // Whole, never cropped: its frame is its own shape (no bars), the picture filling it.
-  const frame = await pic.evaluate((el) => el.closest('.sharedpic').getBoundingClientRect().toJSON());
-  expect(Math.abs(frame.width - p.w)).toBeLessThan(1);
-  expect(Math.abs(frame.height - p.h)).toBeLessThan(1);
+  expect(Math.abs(p.frame.width - p.w)).toBeLessThan(1);
+  expect(Math.abs(p.frame.height - p.h)).toBeLessThan(1);
   expect(p.src).not.toContain('fit=cover');
 
   // The model was offered it (the web off: a picture file named), by a path only.
@@ -274,9 +298,23 @@ test('one picture: copied, kept, large in the thread; a click opens the viewer, 
   await pic.click();
   await expect(main.getByTestId('chat-picture-caption')).toHaveText('concept.png');
   await expect(main.getByTestId('chat-picture-source')).toContainText('docs');
-  // Closed: the viewer.
+  // Closed: the picture takes the wider column in one step, never back again as the
+  // thread's scrollbar comes with it (it did: a second jump a moment later, which shut
+  // the ⋯ menu just opened on it).
+  await pic.evaluate((el) => {
+    const frame = el.closest('.sharedpic');
+    window.__shareWidths = [frame.style.width];
+    new MutationObserver(() => {
+      if (window.__shareWidths.at(-1) !== frame.style.width) window.__shareWidths.push(frame.style.width);
+    }).observe(frame, { attributeFilter: ['style'] });
+  });
   await main.getByTestId('chat-picture').getByRole('button', { name: 'Close the panel' }).click();
   await expect(main.getByTestId('chat-picture')).toHaveCount(0);
+  const wide = await settled(img);
+  expect(wide.w).toBeGreaterThanOrEqual(p.w);
+  expect(Math.abs(wide.w * wide.dpr - wide.nw)).toBeLessThan(0.6);
+  expect((await main.evaluate(() => window.__shareWidths)).length).toBeLessThanOrEqual(2);
+  // …and a click on it: the viewer.
   await pic.click();
   const viewer = main.getByRole('dialog', { name: 'Screenshot' });
   await expect(viewer).toBeVisible();
@@ -306,17 +344,15 @@ test('three pictures: a grid, each at its device pixels', async ({ yap, main, fa
   await expect(main.getByTestId('chat-share-caption').last()).toHaveText('Three ideas for the garden');
   // Two columns, square tiles, each picture at exactly its device pixels.
   const tiles = grid.getByTestId('chat-shared-picture');
-  const boxes = [];
   for (let i = 0; i < 3; i++) {
-    const img = tiles.nth(i).locator('img');
-    await loaded(img);
-    const p = await placement(img);
+    const p = await settled(tiles.nth(i).locator('img'));
     expect(Math.abs(p.w * p.dpr - p.nw)).toBeLessThan(0.6);
     // Filled: Rust's tile of the picture's middle at exactly its device pixels.
     expect(p.src).toMatch(/\?w=\d+&h=\d+&fit=cover$/);
     expect(Math.abs(p.h * p.dpr - p.nh)).toBeLessThan(0.6);
-    boxes.push(await tiles.nth(i).evaluate((el) => el.closest('.sharedpic').getBoundingClientRect().toJSON()));
   }
+  // (The tiles' boxes at one moment: the thread may still be moving to its foot.)
+  const boxes = await tiles.evaluateAll((els) => els.map((el) => el.closest('.sharedpic').getBoundingClientRect().toJSON()));
   expect(Math.abs(boxes[0].y - boxes[1].y)).toBeLessThan(1);
   expect(boxes[2].y).toBeGreaterThan(boxes[0].y + boxes[0].height - 1);
   // 4:3 tiles, the picture filling each (no bars).
