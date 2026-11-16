@@ -110,6 +110,7 @@
         readingFont: cfg.readingFont,
         readingSize: cfg.readingSize,
         motion: cfg.motion,
+        messageActions: cfg.messageActions,
       });
   });
   let outputs = $state([]); // audio output device names (for the chime)

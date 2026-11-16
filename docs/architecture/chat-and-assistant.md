@@ -6312,12 +6312,31 @@ tiny". So both rows are the app's, in every chat:
   ago") and the model that wrote it, cut short with an ellipsis when the row's
   narrow; "· Stopped" after it when it was. An older Retry's ‹ k/n › goes
   first.
-- **Under the person's message**, on hover, and always under the latest one
-  as the app shows it (‹ 1/2 › always): in Chat **Copy**
+- **Under the person's message** (‹ 1/2 › always): in Chat **Copy**
   and **Edit**; in a Code chat **✓✓ and its time** ("✓✓ 12 minutes ago ·":
   ✓ while a queued message waits, `data-testid chat-ticks`; ✓✓ once Claude
   has it, `chat-read` on every other), **Copy**, **Rewind to here** and
   **Fork from here**.
+- **On hover, as the app's** (16 Nov 2026, after the maintainer tried the
+  sizes): both rows show on hovering the message — its bubble, its row, or
+  anything of its between (`.chatmsg`, a `display: contents` group round
+  each message's parts, so the thread lays out as before) — the latest
+  message's too; on a keyboard focus in it (`:has(:focus-visible)`: Tab to
+  the bubble or a button; a click's focus doesn't hold it); and while an
+  answer's read aloud or its chapter named. They fade out a moment after
+  the pointer leaves, so it can cross from the bubble to the row. **Settings
+  → General → Appearance → Message actions** (Show on hover / Always show,
+  `messageActions`, `data-message-actions` on `<html>` from
+  `core/appearance.js`) shows them always. The phone has no hover and
+  always shows its row.
+- **✓ / ✓✓, a status, always** (WhatsApp's way, the maintainer's call): a
+  Code chat's ticks show at rest under the bubble's edge (`.ticks.rest`,
+  `chat-ticks-rest`, `aria-hidden`: the row's own is the one read out),
+  and give way to the row's own, first in it, on hover. Read, the ✓✓ alone
+  takes WhatsApp's read blue — `--yap-tick-read` in app.css: `#53bdeb` in
+  dark (8.2:1 on the thread), `#2196d3` in light, a little deeper because
+  `#53bdeb` is 2.0:1 on the light page (3.1:1) — no pill or background; ✓
+  Sent stays grey.
 - **Tooltips as the app's** (`ui/actionTip.js`, `.yap-action-tip` in
   app.css): a dark bubble above the button after a short hover or on the
   keyboard's focus — its name in bold and, where there's more to say, a line

@@ -52,8 +52,6 @@
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
   const chapters = $derived(chaptersOf(chat.messages));
   const chapterAt = $derived(new Map(chapters.map((c) => [`${c.at}:${c.below ? 'below' : 'above'}`, c])));
-  // The person's latest message: its row (✓✓ and its time, Copy…) always shown, as the Claude app shows it.
-  const lastAsk = $derived(chat.messages.findLastIndex((m) => m.role === 'user' && !m.kind));
   // **Visuals** (chat/made.rs, 15 Nov 2026): read with the chat, heard as they're made; each shows in the
   // answer to its question (above its words), or under the question's work while there's no answer yet.
   followMade();
@@ -447,7 +445,6 @@
               onkept={openKept}
               branch={m.id && !m.streaming ? branchOf(i) : null}
               answer={m.role === 'assistant' ? answerFor(m, i) : null}
-              latestAsk={i === lastAsk}
               editing={m.role === 'user' && chat.editing?.id === m.id ? chat.editing : null}
               onedited={(words) => chat.saveEdit(m, words)}
               oneditcancel={() => chat.cancelEdit()}
