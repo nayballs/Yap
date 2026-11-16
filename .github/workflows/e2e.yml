@@ -1,5 +1,5 @@
 # End-to-end UI tests (desktop/e2e/, docs/e2e-tests.md). Builds the STUB debug app
-# with the frontend embedded once, then runs the suite in eight shards side by
+# with the frontend embedded once, then runs the suite in nine shards side by
 # side, each launching the app isolated (portable data dir, its own WebView2
 # profile, test mode) and driving every window with Playwright over CDP.
 # Screenshots, the HTML report and the app's logs are uploaded as the
@@ -12,8 +12,9 @@
 # (24 Oct 2026), one of two shards the 40-minute one (2 Nov), and by 16 Nov
 # three shards of Playwright's own --shard ran 31–37 minutes of tests each,
 # after a 4-minute build each: most runs hit the 40-minute limit, and main had
-# no finished run for two days. Now one build, handed to eight shards split by
-# time (desktop/e2e/shards.mjs: about 12.5 minutes of tests each).
+# no finished run for two days. Now one build, handed to nine shards split by
+# time (desktop/e2e/shards.mjs: about 12 minutes of tests each; eight came to
+# 13.5–16 on their first run, too near 15).
 name: "E2E"
 
 on:
@@ -88,14 +89,14 @@ jobs:
           retention-days: 1
 
   e2e:
-    name: e2e (${{ matrix.shard }}/8)
+    name: e2e (${{ matrix.shard }}/9)
     needs: build
     runs-on: windows-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7

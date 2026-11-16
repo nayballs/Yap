@@ -373,12 +373,12 @@ unreachable account service. (Runners are elevated, so WebView2 ignores the suit
 policy for `yap.exe` instead.) Locally it runs **four test Yaps at once** (2026-11-16;
 `--workers=N` to change; what keeps them apart, and the `solo` specs that need the
 connectors' fixed port: [`docs/e2e-tests.md`](../e2e-tests.md#several-at-once-2026-11-16)).
-CI builds the test app once and runs the suite in **eight shards** side by side, split
-by time (`desktop/e2e/shards.mjs` over `desktop/e2e/timings.json`, about 12.5 minutes of
+CI builds the test app once and runs the suite in **nine shards** side by side, split
+by time (`desktop/e2e/shards.mjs` over `desktop/e2e/timings.json`, about 12 minutes of
 tests each; Playwright's own `--shard` put the long `agents-*` specs together, and three
 shards of it ran 31–37 minutes each by 16 Nov, most runs hitting the 40-minute limit).
 A newer push cancels a branch's run, never main's. Each shard uploads its `test-results/app` as
-**`e2e-results-1`** … **`e2e-results-8`** on every run — review one with
+**`e2e-results-1`** … **`e2e-results-9`** on every run — review one with
 `gh run download <run-id> --repo nayballs/Yap --name e2e-results-1 --dir e2e-<run-id>`
 and read the PNGs under `screenshots/`. Full guide (incl. adding a test):
 [`docs/e2e-tests.md`](../e2e-tests.md).

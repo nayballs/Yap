@@ -421,7 +421,7 @@ Accounts in debug builds: `cd cloud && npm run dev` (wrangler dev on :8787; see 
 then `cargo clippy --locked --release -- -D warnings` (debug-only code is dead in release:
 gate it with `#[cfg(debug_assertions)]`), and the phone app's tests (`npm run test:link`, Chromium and Firefox).
 ⚠ Zero-warnings ratchet on the **latest stable** toolchain — keep local Rust current
-(`rustup update`). `e2e.yml` runs the e2e suite on the same triggers (one build, eight
+(`rustup update`). `e2e.yml` runs the e2e suite on the same triggers (one build, nine
 shards split by time: `desktop/e2e/shards.mjs`); a newer push cancels a branch's runs, never
 main's, so every batch of merges gets a result. Dependabot opens
 weekly update PRs; `pins.yml` keeps an issue open while a pinned download is behind

@@ -195,8 +195,8 @@ each run):
 `.github/workflows/e2e.yml` runs the suite on every push and PR to `main`, and
 on demand (`gh workflow run e2e.yml --repo nayballs/Yap`, `-f workers=2` for
 two test Yaps a runner). One job builds the test app and hands its `yap.exe`
-to **eight shards** side by side (`YAP_E2E_EXE`), each uploading its
-`test-results/app` as **`e2e-results-1`** … **`e2e-results-8`** on every run,
+to **nine shards** side by side (`YAP_E2E_EXE`), each uploading its
+`test-results/app` as **`e2e-results-1`** … **`e2e-results-9`** on every run,
 pass or fail. A newer push cancels a branch's run in progress, but never
 main's: a run on main always finishes, so every batch of merges gets a result.
 
@@ -206,8 +206,8 @@ by the seconds in `desktop/e2e/timings.json`, and the shard runs its list with
 `--test-list`. Playwright's own `--shard` splits the files in name order by how
 many tests each has, which put the long `agents-*` specs together: three such
 shards ran 31–37 minutes of tests each by 16 Nov, most runs hit the job's
-40-minute limit, and main had no finished run for two days. Eight shards by time
-are about 12.5 minutes each. A new spec counts as the median until its time is
+40-minute limit, and main had no finished run for two days. Nine shards by time
+are about 12 minutes of tests each (eight ran 13.5–16 on their first run). A new spec counts as the median until its time is
 recorded; refresh the timings now and then from the shards' JSON reports:
 
 ```bash
