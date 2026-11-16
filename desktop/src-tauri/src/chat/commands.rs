@@ -198,8 +198,11 @@ pub async fn chat_send(
     incognito: Option<bool>,
     project: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    // The files attached in the box (chat/attachments.rs): each still there.
-    let files = crate::chat::attachments::taken(&files.unwrap_or_default())?;
+    // The files attached in the box (chat/attachments.rs): each still there,
+    // and out of the box now (a question asked out loud can't take them too).
+    let files = files.unwrap_or_default();
+    crate::chat::attachments::sent_from_box(&files);
+    let files = crate::chat::attachments::taken(&files)?;
     // A Skill (`/decisions`, a one-tap prompt): asked across the meetings,
     // its own passages and instructions (chat/skills.rs).
     let skill_turn = match skill.as_deref().map(str::trim).filter(|s| !s.is_empty()) {

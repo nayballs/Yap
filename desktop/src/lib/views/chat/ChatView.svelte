@@ -563,6 +563,8 @@
       // The quote over the box, taken by a question asked out loud (or
       // given back: no answer came).
       listen('yap-chat-quote', (e) => chat.onQuote(e.payload)),
+      // …and the files in the box (chat/attachments.rs).
+      listen('yap-chat-files', (e) => chat.onBoxFiles(e.payload)),
       // Words selected on a page beside the chat, asked about (its menu).
       listen('yap-page-quote', (e) => chat.onPageQuote(e.payload)),
       // A question asked with the assistant shortcut, live (and its card's

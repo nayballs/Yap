@@ -296,6 +296,55 @@ test("a scanned page is read with OCR, a presentation slide by slide with its no
   }
 });
 
+// Asked out loud (the Voice Assistant, 16 Nov 2026): with Chat in view the box's files go with the question, as a typed
+// one takes them; asked from another app they stay for the box, as a quoted passage does.
+test('asked out loud with Chat in view, a question takes the files in the box; from another app they stay', async ({ yap, main, fakeLlm, shot }) => {
+  const askAloud = (text) => yap.invoke('e2e_assistant_ask', { text, listenMs: 0 });
+  await freshChat(main);
+  await drop(yap, [SEEDS]);
+  await expect(boxFiles(main)).toHaveCount(1);
+
+  // From another app (Yap's window not in view): the question is about something else, and the file stays.
+  await yap.invoke('e2e_focus', { focused: false });
+  try {
+    fakeLlm.scriptChat([{ content: 'Sunny all week.' }]);
+    await askAloud('What is the weather like');
+    await expect(thread(main)).toContainText('Sunny all week.', { timeout: 20_000 });
+  } finally {
+    await yap.invoke('e2e_focus', { focused: true });
+  }
+  expect(lastAsked(fakeLlm)).not.toContain('<documents>');
+  expect(lastAsked(fakeLlm)).not.toContain('Runner beans');
+  await expect(boxFiles(main)).toHaveCount(1);
+  await expect(thread(main).getByTestId('chat-files-sent')).toHaveCount(0);
+
+  // With Chat in front, on the chat the box is in: the file goes with the spoken question, and its chip goes.
+  fakeLlm.scriptChat([{ content: 'Runner beans, sweet peas and courgettes.' }]);
+  await askAloud("What's on my seed list?");
+  await expect(thread(main).locator('.cbubble.assistant').last()).toHaveText('Runner beans, sweet peas and courgettes.', { timeout: 20_000 });
+  const asked = lastAsked(fakeLlm);
+  expect(asked.startsWith('<documents>\n<document index="1">\n<source>seed-list.txt</source>\n<document_content>\nRunner beans\nSweet peas\nCourgettes\n</document_content>')).toBe(true);
+  expect(asked).toContain("What's on my seed list?");
+  await expect(main.getByTestId('chat-files')).toHaveCount(0);
+  const sent = thread(main).getByTestId('chat-files-sent').getByTestId('chat-file-chip');
+  await expect(sent).toHaveCount(1);
+  await expect(sent).toContainText('seed-list.txt');
+  // Kept with the question, asked out loud (never its text).
+  await expectStore(yap, 'chats.json', (s) => {
+    const q = s.conversations.flatMap((c) => c.messages).find((m) => m.role === 'user' && m.text === "What's on my seed list?");
+    return q?.voice === true && q.attachments?.map((a) => a.name).join() === 'seed-list.txt' && !JSON.stringify(q).includes('Courgettes');
+  });
+  // (Nor was the window in front looked at: the file is what it's about.)
+  expect(fakeLlm.requests.some((r) => r.kind === 'screenQuestion' && r.user.includes('seed list'))).toBe(false);
+  await shot(main, '04-a-spoken-question-with-its-file');
+
+  // A follow-up out loud takes nothing more: the box is empty.
+  fakeLlm.scriptChat([{ content: 'Sweet peas.' }]);
+  await askAloud('Which one is a flower?');
+  await expect(thread(main).locator('.cbubble.assistant').last()).toHaveText('Sweet peas.', { timeout: 20_000 });
+  expect(lastAsked(fakeLlm)).not.toContain('<documents>');
+});
+
 test('a long scan shows "Reading…" while its pages are read; past 20 pages, the rest are named', async ({ yap, main }) => {
   const LONG = path.join(HERE, 'allotment-minutes.pdf');
   fs.writeFileSync(LONG, pdfOf(Array.from({ length: 21 }, () => ({ scan: true }))));

@@ -134,3 +134,48 @@ test('a project: made, its instructions and files, a chat in it carrying them, a
   expect(yap.readJson('projects.json').projects).toEqual([]);
   expect((await yap.invoke('chats_list')).map((c) => c.title)).toEqual(expect.arrayContaining(['Greenhouse heater', 'When do the broad beans go in?']));
 });
+
+// Asked out loud (the Voice Assistant, 16 Nov 2026): with a project's page in view, or the new chat its New chat
+// started, the question starts its chat in that project, as the first typed question there does.
+test("asked out loud on a project's page, or in its new chat, the chat starts in the project", async ({ yap, main, fakeLlm, shot }) => {
+  const askAloud = (text) => yap.invoke('e2e_assistant_ask', { text, listenMs: 0 });
+  const p = await yap.invoke('project_create', { name: 'Orchard 2027', description: 'Planting the fruit trees' });
+  await yap.invoke('project_update', { id: p.id, instructions: 'Name trees by their row and number.' });
+  await openView(main, 'Chat');
+  await main.getByRole('button', { name: 'Projects', exact: true }).click();
+  await main.getByTestId('chat-projects').getByRole('button', { name: /Orchard 2027/ }).click();
+  await expect(page(main).getByRole('heading', { name: 'Orchard 2027' })).toBeVisible();
+
+  // On the project's page: a new chat in it, the page giving way to the chat.
+  fakeLlm.scriptChat([{ content: 'The plum in row 2, number 3.' }]);
+  await askAloud('Which tree goes in first?');
+  await expect(main.locator('.cbubble.assistant').last()).toContainText('row 2, number 3', { timeout: 20_000 });
+  await expect(page(main)).toHaveCount(0);
+  await expect(main.getByTestId('chat-project-line')).toContainText('In Orchard 2027');
+  const sys = systemOf(askedWith(fakeLlm, 'Which tree goes in first?'));
+  expect(sys).toContain('This chat is in the user\'s project "Orchard 2027". It\'s for: Planting the fruit trees');
+  expect(sys).toContain('<project_instructions>\nName trees by their row and number.\n</project_instructions>');
+  const first = (await yap.invoke('chats_list')).find((c) => c.title === 'Which tree goes in first?');
+  await expect.poll(() => yap.readJson('projects.json').chats?.[String(first?.id)]).toBe(p.id);
+  await shot(main, '04-asked-out-loud-on-the-project-page');
+
+  // Its New chat ("New chat in Orchard 2027", nothing asked yet): the spoken question's chat is in it too.
+  await main.getByTestId('chat-project-line').getByRole('button').click();
+  await page(main).getByRole('button', { name: 'New chat in Orchard 2027' }).click();
+  await expect(main.getByTestId('chat-project-line')).toContainText('New chat in Orchard 2027');
+  fakeLlm.scriptChat([{ content: 'Water them weekly in the first summer.' }]);
+  await askAloud('How often do new trees need water?');
+  await expect(main.locator('.cbubble.assistant').last()).toContainText('weekly', { timeout: 20_000 });
+  await expect(main.getByTestId('chat-project-line')).toContainText('In Orchard 2027');
+  expect(systemOf(askedWith(fakeLlm, 'How often do new trees need water?'))).toContain('<project_instructions>');
+  const second = (await yap.invoke('chats_list')).find((c) => c.title === 'How often do new trees need water?');
+  await expect.poll(() => yap.readJson('projects.json').chats?.[String(second?.id)]).toBe(p.id);
+
+  // A plain new chat (New chat in the list): in no project, as before.
+  await main.getByRole('button', { name: 'New chat', exact: true }).click();
+  fakeLlm.scriptChat([{ content: 'About 30 metres.' }]);
+  await askAloud('How tall is a fictional lighthouse?');
+  await expect(main.locator('.cbubble.assistant').last()).toContainText('30 metres', { timeout: 20_000 });
+  await expect(main.getByTestId('chat-project-line')).toHaveCount(0);
+  expect(systemOf(askedWith(fakeLlm, 'How tall is a fictional lighthouse?'))).not.toContain('Orchard 2027');
+});
