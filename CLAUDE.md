@@ -288,7 +288,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `agents/pictures.rs` — a picture a step's answer carried (a picture file read, a screenshot), kept in `agents/<id>/pictures/`, never `chat-images/`; shown at the end of its line.
 
 **Yap Link (the phone)** — [link.md](./docs/architecture/link.md)
-- `link.rs` (+ `link/`) — Yap's AI from a paired phone on the home Wi-Fi (off by default); never on a Public network.
+- `link.rs` (+ `link/`) — Yap's AI from a paired phone on the home Wi-Fi (off by default); never on a Public network. Retry's and Edit's versions there: one version shown a conversation, the PC's, the last switch winning (`versions_changed`); ↻ from a phone in plain chats only.
 - `link/code.rs` (+ `code/gates.rs`, `code/view.rs`) / `link/lanes.rs` — Remote Control (off): Yap Code from a phone, every message through the gates.
 
 **Accounts** — [accounts.md](./docs/architecture/accounts.md)
