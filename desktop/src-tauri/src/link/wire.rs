@@ -505,6 +505,10 @@ pub struct ThreadMessage {
     /// the files and pictures stay on the PC. The page lists them under it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
+    /// Each of `files`' size in bytes, in their order (16 Nov 2026: the
+    /// page's file chips say it, as the PC's do).
+    #[serde(rename = "fileSizes", skip_serializing_if = "Vec::is_empty")]
+    pub file_sizes: Vec<u64>,
     /// **Its versions** (an Edit's, or an older Retry's:
     /// `chat/chats/branches.rs`): ‹ shown / count › on it, switched with
     /// `show_version` at its `at`.

@@ -42,6 +42,7 @@
   // an answer: under its question, above the answer's turn), and the floating contents (ChatChapters, its own chunk)
   // to jump between them.
   import { chaptersOf } from './chapters.js';
+  import { chippedElsewhere } from './fileChip.js';
   // What the chat made (chat/made.rs): its visuals and its kept pages' cards, each in the answer to its question.
   import { made, followMade, onMade, placeMade, promptFromVisual } from './made.svelte.js';
   // The rows' times ("12 minutes ago") move on while the thread is shown.
@@ -79,6 +80,9 @@
   // words has no line of its own and no "Agent done" line — its answer is all there is, as in Claude Code's app.
   /** A report's marker with nothing to say (its turn a plain reply). */
   const quietReport = (m) => plainReport(m, agentOfReport(agents.list, m.id, chat.activeId, reportFolder(m.text)));
+  // **One chip per file per turn** (16 Nov 2026): a report's file the turn's answer shares is its name in the
+  // report's line, its chip under the answer (fileChip.js).
+  const chippedAway = $derived(chippedElsewhere(chat.messages));
   const asks = $derived(chat.activeId == null ? [] : agents.approvals.filter((a) => a.conversation === chat.activeId));
   // Answered from a paired phone (Remote Control): "Allowed from Office phone".
   // **The plans a turn sent back with comments** (Plan mode's review, PlanHistory.svelte): its `plansBefore`, and
@@ -412,7 +416,7 @@
           {#if m.kind === 'agentReport'}
             {#if !quietReport(m)}
               {#await import('./AgentReportCard.svelte') then { default: AgentReportCard }}
-                <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} {room} onpicture={openShared} quiet={!!code?.current} />
+                <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} {room} onpicture={openShared} quiet={!!code?.current} elsewhere={chippedAway.get(i) ?? null} />
               {/await}
             {/if}
           {:else}

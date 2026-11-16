@@ -3,12 +3,13 @@
 // its tab, a file of a Code chat's workspace (one its work changed, or one it shared) where Settings → Yap
 // Code's "Open file links in" says, as a file link opens (fileOpen.svelte.js `openFileLink`, 16 Nov 2026:
 // Yap's file view, an editor, the default app — Rust decides, from the conversation's own workspace, and a
-// file Windows would run opens in Yap), any other shared file as its card opens it. For the Code chat's
+// file Windows would run opens in Yap), any other shared file as its chip opens it (sharedOpen.js). For the Code chat's
 // summary (SummaryTab) and any chat's Outputs tab.
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../../ui/toast.svelte.js';
 import { copyText } from '../../core/itemMenus.js';
 import { editorLabel, editors, openFileLink, showInYap } from './fileOpen.svelte.js';
+import { openInApp, showSharedInYap } from './sharedOpen.js';
 
 /**
  * **The workspace's file at `path`**, as Rust finds it in Code chat `conversationId`'s own workspace
@@ -46,17 +47,14 @@ export async function openOutput(it, { doc, conversationId }) {
       doc.showPicture({ id: it.item.id, w: it.item.w, h: it.item.h, caption: it.item.name });
       return;
     }
-    // A file in the workspace: where its links open; any other as its card opens it.
+    // A file in the workspace: where its links open; any other as its chip opens it (sharedOpen.js: Yap's file
+    // or sheet view beside the chat, else its own app).
     const ref = await workspaceFile(conversationId, it.item.path);
     if (ref) {
       await openFileLink({ rel: ref.rel, line: null }, { doc, conversation: conversationId });
       return;
     }
-    try {
-      await invoke('chat_file_open', { conversation: conversationId, path: it.item.path });
-    } catch (e) {
-      toast({ title: "Couldn't open it", description: String(e?.message ?? e), variant: 'destructive' });
-    }
+    if (!showSharedInYap(it.item, { doc, conversation: conversationId })) await openInApp(it.item, conversationId);
   }
 }
 

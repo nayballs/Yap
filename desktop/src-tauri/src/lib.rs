@@ -562,6 +562,7 @@ pub fn run() {
             chat::shares::chat_file_open,
             chat::shares::chat_file_reveal,
             chat::shares::chat_file_preview,
+            chat::shares::chat_file_read,
             // What a chat made: its visuals (chat/made.rs).
             chat::made::chat_made_list,
             chat::made::pages::chat_page_save_as,

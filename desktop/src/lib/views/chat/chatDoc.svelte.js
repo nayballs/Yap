@@ -111,7 +111,8 @@ export const agentKey = (id) => `agent:${id}`;
 /** A Code chat's file, its Runs and its summary (FileTab, RunsTab, SummaryTab: 15 Nov 2026). */
 export const fileKey = (rel) => `file:${rel}`;
 /** A spreadsheet beside the chat (SheetTab, chat/sheets/view.rs): a Code chat's file's, an attached one's, a project's. */
-export const sheetKey = (src) => (src?.from === 'attachment' ? `sheet:att:${src.id}` : src?.from === 'project' ? `sheet:pf:${src.file}` : `sheet:ws:${src?.rel}`);
+export const sheetKey = (src) =>
+  src?.from === 'attachment' ? `sheet:att:${src.id}` : src?.from === 'project' ? `sheet:pf:${src.file}` : src?.from === 'shared' ? `sheet:sh:${src.path}` : `sheet:ws:${src?.rel}`;
 /** A big project's file as Yap read it (ProjectFileTab, chat/projects/sources.rs): its tab's key, one a file. */
 export const projectFileKey = (file) => `pfile:${file}`;
 export const RUNS_KEY = 'runs';
@@ -489,13 +490,16 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
   /**
    * **A Code chat's file** (`{rel, line}`: a link in an answer or a row,
    * agents/files.rs): its File tab, scrolled to the line and marked. One tab
-   * a file; `seq` tells the tab it was asked again (another line).
+   * a file; `seq` tells the tab it was asked again (another line). **A file
+   * shared into the chat** (16 Nov 2026, its chip: sharedOpen.js) is
+   * `{rel: its full path with /, shared: true, opens}`, read by
+   * `chat_file_read` (chat/shares.rs) in any chat.
    */
   function showFile(ref) {
     if (!ref?.rel) return;
     if (showing === 'doc') flushSave();
     fileSeq += 1;
-    const f = { rel: ref.rel, line: Number(ref.line) || null, seq: fileSeq };
+    const f = { rel: ref.rel, line: Number(ref.line) || null, seq: fileSeq, ...(ref.shared ? { shared: true, opens: ref.opens || '' } : {}) };
     inRow({ key: fileKey(f.rel), kind: 'file', file: f });
     extra = extra.map((t) => (t.key === fileKey(f.rel) ? { ...t, file: f } : t));
     file = f;
@@ -505,7 +509,8 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
 
   /**
    * **A spreadsheet** (`{src, name}`: `src` a Code chat's file `{from: 'workspace', conversation, rel}` or an
-   * attached one `{from: 'attachment', id}`, chat/sheets/view.rs): its Sheet tab, drawn as Excel draws it and
+   * attached one `{from: 'attachment', id}`, or a shared one `{from: 'shared', conversation, path}` (read only),
+   * chat/sheets/view.rs): its Sheet tab, drawn as Excel draws it and
    * live while it changes on disk. One tab a file; `seq` tells the tab it was asked again.
    */
   function showSheet(s) {
