@@ -18,9 +18,8 @@
 // - An agent's tab opening at once (on its panel: agents-panel.spec.js; a
 //   row's Open its whole timeline, below), its log, files, commands, what it wasn't
 //   allowed, its words and cost; the pill under the answer; the report as an
-//   agent card; Undo the agent's changes. Light and dark. An agent whose edits went through with
-//   no backup made (Claude Code's hooks didn't run): its tab says Undo can't
-//   put the files back, and offers no Undo.
+//   agent card. Light and dark. No Undo (16 Nov 2026, as the Claude app): the
+//   person asks Claude, or rewinds (agents-direct.spec.js).
 // - A slow agent: its live line, the running list above the conversations,
 //   "1 agent working" on the Yap bar (its click opening the agent), Stop,
 //   Continue.
@@ -65,12 +64,7 @@ import {
   commandsOf,
   messageIndex,
   pillsByAnswer,
-  canUndo,
-  canUndoTurn,
-  undoableFiles,
-  unbackedFiles,
-  unbackedLine,
-  NO_BACKUPS,
+  reportChanged,
   agentOfReport,
   reportTitle,
   reportFolder,
@@ -153,8 +147,6 @@ const EDIT = [
   result(DONE, { permission_denials: [{ tool_name: 'Bash', tool_use_id: 'toolu_rm', tool_input: { command: 'rm -rf build' } }] }),
   { _wait_user: true },
 ];
-/** The same edit with Claude Code's hooks off (a managed policy): the edit goes through, no backup is made. */
-const EDIT_NO_HOOK = EDIT.filter((l) => !l._hook);
 /** Says what it was told. */
 const ECHO = [{ _wait_user: true }, init('auto'), result('Got: {{user_text}}', { total_cost_usd: 0.002 }), { _wait_user: true }];
 /** The same, paid by the API key Yap gave it. */
@@ -411,30 +403,11 @@ test('core/agents.js: status, cost by how it is paid, time, steps, pills, proble
   expect(statusTone('running')).toBe('live');
   expect(statusTone('interrupted')).toBe('idle');
   expect([isLive('queued'), isLive('asking'), isLive('done')]).toEqual([true, true, false]);
-  // Undo: once it's over, with files changed and their backups there.
-  const changed = { status: 'done', files: ['notes.md'] };
-  expect(canUndo(changed)).toBe(true);
-  expect(canUndo({ ...changed, status: 'running' })).toBe(false);
-  expect(canUndo({ ...changed, files: [] })).toBe(false);
-  expect(canUndo({ ...changed, undone: true })).toBe(false);
-  expect(canUndo({ ...changed, swept: true })).toBe(false);
-  expect(canUndo({ ...changed, noBackups: true })).toBe(false);
-  expect(canUndo(null)).toBe(false);
-  // A command's files (agents/changes.rs): one it made can be deleted, one it changed with a copy put back — one
-  // with no copy from before can't, so a turn with only that offers no Undo, and says why.
-  const turn = (byCommand) => ({ status: 'done', files: byCommand.map((c) => c.file), turnList: [{ n: 1, files: byCommand.map((c) => c.file), byCommand }] });
-  expect(canUndo(turn([{ file: 'costs.xlsx', new: true, kept: false }]))).toBe(true);
-  expect(canUndo(turn([{ file: 'package-lock.json', new: false, kept: true }]))).toBe(true);
-  const lost = turn([{ file: 'data.csv', new: false, kept: false }]);
-  expect(canUndo(lost)).toBe(false);
-  expect(canUndoTurn(lost, lost.turnList[0])).toBe(false);
-  expect(canUndo({ ...turn([{ file: 'costs.xlsx', new: true, kept: false }]), noBackups: true }), "its hooks didn't run, but a command's new file can still go").toBe(true);
-  expect(undoableFiles(['notes.md', 'data.csv'], [{ file: 'data.csv', new: false, kept: false }], false)).toEqual(['notes.md']);
-  expect(unbackedLine(unbackedFiles(lost.turnList))).toBe("Undo can't put back data.csv: a command changed it, and Yap had no copy of it from before.");
-  expect(unbackedLine(['a.csv', 'b.csv'])).toBe("Undo can't put back a.csv, b.csv: commands changed them, and Yap had no copy of them from before.");
-  expect(unbackedLine([])).toBe('');
-  expect(NO_BACKUPS).toBe("No backups were made, so Undo can't put these files back.");
-
+  // A report card's "Changed …": its own edits, then what its commands made or changed; an older marker the same.
+  expect(reportChanged("The agent in garden-planner: it's done.\nFiles it changed: notes.md.\nFiles its commands made: costs.xlsx.\nFiles its commands changed: package.json.")).toBe('notes.md, costs.xlsx, package.json');
+  expect(reportChanged('Files it changed: notes.md, beds.js (backed up first).')).toBe('notes.md, beds.js');
+  expect(reportChanged("Files it changed: notes.md (no backups were made, so Undo can't put them back).")).toBe('notes.md');
+  expect(reportChanged("The agent in garden-planner: it's done.")).toBe('');
   // Plan and key, told apart.
   // (In a plan chat's answers' words: core/aiModel.js paidLine, core/money.js.)
   expect(money(0.041)).toBe('$0.04');
@@ -724,8 +697,8 @@ test('Bypass permissions asks once, then the chip is amber and switches freely',
 
 // ---------------------------------------------------------------- an agent, end to end
 
-test('an agent: its tab opens at once and follows it, the pill, the report card, Undo', async ({ yap, main, fakeLlm, shot }) => {
-  const REPORT = "Done. I changed notes.md from Draft to Final and the tests pass. There's a backup if you want it back.";
+test('an agent: its tab opens at once and follows it, the pill, the report card, and no Undo button', async ({ yap, main, fakeLlm, shot }) => {
+  const REPORT = 'Done. I changed notes.md from Draft to Final and the tests pass.';
   const started = await startAgent(yap, main, fakeLlm, {
     lines: EDIT,
     name: 'edit',
@@ -787,43 +760,10 @@ test('an agent: its tab opens at once and follows it, the pill, the report card,
   await pill.click();
   await expect(tab(main)).toBeVisible();
 
-  // Undo the agent's changes: asked first, then what was put back.
-  await tab(main).getByRole('button', { name: "Undo the agent's changes" }).click();
-  const confirm = main.getByRole('alertdialog', { name: "Undo the agent's changes?" });
-  await expect(confirm).toBeVisible();
-  await confirm.getByRole('button', { name: "Undo the agent's changes" }).click();
-  await expect(main.getByTestId('chat-agent-undone')).toHaveText('Undone: notes.md put back.');
-  expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Draft notes\n');
-  await expect(tab(main).getByRole('button', { name: "Undo the agent's changes" })).toHaveCount(0);
-  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).undone).toBe(true);
-});
-
-test('an agent whose edits made no backup (hooks off): its tab says Undo can’t put them back, and offers no Undo', async ({ yap, main, fakeLlm, shot }) => {
-  const started = await startAgent(yap, main, fakeLlm, {
-    lines: EDIT_NO_HOOK,
-    name: 'edit-no-hook',
-    brief: 'Change Draft to Final in notes.md, then run the tests.',
-    report: "Done. I changed notes.md from Draft to Final; no backup was made, so Undo can't put it back.",
-    ask: 'Send an agent to garden-planner: change Draft to Final in notes.md and run the tests.',
-  });
-  const agent = await ended(yap, started.id);
-  expect(agent.status).toBe('done');
-  // The edit went through and nothing was backed up: marked.
+  // No Undo (as the Claude app): the person asks Claude to take a change back, or rewinds.
+  await expect(tab(main).getByRole('button', { name: /^Undo/ })).toHaveCount(0);
+  await expect(tab(main).getByTestId('chat-agent-undo-turn')).toHaveCount(0);
   expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Final notes\n');
-  expect(agent.noBackups).toBe(true);
-  await expect(tab(main)).toHaveAttribute('data-status', 'done');
-  await agentTimeline(main);
-  await expect(main.getByTestId('chat-agent-files').locator('.fname')).toHaveText(['notes.md']);
-  await expect(main.getByTestId('chat-agent-no-backups')).toHaveText(NO_BACKUPS);
-  await expect(tab(main).getByRole('button', { name: "Undo the agent's changes" })).toHaveCount(0);
-  // The report's facts say so too (the model reads them), never "backed up".
-  const messages = await messagesOf(yap, agent.conversation, 4);
-  const marker = messages.find((m) => m.kind === 'agentReport');
-  expect(marker.text).toContain("Files it changed: notes.md (no backups were made, so Undo can't put them back).");
-  expect(marker.text).not.toContain('backed up first');
-  await shot(main, '06b-agent-tab-no-backups');
-  // An agent whose hook ran (the one before) is never marked.
-  expect((await agents(yap)).filter((j) => j.id !== agent.id && j.files?.length).every((j) => !j.noBackups)).toBe(true);
 });
 
 test('a slow agent: its live line, the running list, “1 agent working” on the bar, Stop and Continue', async ({ yap, main, fakeLlm, shot }) => {
@@ -1180,7 +1120,7 @@ test('an agent paid by the API key says so, and History tells plan and key apart
   const costs = await dialog.getByTestId('yap-code-history-cost').allTextContents();
   expect(costs[0]).toBe('API key · $0.002');
   // The agents before it ran on the plan: said as the plan's.
-  for (const c of costs.slice(1)) expect(c).toMatch(/^Your Claude plan( · ≈ \$[\d.]+ on the API)?( · Undone)?$/);
+  for (const c of costs.slice(1)) expect(c).toMatch(/^Your Claude plan( · ≈ \$[\d.]+ on the API)?$/);
   await closeSettings(main);
 });
 
@@ -1257,10 +1197,11 @@ test('Settings → Yap Code: the switch, Claude Code, pay with, defaults, folder
     const c = await yap.invoke('get_config');
     return [c.agentsAsk, c.agentsSpeak];
   }).toEqual(['always', 'always']);
-  await expect(dialog.locator('[data-setting="yap-code-limits"]')).toHaveText('Backups of changed files are kept 7 days. One agent at a time per workspace, at most 3 at once.');
-  await expect(dialog.locator('[data-setting="yap-code-backups-hooks"]')).toHaveText(
-    "Undo needs Claude Code's hooks, which back up each file before an agent changes it. If a policy set by your organisation turns hooks off, no backups are made, and the agent's tab says so.",
+  // No Undo and no backups of Yap's own (16 Nov 2026, as the Claude app): ask Claude, or rewind.
+  await expect(dialog.locator('[data-setting="yap-code-limits"]')).toHaveText(
+    "One agent at a time per workspace, at most 3 at once. To take a change back, ask Claude, or rewind to before your message: Claude Code's own checkpoints put its edits back.",
   );
+  await expect(dialog.locator('[data-setting="yap-code-backups-hooks"]')).toHaveCount(0);
   await expect(dialog.getByTestId('yap-code-connections-note')).toHaveText("Agents connect to Anthropic through Claude Code itself, so they aren't in Network connections.");
   await shot(main, '15-settings-yap-code-light');
   await theme(yap, main, 'dark');

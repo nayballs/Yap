@@ -3,8 +3,8 @@
 // what it said, its files with +N −M and one diff at a time (Wrap), its
 // commands — fed by the PC's snapshot and then its numbered live events
 // (a number missing, or `agent_resync`: the snapshot again), older steps on
-// request; Stop, Continue, Undo after the phone's own confirm, "Tell the
-// agent…" in the composer; ✕ back to the chat, the agent carrying on.
+// request; Stop, Continue, "Tell the agent…" in the composer (no Undo, as
+// the Claude app: ask Claude); ✕ back to the chat, the agent carrying on.
 // Yap on the PC mocked with the wire's own examples (support/code-pc.js).
 import { test, expect } from '@playwright/test';
 import { servePage, seedDevice, open, ready, snapshot } from './support/harness.js';
@@ -157,24 +157,15 @@ test('Stop while it works; Continue once stopped', async ({ page }) => {
   expect(pc.codeSide.wireErrors).toEqual([]);
 });
 
-test("Undo: the phone's own confirm first, with the files it puts back — Cancel sends nothing", async ({ page }) => {
+test('No Undo on the phone, as in the Claude app: a done agent offers none, and the wire has no message for one', async ({ page }) => {
   const pc = await mockCodePc(page, { agents: [brief()], record: record({ status: 'done', endedTs: 1730000300, text: 'Done.' }) });
   await open(page);
   await ready(page, pc);
   await openAgent(page);
   await expect(page.getByTestId('agent-status')).toHaveText('Done');
-  await page.getByTestId('agent-undo').click();
-  const sheet = page.getByTestId('undo-sheet');
-  await expect(sheet).toBeVisible();
-  await expect(sheet.locator('#undo-title')).toHaveText('Put back 1 file in garden-planner?');
-  await expect(sheet.getByTestId('undo-files')).toHaveText('notes.md');
-  await sheet.getByTestId('undo-cancel').click();
-  await expect(sheet).toBeHidden();
-  expect(pc.of('agent_undo')).toEqual([]);
-  await page.getByTestId('agent-undo').click();
-  await sheet.getByTestId('undo-go').click();
-  await expect.poll(() => pc.of('agent_undo')).toEqual([{ type: 'agent_undo', id: AGENT_ID, sure: true }]);
-  await expect(page.getByTestId('agent-note')).toHaveText('Put back 1 file in garden-planner.');
+  await expect(page.getByTestId('agent-undo')).toHaveCount(0);
+  await expect(page.getByTestId('agent-undo-turn')).toHaveCount(0);
+  await expect(page.getByTestId('undo-sheet')).toHaveCount(0);
   expect(pc.codeSide.wireErrors).toEqual([]);
 });
 

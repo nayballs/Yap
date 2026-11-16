@@ -12,7 +12,6 @@ use serde_json::{json, Value};
 use super::approve::describe;
 use super::reads::{render_calendar, Reads};
 use super::server::{Emit, Endpoint};
-use super::backup::{self, restore, Entry, Manifest, State, MAX_BACKUP_BYTES};
 use super::*;
 use crate::integrations::mcp::{list_meetings, BridgeError};
 use crate::notes::Note;
@@ -79,11 +78,11 @@ impl Reads for Fake {
 
 type Events = Arc<Mutex<Vec<(String, Value)>>>;
 
-fn endpoint(wait: Duration, max_backup: u64) -> (Arc<Endpoint>, Events) {
+fn endpoint(wait: Duration) -> (Arc<Endpoint>, Events) {
     let events: Events = Arc::default();
     let kept = Arc::clone(&events);
     let emit: Emit = Arc::new(move |name: &str, v: Value| kept.lock().unwrap().push((name.to_string(), v)));
-    let ep = Endpoint::start_with(Arc::new(Fake { notes: vec![meeting()] }), emit, wait, max_backup).unwrap();
+    let ep = Endpoint::start(Arc::new(Fake { notes: vec![meeting()] }), emit, wait).unwrap();
     (ep, events)
 }
 
@@ -170,7 +169,7 @@ fn names(list: &Value) -> Vec<String> {
 
 #[test]
 fn a_chat_run_connects_lists_and_reads_over_real_http() {
-    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    let (ep, _) = endpoint(Duration::from_secs(5));
     let h = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
 
     // The run's own config: Claude Code's http server entry, its key.
@@ -187,7 +186,7 @@ fn a_chat_run_connects_lists_and_reads_over_real_http() {
     assert!(!h.mcp_config().to_string().contains(&env[0].1));
     assert_eq!(h.bearer(), format!("Bearer {}", env[0].1));
     assert_eq!(server["timeout"], TOOL_TIMEOUT_MS);
-    assert_eq!(h.settings(), json!({}), "no backups, no hook");
+    assert_eq!(h.settings(), json!({}), "nothing of Yap's in its settings");
 
     let mut c = Client::of(&h);
     // Claude Code 2.1.296 probes the 2026 era first; "method not found"
@@ -268,7 +267,7 @@ fn a_chat_run_connects_lists_and_reads_over_real_http() {
 
 #[test]
 fn a_code_chats_run_reads_meetings_notes_and_tasks_but_never_yaps_memory() {
-    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    let (ep, _) = endpoint(Duration::from_secs(5));
     let h = ep.register(RunSpec::new("Code chat", Tools::Chat).with_agents(true).with_memory(false)).unwrap();
     let mut c = Client::of(&h);
     let init = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }));
@@ -294,7 +293,7 @@ fn a_code_chats_run_reads_meetings_notes_and_tasks_but_never_yaps_memory() {
 
 #[test]
 fn requests_without_the_run_s_key_or_from_another_site_are_refused() {
-    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    let (ep, _) = endpoint(Duration::from_secs(5));
     let h = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
     let other = ep.register(RunSpec::new("Another", Tools::Chat)).unwrap();
     let c = Client::of(&h);
@@ -326,7 +325,7 @@ fn requests_without_the_run_s_key_or_from_another_site_are_refused() {
 
 #[test]
 fn an_agents_run_with_reads_lists_yaps_own_data_never_its_memory() {
-    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    let (ep, _) = endpoint(Duration::from_secs(5));
     // A Code chat's own session: approve, and the reads — never memory, whatever the spec says.
     let mut spec = RunSpec::new("garden-planner", Tools::Agent);
     spec.reads = true;
@@ -374,7 +373,7 @@ fn an_agents_run_with_reads_lists_yaps_own_data_never_its_memory() {
 #[test]
 fn a_code_chats_own_session_has_yaps_browser_acting_on_its_pages_and_the_screen_look() {
     use crate::chat::pictures::Gate;
-    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    let (ep, _) = endpoint(Duration::from_secs(5));
     // The web and the screen on, a model that reads images (agents/runner.rs `direct_eyes`): the pages, the pictures, the look.
     let mut spec = RunSpec::new("garden-planner", Tools::Agent);
     spec.reads = true;
@@ -474,7 +473,7 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
     let folder = temp("approve");
     // Plenty of time to answer here (a loaded test run is slow); the
     // timeout has an endpoint of its own below.
-    let (ep, events) = endpoint(Duration::from_secs(60), MAX_BACKUP_BYTES);
+    let (ep, events) = endpoint(Duration::from_secs(60));
     let mut spec = RunSpec::new("Update the guide", Tools::Agent);
     spec.folder = Some(folder.clone());
     spec.approval = Some(Approval { run: "agent-7".into(), conversation: Some(42), origin: Origin::Voice, unattended: false });
@@ -513,7 +512,7 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
     assert_eq!(outcomes(&events), ["allowed", "denied"]);
 
     // Nobody answers: a no, said so.
-    let (quick, quick_events) = endpoint(Duration::from_millis(300), MAX_BACKUP_BYTES);
+    let (quick, quick_events) = endpoint(Duration::from_millis(300));
     let unanswered = quick.register(RunSpec::new("Unattended", Tools::Agent)).unwrap();
     let call = approving(&Client::of(&unanswered), json!({ "tool_name": "Bash", "input": { "command": "git push" } }));
     let decision = call.join().unwrap();
@@ -585,7 +584,7 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
 
 #[test]
 fn in_bypass_permissions_a_prompt_is_answered_no_at_once_with_no_card() {
-    let (ep, events) = endpoint(Duration::from_secs(60), MAX_BACKUP_BYTES);
+    let (ep, events) = endpoint(Duration::from_secs(60));
     let mut spec = RunSpec::new("Catch up on the add-on", Tools::Agent);
     spec.approval = Some(Approval { run: "agent-8".into(), conversation: Some(43), origin: Origin::Voice, unattended: true });
     let h = ep.register(spec).unwrap();
@@ -608,7 +607,7 @@ fn in_bypass_permissions_a_prompt_is_answered_no_at_once_with_no_card() {
 
 #[test]
 fn a_run_that_ends_or_a_cancelled_call_denies_the_prompt_waiting() {
-    let (ep, events) = endpoint(Duration::from_secs(30), MAX_BACKUP_BYTES);
+    let (ep, events) = endpoint(Duration::from_secs(30));
     // Cancelled by Claude Code (an interrupt).
     let h = ep.register(RunSpec::new("Tidy", Tools::Agent)).unwrap();
     let c = Client::of(&h);
@@ -659,162 +658,14 @@ fn cards_say_what_a_tool_would_do_in_plain_words() {
     assert_eq!(describe("Write", &json!({ "file_path": "/srv/a.txt", "content": long }), None).1.chars().count(), 2_000, "trimmed");
 }
 
-// ---- the backup hook and Undo ----
-
-fn hook(h: &RunHandle, input: &Value) -> (u16, String) {
-    let hook = &h.settings()["hooks"]["PreToolUse"][0]["hooks"][0];
-    let url = hook["url"].as_str().unwrap();
-    let path = url.split_once(&format!("127.0.0.1:{}", h.port())).unwrap().1;
-    http(h.port(), "POST", path, &[("Authorization", h.bearer()), ("Content-Type", "application/json".into())], &input.to_string())
-}
-
-fn edit_input(work: &Path, tool: &str, key: &str, path: &str) -> Value {
-    json!({
-        "session_id": "session-1",
-        "cwd": work,
-        "permission_mode": "auto",
-        "hook_event_name": "PreToolUse",
-        "tool_name": tool,
-        "tool_input": { key: path, "old_string": "x", "new_string": "y", "content": "z" },
-        "tool_use_id": "toolu_02"
-    })
-}
-
-#[test]
-fn the_backup_hook_keeps_the_first_copy_and_undo_puts_everything_back() {
-    let root = temp("backup");
-    let work = root.join("work");
-    let backups = root.join("agent-backup");
-    std::fs::create_dir_all(work.join("docs")).unwrap();
-    std::fs::write(work.join("a.txt"), "before").unwrap();
-    std::fs::write(work.join("docs").join("guide.ipynb"), "{\"cells\":[]}").unwrap();
-    std::fs::write(work.join("big.bin"), vec![7u8; 2048]).unwrap();
-    let (ep, _) = endpoint(Duration::from_secs(5), 1024);
-    let mut spec = RunSpec::new("Update the guide", Tools::Agent);
-    spec.backup_dir = Some(backups.clone());
-    spec.folder = Some(work.clone());
-    let h = ep.register(spec).unwrap();
-
-    // The run's settings: the http hook, before edits, with its key.
-    let settings = h.settings();
-    let group = &settings["hooks"]["PreToolUse"][0];
-    assert_eq!(group["matcher"], "Edit|Write|MultiEdit|NotebookEdit");
-    let hk = &group["hooks"][0];
-    assert_eq!((hk["type"].as_str(), hk["timeout"].as_u64()), (Some("http"), Some(HOOK_TIMEOUT_SECS)));
-    assert_eq!(hk["url"], format!("http://127.0.0.1:{}/hook/{}/PreToolUse", h.port(), h.id()));
-    // Its key named, as the MCP server's is; an http hook's headers take
-    // only the variables it lists.
-    assert_eq!(hk["headers"]["Authorization"], "Bearer ${YAP_RUN_KEY}");
-    assert_eq!(hk["allowedEnvVars"], json!(["YAP_RUN_KEY"]));
-    assert!(!settings.to_string().contains(&h.env()[0].1), "the key is never in the settings");
-
-    let a = work.join("a.txt");
-    // First edit: copied, and the hook says carry on.
-    assert_eq!(hook(&h, &edit_input(&work, "Edit", "file_path", a.to_str().unwrap())), (200, "{}".to_string()));
-    std::fs::write(&a, "after one edit").unwrap();
-    // A second edit of it keeps the first copy.
-    assert_eq!(hook(&h, &edit_input(&work, "MultiEdit", "file_path", a.to_str().unwrap())).0, 200);
-    // A new file, named relative to the session's cwd: created.
-    assert_eq!(hook(&h, &edit_input(&work, "Write", "file_path", "new.txt")).0, 200);
-    std::fs::write(work.join("new.txt"), "made by the agent").unwrap();
-    // A notebook, and a file too big to copy.
-    assert_eq!(hook(&h, &edit_input(&work, "NotebookEdit", "notebook_path", work.join("docs").join("guide.ipynb").to_str().unwrap())).0, 200);
-    assert_eq!(hook(&h, &edit_input(&work, "Write", "file_path", work.join("big.bin").to_str().unwrap())).0, 200);
-    // Not an edit, the backup folder itself, a wrong key, another event: nothing.
-    assert_eq!(hook(&h, &edit_input(&work, "Bash", "file_path", a.to_str().unwrap())).0, 200);
-    assert_eq!(hook(&h, &edit_input(&work, "Write", "file_path", backups.join("manifest.json").to_str().unwrap())).0, 200);
-    let wrong = http(h.port(), "POST", &format!("/hook/{}/PreToolUse", h.id()), &[("Authorization", "Bearer 00".into())], &edit_input(&work, "Edit", "file_path", "other.txt").to_string());
-    assert_eq!(wrong.0, 401);
-    let post = http(h.port(), "POST", &format!("/hook/{}/PostToolUse", h.id()), &[("Authorization", Client::of(&h).auth)], &edit_input(&work, "Edit", "file_path", "other.txt").to_string());
-    assert_eq!(post, (200, "{}".to_string()));
-
-    let m = backup::read_manifest(&backups).unwrap();
-    let states: Vec<(String, State)> = m.files.iter().map(|e| (e.original.file_name().unwrap().to_string_lossy().into_owned(), e.state)).collect();
-    assert_eq!(
-        states,
-        [("a.txt".into(), State::Copied), ("new.txt".into(), State::Created), ("guide.ipynb".into(), State::Copied), ("big.bin".into(), State::TooBig)]
-    );
-    assert_eq!(m.files[0].original, a, "the absolute path");
-    assert_eq!(std::fs::read_to_string(backups.join(&m.files[0].backup)).unwrap(), "before", "the first copy wins");
-    assert!(m.files.iter().all(|e| e.state != State::Copied || !e.backup.contains(['/', '\\'])));
-    std::fs::write(work.join("docs").join("guide.ipynb"), "{\"cells\":[1]}").unwrap();
-
-    // Undo all.
-    let report = restore(&backups);
-    assert_eq!(report.restored, [a.clone(), work.join("docs").join("guide.ipynb")]);
-    assert_eq!(report.deleted, [work.join("new.txt")]);
-    assert_eq!(report.skipped.len(), 1, "the big file was never copied");
-    assert!(report.refused.is_empty() && report.failed.is_empty() && report.error.is_none(), "{report:?}");
-    assert_eq!(std::fs::read_to_string(&a).unwrap(), "before");
-    assert_eq!(std::fs::read_to_string(work.join("docs").join("guide.ipynb")).unwrap(), "{\"cells\":[]}");
-    assert!(!work.join("new.txt").exists());
-    // Undo again: nothing left to delete.
-    let again = restore(&backups);
-    assert_eq!(again.skipped.iter().filter(|s| s.reason == "already gone").count(), 1);
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-#[test]
-fn undo_refuses_what_a_tampered_manifest_points_at() {
-    let root = temp("tampered");
-    let backups = root.join("backup");
-    std::fs::create_dir_all(&backups).unwrap();
-    let victim = root.join("victim.txt");
-    std::fs::write(&victim, "keep me").unwrap();
-    std::fs::write(root.join("secret.txt"), "not a backup").unwrap();
-    let entry = |original: PathBuf, state: State, backup: &str| Entry { original, state, backup: backup.into(), bytes: 1, tool: "Edit".into(), ts: 0, note: String::new(), command: false, was: None, after: None };
-    let m = Manifest {
-        version: 1,
-        files: vec![
-            entry(victim.clone(), State::Copied, "../secret.txt"),
-            entry(PathBuf::from("relative.txt"), State::Created, ""),
-            entry(root.join("x").join("..").join("victim.txt"), State::Created, ""),
-            entry(backups.join("manifest.json"), State::Created, ""),
-        ],
-    };
-    std::fs::write(backups.join("manifest.json"), serde_json::to_vec(&m).unwrap()).unwrap();
-    let report = restore(&backups);
-    assert_eq!(report.refused.len(), 4, "{report:?}");
-    assert!(report.restored.is_empty() && report.deleted.is_empty());
-    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me");
-    assert!(backups.join("manifest.json").exists());
-    // A manifest that isn't one: nothing done, said.
-    std::fs::write(backups.join("manifest.json"), "garbage").unwrap();
-    assert!(restore(&backups).error.is_some());
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-#[test]
-fn edits_at_once_back_a_file_up_once() {
-    let root = temp("parallel");
-    let backups = root.join("backup");
-    let file = root.join("shared.txt");
-    std::fs::write(&file, "original").unwrap();
-    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
-    let mut spec = RunSpec::new("Parallel", Tools::Agent);
-    spec.backup_dir = Some(backups.clone());
-    let h = Arc::new(ep.register(spec).unwrap());
-    let threads: Vec<_> = (0..6)
-        .map(|_| {
-            let (h, root, file) = (Arc::clone(&h), root.clone(), file.clone());
-            std::thread::spawn(move || hook(&h, &edit_input(&root, "Edit", "file_path", file.to_str().unwrap())).0)
-        })
-        .collect();
-    for t in threads {
-        assert_eq!(t.join().unwrap(), 200);
-    }
-    assert_eq!(backup::read_manifest(&backups).unwrap().files.len(), 1);
-    let _ = std::fs::remove_dir_all(&root);
-}
-
 /// **The real Claude Code against the endpoint** (opt in: `YAP_TEST_CLAUDE_EXE`
 /// = the `claude` executable; `cargo test -- --ignored real_claude_code`).
 /// It runs with a clean environment and an empty config folder, so it has
 /// no sign-in and never reaches a model: the run stops at "Not logged in",
 /// after connecting its MCP servers. What it checks: Claude Code's probe,
 /// `initialize` and `tools/list` against this endpoint (its `system/init`
-/// says the server is connected and lists its tools), that it takes the
-/// hook settings, and that `--permission-prompt-tool mcp__yap__approve`
+/// says the server is connected and lists its tools), that it takes its
+/// settings, and that `--permission-prompt-tool mcp__yap__approve`
 /// keeps `approve` out of the model's tools (2.1.296: listed without the
 /// flag, gone with it), so the model can't call it itself.
 #[test]
@@ -825,11 +676,10 @@ fn real_claude_code_connects_to_the_endpoint() {
         return;
     };
     let root = temp("real-claude");
-    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    let (ep, _) = endpoint(Duration::from_secs(5));
     for (tools, prompt_tool) in [(Tools::Chat, false), (Tools::Agent, false), (Tools::Agent, true)] {
         let mut spec = RunSpec::new("Real CLI", tools);
         if tools == Tools::Agent {
-            spec.backup_dir = Some(root.join("backup"));
             spec.folder = Some(root.clone());
         }
         let h = ep.register(spec).unwrap();
@@ -876,7 +726,7 @@ fn real_claude_code_connects_to_the_endpoint() {
 
 #[test]
 fn a_chat_run_offered_agents_lists_and_allows_their_tools_and_runs_them_for_its_turn() {
-    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    let (ep, _) = endpoint(Duration::from_secs(5));
     let plain = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
     let h = ep.register(RunSpec::new("Plan chat", Tools::Chat).with_agents(true)).unwrap();
     // Not offered: neither listed, allowed nor run.
@@ -930,7 +780,7 @@ fn a_chat_run_offered_agents_lists_and_allows_their_tools_and_runs_them_for_its_
 #[test]
 fn a_chat_run_offered_the_screen_and_pages_lists_and_allows_them_and_refuses_them_where_the_tool_loop_would() {
     use crate::chat::pictures::Gate;
-    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    let (ep, _) = endpoint(Duration::from_secs(5));
     let sees = eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
     let plain = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
     let h = ep.register(RunSpec::new("Plan chat", Tools::Chat).with_eyes(sees)).unwrap();

@@ -18,11 +18,11 @@
   //   settings and MCP servers run too; the Bypass warning where Bypass can
   //   run. **Animate Code chats** (`agentsAnimate`).
   // - **Ask before starting an agent** (`agentsAsk`), **Read agent reports aloud**
-  //   (`agentsSpeak`), and the limits: backups 7 days, one agent a folder, 3
-  //   at once; Undo needs Claude Code's hooks (a managed policy can turn
-  //   them off: then no backups, and the agent's tab says so).
+  //   (`agentsSpeak`), and the limits: one agent a folder, 3 at once. No
+  //   Undo (16 Nov 2026, as the Claude app): the person asks Claude to undo
+  //   a change, or rewinds to before their message in a Code chat.
   // - **History** (`agent_list`): each agent's status, folder, when and cost
-  //   (plan and key told apart), Open (Chat on it) and Undo.
+  //   (plan and key told apart), and Open (Chat on it).
   //
   //   cfg:  Settings' config $state (auto-save does the saving).
   //   goto(target): another Settings page; onshowview(view): leaves Settings.
@@ -41,7 +41,7 @@
   import { sharedKey } from '../core/providers.js';
   import { EFFORT_LABELS } from '../core/effort.js';
   import { agents, initAgents, refreshAgents } from '../stores/agents.svelte.js';
-  import { statusWord, statusTone, costLine, MODE_LABELS, modelLabel, canUndo, BYPASS_WARNING } from '../core/agents.js';
+  import { statusWord, statusTone, costLine, MODE_LABELS, modelLabel, BYPASS_WARNING } from '../core/agents.js';
   import { FEATURE_NAME, CODE_NAME, WORKSPACES, samePath, AGENT_NOTICES_LABEL, AGENT_NOTICES_DESC } from '../core/codeChats.js';
 
   let { cfg, goto = null, onshowview = null } = $props();
@@ -86,9 +86,6 @@
   let bypassConfirmed = $state(false);
   let confirmBypass = $state(false);
   let modeBefore = 'auto';
-  let undoing = $state(null);
-  let undoOpen = $state(false);
-  let undoBusy = $state(false);
   let showAll = $state(false);
 
   const hasKey = $derived(!!sharedKey(cfg, 'anthropic'));
@@ -196,23 +193,6 @@
   function openAgent(j) {
     agents.openWanted = { id: j.id, conversation: j.conversation ?? null };
     onshowview?.('chat');
-  }
-
-  async function undo() {
-    const j = undoing;
-    if (!j) return;
-    undoBusy = true;
-    try {
-      const r = await invoke('agent_undo', { id: j.id });
-      const back = (r?.restored?.length ?? 0) + (r?.deleted?.length ?? 0);
-      toast({ title: back ? `Undone: ${back === 1 ? '1 file' : `${back} files`} put back` : 'Nothing needed putting back', variant: 'success' });
-      refreshAgents();
-    } catch (e) {
-      toast({ title: "Couldn't undo the agent's changes", description: String(e?.message ?? e), variant: 'destructive' });
-    } finally {
-      undoBusy = false;
-      undoOpen = false;
-    }
   }
 
   const when = (secs) =>
@@ -327,10 +307,7 @@
     <Toggle bind:checked={cfg.notifyAgents} label={AGENT_NOTICES_LABEL} desc={AGENT_NOTICES_DESC} />
   </Row>
   <Row>
-    <p class="set-note" data-setting="yap-code-limits">Backups of changed files are kept 7 days. One agent at a time per workspace, at most 3 at once.</p>
-  </Row>
-  <Row>
-    <p class="set-note small" data-setting="yap-code-backups-hooks">Undo needs Claude Code's hooks, which back up each file before an agent changes it. If a policy set by your organisation turns hooks off, no backups are made, and the agent's tab says so.</p>
+    <p class="set-note" data-setting="yap-code-limits">One agent at a time per workspace, at most 3 at once. To take a change back, ask Claude, or rewind to before your message: Claude Code's own checkpoints put its edits back.</p>
   </Row>
 </Group>
 
@@ -340,20 +317,10 @@
       <span class="hdot tone-{statusTone(j.status)}" aria-hidden="true"></span>
       <div class="htext">
         <p class="htop"><span class="hfolder">{j.folder}</span><span class="hstatus">{statusWord(j.status)}</span><span class="hwhen">{when(j.createdTs)}</span></p>
-        <p class="hcost" data-testid="yap-code-history-cost">{costLine(j)}{j.undone ? ' · Undone' : ''}</p>
+        <p class="hcost" data-testid="yap-code-history-cost">{costLine(j)}</p>
       </div>
       <div class="hbtns">
         <Button variant="ghost" size="sm" onclick={() => openAgent(j)}>Open</Button>
-        {#if canUndo(j)}
-          <Button
-            variant="ghost"
-            size="sm"
-            onclick={() => {
-              undoing = j;
-              undoOpen = true;
-            }}>Undo</Button
-          >
-        {/if}
       </div>
     </div>
   {:else}
@@ -371,15 +338,6 @@
 <p class="set-note foot" data-testid="yap-code-connections-note">Agents connect to Anthropic through Claude Code itself, so they aren't in Network connections.</p>
 
 <ConfirmDialog bind:open={confirmBypass} title="Use Bypass permissions?" body={WARNING} confirmLabel="Use Bypass permissions" onconfirm={okBypass} />
-<ConfirmDialog
-  bind:open={undoOpen}
-  title="Undo the agent's changes?"
-  body={undoing ? `Every file the agent in ${undoing.folder} changed goes back to how it was before it, and the files it made are deleted.` : ''}
-  confirmLabel="Undo the agent's changes"
-  busyLabel="Undoing…"
-  busy={undoBusy}
-  onconfirm={undo}
-/>
 
 <style>
   .fpath {

@@ -17,24 +17,21 @@
   //   the newest open (and the one a pill or a report card asked for), the
   //   earlier folded. A request waiting behind the turn working: "Queued".
   //   Each turn's section (AgentTurn.svelte): the line it's on, its to-do
-  //   list, its timeline, the files it changed with their diffs and **Undo
-  //   this turn**, the commands it ran, what it wasn't allowed to do, its
-  //   final words.
+  //   list, its timeline, the files it changed with their diffs, the
+  //   commands it ran, what it wasn't allowed to do, its final words.
   // - Its cost in all, told apart by how it's paid ("Your Claude plan · ≈
   //   $0.04 on the API" / "API key · $0.04").
   // - A problem with Claude Code itself in plain words, with one button
   //   (Sign in, when it isn't signed in).
-  // - Stop (while it works), Continue (stopped, interrupted, failed), Undo
-  //   agent — **Undo all** once it has turns, back to before its first (a
-  //   confirm, then what was put back; never when no backups were made:
-  //   Claude Code's hooks didn't run, and the tab says so), Open in terminal
-  //   (once it isn't running), and "Tell the agent…": the person's own words,
+  // - Stop (while it works), Continue (stopped, interrupted, failed), Open
+  //   in terminal (once it isn't running), and "Tell the agent…": the person's own words,
   //   its next turn (`agent_message`) — while it works, handed to it now:
-  //   it reads it at its next step (agents/runner.rs `passes_now`).
+  //   it reads it at its next step (agents/runner.rs `passes_now`). No Undo
+  //   (16 Nov 2026, as the Claude app): the person asks Claude to undo a
+  //   change, or rewinds to before their message (agents/rewind.rs).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick, untrack } from 'svelte';
-  import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { toast } from '../../ui/toast.svelte.js';
   import {
     isLive,
@@ -49,10 +46,6 @@
     problemWords,
     modeLabel,
     modelLabel,
-    canUndo as undoable,
-    canUndoTurn,
-    unbackedFiles,
-    unbackedLine,
     shownStepPicture,
   } from '../../core/agents.js';
   import { EFFORT_LABELS } from '../../core/effort.js';
@@ -72,14 +65,8 @@
   let now = $state(Date.now() / 1000);
   let busy = $state('');
   let message = $state('');
-  let confirmUndo = $state(false);
-  let undone = $state(null); // what Undo all put back
-  let undoBtn = $state(null);
-  // Each turn as the person left it: open or folded (n → bool), what its
-  // Undo put back or why it couldn't (n → words).
+  // Each turn as the person left it: open or folded (n → bool).
   let folded = $state({});
-  let turnUndone = $state({});
-  let turnRefused = $state({});
   let bodyEl = $state(null);
   // Which view: 'panel' (its rows) or 'timeline' (a row's Open); the row a
   // pill or a report card asked for (`{key, seq}`).
@@ -108,7 +95,6 @@
   const problem = $derived(problemWords(shown?.problem));
   // How long it has worked: its turns added up (not the time between them).
   const ran = $derived(shown ? workedFor(shown, now) : '');
-  const canUndo = $derived(undoable(shown));
 
   const isOpen = (t) => (folded[t.n] ?? t.n !== current) === false;
   /** The Code chat's agents for the panel: this one first, then the chat's others. */
@@ -149,11 +135,8 @@
       loadedFor = id;
       agent = null;
       log = [];
-      undone = null;
       message = '';
       folded = {};
-      turnUndone = {};
-      turnRefused = {};
       otherLogs = {};
       load(id);
     });
@@ -202,7 +185,7 @@
     const auto = ref?.auto;
     untrack(() => {
       // (A turn that's the person's own message, straight to the chat's session, has no row in the panel —
-      // the chat talking, not an agent sent: its line or report opens its timeline, with its Undo.)
+      // the chat talking, not an agent sent: its line or report opens its timeline.)
       const asked = turn == null ? null : agentsStore.list.find((a) => a.id === id)?.turnList?.find((t) => t.n === turn);
       if (at === 'timeline' || asked?.direct) {
         showTimeline(turn);
@@ -334,7 +317,6 @@
   }
 
   async function carryOn() {
-    undone = null;
     const r = await act('continue', 'agent_continue');
     if (r && typeof r === 'object' && r.id) agent = { ...agent, ...r };
   }
@@ -349,32 +331,6 @@
     if (claudePlan.failed) toast({ title: "Couldn't open Claude Code's sign-in", description: claudePlan.failed, variant: 'destructive' });
   }
 
-  async function undo() {
-    const r = await act('undo', 'agent_undo');
-    confirmUndo = false;
-    if (!r || typeof r !== 'object') return;
-    undone = r;
-    turnRefused = {};
-    refreshSoon();
-    tick().then(() => undoBtn?.focus?.());
-  }
-
-  /** **Undo this turn**: its files back as they were before it — refused while a later turn changed one of them. */
-  async function undoTurn(t) {
-    if (!shown || busy) return;
-    busy = 'undo';
-    turnRefused = { ...turnRefused, [t.n]: '' };
-    try {
-      const r = await invoke('agent_undo_turn', { id: shown.id, turn: t.n });
-      turnUndone = { ...turnUndone, [t.n]: undoneLine(r) };
-      refreshSoon();
-    } catch (e) {
-      turnRefused = { ...turnRefused, [t.n]: String(e?.message ?? e) };
-    } finally {
-      busy = '';
-    }
-  }
-
   async function send() {
     const text = message.trim();
     if (!text || busy) return;
@@ -384,32 +340,6 @@
     if (typeof r === 'object' && r.id) agent = { ...agent, ...r };
   }
 
-  const shortPath = (p) => String(p || '').split(/[\\/]/).pop() || String(p || '');
-  const undoneLine = (r) => {
-    const back = (r.restored?.length ?? 0) + (r.deleted?.length ?? 0);
-    if (!back) return 'Nothing needed putting back.';
-    const parts = [];
-    if (r.restored?.length) parts.push(`${r.restored.map(shortPath).join(', ')} put back`);
-    if (r.deleted?.length) parts.push(`${r.deleted.map(shortPath).join(', ')} deleted (the agent made ${r.deleted.length === 1 ? 'it' : 'them'})`);
-    // What it couldn't put back, and why (a command's file with no copy, one changed since).
-    const left = (r.skipped || []).filter((s) => s.reason && s.reason !== 'already gone');
-    if (left.length) parts.push(`${left.map((s) => shortPath(s.path)).join(', ')} left as ${left.length === 1 ? 'it is' : 'they are'} (${[...new Set(left.map((s) => s.reason))].join('; ')})`);
-    return `Undone: ${parts.join('; ')}.`;
-  };
-  // Files its commands changed with no copy from before: the confirm says so (never "Yap kept their backups" for them).
-  const unbackedNow = $derived(unbackedFiles((shown?.turnList || []).filter((t) => !t.undone)));
-  const undoBody = $derived.by(() => {
-    // (Claude Code's hooks didn't run: only what its commands made, or Git had, can be undone.)
-    if (shown?.noBackups) return "The files its commands made are deleted, and those they changed that Git had are put back. No backups were made of Claude Code's own edits, so Undo can't put those back.";
-    const lost = unbackedLine(unbackedNow);
-    if (lost) {
-      const when = many ? 'before its first turn' : 'before it';
-      return `The files it changed that Yap backed up go back to how they were ${when}, and the files it made are deleted. ${lost}`;
-    }
-    return many
-      ? 'Every file it changed, in every turn, goes back to how it was before its first turn, and the files it made are deleted. Yap kept their backups for this.'
-      : 'Every file it changed goes back to how it was before it, and the files it made are deleted. Yap kept their backups for this.';
-  });
   const effortWord = (e) => EFFORT_LABELS[e] || e || '';
   /** A turn's header line after its title: its status, how long, its cost. */
   const turnFacts = (t) => {
@@ -470,9 +400,6 @@
           onpicture={(p) => doc.showPicture(p)}
           ontask={(r) => doc.showTask({ key: r.key, agentId: r.agentId, n: r.n, helper: r.helper?.key ?? null, title: r.title })}
         />
-        {#if undone}
-          <p class="undone" aria-live="polite" data-testid={many ? 'chat-agent-undone-all' : 'chat-agent-undone'}>{undoneLine(undone)}</p>
-        {/if}
       {:else}
         <button type="button" class="back" data-testid="chat-agent-back" onclick={() => (view = 'panel')} aria-label="Back to the agent's turns">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
@@ -520,11 +447,6 @@
                     turn={t}
                     live={turnLive(t)}
                     single={!many}
-                    undoable={many && canUndoTurn(shown, t)}
-                    undone={turnUndone[t.n] || (!many && undone ? undoneLine(undone) : '')}
-                    refused={turnRefused[t.n] || ''}
-                    busy={!!busy}
-                    onundo={() => undoTurn(t)}
                     onpicture={(p) => doc.showPicture(shownStepPicture(p, shown.folder))}
                   />
                 </div>
@@ -532,10 +454,6 @@
             {/if}
           </section>
         {/each}
-
-        {#if many && undone}
-          <p class="undone" aria-live="polite" data-testid="chat-agent-undone-all">{undoneLine(undone)}</p>
-        {/if}
 
         <p class="cost" data-testid="chat-agent-cost" data-pay={shown.pay || 'plan'}>{costLine(shown)}{many && Number(shown.cost) > 0 ? ' in all' : ''}</p>
       {/if}
@@ -547,9 +465,6 @@
           <button type="button" class="pill" onclick={stop} disabled={!!busy}>Stop</button>
         {:else if shown.status === 'stopped' || shown.status === 'interrupted' || shown.status === 'failed'}
           <button type="button" class="pill primary" onclick={carryOn} disabled={!!busy}>Continue</button>
-        {/if}
-        {#if canUndo}
-          <button type="button" class="pill" bind:this={undoBtn} onclick={() => (confirmUndo = true)} disabled={!!busy}>{many ? 'Undo all' : "Undo the agent's changes"}</button>
         {/if}
         {#if !live && shown.session && shown.startedTs}
           <button type="button" class="pill" onclick={openTerminal} disabled={!!busy} title="Its session in Windows Terminal, in its folder">Open in terminal</button>
@@ -589,17 +504,6 @@
     </div>
   {/if}
 {/snippet}
-
-<ConfirmDialog
-  bind:open={confirmUndo}
-  title={many ? 'Undo every turn of this agent?' : "Undo the agent's changes?"}
-  body={undoBody}
-  confirmLabel={many ? 'Undo all' : "Undo the agent's changes"}
-  busyLabel="Undoing…"
-  busy={busy === 'undo'}
-  returnFocus={undoBtn}
-  onconfirm={undo}
-/>
 
 <style>
   .agenttab {
@@ -897,13 +801,6 @@
   .tbody {
     padding: 0 12px 12px;
     border-top: 1px solid color-mix(in srgb, var(--yap-paper-rule) 70%, transparent);
-  }
-  .undone {
-    margin: 12px 0 0;
-    padding: 8px 10px;
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--yap-success) 9%, var(--yap-paper));
-    font-size: 12.5px;
   }
   .cost {
     margin: 14px 0 0;

@@ -243,6 +243,9 @@ pub struct User {
     /// Claude Code's structured result of the tool (WebSearch's results,
     /// a file edit's patch, …), as it sent it.
     pub tool_use_result: Option<Value>,
+    /// Its `uuid`: for a replayed message that starts a turn, Claude Code's
+    /// own file checkpoint (`--rewind-files` takes it back to before it).
+    pub uuid: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -596,6 +599,7 @@ pub fn from_value(v: Value) -> Event {
                 parent_tool_use_id: opt_str(&v, "parent_tool_use_id"),
                 is_replay: v.get("isReplay").and_then(Value::as_bool).unwrap_or(false),
                 tool_use_result: v.get("tool_use_result").filter(|r| !r.is_null()).cloned(),
+                uuid: opt_str(&v, "uuid"),
             })
         }),
         "result" => Some(Event::Result(result(&v))),

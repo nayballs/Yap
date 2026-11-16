@@ -60,7 +60,7 @@ pub const KEPT_ENV: &[&str] = &["CLAUDE_CONFIG_DIR"];
 /// tools reference: since 2.1.268 newer models get no task-tracking tool
 /// unless a session opts in), as `TodoWrite` (`CLAUDE_CODE_ENABLE_TASKS=0`),
 /// the list Yap reads (`agents/steps.rs`).
-pub const RUN_SETS_ENV: &[&str] = &["CLAUDE_CODE_ENABLE_TODO_TOOLS", "CLAUDE_CODE_ENABLE_TASKS"];
+pub const RUN_SETS_ENV: &[&str] = &["CLAUDE_CODE_ENABLE_TODO_TOOLS", "CLAUDE_CODE_ENABLE_TASKS", "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"];
 
 // ---- Version ----
 

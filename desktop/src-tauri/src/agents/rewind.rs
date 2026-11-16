@@ -8,10 +8,9 @@
 //! - **Rewind** to before a message that started one of Claude's turns: the
 //!   chat goes back to before it (the message and everything after go; its
 //!   words go back in the message box, the page's part), that turn and the
-//!   ones after are marked rewound (kept for their backups and log, never
-//!   shown), the files they changed are put back as they were, newest first,
-//!   when the person asks (Yap's own backups, as Undo: `runner::undo_turn`),
-//!   and Claude never sees those turns again: the next turn starts Claude
+//!   ones after are marked rewound (kept for their log, never shown), the
+//!   files they changed are put back as they were when the person asks, and
+//!   Claude never sees those turns again: the next turn starts Claude
 //!   Code's own fork of the session up to the end of the turn before
 //!   (`--resume <id> --fork-session --resume-session-at <its last message>`,
 //!   [`store::Branch`]), or a new session when it was the first (in a
@@ -34,16 +33,34 @@
 //! own advice for a session that can't be resumed), then the person's words.
 //! Never Claude Code's transcript files: their format is internal to it.
 //!
+//! **The files go back through Claude Code's own checkpoints** (16 Nov 2026,
+//! as the Claude app's Rewind; [`files_back`]): every run has them on
+//! (`runner::CHECKPOINT_ENV`), each turn keeps where they can take its files
+//! back to (`TurnNote::checkpoint`: its session and its first message), and
+//! `claude -p --resume <session> --rewind-files <message> --no-session-persistence`
+//! does it — documented for the Agent SDK's file checkpointing, checked on
+//! 2.1.296: no model call, the files Claude Code's Write, Edit and
+//! NotebookEdit changed put back and the files they made deleted, and the
+//! session's transcript left as it was. One call a session, the newest
+//! first, each to the earliest rewound turn in it that edited a file. As in
+//! the Claude app, what a command changed stays as it is (said: ask Claude to
+//! undo it), and so does a turn from before the checkpoints (said too). Yap
+//! keeps no copies of its own.
+//!
 //! A message Claude read while it worked (a note, joined to the turn it
 //! came in) has neither: rewinding to it would cut a turn in two. A turn
 //! from before Yap kept where turns end (`TurnNote::end_uuid`) can't be a
 //! branch point: Rewind and Fork say so rather than guess.
+
+use std::time::Duration;
 
 use serde::Serialize;
 
 use super::code_chat;
 use super::runner;
 use super::store::{self, Agent, Branch, Fork, TurnNote};
+use crate::ai::claude_code::cli::{self, Place, Program};
+use crate::ai::claude_code::session::{self, Conversation, Pay, RunFiles, Spec};
 
 /// What a Rewind did.
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -53,12 +70,15 @@ pub struct Rewound {
     pub text: String,
     /// How many turns went.
     pub turns: usize,
-    /// Files put back as they were, and files the turns made, deleted.
-    pub restored: usize,
-    pub deleted: usize,
-    /// What couldn't be put back, in words (each turn's own reason).
+    /// Claude Code put the files its tools changed back as they were.
+    pub files_back: bool,
+    /// What stays as it is, in words (a command's changes, a turn from before
+    /// the checkpoints, Claude Code couldn't).
     pub problems: Vec<String>,
 }
+
+/// The longest a `--rewind-files` may take.
+const REWIND_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The most of the conversation a seeded session gets as text (the latest
 /// kept, each message cut to [`SEED_EACH`]).
@@ -169,6 +189,101 @@ pub(crate) fn rewound_from(turns: &[TurnNote], n: u32) -> Vec<u32> {
     gone
 }
 
+/// A turn edited a file with Claude Code's own tools (one of its `files` not
+/// a command's). Pure.
+fn edited(t: &TurnNote) -> bool {
+    t.files.iter().any(|f| !t.by_command.iter().any(|c| &c.file == f))
+}
+
+/// **What a Rewind of turns `gone` asks Claude Code for**: each session's
+/// `(session, message)` to rewind its files to — the earliest of the gone
+/// turns in it that edited a file — the newest session first; and the gone
+/// turns that edited files with no checkpoint (from before them). Pure.
+pub(crate) fn rewinds_for(turns: &[TurnNote], gone: &[u32]) -> (Vec<(String, String)>, Vec<u32>) {
+    let mut with: Vec<&TurnNote> = turns.iter().filter(|t| gone.contains(&t.n) && edited(t)).collect();
+    with.sort_by_key(|t| t.n);
+    let unchecked: Vec<u32> = with.iter().filter(|t| t.checkpoint.as_ref().is_none_or(|c| c.session.is_empty() || c.at.is_empty())).map(|t| t.n).collect();
+    // Each session: its earliest such turn's checkpoint, and its latest turn (the order).
+    let mut sessions: Vec<(String, String, u32)> = Vec::new();
+    for t in with.iter().filter(|t| !unchecked.contains(&t.n)) {
+        let Some(c) = &t.checkpoint else { continue };
+        match sessions.iter_mut().find(|(s, _, _)| *s == c.session) {
+            Some(entry) => entry.2 = entry.2.max(t.n),
+            None => sessions.push((c.session.clone(), c.at.clone(), t.n)),
+        }
+    }
+    sessions.sort_by_key(|s| std::cmp::Reverse(s.2));
+    (sessions.into_iter().map(|(s, at, _)| (s, at)).collect(), unchecked)
+}
+
+/// **`--rewind-files`'s arguments**: session `session`'s files back to before
+/// message `at`, nothing written into the session (`settings`: the file with
+/// the person's hooks off). Pure.
+pub fn rewind_args(session: &str, at: &str, settings: Option<&std::path::Path>) -> Vec<String> {
+    let mut a: Vec<String> = ["-p", "--resume", session, "--rewind-files", at, "--no-session-persistence"].iter().map(|s| s.to_string()).collect();
+    if let Some(f) = settings {
+        a.push("--settings".into());
+        a.push(f.display().to_string());
+    }
+    a
+}
+
+/// One `--rewind-files` with `program` in `agent`'s workspace. No model is
+/// called, so no way of paying is passed; the person's hooks are off (nothing
+/// of theirs runs because they rewound).
+fn rewind_session(program: &Program, agent: &Agent, session_id: &str, at: &str) -> Result<(), String> {
+    let mut spec = Spec::new(&agent.path, Pay::Plan);
+    spec.settings = Some(serde_json::json!({ "disableAllHooks": true }));
+    spec.conversation = Conversation::Resume(session_id.to_string());
+    let files = RunFiles::write(&spec)?;
+    let extra = vec![(runner::CHECKPOINT_ENV.0.to_string(), runner::CHECKPOINT_ENV.1.to_string())];
+    let env = session::environment(std::env::vars_os(), &Pay::Plan, &extra)?;
+    let a = rewind_args(session_id, at, files.files().settings.as_deref());
+    let a: Vec<&str> = a.iter().map(String::as_str).collect();
+    let out = cli::run_captured_at(program, &a, Place { dir: agent.path.clone().into(), env, what: "Claude Code" }, REWIND_TIMEOUT)?;
+    drop(files);
+    if out.code == Some(0) && out.stdout.contains("Files rewound") {
+        return Ok(());
+    }
+    let why = format!("{}\n{}", out.stderr, out.stdout).lines().map(str::trim).find(|l| !l.is_empty()).map(|l| l.chars().take(200).collect::<String>()).unwrap_or_else(|| format!("exit {:?}", out.code));
+    Err(why)
+}
+
+/// **The files of turns `gone` back as they were** (the module's notes):
+/// whether Claude Code put them back, and what stays as it is.
+fn files_back(agent: &Agent, gone: &[u32]) -> (bool, Vec<String>) {
+    let (rewinds, unchecked) = rewinds_for(&agent.turn_list, gone);
+    let mut problems = Vec::new();
+    // What its commands changed: as in the Claude app, Rewind leaves it.
+    let commands: Vec<String> = agent.turn_list.iter().filter(|t| gone.contains(&t.n)).flat_map(|t| t.by_command.iter().map(|c| c.file.clone())).collect();
+    if !commands.is_empty() {
+        let shown: Vec<&str> = commands.iter().take(3).map(String::as_str).collect();
+        let more = commands.len().saturating_sub(shown.len());
+        let more = if more > 0 { format!(" and {more} more") } else { String::new() };
+        problems.push(format!("What its commands changed stays as it is ({}{more}): ask Claude to undo it.", shown.join(", ")));
+    }
+    if !unchecked.is_empty() {
+        problems.push("Files from before Yap used Claude Code's checkpoints stay as they are.".into());
+    }
+    if rewinds.is_empty() {
+        return (false, problems);
+    }
+    let Some(program) = cli::find() else {
+        problems.push("Claude Code isn't on this PC, so the files stay as they are.".into());
+        return (false, problems);
+    };
+    let mut back = true;
+    for (session_id, at) in &rewinds {
+        if let Err(why) = rewind_session(&program, agent, session_id, at) {
+            tracing::info!(id = %agent.id, "Code chat: Claude Code couldn't rewind a session's files");
+            tracing::debug!(why = %why, "Code chat: --rewind-files said");
+            problems.push(format!("Claude Code couldn't put the files back: {why}"));
+            back = false;
+        }
+    }
+    (back, problems)
+}
+
 /// **Rewind** conversation `conversation` to before its message `index`
 /// (the module's doc); `files`: the files the turns changed go back too.
 pub fn rewind(conversation: u64, index: usize, files: bool) -> Result<Rewound, String> {
@@ -201,24 +316,11 @@ fn rewind_as(conversation: u64, index: usize, files: bool, keep_shots: bool) -> 
     crate::chat::chats::get(conversation).and_then(|c| c.messages.get(index).filter(|m| m.role == "user" && m.kind.is_empty()).cloned()).ok_or("That message isn't there any more.")?;
     let gone = rewound_from(&agent.turn_list, turn.n);
     let mut out = Rewound { turns: gone.len(), ..Default::default() };
-    // The files first, newest turn first (each put back to before it), as Undo does.
+    // The files first, through Claude Code's own checkpoints.
     if files {
-        for n in &gone {
-            let t = agent.turn_list.iter().find(|t| t.n == *n);
-            if t.is_none_or(|t| t.undone || t.files.is_empty()) {
-                continue;
-            }
-            match runner::undo_turn(&agent.id, *n) {
-                Ok(r) => {
-                    out.restored += r.restored.len();
-                    out.deleted += r.deleted.len();
-                    if !r.failed.is_empty() {
-                        out.problems.push(format!("{} file{} couldn't be put back.", r.failed.len(), if r.failed.len() == 1 { "" } else { "s" }));
-                    }
-                }
-                Err(e) => out.problems.push(e),
-            }
-        }
+        let (back, problems) = files_back(&agent, &gone);
+        out.files_back = back;
+        out.problems = problems;
     }
     let message = crate::chat::chats::rewind(conversation, index, keep_shots)?;
     out.text = message.text.clone();
@@ -240,7 +342,7 @@ fn rewind_as(conversation: u64, index: usize, files: bool, keep_shots: bool) -> 
         return Err("The chat's agent isn't there any more.".into());
     };
     store::saved().map_err(|e| e.to_string())?;
-    tracing::info!(id = %agent.id, conversation, turn = turn.n, turns = out.turns, files, restored = out.restored, deleted = out.deleted, fresh = branch.at.is_none(), seeded = branch.seed.is_some(), "Code chat: rewound");
+    tracing::info!(id = %agent.id, conversation, turn = turn.n, turns = out.turns, files, files_back = out.files_back, problems = out.problems.len(), fresh = branch.at.is_none(), seeded = branch.seed.is_some(), "Code chat: rewound");
     runner::told_changed(&agent, "rewound");
     Ok((out, message))
 }
@@ -311,6 +413,33 @@ mod tests {
         turns[2].rewound = true;
         assert_eq!(rewound_from(&turns, 2), [4, 2]);
         assert_eq!(rewound_from(&turns, 5), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn a_rewinds_files_go_back_through_each_sessions_earliest_checkpoint_newest_session_first() {
+        use store::{Checkpoint, CommandFile};
+        let at = |s: &str, a: &str| Some(Checkpoint { session: s.into(), at: a.into() });
+        let t = |n: u32, files: &[&str], cp: Option<Checkpoint>| TurnNote { n, files: files.iter().map(|f| f.to_string()).collect(), checkpoint: cp, direct: true, ..Default::default() };
+        let turns = vec![
+            t(1, &["notes.md"], at("s1", "m1")),
+            t(2, &[], at("s1", "m2")),
+            t(3, &["beds.js"], at("s1", "m3")),
+            // A Rewind before turn 4 started a new session: its own checkpoints.
+            t(4, &["map.js"], at("s2", "m4")),
+            t(5, &["notes.md"], at("s2", "m5")),
+        ];
+        // Back to before turn 2: session 2 to before turn 4, then session 1 to before turn 3 (turn 2 edited nothing).
+        assert_eq!(rewinds_for(&turns, &[5, 4, 3, 2]), (vec![("s2".into(), "m4".into()), ("s1".into(), "m3".into())], vec![]));
+        assert_eq!(rewinds_for(&turns, &[5]), (vec![("s2".into(), "m5".into())], vec![]));
+        // A turn whose only files were a command's: nothing for Claude Code to rewind.
+        let by_command = vec![TurnNote { by_command: vec![CommandFile { file: "costs.xlsx".into(), new: true }], ..t(6, &["costs.xlsx"], at("s2", "m6")) }];
+        assert_eq!(rewinds_for(&by_command, &[6]), (vec![], vec![]));
+        // A turn from before the checkpoints: said, never guessed.
+        let old = vec![t(1, &["notes.md"], None), t(2, &["beds.js"], at("s1", "m2"))];
+        assert_eq!(rewinds_for(&old, &[2, 1]), (vec![("s1".into(), "m2".into())], vec![1]));
+        // The call: nothing written into the session, the person's hooks off.
+        let a = rewind_args("s1", "m3", Some(std::path::Path::new("settings.json")));
+        assert_eq!(a, ["-p", "--resume", "s1", "--rewind-files", "m3", "--no-session-persistence", "--settings", "settings.json"]);
     }
 
     #[test]

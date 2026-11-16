@@ -8,8 +8,10 @@
 //!   CLAUDE.md, as in their terminal. Yap adds its run endpoint
 //!   (`integrations/claude_live.rs`, `Tools::Agent`): the permission prompt
 //!   tool (`--permission-prompt-tool mcp__yap__approve`: a card for the
-//!   person, never answered by voice) and the backup hook (`--settings`:
-//!   each file copied into `agents/<id>/backup/` before it's first changed).
+//!   person, never answered by voice). Claude Code's own file checkpoints are
+//!   on ([`CHECKPOINT_ENV`]): each turn keeps where they can take its files
+//!   back to (`TurnNote::checkpoint`), for Rewind (`rewind.rs`), as the
+//!   Claude app's Rewind does. Yap keeps no copies of its own.
 //! - **The flags**: `--permission-mode` from the agent's mode, `--model`,
 //!   `--effort`, `--session-id` (then `--resume`). Paid with the person's
 //!   Claude plan, or their Anthropic key (`agents_pay`), never ambiguously
@@ -18,8 +20,8 @@
 //!   a short summary of what you changed and anything you couldn't do.", so
 //!   the report is ready to say.
 //! - **Followed** ([`Follow`]): each tool call as a plain line
-//!   (`steps.rs`), the files it changes (its Edit / Write calls and the
-//!   backup manifest) and what changed in them once the call went through
+//!   (`steps.rs`), the files it changes (its Edit / Write calls, and what
+//!   its commands changed: `changes.rs`) and what changed in them once the call went through
 //!   (`diff.rs`), the commands it runs and what they're for, its to-do
 //!   list, what it says between its calls, what it wasn't allowed to do,
 //!   Claude Code's problems (signed out, at the plan's limit, paying
@@ -35,9 +37,8 @@
 //!   Code chat, `message_agent`, the tab's "Tell the agent…"), on the same
 //!   session (`--resume`), at the chat's Mode then (`modes::next_turn`: a
 //!   plan stays a plan until "go ahead"), Settings' model and effort then
-//!   (unless the person asked for their own), each with its own backups
-//!   (`agents/<id>/backup/<n>/`) and its own report. Continue carries on the
-//!   same turn.
+//!   (unless the person asked for their own), each with its own checkpoint
+//!   and its own report. Continue carries on the same turn.
 //! - **A note while a turn works goes to it now** (2026-11-11,
 //!   [`follow_up`], [`passes_now`]): written to its Claude Code, which takes
 //!   it into the work in hand at its next tool call's end and answers once
@@ -1188,10 +1189,18 @@ fn pay_for(agent: &Agent, cfg: &crate::config::YapConfig, status: &cli::Status) 
 /// Task tools.
 pub const TODO_ENV: [(&str, &str); 2] = [("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1"), ("CLAUDE_CODE_ENABLE_TASKS", "0")];
 
+/// **Claude Code's own file checkpoints** (16 Nov 2026, the Agent SDK's
+/// `enableFileCheckpointing`, documented for `claude -p` as this variable):
+/// before Write, Edit or NotebookEdit changes a file, Claude Code keeps it,
+/// and `--rewind-files <message uuid>` takes the files back to before that
+/// message — what the Claude app's Rewind does. Yap's Rewind uses it
+/// (`rewind.rs`); Yap keeps no copies of its own.
+pub const CHECKPOINT_ENV: (&str, &str) = ("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "true");
+
 /// **An agent's Claude Code run**: in its folder, the person's own setup (no
 /// `--strict-mcp-config`, no `--setting-sources`, Claude Code's own tools)
-/// with Yap's endpoint added (the run's `mcp_config`, the backup hook's
-/// `settings`, and `env`: the run key both of them name), its permission
+/// with Yap's endpoint added (the run's `mcp_config`, its `settings`, and
+/// `env`: the run key it names; Claude Code's own file checkpoints on), its permission
 /// prompts to Yap's `approve`, at `mode` (a read-only turn: its editing
 /// tools off, [`tools_off`]), its model and effort, on `conversation`. Its
 /// session is kept (`--resume`, Open in terminal). Pure.
@@ -1211,6 +1220,8 @@ pub fn agent_spec(
     spec.env = env;
     // Its to-do list on every model, as TodoWrite (the thread's to-do card, the plan from before a message).
     spec.env.extend(TODO_ENV.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+    // Claude Code's own file checkpoints: what Rewind takes the files back with.
+    spec.env.push((CHECKPOINT_ENV.0.to_string(), CHECKPOINT_ENV.1.to_string()));
     spec.model = Some(agent.model.clone()).filter(|m| !m.trim().is_empty());
     spec.effort = Effort::parse(&agent.effort);
     spec.permission_mode = mode.permission();
@@ -1256,11 +1267,6 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     if !folder.is_dir() {
         return failed_early(id, n, "The agent's workspace isn't there any more.".into(), None);
     }
-    // This turn's own backups (first copy wins within it).
-    let Some(backup) = store::turn_backup_dir(id, n) else { return failed_early(id, n, "That isn't one of Yap's agents.".into(), None) };
-    if let Err(e) = std::fs::create_dir_all(&backup) {
-        return failed_early(id, n, format!("Couldn't make the agent's backup folder: {e}"), None);
-    }
     let mode = modes::or_auto(&agent.mode);
     // **A phone's turn runs at most at Auto** (Remote Control, design §5.3),
     // whatever set its mode: its question asked for it, or the phone's own
@@ -1281,7 +1287,6 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     let run = match claude_live::register_run(RunSpec {
         label: agent.folder.clone(),
         tools: Tools::Agent,
-        backup_dir: Some(backup.clone()),
         folder: Some(folder.clone()),
         // Bypass: nobody is asked while it runs (a prompt is answered no, no card).
         approval: Some(Approval { run: id.to_string(), conversation: agent.conversation, origin: agent.origin, unattended: modes::unattended(mode) }),
@@ -1429,7 +1434,6 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
             t.plan_unused = false;
             t.asks = false;
             t.error = None;
-            t.undone = false;
             t.told_at = None;
         }
     }) else {
@@ -1449,7 +1453,7 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     // What its session's running total goes on from: nothing (a new
     // session), or what was kept of it (none kept: not known).
     let total_before = if resuming { Some(agent.session_total).filter(|t| *t > 0.0) } else { Some(0.0) };
-    let mut follow = Follow::new(&agent, n, folder, backup, mode, window, total_before);
+    let mut follow = Follow::new(&agent, n, folder, mode, window, total_before);
     follow.marks = beside.as_ref().map(|t| t.marks());
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     let mut shows = beside.is_some();
@@ -1486,10 +1490,10 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     }
     // Unregistered: a permission card still waiting is a no.
     drop(run);
-    // **What its commands made or changed** (`changes.rs`): into its backups and its files, before its end is said.
+    // **What its commands made or changed** (`changes.rs`): into its files, before its end is said.
     let windows = follow.command_windows(SystemTime::now());
-    let (dir, at, edited) = (follow.backup.clone(), follow.folder.clone(), follow.edited_files.iter().cloned().collect::<Vec<_>>());
-    let made = tauri::async_runtime::spawn_blocking(move || super::changes::settle(before.as_ref(), &windows, &dir, &at, &edited)).await.unwrap_or_default();
+    let (at, edited) = (follow.folder.clone(), follow.edited_files.iter().cloned().collect::<Vec<_>>());
+    let made = tauri::async_runtime::spawn_blocking(move || super::changes::settle(before.as_ref(), &windows, &at, &edited)).await.unwrap_or_default();
     follow.note_command_files(made);
     let ended = follow.finish();
     // A branch Claude Code never started (it refused the point, or the flag): the next turn starts afresh, the
@@ -1506,8 +1510,6 @@ struct Follow {
     /// The turn (`store::TurnNote::n`): its events, its note.
     n: u32,
     folder: PathBuf,
-    /// This turn's backups.
-    backup: PathBuf,
     mode: Mode,
     /// A read-only turn: never a plan waiting for a go-ahead, whatever its
     /// mode ([`after_plan`]'s caller).
@@ -1552,10 +1554,9 @@ struct Follow {
     /// starts on it now — or, [`NOTE_GRACE`] on, the note goes back to Yap.
     unread_since: Option<Instant>,
     last_flush: Instant,
-    /// The edit tools' calls this turn (the backup hook's tools), by id.
+    /// The edit tools' calls this turn (Write, Edit, MultiEdit, NotebookEdit), by id.
     edits: HashSet<String>,
-    /// One of them went through (its result not an error): the backup hook
-    /// ran before it, if hooks run at all.
+    /// One of them went through (its result not an error).
     edited: bool,
     /// Tool calls not back yet, by id.
     open: HashSet<String>,
@@ -1590,6 +1591,9 @@ struct Follow {
     /// The files Claude Code's own edit tools named this turn (as `files`
     /// says them): theirs, never a command's, its hooks on or off.
     edited_files: HashSet<String>,
+    /// The files its Write calls made (their result: a new file), for the
+    /// turn's `created`.
+    written_new: Vec<String>,
     /// Characters of output kept this turn (`output::TURN_MAX`).
     output_used: usize,
     /// What the turn has used (`usage.rs`).
@@ -1618,17 +1622,18 @@ struct Change {
     known: bool,
 }
 
-/// A Write's kind: "new" when it made the file (the backup manifest says
-/// it didn't exist before the agent, and the agent hadn't written it yet this
-/// time), "rewrite" when it was there, "write" when Yap can't tell (no
-/// backups made). Pure.
-fn write_kind(known: bool, state: Option<claude_live::backup::State>) -> &'static str {
-    use claude_live::backup::State;
-    match (known, state) {
-        (true, _) => "rewrite",
-        (false, Some(State::Created)) => "new",
-        (false, Some(_)) => "rewrite",
-        (false, None) => "write",
+/// A Write's kind, from Claude Code's own result: "new" when it made the
+/// file (its `tool_use_result.type` is "create", or its words say "File
+/// created successfully"), "rewrite" when it was there ("update", or the
+/// agent had touched it before), "write" when it doesn't say. Pure.
+fn write_kind(known: bool, record: Option<&serde_json::Value>, text: &str) -> &'static str {
+    let said = record.and_then(|r| r.get("type")).and_then(serde_json::Value::as_str);
+    match said {
+        Some("create") => "new",
+        Some("update") => "rewrite",
+        _ if text.trim_start().starts_with("File created successfully") => "new",
+        _ if known || text.contains("has been updated") => "rewrite",
+        _ => "write",
     }
 }
 
@@ -1653,29 +1658,19 @@ fn add_found(found: &mut Vec<crate::chat::chats::Source>, title: &str, url: &str
     });
 }
 
-/// Whether `tool` is one the backup hook runs before (`Edit`, `Write`,
-/// `MultiEdit`, `NotebookEdit`). Pure.
+/// Whether `tool` is one of Claude Code's file-editing tools (`Edit`,
+/// `Write`, `MultiEdit`, `NotebookEdit`): the ones its checkpoints cover. Pure.
 fn backed_up_tool(tool: &str) -> bool {
-    claude_live::BACKUP_MATCHER.split('|').any(|t| t == tool)
-}
-
-/// **No backups were made**: an edit went through this turn (Claude Code
-/// runs `PreToolUse` hooks before a tool, and Yap's hook notes every file
-/// it's called for, copied or not), yet the agent's backup list is empty —
-/// so its hooks never ran (a managed policy turned them off, `--bare`) or
-/// never reached Yap. Pure.
-fn no_backups(edited: bool, backed_up: usize) -> bool {
-    edited && backed_up == 0
+    matches!(tool, "Edit" | "Write" | "MultiEdit" | "NotebookEdit")
 }
 
 impl Follow {
-    fn new(agent: &Agent, n: u32, folder: PathBuf, backup: PathBuf, mode: Mode, window: u64, total_before: Option<f64>) -> Follow {
+    fn new(agent: &Agent, n: u32, folder: PathBuf, mode: Mode, window: u64, total_before: Option<f64>) -> Follow {
         let before = agent.turn_list.iter().find(|t| t.n == n).and_then(|t| t.usage.clone());
         Follow {
             id: agent.id.clone(),
             n,
             folder,
-            backup,
             mode,
             read_only: agent.turn_list.iter().find(|t| t.n == n).is_some_and(|t| t.read_only),
             direct: agent.turn_list.iter().find(|t| t.n == n).is_some_and(|t| t.direct),
@@ -1710,6 +1705,7 @@ impl Follow {
             command_started: HashMap::new(),
             command_runs: Vec::new(),
             edited_files: HashSet::new(),
+            written_new: Vec::new(),
             output_used: 0,
             meter: super::usage::Meter::new(before, &agent.model, window),
             marks: None,
@@ -1726,16 +1722,18 @@ impl Follow {
         all
     }
 
-    /// **What its commands made or changed** (`changes::settle`): in the
-    /// turn's `files` (Outputs, the summary, the file view) and its
-    /// `by_command` (Files changed, the report, Undo's words).
+    /// **What its commands made or changed** (`changes::settle`), and the
+    /// files its Write calls made: in the turn's `files` (Outputs, the
+    /// summary, the file view), its `by_command` (Files changed, the report)
+    /// and its `created` (the report card's new files). A Continue's run adds
+    /// to what the turn's earlier ones found.
     fn note_command_files(&self, made: Vec<store::CommandFile>) {
         let n = self.n;
-        let known = store::get(&self.id).and_then(|j| j.turn_list.iter().find(|t| t.n == n).map(|t| t.by_command.clone())).unwrap_or_default();
-        if made.is_empty() && known.is_empty() {
+        if made.is_empty() && self.written_new.is_empty() {
             return;
         }
-        tracing::info!(id = %self.id, turn = n, files = made.len(), new = made.iter().filter(|c| c.new).count(), kept = made.iter().filter(|c| c.kept).count(), "Agents: files its commands made or changed");
+        tracing::info!(id = %self.id, turn = n, files = made.len(), new = made.iter().filter(|c| c.new).count(), written = self.written_new.len(), "Agents: files its commands made or changed");
+        let new_ones: Vec<String> = self.written_new.iter().cloned().chain(made.iter().filter(|c| c.new).map(|c| c.file.clone())).collect();
         store::update(&self.id, |j| {
             for c in &made {
                 if !j.files.contains(&c.file) {
@@ -1747,8 +1745,16 @@ impl Follow {
                     if !t.files.contains(&c.file) {
                         t.files.push(c.file.clone());
                     }
+                    match t.by_command.iter_mut().find(|k| k.file == c.file) {
+                        Some(k) => k.new |= c.new,
+                        None => t.by_command.push(c.clone()),
+                    }
                 }
-                t.by_command = made.clone();
+                for f in &new_ones {
+                    if !t.created.contains(f) {
+                        t.created.push(f.clone());
+                    }
+                }
             }
         });
     }
@@ -1930,7 +1936,7 @@ impl Follow {
         }
         self.open.remove(id);
         if let Some(change) = self.changes.remove(id).filter(|_| !is_error) {
-            self.diff_of(change, id, result);
+            self.diff_of(change, id, result, text);
         }
         if self.commands.remove(id) {
             self.output_of(id, text, is_error);
@@ -1966,14 +1972,14 @@ impl Follow {
     /// What `change` (call `call`) did to its file, within the caps, said
     /// and logged: from Claude Code's own patch when its `result` has one
     /// (each part's place in the file), else from the call's input.
-    fn diff_of(&mut self, change: Change, call: &str, result: Option<&serde_json::Value>) {
+    fn diff_of(&mut self, change: Change, call: &str, result: Option<&serde_json::Value>, text: &str) {
         let d = if change.tool == "Write" {
             let content = change.input.get("content").and_then(serde_json::Value::as_str).unwrap_or("");
-            let state = claude_live::backup::read_manifest(&self.backup)
-                .ok()
-                .and_then(|m| m.files.into_iter().find(|e| steps::shown_path(&e.original.to_string_lossy(), &self.folder) == change.file))
-                .map(|e| e.state);
-            let kind = write_kind(change.known, state);
+            let kind = write_kind(change.known, result, text);
+            // A file it made: the turn's `created` (its report card's new files).
+            if kind == "new" && !self.written_new.contains(&change.file) {
+                self.written_new.push(change.file.clone());
+            }
             // (A file written over: what changed in it, when Claude Code said; a new one: its lines.)
             result.and_then(|r| diff::of_patch(&change.file, kind, r)).or_else(|| Some(diff::of_write(&change.file, content, kind)))
         } else {
@@ -2102,6 +2108,10 @@ impl Follow {
             // message of Yap's echoed back: Claude Code has taken it in.
             Event::User(u) => {
                 if u.is_replay && u.parent_tool_use_id.is_none() {
+                    // Its first message's place: Claude Code's checkpoint before the turn (Rewind's files).
+                    if let Some(at) = u.uuid.as_deref().filter(|a| !a.is_empty()) {
+                        self.checkpoint_at(&session.session_id(), at);
+                    }
                     let text: String = u.blocks.iter().filter_map(|b| if let Block::Text(t) = b { Some(t.as_str()) } else { None }).collect();
                     self.on_taken(&text);
                 }
@@ -2163,6 +2173,23 @@ impl Follow {
         }
     }
 
+    /// **The turn's checkpoint** (`TurnNote::checkpoint`): the first message
+    /// of its own Claude Code echoed back, in `session` — kept once, so a
+    /// Continue's run keeps the turn's first. Claude Code's
+    /// `--rewind-files <at>` takes the files back to before it.
+    fn checkpoint_at(&self, session: &str, at: &str) {
+        let n = self.n;
+        let unset = store::get(&self.id).is_some_and(|j| j.turn_list.iter().any(|t| t.n == n && t.checkpoint.is_none()));
+        if !unset || session.is_empty() {
+            return;
+        }
+        store::touch(&self.id, |j| {
+            if let Some(t) = j.turn_mut(n) {
+                t.checkpoint = Some(store::Checkpoint { session: session.to_string(), at: at.to_string() });
+            }
+        });
+    }
+
     /// **Claude Code echoed a message back** (`--replay-user-messages`): it
     /// has taken it in — the turn's first as it starts, a note at its next
     /// tool call's end (or, none left, as a turn of its own right after).
@@ -2205,10 +2232,6 @@ impl Follow {
         let stopping = with_state(|s| s.live.get(&self.id).is_some_and(|l| l.stopping.is_some()));
         let text = if r.text.trim().is_empty() { self.last_text.clone() } else { r.text.trim().to_string() };
         let outcome = outcome_of(r, stopping, self.problem.as_ref());
-        let read = claude_live::backup::read_manifest(&self.backup).ok();
-        let manifest: Vec<String> = read.as_ref().map(|m| m.files.iter().map(|e| steps::shown_path(&e.original.to_string_lossy(), &self.folder)).collect()).unwrap_or_default();
-        // (Its hook's own entries: a command's files, noted at a turn's end, aren't the hook running.)
-        let hooked = read.as_ref().map_or(0, |m| m.files.iter().filter(|e| !e.command).count());
         // (A plan sent back with comments isn't a denial: `revised_plan`.)
         let before: Vec<store::PlanBefore> = store::get(&self.id).and_then(|j| j.turn_list.iter().find(|t| t.n == self.n).map(|t| t.plans_before.clone())).unwrap_or_default();
         let denials: Vec<Denial> = r
@@ -2229,18 +2252,11 @@ impl Follow {
         let said = self.meter.said() || r.usage.input_tokens + r.usage.output_tokens > 0;
         let usage = self.meter.at_result(r);
         let usage = said.then_some(usage);
-        let unbacked = no_backups(self.edited, hooked);
-        if unbacked {
-            tracing::info!(id = %self.id, "Agents: files changed with no backups (Claude Code's hooks didn't run)");
-        }
         let n = self.n;
         let agent = store::update(&self.id, |j| {
             j.cost = cost;
             if session_total > 0.0 {
                 j.session_total = session_total;
-            }
-            if unbacked {
-                j.no_backups = true;
             }
             if let Some(t) = j.turn_mut(n) {
                 t.cost = turn_cost;
@@ -2251,20 +2267,10 @@ impl Follow {
                 if self.last_uuid.is_some() {
                     t.end_uuid.clone_from(&self.last_uuid);
                 }
-                for f in &manifest {
-                    if !t.files.contains(f) {
-                        t.files.push(f.clone());
-                    }
-                }
                 for d in &denials {
                     if !t.denials.iter().any(|x| x.tool == d.tool && x.detail == d.detail) {
                         t.denials.push(d.clone());
                     }
-                }
-            }
-            for f in manifest {
-                if !j.files.contains(&f) {
-                    j.files.push(f);
                 }
             }
             for d in denials {
@@ -3073,7 +3079,6 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
         j.sized = runs.sized;
         j.pay = pay.to_string();
         j.status = Status::Queued;
-        j.undone = false;
         if let (false, Next::Message(t)) = (ran, &next) {
             j.brief = format!("{}\n\n{}", j.brief.trim(), t.trim());
         }
@@ -3107,109 +3112,6 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
     // A newer turn in the chat: a plan there nobody acted on stops waiting.
     plans_aside_told();
     schedule(id, ran.then_some(body));
-}
-
-/// What Undo said, as the tab's line: "Undone: 2 files put back".
-fn undone_step(report: &claude_live::backup::RestoreReport) -> String {
-    match report.restored.len() + report.deleted.len() {
-        0 => "Undo: nothing to put back".to_string(),
-        1 => "Undone: 1 file put back".to_string(),
-        n => format!("Undone: {n} files put back"),
-    }
-}
-
-/// **Undo agent `id`** (Undo all): every file it changed, in every turn not
-/// undone already, put back as it was before its first turn, every file it
-/// made deleted (`backup::restore_all`). Not while it runs.
-pub fn undo(id: &str) -> Result<claude_live::backup::RestoreReport, String> {
-    let agent = store::get(id).ok_or("There's no such agent.")?;
-    if agent.status.live() {
-        return Err("Stop the agent first.".into());
-    }
-    if agent.swept {
-        return Err("Its backups are gone: Yap keeps them 7 days.".into());
-    }
-    let undone: Vec<u32> = agent.turn_list.iter().filter(|t| t.undone).map(|t| t.n).collect();
-    let all = store::backup_dirs(id);
-    if all.is_empty() {
-        return Err("This agent didn't change any files.".into());
-    }
-    let dirs: Vec<PathBuf> = all.iter().filter(|(n, _)| !undone.contains(n)).map(|(_, d)| d.clone()).collect();
-    if dirs.is_empty() {
-        return Err("Its files are back as they were already.".into());
-    }
-    let report = claude_live::backup::restore_all(&dirs);
-    if let Some(e) = &report.error {
-        return Err(e.clone());
-    }
-    tracing::info!(id, turns = dirs.len(), restored = report.restored.len(), deleted = report.deleted.len(), failed = report.failed.len(), "Agents: undone");
-    let turns: Vec<u32> = all.iter().map(|(n, _)| *n).collect();
-    if let Some(agent) = store::update(id, |j| {
-        j.undone = true;
-        for t in j.turn_list.iter_mut().filter(|t| turns.contains(&t.n)) {
-            t.undone = true;
-        }
-    }) {
-        emit(&AgentEvent { step: Some(undone_step(&report)), ..AgentEvent::of(&agent) });
-    }
-    Ok(report)
-}
-
-/// The later turn of `later` (`(turn, the files it changed)`, oldest first)
-/// that changed one of `files` too, and that file: the reason an earlier
-/// turn can't be undone first. Pure.
-pub fn later_change<'a>(files: &[PathBuf], later: &'a [(u32, Vec<PathBuf>)]) -> Option<(u32, &'a PathBuf)> {
-    later.iter().rev().find_map(|(n, theirs)| theirs.iter().find(|f| files.iter().any(|m| claude_live::backup::same_path(m, f))).map(|f| (*n, f)))
-}
-
-/// **Undo turn `n` of agent `id`**: the files that turn changed put back as
-/// they were before it, the files it made deleted. Refused while a later
-/// turn, not undone, changed one of the same files ("Undo the later change
-/// first"). Not while it runs.
-pub fn undo_turn(id: &str, n: u32) -> Result<claude_live::backup::RestoreReport, String> {
-    let agent = store::get(id).ok_or("There's no such agent.")?;
-    if agent.status.live() {
-        return Err("Stop the agent first.".into());
-    }
-    if agent.swept {
-        return Err("Its backups are gone: Yap keeps them 7 days.".into());
-    }
-    let notes = agent.turn_notes();
-    let turn = notes.iter().find(|t| t.n == n).ok_or("There's no such turn.")?;
-    if turn.undone {
-        return Err("That turn's files are back as they were already.".into());
-    }
-    let all = store::backup_dirs(id);
-    let mine: Vec<PathBuf> = all.iter().filter(|(m, _)| *m == n).map(|(_, d)| d.clone()).collect();
-    if mine.is_empty() {
-        return Err("That turn didn't change any files.".into());
-    }
-    let files: Vec<PathBuf> = mine.iter().flat_map(|d| claude_live::backup::originals(d).unwrap_or_default()).collect();
-    let undone = |m: u32| notes.iter().any(|t| t.n == m && t.undone);
-    let later: Vec<(u32, Vec<PathBuf>)> = all.iter().filter(|(m, _)| *m > n && !undone(*m)).map(|(m, d)| (*m, claude_live::backup::originals(d).unwrap_or_default())).collect();
-    if let Some((m, file)) = later_change(&files, &later) {
-        let title = notes.iter().find(|t| t.n == m).map(|t| t.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| "A later turn".into());
-        let shown = steps::shown_path(&file.to_string_lossy(), std::path::Path::new(&agent.path));
-        tracing::info!(id, turn = n, later = m, "Agents: undo refused: a later turn changed the same file");
-        return Err(format!("Undo the later change first: “{title}” changed {shown} too."));
-    }
-    let report = claude_live::backup::restore_all(&mine);
-    if let Some(e) = &report.error {
-        return Err(e.clone());
-    }
-    tracing::info!(id, turn = n, restored = report.restored.len(), deleted = report.deleted.len(), failed = report.failed.len(), "Agents: a turn undone");
-    let with_backups: Vec<u32> = all.iter().map(|(m, _)| *m).collect();
-    if let Some(agent) = store::update(id, |j| {
-        j.keep_turns();
-        if let Some(t) = j.turn_mut(n) {
-            t.undone = true;
-        }
-        // Every turn with backups undone: the agent is.
-        j.undone = with_backups.iter().all(|m| j.turn_list.iter().any(|t| t.n == *m && t.undone));
-    }) {
-        emit(&AgentEvent { step: Some(undone_step(&report)), ..AgentEvent::at(&agent, n) });
-    }
-    Ok(report)
 }
 
 /// **Open in terminal**: the agent's session in Windows Terminal, in its
@@ -3356,9 +3258,17 @@ mod tests {
             assert!(!a.iter().any(|x| x == never), "{never} in {a:?}");
         }
         assert_eq!((spec.mcp_config, spec.settings), (Some(mcp.clone()), Some(hooks.clone())));
-        // The run key in its environment, which its files name; its to-do list on, as TodoWrite.
+        // The run key in its environment, which its files name; its to-do list on, as TodoWrite; Claude Code's own
+        // file checkpoints on (Rewind's files).
         assert_eq!(spec.env[..1], key[..]);
-        assert_eq!(&spec.env[1..], &[("CLAUDE_CODE_ENABLE_TODO_TOOLS".to_string(), "1".to_string()), ("CLAUDE_CODE_ENABLE_TASKS".to_string(), "0".to_string())]);
+        assert_eq!(
+            &spec.env[1..],
+            &[
+                ("CLAUDE_CODE_ENABLE_TODO_TOOLS".to_string(), "1".to_string()),
+                ("CLAUDE_CODE_ENABLE_TASKS".to_string(), "0".to_string()),
+                ("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING".to_string(), "true".to_string())
+            ]
+        );
         assert!(session::environment(Vec::new(), &Pay::Plan, &spec.env).is_ok(), "a run may set them");
         // A later turn resumes it, at the mode it runs at then.
         let spec = agent_spec(&agent, &folder, Pay::Plan, Mode::Auto, false, Conversation::Resume("prev".into()), mcp.clone(), hooks.clone(), key.clone());
@@ -3394,18 +3304,16 @@ mod tests {
     }
 
     #[test]
-    fn a_turn_that_edited_with_no_backup_is_marked() {
+    fn claude_codes_own_edit_tools_and_its_checkpoints_on_every_run() {
         for tool in ["Edit", "Write", "MultiEdit", "NotebookEdit"] {
             assert!(backed_up_tool(tool), "{tool}");
         }
         for tool in ["Bash", "Read", "WebFetch", "mcp__yap__approve", "edit", ""] {
             assert!(!backed_up_tool(tool), "{tool}");
         }
-        // An edit through, nothing in the backup list: the hooks never ran.
-        assert!(no_backups(true, 0));
-        // Backed up (copied, created, too big or failed: all listed), or no edit.
-        assert!(!no_backups(true, 1));
-        assert!(!no_backups(false, 0));
+        // Its checkpoints: the variable Claude Code documents, which Yap may set for a run.
+        assert_eq!(CHECKPOINT_ENV, ("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "true"));
+        assert!(cli::RUN_SETS_ENV.contains(&CHECKPOINT_ENV.0));
     }
 
     #[test]
@@ -3515,8 +3423,7 @@ mod tests {
         let folder = PathBuf::from(format!(r"D:\Projects\seed-tracker-{id}"));
         store::insert(Agent { id: id.clone(), folder: "seed-tracker".into(), path: folder.to_string_lossy().into_owned(), status: Status::Running, started_ts: 5, turn_list: vec![store::TurnNote { n: 1, status: Status::Running, started_ts: 5, ..Default::default() }], ..Default::default() });
         let agent = store::get(&id).unwrap();
-        let backup = store::turn_backup_dir(&id, 1).unwrap();
-        let mut follow = Follow::new(&agent, 1, folder.clone(), backup, Mode::Auto, 200_000, None);
+        let mut follow = Follow::new(&agent, 1, folder.clone(), Mode::Auto, 200_000, None);
         let picture = |w: u32, h: u32| {
             let rgba: Vec<u8> = (0..w * h).flat_map(|i| [(i % 200) as u8, 80, 120, 255]).collect();
             let png = crate::snip::images::encode_png(&rgba, w, h, true).unwrap();
@@ -3554,8 +3461,7 @@ mod tests {
         let folder = PathBuf::from(format!(r"D:\Projects\seed-tracker-{id}"));
         store::insert(Agent { id: id.clone(), folder: "seed-tracker".into(), path: folder.to_string_lossy().into_owned(), status: Status::Running, started_ts: 5, turn_list: vec![store::TurnNote { n: 1, status: Status::Running, started_ts: 5, ..Default::default() }], ..Default::default() });
         let agent = store::get(&id).unwrap();
-        let backup = store::turn_backup_dir(&id, 1).unwrap();
-        let mut follow = Follow::new(&agent, 1, folder.clone(), backup, Mode::Auto, 200_000, None);
+        let mut follow = Follow::new(&agent, 1, folder.clone(), Mode::Auto, 200_000, None);
         let notes = folder.join("notes.txt").to_string_lossy().into_owned();
         // An edit: Claude Code's own record of it says where in the file.
         follow.on_tool("toolu_edit_1", "Edit", &json!({ "file_path": notes, "old_string": "line five", "new_string": "line 5" }));
@@ -3608,8 +3514,7 @@ mod tests {
         let folder = PathBuf::from(format!(r"D:\Projects\seed-tracker-{id}"));
         store::insert(Agent { id: id.clone(), folder: "seed-tracker".into(), path: folder.to_string_lossy().into_owned(), status: Status::Running, started_ts: 5, turn_list: vec![store::TurnNote { n: 1, status: Status::Running, started_ts: 5, ..Default::default() }], ..Default::default() });
         let agent = store::get(&id).unwrap();
-        let backup = store::turn_backup_dir(&id, 1).unwrap();
-        let mut follow = Follow::new(&agent, 1, folder, backup, Mode::Auto, 200_000, None);
+        let mut follow = Follow::new(&agent, 1, folder, Mode::Auto, 200_000, None);
         // The first piece at once; the next within the pause is kept for the one after.
         assert!(follow.on_saying("I'll add "));
         assert!(!follow.on_saying("the watering "));
@@ -3640,8 +3545,7 @@ mod tests {
         let folder = PathBuf::from(format!(r"D:\Projects\seed-tracker-{id}"));
         store::insert(Agent { id: id.clone(), folder: "seed-tracker".into(), path: folder.to_string_lossy().into_owned(), status: Status::Running, started_ts: 5, turn_list: vec![store::TurnNote { n: 1, status: Status::Running, started_ts: 5, ..Default::default() }], ..Default::default() });
         let agent = store::get(&id).unwrap();
-        let backup = store::turn_backup_dir(&id, 1).unwrap();
-        let mut follow = Follow::new(&agent, 1, folder.clone(), backup, Mode::Auto, 200_000, None);
+        let mut follow = Follow::new(&agent, 1, folder.clone(), Mode::Auto, 200_000, None);
         let notes = folder.join("notes.txt").to_string_lossy().into_owned();
         // The session's own list, then its hand-over.
         follow.on_tool("toolu_todo", "TodoWrite", &json!({ "todos": [{ "content": "Check the docs", "status": "in_progress", "activeForm": "Checking the docs" }] }));
@@ -3714,14 +3618,17 @@ mod tests {
 
     #[test]
     fn a_write_is_new_rewritten_or_written() {
-        use claude_live::backup::State;
-        assert_eq!(write_kind(false, Some(State::Created)), "new");
-        assert_eq!(write_kind(false, Some(State::Copied)), "rewrite");
-        assert_eq!(write_kind(false, Some(State::TooBig)), "rewrite");
-        // The agent wrote it before (it made it, then wrote it again).
-        assert_eq!(write_kind(true, Some(State::Created)), "rewrite");
-        // No backups made: Yap can't tell.
-        assert_eq!(write_kind(false, None), "write");
+        use serde_json::json;
+        // Claude Code's own record says.
+        assert_eq!(write_kind(false, Some(&json!({ "type": "create" })), ""), "new");
+        assert_eq!(write_kind(true, Some(&json!({ "type": "create" })), ""), "new");
+        assert_eq!(write_kind(false, Some(&json!({ "type": "update" })), ""), "rewrite");
+        // Else its words.
+        assert_eq!(write_kind(false, None, "File created successfully at: notes.md"), "new");
+        assert_eq!(write_kind(false, None, "The file notes.md has been updated."), "rewrite");
+        // The agent wrote it before; or nothing says.
+        assert_eq!(write_kind(true, None, ""), "rewrite");
+        assert_eq!(write_kind(false, None, ""), "write");
     }
 
     // ---- turns ----
@@ -3730,38 +3637,6 @@ mod tests {
 
     fn turn(n: u32, title: &str, files: &[&str]) -> TurnNote {
         TurnNote { n, title: title.into(), status: Status::Done, started_ts: n as u64, ended_ts: n as u64, files: files.iter().map(|f| f.to_string()).collect(), ..Default::default() }
-    }
-
-    /// A turn's backups as the backup hook leaves them (`n` 0: an older
-    /// agent's, right in `backup/`): each file with its text before the turn,
-    /// or `None`, the turn made it.
-    fn backed_up(id: &str, n: u32, files: &[(&std::path::Path, Option<&str>)]) {
-        use claude_live::backup::{Entry, Manifest, State as B, MANIFEST};
-        let dir = if n == 0 { store::backup_dir(id).unwrap() } else { store::turn_backup_dir(id, n).unwrap() };
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut m = Manifest::default();
-        for (i, (path, before)) in files.iter().enumerate() {
-            let name = format!("{:04}-{}", i + 1, path.file_name().unwrap().to_string_lossy());
-            let (state, backup) = match before {
-                Some(text) => {
-                    std::fs::write(dir.join(&name), text).unwrap();
-                    (B::Copied, name)
-                }
-                None => (B::Created, String::new()),
-            };
-            m.files.push(Entry { original: path.to_path_buf(), state, backup, bytes: 0, tool: "Edit".into(), ts: 0, note: String::new(), command: false, was: None, after: None });
-        }
-        std::fs::write(dir.join(MANIFEST), serde_json::to_vec(&m).unwrap()).unwrap();
-    }
-
-    fn read(p: &std::path::Path) -> String {
-        std::fs::read_to_string(p).unwrap()
-    }
-
-    fn workspace() -> PathBuf {
-        let folder = std::env::temp_dir().join(format!("yap-agent-turns-{}", store::new_id()));
-        std::fs::create_dir_all(&folder).unwrap();
-        folder
     }
 
     #[test]
@@ -4024,122 +3899,6 @@ mod tests {
         assert_eq!((a.model.as_deref(), a.sizing.as_deref()), (Some("claude-opus-5-5"), Some("a multi-file change")), "the smaller pick doesn't shrink it");
         a.merge(Ask { model: Some("claude-haiku-5-5".into()), model_asked: true, ..Default::default() });
         assert_eq!((a.model.as_deref(), a.model_asked), (Some("claude-haiku-5-5"), true), "the person's own wins");
-    }
-
-    #[test]
-    fn an_earlier_turn_waits_for_a_later_one_that_changed_the_same_file() {
-        let notes = PathBuf::from(r"D:\Projects\garden-planner\notes.md");
-        let map = PathBuf::from(r"D:\Projects\garden-planner\map.js");
-        let later = vec![(2, vec![map.clone()]), (3, vec![notes.clone()])];
-        assert_eq!(later_change(std::slice::from_ref(&notes), &later).map(|(n, _)| n), Some(3));
-        assert_eq!(later_change(&[PathBuf::from(r"D:\Projects\garden-planner\beds.json")], &later), None);
-        assert_eq!(later_change(std::slice::from_ref(&notes), &[]), None);
-        // Windows' names don't care about case: the same file, however it's written.
-        #[cfg(windows)]
-        assert_eq!(later_change(&[notes], &[(4, vec![PathBuf::from(r"d:\projects\garden-planner\NOTES.md")])]).map(|(n, _)| n), Some(4));
-    }
-
-    #[test]
-    fn each_turn_undoes_on_its_own_and_undo_all_goes_back_before_the_first() {
-        let folder = workspace();
-        let (notes, map) = (folder.join("notes.md"), folder.join("minimap.js"));
-        // Turn 1 changed notes.md (v0 → v1); turn 2 changed it again (v1 →
-        // v2) and made minimap.js.
-        let setup = |id: &str| {
-            store::insert(Agent {
-                id: id.into(),
-                folder: "garden-planner".into(),
-                path: folder.to_string_lossy().into_owned(),
-                status: Status::Done,
-                started_ts: 1,
-                files: vec!["notes.md".into(), "minimap.js".into()],
-                turn_list: vec![turn(1, "Add a watering schedule", &["notes.md"]), turn(2, "Add a minimap button", &["notes.md", "minimap.js"])],
-                ..Default::default()
-            });
-            backed_up(id, 1, &[(&notes, Some("v0"))]);
-            backed_up(id, 2, &[(&notes, Some("v1")), (&map, None)]);
-            std::fs::write(&notes, "v2").unwrap();
-            std::fs::write(&map, "map").unwrap();
-        };
-        let a = store::new_id();
-        setup(&a);
-        assert_eq!(store::backup_dirs(&a).iter().map(|(n, _)| *n).collect::<Vec<_>>(), [1, 2]);
-        // The earlier turn first: refused, the later one named.
-        assert_eq!(undo_turn(&a, 1).unwrap_err(), "Undo the later change first: “Add a minimap button” changed notes.md too.");
-        assert_eq!(read(&notes), "v2", "nothing touched");
-        // The later turn: its own files, as they were before it.
-        let r = undo_turn(&a, 2).unwrap();
-        assert_eq!((r.restored.len(), r.deleted.len()), (1, 1));
-        assert_eq!(read(&notes), "v1");
-        assert!(!map.exists());
-        let j = store::get(&a).unwrap();
-        assert!(j.turn_list[1].undone && !j.turn_list[0].undone && !j.undone);
-        assert!(undo_turn(&a, 2).is_err(), "undone already");
-        assert!(undo_turn(&a, 9).is_err());
-        // Now the earlier one goes too: every turn undone, the agent is.
-        undo_turn(&a, 1).unwrap();
-        assert_eq!(read(&notes), "v0");
-        assert!(store::get(&a).unwrap().undone);
-
-        // Undo all: back to before its first turn, in one go.
-        let b = store::new_id();
-        setup(&b);
-        let r = undo(&b).unwrap();
-        assert_eq!(read(&notes), "v0");
-        assert!(!map.exists());
-        assert_eq!(r.restored.len(), 1, "notes.md once, from its earliest backup");
-        let j = store::get(&b).unwrap();
-        assert!(j.undone && j.turn_list.iter().all(|t| t.undone));
-        assert!(undo(&b).is_err(), "nothing left to undo");
-        // An undone turn is left out of Undo all.
-        let c = store::new_id();
-        setup(&c);
-        undo_turn(&c, 2).unwrap();
-        std::fs::write(&notes, "edited by hand").unwrap();
-        undo(&c).unwrap();
-        assert_eq!(read(&notes), "v0");
-        // Never while it runs.
-        let d = store::new_id();
-        setup(&d);
-        store::update(&d, |j| j.status = Status::Running);
-        assert_eq!(undo(&d).unwrap_err(), "Stop the agent first.");
-        assert_eq!(undo_turn(&d, 2).unwrap_err(), "Stop the agent first.");
-        let _ = std::fs::remove_dir_all(folder);
-    }
-
-    #[test]
-    fn an_older_agents_single_backup_is_its_turn_one() {
-        let folder = workspace();
-        let notes = folder.join("notes.md");
-        // From before turns: one backup, right in backup/, no turns kept.
-        let id = store::new_id();
-        store::insert(Agent { id: id.clone(), folder: "garden-planner".into(), path: folder.to_string_lossy().into_owned(), brief: "Tidy notes.md.".into(), status: Status::Done, started_ts: 1, turns: 2, files: vec!["notes.md".into()], ..Default::default() });
-        backed_up(&id, 0, &[(&notes, Some("v0"))]);
-        std::fs::write(&notes, "v1").unwrap();
-        assert_eq!(store::backup_dirs(&id).iter().map(|(n, _)| *n).collect::<Vec<_>>(), [1]);
-        let j = store::get(&id).unwrap();
-        assert!(j.turn_list.is_empty());
-        assert_eq!(j.turn_notes().iter().map(|t| (t.n, t.title.as_str())).collect::<Vec<_>>(), [(1, "Tidy notes.md")]);
-        undo_turn(&id, 1).unwrap();
-        assert_eq!(read(&notes), "v0");
-        assert!(store::get(&id).unwrap().undone);
-        // Undo all, as Undo agent did.
-        let again = store::new_id();
-        store::insert(Agent { id: again.clone(), path: folder.to_string_lossy().into_owned(), status: Status::Done, files: vec!["notes.md".into()], ..Default::default() });
-        backed_up(&again, 0, &[(&notes, Some("v0"))]);
-        std::fs::write(&notes, "v1").unwrap();
-        undo(&again).unwrap();
-        assert_eq!(read(&notes), "v0");
-        // Its turn 1 carried on since (a backup/1/ of its own): the older copy wins.
-        let both = store::new_id();
-        store::insert(Agent { id: both.clone(), path: folder.to_string_lossy().into_owned(), status: Status::Done, ..Default::default() });
-        backed_up(&both, 0, &[(&notes, Some("v0"))]);
-        backed_up(&both, 1, &[(&notes, Some("v1"))]);
-        std::fs::write(&notes, "v2").unwrap();
-        assert_eq!(store::backup_dirs(&both).iter().map(|(n, _)| *n).collect::<Vec<_>>(), [1, 1]);
-        undo_turn(&both, 1).unwrap();
-        assert_eq!(read(&notes), "v0");
-        let _ = std::fs::remove_dir_all(folder);
     }
 
     #[test]

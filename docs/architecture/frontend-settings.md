@@ -658,14 +658,12 @@ on an element that also has a `settings.css` class (`set-note`,
   is confirmed; "No workspaces yet…"; **Animate Code chats**, `agentsAnimate`,
   yap-code.md "Code chats"); **Ask before sending an agent** (`agentsAsk`: When it
   matters, the default — a workspace agents haven't used yet, or after the chat
-  read the web —, Always, Never) and **Read agent reports aloud** (`agentsSpeak`); the limits ("Backups of changed files are
-  kept 7 days. One agent at a time per workspace, at most 3 at once.") and, small,
-  "Undo needs Claude Code's hooks, which back up each file before an agent
-  changes it. If a policy set by your organisation turns hooks off, no
-  backups are made, and the agent's tab says so." (`yap-code-backups-hooks`);
+  read the web —, Always, Never) and **Read agent reports aloud** (`agentsSpeak`); the limits ("One agent at a time per
+  workspace, at most 3 at once. To take a change back, ask Claude, or rewind
+  to before your message: Claude Code's own checkpoints put its edits
+  back."; no Undo since 16 Nov 2026, as the Claude app);
   **History** (`agent_list`: each agent's status dot, folder, when and cost —
-  plan and key told apart, `core/agents.js` `costLine` — Open (Chat on it) and
-  Undo, offered by `core/agents.js` `canUndo` (never for an agent with no backups made), 20 at
+  plan and key told apart, `core/agents.js` `costLine` — and Open (Chat on it), 20 at
   first). Twelve search entries (`settingsIndex.js`), a nav entry
   (`nav.js`), `PAGES.agents`.
 - **Speech-to-Text** (`models`, `ModelManager.svelte`): **Your model** first —

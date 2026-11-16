@@ -3,7 +3,7 @@
   // `turnsOf`): one request to the person's Claude Code and what came of it
   // — the line it's on while it works, its to-do list, its timeline (every
   // step and what it said between them: AgentTimeline.svelte), the files it
-  // changed with their diffs (AgentFiles.svelte) and its own Undo, the
+  // changed with their diffs (AgentFiles.svelte; a command's files said so), the
   // commands it ran (a few, then "Show N more"), what it wasn't allowed to
   // do, and its final words (markdown). An agent is one Claude Code session per
   // Code chat: each follow-up is a turn of its own (agents/runner.rs).
@@ -11,19 +11,17 @@
   import { colourCode } from '../../ui/colourCode.js';
   import { codeCopy } from '../../ui/codeCopy.js';
   import { markdownVisuals } from '../../ui/markdownVisuals.js';
-  import { timelineOf, latestStep, todosOf, todoCount, diffsOf, commandsOf, NO_BACKUPS, unbackedFiles, unbackedLine } from '../../core/agents.js';
+  import { timelineOf, latestStep, todosOf, todoCount, diffsOf, commandsOf } from '../../core/agents.js';
   import AgentTimeline from './AgentTimeline.svelte';
   import AgentFiles from './AgentFiles.svelte';
 
   /**
    * `agent`: the agent as it is now; `turn`: this turn (`turnsOf`, its `events`);
    * `live`: this turn is working now; `single`: the agent's only turn (an
-   * older agent's commands from the agent); `undoable`: Undo this turn offered;
-   * `undone`: what Undo this turn put back (its line); `refused`: why it
-   * couldn't; `busy`; `onundo()`; `onpicture(picture)`: open a picture one
+   * older agent's commands from the agent); `onpicture(picture)`: open a picture one
    * of its steps came back with.
    */
-  let { agent, turn, live = false, single = false, undoable = false, undone = '', refused = '', busy = false, onundo = null, onpicture = null } = $props();
+  let { agent, turn, live = false, single = false, onpicture = null } = $props();
 
   let allCommands = $state(false);
   /** Commands shown before "Show N more". */
@@ -45,8 +43,6 @@
     return commandsOf(agent, events);
   });
   const shownCommands = $derived(allCommands ? commands : commands.slice(0, FEW_COMMANDS));
-  // What its commands changed that Undo can't put back (agents/changes.rs).
-  const unbacked = $derived(unbackedLine(unbackedFiles([turn])));
 </script>
 
 {#if latest}
@@ -81,18 +77,6 @@
   <div class="section" data-testid="chat-agent-files">
     <h3>Files changed <span class="count">{turn.files.length}</span></h3>
     <AgentFiles files={turn.files} {diffs} byCommand={turn.byCommand} />
-    {#if agent?.noBackups}
-      <p class="nobackups" data-testid="chat-agent-no-backups">{NO_BACKUPS}</p>
-    {/if}
-    {#if unbacked}
-      <p class="nobackups" data-testid="chat-agent-command-unbacked">{unbacked}</p>
-    {/if}
-    {#if undoable}
-      <button type="button" class="undoturn" data-testid="chat-agent-undo-turn" onclick={() => onundo?.()} disabled={busy}>Undo this turn</button>
-    {/if}
-    {#if refused}
-      <p class="refused" role="alert" data-testid="chat-agent-turn-refused">{refused}</p>
-    {/if}
   </div>
 {/if}
 {#if commands.length}
@@ -130,11 +114,7 @@
   </div>
 {/if}
 
-{#if undone}
-  <p class="undone" aria-live="polite" data-testid="chat-agent-undone">{undone}</p>
-{:else if turn?.undone}
-  <p class="undone">Undone: its files are back as they were.</p>
-{/if}
+
 
 <style>
   .now {
@@ -291,8 +271,7 @@
   .showmore:hover {
     text-decoration: underline;
   }
-  .showmore:focus-visible,
-  .undoturn:focus-visible {
+  .showmore:focus-visible {
     outline: 2px solid var(--yap-focus-ring);
     outline-offset: 1px;
   }
@@ -304,48 +283,5 @@
   }
   .final .md :global(p) {
     margin: 0 0 8px;
-  }
-  .nobackups {
-    margin: 8px 0 0;
-    padding: 7px 10px;
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--yap-warning) 10%, var(--yap-paper));
-    color: var(--yap-paper-text-2);
-    font-size: 12.5px;
-  }
-  .undoturn {
-    margin: 8px 0 0;
-    height: 26px;
-    padding: 0 11px;
-    border: 1px solid var(--yap-paper-rule);
-    border-radius: 999px;
-    background: var(--yap-paper);
-    color: var(--yap-paper-ink);
-    font: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .undoturn:hover:not(:disabled) {
-    background: var(--yap-paper-s2);
-  }
-  .undoturn:disabled {
-    opacity: 0.55;
-    cursor: default;
-  }
-  .refused {
-    margin: 8px 0 0;
-    padding: 7px 10px;
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--yap-warning) 12%, var(--yap-paper));
-    color: var(--yap-paper-ink);
-    font-size: 12.5px;
-  }
-  .undone {
-    margin: 12px 0 0;
-    padding: 8px 10px;
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--yap-success) 9%, var(--yap-paper));
-    font-size: 12.5px;
   }
 </style>

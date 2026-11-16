@@ -1,16 +1,20 @@
 //! **What a turn's commands changed** (15 Nov 2026). Claude Code's own edit
-//! tools go through Yap's backup hook (`integrations/claude_live/backup.rs`);
-//! a file a command makes or changes — a script (exceljs, Python), `npm`, a
-//! formatter — never does. The Yap Lab found it on 15 Nov: an exceljs script
-//! wrote `costs.xlsx`, and Outputs said "Nothing made yet". So each turn reads
-//! the workspace before it and compares after:
+//! tools say which file they change; a command never does — a script
+//! (exceljs, Python), `npm`, a formatter. The Lab found it on 15 Nov: an
+//! exceljs script wrote `costs.xlsx`, and Outputs said "Nothing made yet". So
+//! each turn reads the workspace before it and compares after, and lists
+//! what its commands made or changed (Outputs, the summary, the file view,
+//! Files changed, the report). Nothing is copied: as in the Claude app,
+//! Rewind doesn't undo what a command did (Claude Code's checkpoints cover
+//! its own edit tools only), and the person asks Claude to undo it.
 //!
 //! - **Before** ([`before`], as the turn starts, before Claude Code does):
 //!   - in a Git repository (the person's own Git, and `git rev-parse` answers
-//!     in the workspace): `git status --porcelain=v1 -z --untracked-files=all`
-//!     for the workspace's part of it (`.gitignore` kept), each file it lists
-//!     with its size and times, and the commit at `HEAD` — every other file is
-//!     as Git has it there;
+//!     in the workspace, and the repository doesn't ignore the workspace
+//!     itself): `git status --porcelain=v1 -z --untracked-files=all` for the
+//!     workspace's part of it (`.gitignore` kept), each file it lists with
+//!     its size and times, and the commit at `HEAD` — every other file is as
+//!     Git has it there;
 //!   - elsewhere (or when Git can't say), a walk ([`walk`]) that leaves out
 //!     build output and hidden folders as the @ picker's does
 //!     (`mention::SKIPPED`), links, and Yap's own data folder: every file, its
@@ -19,35 +23,17 @@
 //!     Git at [`GIT_TIMEOUT`] or [`MOST_ENTRIES`] files listed. Past them (a
 //!     drive root like `E:\`, a home folder) the check is skipped for the
 //!     turn ([`Skip`]), said in the log with counts only, never a stall.
-//! - **After** ([`after`], once its process is gone): the same again,
-//!   compared, and **only what changed while a command ran** counts
-//!   ([`classify`]): a `Bash` or `PowerShell` call from its start to its
-//!   result, one in the background to the turn's end ([`Window`]), with
-//!   [`SLACK`] either side — by a new file's birth (which unpacking an archive
-//!   doesn't set back) or a changed one's last write. So the person's own
-//!   edits in the workspace meanwhile aren't the turn's. With Git, `HEAD`
-//!   moved (Claude committed) adds the files between the two commits.
-//!   - **New** (not there before): Undo deletes it.
-//!   - **Changed, clean in Git at the turn's start**: Git's own copy (`git
-//!     cat-file --filters <commit>:<path>`, as a checkout would write it) is
-//!     kept as its backup: Undo puts it back.
-//!   - **Changed, anything else** (the person's uncommitted work, a folder
-//!     with no Git): no backup, and it's said — Undo can't put it back.
-//!
-//!   At most [`MOST_FOUND`] files; past that nothing is noted (logged).
-//! - **Why not a copy before each command**: a command's words don't say
-//!   which files it will write (an exceljs script's file is named inside the
-//!   script), so a snapshot of "the files it's about to touch" would be a
-//!   guess, and copying the whole workspace before every command doesn't
-//!   scale. Git already holds every clean file as it was.
-//! - **Kept** ([`settle`]): in the turn's backup manifest, marked `command`,
-//!   each with the file as the turn left it (Undo's guard: one changed since
-//!   is left alone); and, by the runner, in the turn's `files` and
-//!   `by_command` (`store::CommandFile`), so Outputs, the summary, the file
-//!   view, Files changed and the report list them. A file a command made
-//!   that Claude Code then edited is new (its hook's copy was of the
-//!   command's file); one a command changed before Claude Code's copy has no
-//!   copy from before, unless Git has it.
+//! - **After** ([`settle`], once its process is gone, only when a command
+//!   ran): the same again, compared, and **only what changed while a command
+//!   ran counts** ([`classify`]): a `Bash` or `PowerShell` call from its
+//!   start to its result, one in the background to the turn's end
+//!   ([`Window`]), with [`SLACK`] either side — by a new file's birth (which
+//!   unpacking an archive doesn't set back) or a changed one's last write. So
+//!   the person's own edits in the workspace meanwhile aren't the turn's, and
+//!   neither is a file Claude Code's own edit tools named. With Git, `HEAD`
+//!   moved (Claude committed) adds the files between the two commits, and a
+//!   file Git had at the start is changed, never new. At most [`MOST_FOUND`]
+//!   files; past that nothing is noted (logged).
 //! - **Git runs as the person's own** ([`find_git`]: an absolute folder on
 //!   `PATH`, else Git for Windows' own `cmd\git.exe`; never one in the
 //!   workspace), no window, in the kill-on-close job, with
@@ -64,7 +50,6 @@ use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::ai::claude_code::cli::{self, Program};
-use crate::integrations::claude_live::backup::{self, Entry, Manifest, Stamp, State};
 
 use super::store::CommandFile;
 
@@ -78,15 +63,10 @@ pub const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 pub const MOST_FOUND: usize = 500;
 /// A change this close to a command's run is its.
 pub const SLACK: Duration = Duration::from_secs(2);
-/// The longest Git's copy of one file may take, and all of a turn's.
-const COPY_TIMEOUT: Duration = Duration::from_secs(10);
-const COPY_BUDGET: Duration = Duration::from_secs(20);
 /// How deep a walk goes.
 const DEPTH: usize = 16;
 /// The most Git may print for one answer.
 const GIT_OUT_MAX: usize = 8 << 20;
-/// Said for a file a command changed after Claude Code's own copy was made of it.
-const COPIED_LATE: &str = "a command changed it before Claude Code's edit, so Yap has no copy of it from before";
 
 /// **A file as a scan saw it**: its size and times.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,13 +153,8 @@ impl Before {
 pub struct Found {
     /// Relative to the workspace, `/` between parts.
     pub rel: String,
-    pub path: PathBuf,
     /// It wasn't there before the turn.
     pub new: bool,
-    /// It was clean in Git at the turn's start: Git has it as it was.
-    pub clean: bool,
-    /// As the turn left it.
-    pub now: Stamp,
 }
 
 /// The key a path is known by: `/` between parts, and (on Windows) any case.
@@ -299,9 +274,8 @@ pub fn after(before: &Before, windows: &[Window]) -> Result<Vec<Found>, Skip> {
     for (rel, seen) in now {
         let k = key(&rel);
         let was = before.files.get(&k).map(|(_, s)| s);
-        if let Some((new, is_clean)) = classify(was, &seen, clean.contains(&k), windows) {
-            let path = backup::normal(&os_path(folder, &rel)).unwrap_or_else(|| os_path(folder, &rel));
-            found.push(Found { rel, path, new, clean: is_clean, now: Stamp { bytes: seen.bytes, modified_ms: ms(seen.modified) } });
+        if let Some((new, _)) = classify(was, &seen, clean.contains(&k), windows) {
+            found.push(Found { rel, new });
             if found.len() > MOST_FOUND {
                 return Err(Skip::TooManyChanged(found.len()));
             }
@@ -334,185 +308,37 @@ pub fn during(t: Option<SystemTime>, windows: &[Window]) -> bool {
     t.is_some_and(|t| windows.iter().any(|(a, b)| t + SLACK >= *a && t <= *b + SLACK))
 }
 
-fn ms(t: Option<SystemTime>) -> u64 {
-    t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64)
-}
-
-// ---- kept ---------------------------------------------------------------------------------------
+// ---- the turn's end -----------------------------------------------------------------------------
 
 /// **The turn's end**: what its commands made or changed ([`after`], with
 /// `before` and `windows`; nothing when no command ran or the check was
-/// skipped) noted in its backup folder `dir`, and every command's file
-/// there as the turn left it (Undo's guard). What the turn's commands made
-/// or changed, for its `by_command`, relative to the workspace as its
+/// skipped), as its `by_command` says it: relative to the workspace as its
 /// `files` say them. `edited`: the files Claude Code's own edit tools named
-/// this turn (as its `files` say them), left to the backup hook — even with
-/// its hooks off, an edit just before a command is the edit's, not the
-/// command's. Blocking.
-pub fn settle(before: Option<&Before>, windows: &[Window], dir: &Path, folder: &Path, edited: &[String]) -> Vec<CommandFile> {
-    let mut manifest = match backup::read_manifest(dir) {
-        Ok(m) => m,
-        Err(_) => {
-            tracing::warn!("Agents: a turn's backup list couldn't be read; its commands' files aren't noted");
-            return Vec::new();
+/// this turn (as its `files` say them), never a command's — an edit just
+/// before a command is the edit's. Blocking.
+pub fn settle(before: Option<&Before>, windows: &[Window], folder: &Path, edited: &[String]) -> Vec<CommandFile> {
+    let Some(before) = before.filter(|_| !windows.is_empty()) else { return Vec::new() };
+    let started = Instant::now();
+    match after(before, windows) {
+        Ok(found) => {
+            let edited: HashSet<String> = edited.iter().map(|f| key(f)).collect();
+            let out: Vec<CommandFile> = found
+                .into_iter()
+                .filter(|f| !edited.contains(&key(&f.rel)))
+                .map(|f| CommandFile { file: super::steps::shown_path(&os_path(folder, &f.rel).to_string_lossy(), folder), new: f.new })
+                .collect();
+            tracing::info!(git = before.git(), read = before.files_read(), found = out.len(), ms = started.elapsed().as_millis() as u64, "Agents: what a turn's commands changed");
+            out
         }
-    };
-    let had = manifest.clone();
-    if let (Some(before), false) = (before, windows.is_empty()) {
-        let started = Instant::now();
-        match after(before, windows) {
-            Ok(found) => {
-                let edited: HashSet<String> = edited.iter().map(|f| key(f)).collect();
-                let noted = note(&mut manifest, before, &found, windows, dir, &edited);
-                tracing::info!(git = before.git(), read = before.files_read(), found = found.len(), noted, ms = started.elapsed().as_millis() as u64, "Agents: what a turn's commands changed");
-            }
-            Err(why) => {
-                let (words, n) = why.said();
-                tracing::info!(git = before.git(), why = words, n, "Agents: what a turn's commands changed wasn't checked");
-            }
+        Err(why) => {
+            let (words, n) = why.said();
+            tracing::info!(git = before.git(), why = words, n, "Agents: what a turn's commands changed wasn't checked");
+            Vec::new()
         }
-    }
-    // Every command's file as the turn left it (a Continue's edits included).
-    for e in manifest.files.iter_mut().filter(|e| e.command) {
-        e.after = Stamp::now(&e.original);
-    }
-    if manifest != had {
-        if let Err(e) = std::fs::create_dir_all(dir).and_then(|()| backup::write_manifest(dir, &manifest)) {
-            tracing::warn!(kind = %e.kind(), "Agents: a turn's backup list couldn't be saved");
-        }
-    }
-    command_files(&manifest, folder)
-}
-
-/// The manifest's command files, as a turn's `by_command`. Pure.
-pub fn command_files(manifest: &Manifest, folder: &Path) -> Vec<CommandFile> {
-    manifest
-        .files
-        .iter()
-        .filter(|e| e.command)
-        .map(|e| CommandFile { file: super::steps::shown_path(&e.original.to_string_lossy(), folder), new: e.state == State::Created, kept: e.state == State::Copied })
-        .collect()
-}
-
-/// `found` into `manifest` (see [`settle`]); how many entries it added or
-/// changed. Copies from Git go into `dir`.
-fn note(manifest: &mut Manifest, before: &Before, found: &[Found], windows: &[Window], dir: &Path, edited: &HashSet<String>) -> usize {
-    let mut changed = 0;
-    let budget = Instant::now() + COPY_BUDGET;
-    let first_command = windows.iter().map(|(a, _)| *a).min();
-    for f in found {
-        match manifest.files.iter().position(|e| backup::same_path(&e.original, &f.path)) {
-            // Noted already (a Continue of the turn): as it is.
-            Some(i) if manifest.files[i].command => {}
-            // Claude Code's copy of a file a command had made: it's new.
-            Some(i) if f.new && manifest.files[i].state != State::Created => {
-                let e = &mut manifest.files[i];
-                if e.state == State::Copied && backup::plain_name(&e.backup) {
-                    let _ = std::fs::remove_file(dir.join(&e.backup));
-                }
-                e.state = State::Created;
-                e.backup.clear();
-                e.note.clear();
-                e.was = None;
-                e.command = true;
-                e.after = Some(f.now);
-                changed += 1;
-            }
-            Some(_) => {}
-            // One of Claude Code's own edits (its hook didn't run): the hook's business, not a command's.
-            None if edited.contains(&key(&f.rel)) => {}
-            None => {
-                let mut e = Entry { original: f.path.clone(), state: State::Created, backup: String::new(), bytes: f.now.bytes, tool: "command".into(), ts: backup::now_secs(), note: String::new(), command: true, was: None, after: Some(f.now) };
-                if !f.new {
-                    e.state = State::Failed;
-                    e.note = backup::NO_COPY.into();
-                    if f.clean {
-                        git_backup(&mut e, before, &f.rel, manifest.files.len() + 1, dir, budget);
-                    }
-                }
-                manifest.files.push(e);
-                changed += 1;
-            }
-        }
-    }
-    // Claude Code's own copies made after a command ran: from before the turn only if the file hadn't changed by then.
-    let Some(first) = first_command else { return changed };
-    let first_secs = first.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let late: Vec<usize> = manifest.files.iter().enumerate().filter(|(_, e)| !e.command && e.state == State::Copied && e.ts + 1 >= first_secs).map(|(i, _)| i).collect();
-    if late.is_empty() {
-        return changed;
-    }
-    let rels: Vec<(usize, String)> = late.iter().filter_map(|&i| backup::relative_to(&manifest.files[i].original, &before.folder).map(|r| (i, r.replace('\\', "/")))).collect();
-    let clean: HashSet<String> = match &before.how {
-        How::Git { git, prefix, head: Some(head) } => {
-            let unseen: Vec<&str> = rels.iter().map(|(_, r)| r.as_str()).filter(|r| !before.listed.contains(&key(r))).collect();
-            in_commit(git, &before.folder, prefix, head, &unseen).into_keys().collect()
-        }
-        _ => HashSet::new(),
-    };
-    for (i, rel) in rels {
-        let k = key(&rel);
-        if let Some((_, was)) = before.files.get(&k) {
-            // Its copy isn't the file as the turn found it.
-            let copied = manifest.files[i].was;
-            if copied.is_some_and(|c| c.bytes != was.bytes || c.modified_ms != ms(was.modified)) {
-                let e = &mut manifest.files[i];
-                if backup::plain_name(&e.backup) {
-                    let _ = std::fs::remove_file(dir.join(&e.backup));
-                }
-                e.state = State::Failed;
-                e.backup.clear();
-                e.note = COPIED_LATE.into();
-                e.command = true;
-                changed += 1;
-            }
-        } else if clean.contains(&k) {
-            // Clean in Git at the start: Git's copy is the file as it was, whatever ran first.
-            let n = i + 1;
-            let mut e = manifest.files[i].clone();
-            let old = e.backup.clone();
-            git_backup(&mut e, before, &rel, n, dir, budget);
-            if e.state == State::Copied {
-                if old != e.backup && backup::plain_name(&old) {
-                    let _ = std::fs::remove_file(dir.join(&old));
-                }
-                manifest.files[i] = e;
-                changed += 1;
-            }
-        }
-    }
-    changed
-}
-
-/// `e` backed up from Git's copy at the turn's start (`rel` in the
-/// workspace, its `n`th entry): `Copied`, `TooBig`, or left as it was.
-fn git_backup(e: &mut Entry, before: &Before, rel: &str, n: usize, dir: &Path, budget: Instant) {
-    let How::Git { git, prefix, head: Some(head) } = &before.how else { return };
-    if Instant::now() > budget {
-        tracing::debug!("Agents: out of time for Git's copies this turn");
-        return;
-    }
-    let name = backup::backup_name(n, &e.original);
-    if std::fs::create_dir_all(dir).is_err() {
-        return;
-    }
-    let to = dir.join(&name);
-    match git_copy(git, &before.folder, &format!("{head}:{prefix}{rel}"), &to, backup::MAX_BACKUP_BYTES) {
-        Copied::Done(bytes) => {
-            e.state = State::Copied;
-            e.backup = name;
-            e.bytes = bytes;
-            e.note.clear();
-        }
-        Copied::TooBig => {
-            e.state = State::TooBig;
-            e.note = format!("over {} MB, not backed up", backup::MAX_BACKUP_BYTES / (1024 * 1024));
-        }
-        Copied::Failed => {}
     }
 }
 
-// ---- what Undo can do, in words ----------------------------------------------------------------
+// ---- in words ------------------------------------------------------------------------------------
 
 /// Up to 8 names, then "and N more".
 fn names(list: &[&str]) -> String {
@@ -527,27 +353,22 @@ fn names(list: &[&str]) -> String {
 
 /// **The facts of a turn's files for the chat's model** (its report,
 /// `agent_status`): `files` every file it changed, `by_command` those its
-/// commands made or changed, `no_backups` Claude Code's hooks never ran —
-/// so it never says a backup was kept when none was. Pure.
-pub fn file_facts(files: &[String], by_command: &[CommandFile], no_backups: bool) -> Vec<String> {
-    let cmd = |f: &str| by_command.iter().find(|c| c.file == f);
-    let edited: Vec<&str> = files.iter().map(String::as_str).filter(|f| cmd(f).is_none()).collect();
+/// commands made or changed. Nothing about backups or Undo: as in the
+/// Claude app, the person asks Claude to undo a change, or rewinds. Pure.
+pub fn file_facts(files: &[String], by_command: &[CommandFile]) -> Vec<String> {
+    let cmd = |f: &str| by_command.iter().any(|c| c.file == f);
+    let edited: Vec<&str> = files.iter().map(String::as_str).filter(|f| !cmd(f)).collect();
     let made: Vec<&str> = by_command.iter().filter(|c| c.new).map(|c| c.file.as_str()).collect();
-    let kept: Vec<&str> = by_command.iter().filter(|c| !c.new && c.kept).map(|c| c.file.as_str()).collect();
-    let lost: Vec<&str> = by_command.iter().filter(|c| !c.new && !c.kept).map(|c| c.file.as_str()).collect();
+    let changed: Vec<&str> = by_command.iter().filter(|c| !c.new).map(|c| c.file.as_str()).collect();
     let mut lines = Vec::new();
     if !edited.is_empty() {
-        let how = if no_backups { "no backups were made, so Undo can't put them back" } else { "backed up first" };
-        lines.push(format!("Files it changed: {} ({how}).", names(&edited)));
+        lines.push(format!("Files it changed: {}.", names(&edited)));
     }
     if !made.is_empty() {
-        lines.push(format!("Files its commands made: {} (new: Undo deletes them).", names(&made)));
+        lines.push(format!("Files its commands made: {}.", names(&made)));
     }
-    if !kept.is_empty() {
-        lines.push(format!("Files its commands changed: {} (backed up first, from Git).", names(&kept)));
-    }
-    if !lost.is_empty() {
-        lines.push(format!("Files its commands changed with no backup: {} (Undo can't put them back).", names(&lost)));
+    if !changed.is_empty() {
+        lines.push(format!("Files its commands changed: {}.", names(&changed)));
     }
     lines
 }
@@ -582,7 +403,7 @@ pub fn walk(folder: &Path, skip: &[PathBuf], most: usize, time: Duration) -> Res
             let name = entry.file_name().to_string_lossy().into_owned();
             if kind.is_dir() {
                 let path = entry.path();
-                if depth < DEPTH && !name.starts_with('.') && !super::mention::SKIPPED.contains(&name.as_str()) && !hidden(&entry) && !skip.iter().any(|s| backup::same_path(s, &path)) {
+                if depth < DEPTH && !name.starts_with('.') && !super::mention::SKIPPED.contains(&name.as_str()) && !hidden(&entry) && !skip.iter().any(|s| key(&s.to_string_lossy()) == key(&path.to_string_lossy())) {
                     stack.push((path, depth + 1));
                 }
             } else if kind.is_file() {
@@ -760,46 +581,6 @@ pub fn parse_batch_check(out: &str, asked: &[&str]) -> HashMap<String, u64> {
             (kind == "blob" && parts.next().is_none()).then(|| size.parse().ok().map(|s| (key(rel), s))).flatten()
         })
         .collect()
-}
-
-enum Copied {
-    Done(u64),
-    TooBig,
-    Failed,
-}
-
-/// **Git's copy of `spec`** (`<commit>:<path>`) as a checkout writes it
-/// (`git cat-file --filters`: line endings, filters), into `to`, at most
-/// `max` bytes, within [`COPY_TIMEOUT`].
-fn git_copy(git: &Program, dir: &Path, spec: &str, to: &Path, max: u64) -> Copied {
-    let Some(mut cmd) = git_command(git, dir, &["cat-file", "--filters", spec]) else { return Copied::Failed };
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped());
-    let Ok(mut child) = cmd.spawn() else { return Copied::Failed };
-    crate::shell::procs::end_with_yap(&child);
-    let Some(mut stdout) = child.stdout.take() else { return Copied::Failed };
-    let Ok(mut file) = std::fs::File::create(to) else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Copied::Failed;
-    };
-    let writer = std::thread::spawn(move || {
-        let n = std::io::copy(&mut (&mut stdout).take(max + 1), &mut file);
-        let _ = file.flush();
-        n
-    });
-    let code = wait_until(&mut child, Instant::now() + COPY_TIMEOUT);
-    let copied = writer.join().ok().and_then(Result::ok);
-    match (code, copied) {
-        (_, Some(n)) if n > max => {
-            let _ = std::fs::remove_file(to);
-            Copied::TooBig
-        }
-        (Some(Some(0)), Some(n)) => Copied::Done(n),
-        _ => {
-            let _ = std::fs::remove_file(to);
-            Copied::Failed
-        }
-    }
 }
 
 #[cfg(test)]

@@ -537,10 +537,42 @@ fn clip(s: &str, max: usize) -> String {
 /// it.
 fn shown(path: &str, folder: Option<&Path>) -> String {
     let p = Path::new(path);
-    if let Some(rel) = folder.and_then(|f| super::backup::relative_to(p, f)) {
+    if let Some(rel) = folder.and_then(|f| relative_to(p, f)) {
         return rel;
     }
     path.to_string()
+}
+
+/// `p` with `.` and `..` worked out, if it's absolute and `..` never goes
+/// above its root. Pure.
+fn normal(p: &Path) -> Option<std::path::PathBuf> {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::Prefix(_) | Component::RootDir => out.push(c.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    return None;
+                }
+            }
+            Component::Normal(s) => out.push(s),
+        }
+    }
+    out.is_absolute().then_some(out)
+}
+
+/// `p` relative to `folder` when it's in it ("src/app.ts" for the card);
+/// Windows' names compared ignoring case. Pure.
+fn relative_to(p: &Path, folder: &Path) -> Option<String> {
+    let (p, folder) = (normal(p)?, normal(folder)?);
+    let key = |x: &Path| if cfg!(windows) { x.to_string_lossy().to_lowercase() } else { x.to_string_lossy().into_owned() };
+    if !std::path::Path::new(&key(&p)).starts_with(key(&folder)) {
+        return None;
+    }
+    let rel: std::path::PathBuf = p.components().skip(folder.components().count()).collect();
+    (!rel.as_os_str().is_empty()).then(|| rel.display().to_string())
 }
 
 /// **What a tool call would do**, as the card says it: a summary line and

@@ -36,7 +36,7 @@ const GARDEN = path.join(HERE, 'folders', 'garden-planner');
 const PHONE_NAME = 'Kitchen tablet';
 
 const DONE = 'Done. I changed Draft to Final in notes.md and the tests pass.';
-const REPORT = 'Done: I changed Draft to Final in notes.md and the tests pass. There is a backup if you want it back.';
+const REPORT = 'Done: I changed Draft to Final in notes.md and the tests pass.';
 
 // ---- the stand-in's scripts ----
 
@@ -80,7 +80,7 @@ const result = (text, extra = {}) => ({
   ...extra,
 });
 
-/** Edits notes.md (backed up first), then asks to run the tests, and reports. */
+/** Edits notes.md, then asks to run the tests, and reports. */
 const EDIT = [
   { _wait_user: true },
   init('auto'),

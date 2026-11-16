@@ -7,8 +7,7 @@
   // whole that was there before, "…N more lines" past the caps. A file with
   // no diff in the log (an older agent's, one swept) is its name alone. A
   // file one of its commands made or changed (`byCommand`, agents/changes.rs:
-  // a script, npm, a formatter) says so — "New", "By a command", and "No
-  // backup" when Undo can't put it back.
+  // a script, npm, a formatter) says so — "New", "By a command".
   import { diffTotals, diffTitle, diffLine, moreLines } from '../../core/agents.js';
 
   /** `files`: the agent's files, as said; `diffs`: file → its diffs (`diffsOf`); `byCommand`: its commands' files (`{file, new, kept}`). */
@@ -20,8 +19,7 @@
 
 {#snippet byCommandTags(c)}
   {#if c}
-    <span class="tag by" title={c.new ? 'A command made it: Undo deletes it' : c.kept ? 'A command changed it: Undo puts back the copy from Git' : "A command changed it, and Yap had no copy from before: Undo can't put it back"}>By a command</span>
-    {#if !c.new && !c.kept}<span class="tag lost" data-testid="chat-agent-file-unbacked">No backup</span>{/if}
+    <span class="tag by" title={c.new ? 'One of its commands made it' : 'One of its commands changed it'}>By a command</span>
   {/if}
 {/snippet}
 
@@ -30,7 +28,7 @@
     {@const ds = diffs.get(f) || []}
     {@const t = diffTotals(ds)}
     {@const c = commandOf.get(f)}
-    <li class="file" data-testid="chat-agent-file" data-file={f} data-by-command={c ? (c.new ? 'new' : c.kept ? 'kept' : 'unbacked') : null}>
+    <li class="file" data-testid="chat-agent-file" data-file={f} data-by-command={c ? (c.new ? 'new' : 'changed') : null}>
       {#if ds.length}
         <button type="button" class="frow" aria-expanded={!!open[f]} onclick={() => (open = { ...open, [f]: !open[f] })} title={open[f] ? 'Hide the changes' : 'Show the changes'}>
           <svg class="chev" class:down={open[f]} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
@@ -149,10 +147,6 @@
     background: color-mix(in srgb, var(--yap-paper-text-2) 12%, transparent);
     color: var(--yap-paper-text-2);
     font-weight: 500;
-  }
-  .tag.lost {
-    background: color-mix(in srgb, var(--yap-warning) 16%, transparent);
-    color: var(--yap-paper-text);
   }
   .counts {
     margin-left: auto;

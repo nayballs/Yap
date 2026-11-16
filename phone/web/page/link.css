@@ -3958,14 +3958,13 @@ select:focus-visible {
   border-top: 1px solid var(--yap-rule);
 }
 
-/* ---- the sheets: a new Code chat's workspaces, the Mode, the Environment, Undo ---- */
+/* ---- the sheets: a new Code chat's workspaces, the Mode, the Environment ---- */
 
 .sheet-list {
   margin: 0 0 10px;
 }
 .wslist,
-.modelist,
-.undofiles {
+.modelist {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -4062,15 +4061,6 @@ select:focus-visible {
 .envlist dd {
   margin: 0;
   font-weight: 600;
-  overflow-wrap: anywhere;
-}
-.undofiles {
-  margin: 0 4px 12px;
-  font-family: ui-monospace, 'Cascadia Mono', Consolas, 'Roboto Mono', monospace;
-  font-size: 0.875rem;
-}
-.undofiles li {
-  padding: 2px 0;
   overflow-wrap: anywhere;
 }
 .sheet-btns {

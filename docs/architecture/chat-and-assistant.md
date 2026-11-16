@@ -1176,8 +1176,8 @@ one side.
   a test run keeps what it would open (`e2e_kept`: "open:…", "reveal:…").
   **An agent's report** (`of_agent_turn`, `chat/turn/report.rs`): the turn's
   changed files that are pictures by their bytes (the first 4 copied, the
-  rest `morePictures`) and its other files the turn created (its backups'
-  manifest, `Created`; 4, then `moreFiles`), checked as a share (an agent of
+  rest `morePictures`) and its other files the turn created (the turn's
+  `created`: its Write of a new file, a command's new file; 4, then `moreFiles`), checked as a share (an agent of
   this chat's), on the marker message (`files`) — no tool call. The phone
   (Yap Link) lists an answer's shared files by name (`link/chats.rs`
   `files`; the pictures stay on the PC). Logs: counts, kinds and sizes,

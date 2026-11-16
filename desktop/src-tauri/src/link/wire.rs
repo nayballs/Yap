@@ -224,15 +224,6 @@ pub enum In {
     },
     /// A report card's Go ahead.
     AgentGoAhead { id: String },
-    /// Undo this turn (`turn`) or Undo all, after the phone's own confirm
-    /// (`sure`).
-    AgentUndo {
-        id: String,
-        #[serde(default)]
-        turn: Option<u32>,
-        #[serde(default)]
-        sure: bool,
-    },
     /// Allow once / Deny (Go ahead / Not yet on a plan) on a card this phone
     /// was sent, `shownMs` after the page showed it.
     Approve {
@@ -684,7 +675,6 @@ const KNOWN: &[&str] = &[
     "agent_continue",
     "agent_message",
     "agent_go_ahead",
-    "agent_undo",
     "approve",
     "confirm",
     "set_mode",
@@ -705,7 +695,6 @@ pub const CODE_IN: &[&str] = &[
     "agent_continue",
     "agent_message",
     "agent_go_ahead",
-    "agent_undo",
     "approve",
     "confirm",
     "set_mode",
@@ -1114,7 +1103,6 @@ mod tests {
             assert_eq!(snake.trim_start_matches('_'), t, "{again}");
         }
         assert_eq!(parse(&ins["approve"].to_string()).unwrap(), In::Approve { id: 7, allow: true, shown_ms: 2_300 });
-        assert_eq!(parse(&ins["agent_undo"].to_string()).unwrap(), In::AgentUndo { id: "1a2b3c4d".into(), turn: Some(2), sure: true });
         assert_eq!(parse(&ins["set_mode"].to_string()).unwrap(), In::SetMode { chat: 12, mode: "plan".into() });
         // An approval without its time shown reads as shown for no time (refused by the gates).
         assert_eq!(parse(r#"{"type":"approve","id":7,"allow":false}"#).unwrap(), In::Approve { id: 7, allow: false, shown_ms: 0 });

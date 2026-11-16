@@ -742,7 +742,7 @@ pub async fn chat_file_preview(conversation: u64, path: String) -> Result<Option
 /// **What an agent's turn shows on its report card** (`chat/turn/report.rs`):
 /// the pictures it created or changed (by their bytes; the first
 /// [`REPORT_MAX`] copied in, the rest counted), then its other new files
-/// (created this turn, by its backups' manifest) as cards — each checked as a
+/// (created this turn: its `created`) as cards — each checked as a
 /// share is (`local::resolve`: an agent's file is its chat's). `None` with
 /// neither. Reads the file system.
 pub fn of_agent_turn(agent: &crate::agents::store::Agent, n: u32) -> Option<Share> {
@@ -751,9 +751,11 @@ pub fn of_agent_turn(agent: &crate::agents::store::Agent, n: u32) -> Option<Shar
         return None;
     }
     let folder = PathBuf::from(&turn.path);
-    let created: Vec<String> = crate::agents::store::turn_backup_dir(&agent.id, n)
-        .and_then(|d| crate::integrations::claude_live::backup::read_manifest(&d).ok())
-        .map(|m| m.files.into_iter().filter(|e| e.state == crate::integrations::claude_live::backup::State::Created).map(|e| crate::agents::workspaces::norm(&local::plain(&e.original))).collect())
+    let created: Vec<String> = agent
+        .turn_notes()
+        .into_iter()
+        .find(|t| t.n == n)
+        .map(|t| t.created.iter().map(|f| crate::agents::workspaces::norm(&local::plain(&folder.join(f)))).collect())
         .unwrap_or_default();
     let places = local::Context { conversation: agent.conversation, said: Vec::new() }.places();
     of_files(&folder, &turn.files, &created, &places)

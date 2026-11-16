@@ -73,7 +73,9 @@
 //!   kept a transcript (`persist`). Without `_context`: an empty answer.
 //! - `{"_stderr":"text"}`: a line on stderr.
 //! - `{"_write_file":{"path":"notes.md","text":"…"}}`: write a file inside
-//!   the working folder (an agent's edit, after its backup hook).
+//!   the working folder — an agent's edit, which Claude Code's file
+//!   checkpoints keep (below); with `"command":true`, what one of its
+//!   commands wrote, which they don't.
 //! - `{"_exit":N}`: exit with code N.
 //! - `{"_usage":{…}}`: from now on, a `get_usage` control request is
 //!   answered with this body (`control_response` / `success` / `response`:
@@ -97,6 +99,18 @@
 //! "aborted_streaming"`), the script skipping on to the next `_wait_user`.
 //! `get_usage` is answered with the script's `_usage`, if it set one. Any
 //! other control request gets an error response.
+//!
+//! **Its file checkpoints**, as Claude Code's (`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING`
+//! set, the Agent SDK's file checkpointing): each user message echoed back
+//! carries a `uuid`, a checkpoint; before an edit's `_write_file` changes a
+//! file, it's kept (in `YAP_FAKE_CLAUDE_HISTORY`, else the temp folder's
+//! `yap-fake-claude-history/<session>.jsonl`; never Claude Code's own), and
+//! **`--resume <session> --rewind-files <uuid>`** puts every file an edit
+//! changed since that message back (a file one made: deleted), prints
+//! `Files rewound to state at message <uuid>` and exits — before anything
+//! else, no turn. Without the variable: "File rewinding is not enabled",
+//! exit 1; a message it has no checkpoint for: "No file checkpoint found for
+//! this message", exit 1.
 //!
 //! **Its transcript**, as Claude Code saves a session: with
 //! `YAP_FAKE_CLAUDE_TRANSCRIPTS=1` and a `CLAUDE_CONFIG_DIR` (a test's own
@@ -168,6 +182,10 @@ pub fn main(args: Vec<String>) -> i32 {
     // `/context`: Claude Code's own answer, no turn (`_context`).
     if claude_args.iter().any(|a| a == "/context") {
         return context_answer(&script, claude_args);
+    }
+    // `--rewind-files <uuid>`: the session's files back to before that message, no turn.
+    if let Some(at) = claude_args.iter().position(|a| a == "--rewind-files").and_then(|i| claude_args.get(i + 1)) {
+        return rewind_files(claude_args, at);
     }
     // A Claude Code that doesn't take an argument, or refuses it: said and over at once (`_exit_if_arg`).
     for line in script.lines() {
@@ -356,7 +374,7 @@ fn json_or_file(v: &str) -> Result<Value, String> {
 /// Play `script`: `input` is stdin's lines (closed: stdin closed). The exit
 /// code.
 pub fn play(script: &str, ctx: &Ctx, input: Receiver<String>, out: &mut dyn Write) -> Result<i32, String> {
-    let mut p = Player { ctx, input, out, queue: VecDeque::new(), user_text: String::new(), notes: Vec::new(), pictures: Vec::new(), in_turn: false, skipping: false, closed: false, hooks: 0, usage: None };
+    let mut p = Player { ctx, input, out, queue: VecDeque::new(), user_text: String::new(), notes: Vec::new(), pictures: Vec::new(), in_turn: false, skipping: false, closed: false, hooks: 0, usage: None, checkpoint: None, kept: std::collections::HashSet::new() };
     // `_for`: the kind of run the lines play in (`None`: every kind).
     let kind = ctx.kind();
     let mut part: Option<String> = None;
@@ -419,6 +437,10 @@ struct Player<'a> {
     hooks: u32,
     /// What `get_usage` answers (`_usage`); none: refused.
     usage: Option<Value>,
+    /// The latest checkpoint (a message echoed back with file checkpoints
+    /// on), and the files an edit has kept since it.
+    checkpoint: Option<String>,
+    kept: std::collections::HashSet<String>,
 }
 
 impl Player<'_> {
@@ -439,7 +461,12 @@ impl Player<'_> {
         if !self.ctx.replay {
             return Ok(());
         }
-        let line = json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":text}]},"parent_tool_use_id":null,"session_id":self.ctx.session_id,"isReplay":true});
+        let uuid = super::session::new_session_id();
+        if checkpoints_on() {
+            history_add(&self.ctx.session_id, &json!({ "checkpoint": uuid }));
+            self.checkpoint = Some(uuid.clone());
+        }
+        let line = json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":text}]},"parent_tool_use_id":null,"session_id":self.ctx.session_id,"isReplay":true,"uuid":uuid});
         self.print(&line.to_string())
     }
 
@@ -597,6 +624,15 @@ impl Player<'_> {
                 let safe = !rel.is_empty() && std::path::Path::new(rel).components().all(|c| matches!(c, std::path::Component::Normal(_)));
                 if safe {
                     let path = std::path::Path::new(&self.ctx.cwd).join(rel);
+                    // An edit's file kept first (once a checkpoint), as Claude Code's checkpoints do; never a command's.
+                    let command = arg.get("command").and_then(Value::as_bool) == Some(true);
+                    if let (false, Some(at)) = (command, self.checkpoint.clone()) {
+                        let key = format!("{at}|{}", path.display());
+                        if self.kept.insert(key) {
+                            let before = std::fs::read_to_string(&path).ok();
+                            history_add(&self.ctx.session_id, &json!({ "at": at, "path": path.display().to_string(), "before": before }));
+                        }
+                    }
                     if let Err(e) = std::fs::write(&path, arg["text"].as_str().unwrap_or("")) {
                         eprintln!("fake-claude: couldn't write {rel}: {e}");
                     }
@@ -897,6 +933,60 @@ fn sse_response(body: &[u8], id: u64) -> Option<Value> {
         }
     }
     None
+}
+
+// ---- file checkpoints ----
+
+/// Claude Code's file checkpoints are on for this run.
+fn checkpoints_on() -> bool {
+    std::env::var("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING").is_ok_and(|v| matches!(v.trim(), "1" | "true"))
+}
+
+/// Where session `session`'s checkpoints go: `YAP_FAKE_CLAUDE_HISTORY`, else
+/// the temp folder's (never Claude Code's own).
+fn history_file(session: &str) -> std::path::PathBuf {
+    let dir = std::env::var_os("YAP_FAKE_CLAUDE_HISTORY").filter(|v| !v.is_empty()).map(std::path::PathBuf::from).unwrap_or_else(|| std::env::temp_dir().join("yap-fake-claude-history"));
+    let safe: String = session.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+    dir.join(format!("{safe}.jsonl"))
+}
+
+fn history_add(session: &str, line: &Value) {
+    let file = history_file(session);
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&file) {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+/// **`--resume <session> --rewind-files <at>`**: every file an edit changed
+/// since message `at` put back (one it made: deleted), the earliest copy of
+/// each; as Claude Code says it.
+fn rewind_files(args: &[String], at: &str) -> i32 {
+    if !checkpoints_on() {
+        eprintln!("Error: File rewinding is not enabled for this session.");
+        return 1;
+    }
+    let session = args.iter().position(|a| a == "--resume" || a == "-r").and_then(|i| args.get(i + 1)).cloned().unwrap_or_default();
+    let lines: Vec<Value> = std::fs::read_to_string(history_file(&session)).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    let Some(from) = lines.iter().position(|l| l["checkpoint"] == at) else {
+        eprintln!("Error: No file checkpoint found for this message.");
+        return 1;
+    };
+    let mut done = std::collections::HashSet::new();
+    for l in &lines[from..] {
+        let Some(path) = l["path"].as_str() else { continue };
+        if !done.insert(path.to_string()) {
+            continue;
+        }
+        let _ = match l["before"].as_str() {
+            Some(text) => std::fs::write(path, text),
+            None => std::fs::remove_file(path),
+        };
+    }
+    println!("Files rewound to state at message {at}");
+    0
 }
 
 #[cfg(test)]

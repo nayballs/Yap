@@ -11,7 +11,7 @@
   // person's click carries it out (`agent_go_ahead`, Yap's own words at the
   // chat's Mode), once — disabled as soon as it's pressed. Its own small
   // chunk.
-  import { reportTitle, reportFolder, agentOfReport, turnOfReport, statusTone, planWaits } from '../../core/agents.js';
+  import { reportTitle, reportFolder, agentOfReport, turnOfReport, statusTone, planWaits, reportChanged } from '../../core/agents.js';
   import { agents, goAheadWithPlan } from '../../stores/agents.svelte.js';
 
   /**
@@ -33,8 +33,8 @@
   const as = $derived(turn ?? (latest ? agent : null));
   const title = $derived(reportTitle(as, m.text));
   const tone = $derived(as ? statusTone(as.status) : /didn't finish/.test(title) ? 'failed' : 'done');
-  // What it changed, in a line (the marker's own "Files it changed: …").
-  const changed = $derived((/^Files it changed: (.+)$/m.exec(m.text || '')?.[1] ?? '').replace(/\s*\(backed up first\)\.?$/, ''));
+  // What it changed, in a line (the marker's own "Files it changed: …", its commands' files after it).
+  const changed = $derived(reportChanged(m.text));
   // A plan still waiting for its go-ahead, or one this card sent on (kept
   // in the store: used once, even if the thread draws the card again).
   let failed = $state('');

@@ -15,9 +15,9 @@
 //!   ask-first card (`confirm`) — only a card the PC sent that phone, at
 //!   least 400 ms after it was shown, once ([`gates::Shown`]); the PC's card
 //!   closes saying who answered ("Allowed from Office phone");
-//! - **act**: Stop, Continue, "Tell the agent…", Go ahead, Undo (after the
-//!   phone's own confirm), a Code chat's Mode up to Auto under its cap, a new
-//!   Code chat in an existing workspace;
+//! - **act**: Stop, Continue, "Tell the agent…", Go ahead, a Code chat's
+//!   Mode up to Auto under its cap, a new Code chat in an existing workspace
+//!   (16 Nov 2026: no Undo, as in the Claude app: the person asks Claude);
 //! - and ask into a Code chat as before (`ask` / `start`): **a phone's turn
 //!   runs at most at Auto**, never Bypass (`agents/remote.rs`, the runner's
 //!   last gate), and its report is said on that phone (`chat/turn/report.rs`).
@@ -209,7 +209,6 @@ pub fn is_code(m: &In) -> bool {
             | In::AgentContinue { .. }
             | In::AgentMessage { .. }
             | In::AgentGoAhead { .. }
-            | In::AgentUndo { .. }
             | In::Approve { .. }
             | In::Confirm { .. }
             | In::SetMode { .. }
@@ -255,7 +254,6 @@ pub fn handle(cx: &Ctx<'_>, m: In) {
             let device = cx.device.to_string();
             act(cx, &g, &id, "go_ahead", "go ahead", move |a| runner::go_ahead_from(&a.id, Some(&device)).map(|_| format!("The agent in {} is carrying out its plan.", a.folder)))
         }
-        In::AgentUndo { id, turn, sure } => agent_undo(cx, &g, &id, turn, sure),
         In::Approve { id, allow, shown_ms } => approve(cx, &g, id, allow, shown_ms),
         In::Confirm { id, yes, shown_ms } => confirm(cx, &g, id, yes, shown_ms),
         In::SetMode { chat, mode } => set_mode(cx, &g, chat, &mode),
@@ -437,52 +435,6 @@ fn agent_message(cx: &Ctx<'_>, g: &Gate, id: &str, text: &str) {
             runner::FollowedUp::Queued => format!("The agent in {} is still working: it gets that when it finishes this step.", j.folder),
             _ => format!("Passed that to the agent in {}.", j.folder),
         })
-    });
-}
-
-fn agent_undo(cx: &Ctx<'_>, g: &Gate, id: &str, turn: Option<u32>, sure: bool) {
-    let Some((agent, ws)) = agent_for(id) else { return refuse(cx.tx, "agent_undo", &Refusal::NotFound) };
-    if let Err(r) = gates::allows(g, Some(&ws), Action::Act) {
-        return refuse(cx.tx, "agent_undo", &r);
-    }
-    if !sure {
-        return say(cx.tx, Out::Error { message: "Confirm it on the phone first: Undo puts the agent's files back.".into() });
-    }
-    if let Err(r) = locked(&cx.phone.limits).undo(Instant::now()) {
-        return refuse(cx.tx, "agent_undo", &r);
-    }
-    // Off the session's task: files are put back.
-    let (tx, device, name, hub) = (cx.tx.clone(), cx.device.to_string(), cx.name.to_string(), Arc::clone(cx.hub));
-    let chat = Arc::clone(cx.chat);
-    tauri::async_runtime::spawn(async move {
-        let id = agent.id.clone();
-        let done = tauri::async_runtime::spawn_blocking(move || match turn {
-            Some(n) => runner::undo_turn(&id, n),
-            None => runner::undo(&id),
-        })
-        .await
-        .map_err(|e| e.to_string())
-        .and_then(|r| r);
-        let phone = PhoneCode::default();
-        let cx = Ctx { hub: &hub, tx: &tx, device: &device, name: &name, phone: &phone, chat: &chat };
-        let action = if turn.is_some() { "undid turn" } else { "undid" };
-        match done {
-            Ok(report) => {
-                audit(&cx, action, Some(&agent), "ok");
-                let n = report.restored.len() + report.deleted.len();
-                let message = match n {
-                    0 => "Nothing to put back.".to_string(),
-                    1 => format!("Put back 1 file in {}.", agent.folder),
-                    n => format!("Put back {n} files in {}.", agent.folder),
-                };
-                runner::note_remote(&agent.id, turn.unwrap_or(0), format!("{} from {name}", past(action)), note(&cx, action));
-                say(&tx, Out::Acted { action: "undo".into(), id: agent.id.clone(), message });
-            }
-            Err(e) => {
-                audit(&cx, action, Some(&agent), "failed");
-                say(&tx, Out::Error { message: e });
-            }
-        }
     });
 }
 

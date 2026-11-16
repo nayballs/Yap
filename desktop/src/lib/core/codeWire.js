@@ -34,7 +34,6 @@ export const PHONE_TO_PC = [
   'agent_continue',
   'agent_message',
   'agent_go_ahead',
-  'agent_undo',
   'approve',
   'confirm',
   'set_mode',
@@ -100,7 +99,6 @@ export const EXAMPLES = /* wire:begin */ {
     "agent_continue": { "type": "agent_continue", "id": "1a2b3c4d" },
     "agent_message": { "type": "agent_message", "id": "1a2b3c4d", "text": "Add a watering schedule too" },
     "agent_go_ahead": { "type": "agent_go_ahead", "id": "1a2b3c4d" },
-    "agent_undo": { "type": "agent_undo", "id": "1a2b3c4d", "turn": 2, "sure": true },
     "approve": { "type": "approve", "id": 7, "allow": true, "shownMs": 2300 },
     "confirm": { "type": "confirm", "id": 3, "yes": true, "shownMs": 1800 },
     "set_mode": { "type": "set_mode", "chat": 12, "mode": "plan" }

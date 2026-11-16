@@ -12,8 +12,8 @@
 //! `config::migrate_once` (v8) its settings over.
 //!
 //! - [`store`]: `agents.json` (every agent; each chat's Mode; the one-time
-//!   Bypass OK), each agent's `agents/<id>/log.jsonl` and `backup/`; agents live
-//!   when Yap starts are interrupted; backups and logs go after 7 days.
+//!   Bypass OK), each agent's `agents/<id>/log.jsonl` and pictures; agents live
+//!   when Yap starts are interrupted; logs and pictures go after 7 days.
 //! - [`workspaces`]: `workspaces.json`, the folders agents may work in (a cap
 //!   each), and which one an agent means — never a guess.
 //! - [`modes`]: Claude Code's modes as the Mode chip words them; the chat's
@@ -21,8 +21,8 @@
 //!   needs its one-time OK.
 //! - [`runner`]: at most 3 at once, one per folder; each a Claude Code
 //!   session with the person's own setup plus Yap's run endpoint (its
-//!   permission cards, the backup hook); followed as `yap-agent` events;
-//!   stop, message, continue, undo, open in terminal.
+//!   permission cards; Claude Code's own file checkpoints on); followed as
+//!   `yap-agent` events; stop, message, continue, open in terminal.
 //! - [`steps`]: each tool call in plain words (a command by its
 //!   description, else tidied); Claude Code's to-do list.
 //! - [`diff`]: an edit's lines removed and added, a written file's lines,
@@ -162,7 +162,8 @@ pub fn offered(cfg: &crate::config::YapConfig) -> bool {
 }
 
 /// At start (lib.rs setup): the app's handle; agents the last Yap left
-/// running are interrupted; old backups and logs swept, and again daily.
+/// running are interrupted; an older Yap's backup copies deleted; old logs
+/// and pictures swept, and again daily.
 pub fn init(app: &tauri::AppHandle) {
     runner::init(app);
     let interrupted = store::at_start();
@@ -170,6 +171,7 @@ pub fn init(app: &tauri::AppHandle) {
         tracing::info!(interrupted, "Agents: interrupted when Yap last quit");
     }
     let _ = std::thread::Builder::new().name("agents-sweep".into()).spawn(|| loop {
+        store::drop_old_backups();
         store::sweep(store::now_secs());
         std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
     });

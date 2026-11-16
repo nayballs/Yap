@@ -27,7 +27,7 @@ its one line in CLAUDE.md's module index).
 - [calendar.md](./calendar.md) — calendar connections, sync, the reminder card, the "Connect your calendar" dialog.
 - [yap-bar.md](./yap-bar.md) — the Yap bar: its window, its Win32 side and its page (the dictation capsule, cards).
 - [notices.md](./notices.md) — the notice policy, alerts, Windows notifications.
-- [integrations.md](./integrations.md) — the local API, the MCP server, adding Yap to AI apps, Claude Code runs' endpoint (`claude_live`: read tools, `approve`, the backup hook, a plan chat's agent tools), the Integrations view.
+- [integrations.md](./integrations.md) — the local API, the MCP server, adding Yap to AI apps, Claude Code runs' endpoint (`claude_live`: read tools, `approve`, a plan chat's agent tools), the Integrations view.
 - [link.md](./link.md) — Yap Link, home preview: Yap's AI from a paired phone on the home Wi-Fi (the HTTPS server, pairing, the protocol, the voice loop, Settings → Phone).
 - [accounts.md](./accounts.md) — optional accounts: sign-in, sessions, Settings → Account.
 - [privacy-receipts.md](./privacy-receipts.md) — network receipts (every connection Yap makes, by host and purpose: `privacy/net.rs`, Settings → Privacy & data → Network connections) and Report a problem (a diagnostic file checked before it's saved: `privacy/diagnostics.rs`, Settings → About).

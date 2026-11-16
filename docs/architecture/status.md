@@ -91,7 +91,8 @@ sign-in) for two things:
 - **Yap Code**: any chat model, on the plan or a key, hands a task to Claude Code
   in one of the person's folders; the Mode chip, the Agent tab (read like
   Claude Code: steps, its to-do list, diffs, commands, cost), Allow / Deny
-  cards, Undo from backups, a report in the chat's own words (out loud when
+  cards, Rewind through Claude Code's own checkpoints (16 Nov 2026: no
+  Undo of Yap's, as the Claude app), a report in the chat's own words (out loud when
   asked by voice), Open in terminal. From a plan chat too, over Yap's run
   endpoint (`integrations/claude_live/`). With Yap Code on, Chat has two sides,
   **Chat** and **Code**: Code chats are grouped by workspace and start agents
@@ -109,7 +110,8 @@ too).
 **How it was tested:**
 - **Unit**: the engine's flags, environment and files, the parser against
   Claude Code 2.1.296's signed-out recordings, the endpoint's refusals and MCP
-  subset, `approve`, the backup hook and restore, the agent store, workspaces,
+  subset, `approve`, the agent store, Rewind's checkpoints, what a turn's
+  commands changed (`agents/changes.rs`), workspaces,
   modes, consent, Code chats, the steps' words and diffs, the report, the
   plan's usage answer; a Markdown file's encodings and arguments.
 - **E2E on Yap's own stand-in for Claude Code** (`yap.exe fake-claude`):
