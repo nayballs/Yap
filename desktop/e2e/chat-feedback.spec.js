@@ -79,10 +79,10 @@ function sentWith(fakeLlm, from, words) {
 test('👍 and 👎 sit between Copy and ↻; pressed, kept with the answer on this PC; pressed again, taken back', async ({ yap, main, fakeLlm, shot }) => {
   await freshChat(main);
   await ask(main, fakeLlm, 'When does the library open on Saturdays?', 'It opens at nine on Saturdays.');
-  // The row's order: Read aloud, Copy, 👍, 👎, Retry.
-  const row = thread(main).locator('.msgfoot').last();
-  const order = await row.locator('button').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')));
-  expect(order).toEqual(['Read aloud', 'Copy', 'Good answer', 'Not a good answer', 'Retry']);
+  // The row's order: Read aloud, Copy, 👍, 👎, Retry (once the answer is in: its id, its ↻).
+  await expect(thread(main).getByTestId('chat-retry')).toBeVisible();
+  const row = thread(main).getByTestId('chat-retry').locator('xpath=..');
+  await expect.poll(() => row.evaluate((r) => [...r.querySelectorAll('button')].map((b) => b.getAttribute('aria-label')))).toEqual(['Read aloud', 'Copy', 'Good answer', 'Not a good answer', 'Retry']);
   await expect(up(main)).toHaveAttribute('aria-pressed', 'false');
 
   await up(main).click();
