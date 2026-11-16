@@ -2,7 +2,7 @@
 // light and dark, at a small and a middling phone, in
 // test-results/link/screenshots/ (to look at, not compared): a chat whose
 // question was edited (‹ 2/2 › under its bubble) and whose answer was
-// retried (‹ 3/3 › first under it, then Copy, ▶ and ↻), a ↻ under way (its
+// retried (‹ 3/3 › first under it, then Copy, 👍 / 👎, ▶ and ↻: the fullest row), a ↻ under way (its
 // answer written afresh, what followed gone with the old version), and the
 // new answer in with its ‹ 4/4 ›. Also checks nothing overflows sideways and
 // every control is a thumb's size (44 px or more). Chromium only, as the
@@ -62,7 +62,7 @@ for (const scheme of ['light', 'dark']) {
             sessionStorage.setItem('in-chat', '1');
           }
         });
-        const pc = await mockPc(page, { can: [...CAN, 'versions', 'retry'], threads: { 41: THREAD } });
+        const pc = await mockPc(page, { can: [...CAN, 'versions', 'retry', 'rate'], threads: { 41: THREAD } });
         await open(page);
         await ready(page, pc);
         await expect(page.getByTestId('turn')).toHaveCount(2);

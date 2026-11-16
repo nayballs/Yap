@@ -368,7 +368,15 @@
   at once, one per folder, 1 to 3; 3) + agents_animate ("Animate Code chats":
   a slow light round a Code chat's box while its agent runs; on) +
   agents_clean_speech ("Clean up what you say in Code chats": chat_clean_speech's
-  twin for a Code chat's spoken questions, its own switch; on, 2026-11-07) — `jobs_*` (`jobsEnabled`…) until the same day: each
+  twin for a Code chat's spoken questions, its own switch; on, 2026-11-07) +
+  agents_open_files (`agentsOpenFiles`, "Open file links in", Settings → Yap
+  Code → Files in Code chats, 2026-11-16, `agents/editors.rs`: where a Code
+  chat's file link opens on a click — "yap", Yap's file view, the default;
+  "default", Windows' default app, never for a file it would run; or an
+  editor's id, "vscode", "cursor", "zed", "notepadpp", "idea"… — an editor
+  no longer on the PC, or a value Yap doesn't know, opens Yap's view. A new
+  field: an older Yap drops it on its save and links open in Yap's view
+  again; no `migrate_once` step) — `jobs_*` (`jobsEnabled`…) until the same day: each
   field reads its old name as an alias, and `migrate_once` v8 saves them
   once under the new ones, every value kept; an older Yap sharing the folder
   drops them on its save (Yap Code off again),
@@ -864,6 +872,19 @@
   next start puts back each fork that still fits a conversation with none
   (its shown branch's first message there at its time). It goes with the
   chats in Delete some of your data and Reset app.
+- **The person's 👍 / 👎 on an answer** (16 Nov 2026, `chat/feedback.rs`,
+  [chat-and-assistant.md](./chat-and-assistant.md#thumbs-up-and-down-on-an-answer-2026-11-16))
+  is the answer's `feedback`: `{rating: "good" | "bad", reasons?: ["untrue" |
+  "ignored" | "long" | "short" | "tone" | "other"], note?, ts}`, written only
+  when there is one, in whichever version (`branches`) the answer is. Kept on
+  this PC, sent nowhere; in Download your data (`chats/chats.json`, a line
+  under the answer in its chat's Markdown, and `chats/feedback.json`). **New
+  field**: an older Yap's save drops it, so every save of chats.json also
+  writes the marks to `%APPDATA%/yap/chat_feedback.json` (`{version,
+  answers: [{conversation, ts, chars, feedback}]}`, removed when there are
+  none), which no older Yap touches; the next start puts each back on the
+  answer of that conversation at that time and length when it has none. It
+  goes with the chats in Delete some of your data and Reset app.
 - What a chat made (15 Nov 2026, `chat/made.rs`): `%APPDATA%/yap/chat-made/` —
   a folder per conversation (`<chat id>/`) with its `made.json` (`{version,
   created, items: [{id, kind, title, format, after: {index, ts}, at,

@@ -54,7 +54,26 @@
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
   const codeFiles = getContext(CODE_FILES) ?? null;
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null, keptPages = null, onkept = null, branch = null, retry = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null, keptPages = null, onkept = null, branch = null, retry = null, rating = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false } = $props();
+  // **👍 / 👎** (16 Nov 2026, chat/feedback.rs; the Claude app's thumbs): `rating` — `{ value, onrate(fb), learn }`
+  // (ChatThread's `ratingOf`) — under an answer, beside Copy and ↻. 👎 opens its card (FeedbackCard, its own chunk):
+  // what was wrong, Retry with that note, Learn from this. Open for this answer only (`fbFor`: its id and time, so a
+  // version switched in its place, or another chat's answer at the same place, never inherits it).
+  const fbKey = $derived(`${m.id ?? ''}|${m.ts ?? ''}`);
+  let fbFor = $state(null);
+  const fbOpen = $derived(!!rating && fbFor === fbKey);
+  const mark = $derived(rating?.value?.rating ?? null);
+  /** A thumb pressed: marked (👎 opens its card), or — pressed again — taken back. */
+  function thumb(r) {
+    if (!rating) return;
+    if (mark === r) {
+      fbFor = null;
+      rating.onrate?.(null);
+      return;
+    }
+    rating.onrate?.({ rating: r, reasons: [], note: '' });
+    fbFor = r === 'bad' ? fbKey : null;
+  }
   // `visuals`: what the answer made to be seen, not read (chat/made.rs: "Made a visual", above its words;
   // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends. `keptPages`: the
   // pages it saved (chat/made/pages.rs: `[{page, version}]`, a card each, PageCard); `onkept(page, n)` opens one.
@@ -447,15 +466,45 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
       </button>
     {/if}
+    {#if rating && m.id}
+      <!-- 👍 / 👎 (the Claude app's, between Copy and ↻): kept with the answer on this PC, sent nowhere. -->
+      <button
+        type="button"
+        class="readbtn thumbbtn"
+        class:on={mark === 'good'}
+        aria-pressed={mark === 'good' ? 'true' : 'false'}
+        aria-label="Good answer"
+        title={mark === 'good' ? 'You marked it a good answer: press again to take that back' : 'Good answer'}
+        data-testid="chat-thumbs-up"
+        onclick={() => thumb('good')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="hand" d="M7 10.5 10.6 4a1.9 1.9 0 0 1 3.5 1.3l-.9 4.2h5.3a2 2 0 0 1 1.95 2.45l-1.35 6A2.2 2.2 0 0 1 16.95 19.7H7z" /><path d="M7 10.5H4.6A1.6 1.6 0 0 0 3 12.1v6A1.6 1.6 0 0 0 4.6 19.7H7z" /></svg>
+      </button>
+      <button
+        type="button"
+        class="readbtn thumbbtn down"
+        class:on={mark === 'bad'}
+        aria-pressed={mark === 'bad' ? 'true' : 'false'}
+        aria-label="Not a good answer"
+        aria-expanded={mark === 'bad' ? String(fbOpen) : undefined}
+        title={mark === 'bad' ? 'You marked it not a good answer: press again to take that back' : 'Not a good answer: say what was wrong'}
+        data-testid="chat-thumbs-down"
+        onclick={() => thumb('bad')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="hand" d="M7 10.5 10.6 4a1.9 1.9 0 0 1 3.5 1.3l-.9 4.2h5.3a2 2 0 0 1 1.95 2.45l-1.35 6A2.2 2.2 0 0 1 16.95 19.7H7z" /><path d="M7 10.5H4.6A1.6 1.6 0 0 0 3 12.1v6A1.6 1.6 0 0 0 4.6 19.7H7z" /></svg>
+      </button>
+    {/if}
     {#if retry && m.id}
-      <!-- Retry, beside Copy (the Claude app's ↻): its question answered again, this answer kept as a version. -->
+      <!-- Retry, beside Copy (the Claude app's ↻): its question answered again, this answer kept as a version (one
+           marked 👎: with what was wrong given to the model, chat/feedback.rs). -->
+      {@const label = retry.noted ? 'Retry with your note' : 'Retry'}
       <button
         type="button"
         class="readbtn retrybtn"
         class:off={!!retry.why}
         aria-disabled={retry.why ? 'true' : undefined}
-        aria-label={retry.why ? `Retry (${retry.why.toLowerCase()})` : 'Retry'}
-        title={retry.why ? `Retry (${retry.why.toLowerCase()})` : 'Retry: answer it again (this answer is kept)'}
+        aria-label={retry.why ? `${label} (${retry.why.toLowerCase()})` : label}
+        title={retry.why ? `${label} (${retry.why.toLowerCase()})` : retry.noted ? 'Retry with your note: answered again with what you said was wrong (this answer is kept)' : 'Retry: answer it again (this answer is kept)'}
         data-testid="chat-retry"
         onclick={act(retry.why, retry.onretry)}
       >
@@ -475,6 +524,18 @@
       <span class="byline stopped" title="You stopped this answer while it was being written">· Stopped</span>
     {/if}
   </div>
+  {#if fbOpen}
+    <!-- 👎's card (its own chunk): what was wrong, Retry with that note, Learn from this. -->
+    {#await import('./FeedbackCard.svelte') then { default: FeedbackCard }}
+      <FeedbackCard
+        value={rating.value}
+        {retry}
+        learn={rating.learn}
+        onchange={(fb) => rating.onrate?.(fb)}
+        onclose={() => (fbFor = null)}
+      />
+    {/await}
+  {/if}
 {/if}
 {#if m.role === 'assistant' && m.nextStep?.recap && last && !m.streaming}
   <!-- The next-step box (suggest_next_step): under the chat's latest answer only, its buttons sending the
@@ -850,9 +911,18 @@
     height: 10px;
   }
   .copybtn svg,
-  .retrybtn svg {
+  .retrybtn svg,
+  .thumbbtn svg {
     width: 12px;
     height: 12px;
+  }
+  /* 👎 is 👍 turned over; a thumb pressed is filled softly, in the primary colour (.readbtn.on). */
+  .thumbbtn.down svg {
+    transform: rotate(180deg);
+  }
+  .thumbbtn.on .hand {
+    fill: currentColor;
+    fill-opacity: 0.22;
   }
   .retrybtn.off,
   .retrybtn.off:hover {

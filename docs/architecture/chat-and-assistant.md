@@ -256,6 +256,10 @@ one side.
   the branch shown is `messages`; `Conversation.branches` the forks along it,
   each with its other branches; copied to `chat_branches.json` for an older
   Yap's save. [Below](#retry-edit-and-versions-2026-11-15).
+- **`chat/feedback.rs`** — **👍 / 👎 on an answer** (2026-11-16, the Claude
+  app's thumbs): `ChatMessage.feedback`, kept on this PC and sent nowhere;
+  copied to `chat_feedback.json` for an older Yap's save; Retry with the
+  note; Learn from this. [Below](#thumbs-up-and-down-on-an-answer-2026-11-16).
 - **`chat/note_chats.rs`** — **a meeting's Ask thread, kept** (Wispr Flow's
   "New chat" / "Past chats"; the private roadmap's R15): what was asked about
   a meeting in the notepad's Ask sheet or its note's "Ask anything…" bar
@@ -4677,10 +4681,11 @@ already takes (`chat/attachments.rs`, `views/chat/FileChip.svelte`,
 ## Spreadsheets (2026-11-15)
 
 Chat reads Excel files, and a workbook shows beside the chat as Excel draws
-it — live while a Code chat's Claude builds one. Read only (editing cells is
-a follow-up). Rust: `chat/sheets.rs` (+ `sheets/xlsx.rs`, `xls.rs`,
-`delimited.rs`, `view.rs`) and `chat/attachments/sheet.rs`; the page:
-`views/chat/SheetTab.svelte` + `sheetView.js`.
+it — live while a Code chat's Claude builds one, and a Code chat's `.xlsx`
+or `.csv` edited there by the person ([Editing a sheet](#editing-a-sheet-2026-11-16)).
+Rust: `chat/sheets.rs` (+ `sheets/xlsx.rs`, `xls.rs`, `delimited.rs`,
+`view.rs`, `edit.rs`, `save.rs`, `patch.rs`) and `chat/attachments/sheet.rs`;
+the page: `views/chat/SheetTab.svelte` + `sheetView.js`.
 
 - **Reading a workbook** (`sheets::read`, on this PC, never uploaded to be
   read; in its own thread for at most 60 s, so a reader that panics or a
@@ -4704,7 +4709,12 @@ a follow-up). Rust: `chat/sheets.rs` (+ `sheets/xlsx.rs`, `xls.rs`,
     so a file lacking one is read with Excel's empty-workbook defaults put in
     (`xlsx::full_styles`, `with_full_styles`; a whole `styles.xml` when it has
     none) before IronCalc sees it, and a panic of IronCalc's own is a failure
-    like any other, so calamine still has its turn.
+    like any other, so calamine still has its turn. **Bare currency signs
+    quoted** (16 Nov 2026, the Lab: openpyxl's `£#,##0.00` showed every
+    price as `#VALUE!`): Excel shows `£`, `¥`, `₹`… unquoted in a number
+    format, IronCalc takes only `$` and `€` so, so the model's codes have
+    any other character past ASCII quoted, outside quotes and `[…]`
+    (`xlsx::quoted_literals`); the file's own codes are never rewritten.
   - **`.xls`, `.xlsb`, `.ods` by calamine** (0.38, MIT): values and
     formulas as the file keeps them (the app that saved it calculated
     them), numbers as Excel's General shows them, dates as `2026-11-15`;
@@ -4766,9 +4776,11 @@ a follow-up). Rust: `chat/sheets.rs` (+ `sheets/xlsx.rs`, `xls.rs`,
     clipped "15/11/2026" would read "5/11/2026");
   - frozen rows and columns, stuck while the rest scrolls, with Excel's
     line under them;
-  - **the formula bar**: the cell selected (a click; arrows, Tab, Page
-    Up/Down, Ctrl+Home/End move it; Ctrl+C copies its value), its formula,
-    else its value, in a read-only field;
+  - **the formula bar**: the cell selected (a click; arrows, Tab, Enter,
+    Page Up/Down, Ctrl+Home/End move it; Ctrl+C copies its value), its
+    formula, else its value as typed ("7.5" for "£7.50": the cell's `i`),
+    else as shown — typed in where the sheet can be edited, read only
+    elsewhere;
   - the facts at the foot: its used range, formulas "calculated by Yap",
     rows not read, hidden sheets.
 - **Big sheets scroll smoothly**: only what's in view is drawn
@@ -4791,8 +4803,11 @@ a follow-up). Rust: `chat/sheets.rs` (+ `sheets/xlsx.rs`, `xls.rs`,
   spreadsheet app (Windows' default for its ending; "Open in app" for an
   `.ods`), on that click only; a test run keeps it (`open-sheet:<name>`).
   Copy path and ↻ beside it.
-- **Not done** (follow-ups): editing cells; a Chat tool that keeps a
-  spreadsheet as it keeps pages; a picture of the sheet as shown for a Code
+- **Not done** (follow-ups): editing anything but a cell's value or
+  formula (formats, rows and columns, sheets; see Editing a sheet); an
+  empty styled cell openpyxl writes as `<c t="n"/>` (no value) reads as 0
+  where Excel shows nothing (IronCalc's import; seen in the Lab, 16 Nov
+  2026); a Chat tool that keeps a spreadsheet as it keeps pages; a picture of the sheet as shown for a Code
   chat's Claude to check its own layout; conditional formatting, charts,
   pictures and comments aren't drawn; rows with wrapped text aren't grown
   to fit (their height is the file's); General numbers aren't shortened to
@@ -4808,6 +4823,147 @@ a follow-up). Rust: `chat/sheets.rs` (+ `sheets/xlsx.rs`, `xls.rs`,
   formula bar, light and dark, Open in Excel, what the model gets, its chip,
   a project's file; a Code chat's: its link and Outputs row, live as the
   test rewrites it, a half-written one, a 5,000-row sheet scrolled).
+
+## Editing a sheet (2026-11-16)
+
+A Code chat's workbook in the sheet view is the person's to change too: a
+cell's value or formula, typed in the cell or the formula bar, calculated on
+this PC, saved back to the file. Rust: `chat/sheets/edit.rs` (the editors),
+`save.rs` (the rule, the package), `patch.rs` (the XML), `view.rs` (the
+commands); the page: `SheetTab.svelte`.
+
+- **What can be edited** (`edit::refused`, said in the header's "Read only"
+  pill's tooltip and under the formula bar when you try to type): a Code
+  chat's own `.xlsx`, `.xlsm`, `.csv` or `.tsv`. Read only: an **attached
+  file** (it's Yap's copy, not the person's file); an **`.xls`, `.xlsb` or
+  `.ods`** (calamine reads their values only, so a copy in `.xlsx` would lose
+  every look: decided read only with a note, not "Save as a copy in
+  `.xlsx`"); an `.xlsx` IronCalc couldn't read; a file Windows marks
+  read-only; a CSV in an encoding Yap can't write back (not UTF-8/UTF-16, as
+  the Markdown files' rule); an `.xlsx` whose sheets Yap can't patch (a row
+  or cell with no `r`, Strict Open XML: found at the first change,
+  `save::check_package`).
+- **Typing** (Excel's keys): a character starts a new value in the cell
+  selected ("enter" mode: an arrow ends it and moves); F2 or a double-click
+  edits what's there ("edit" mode: an arrow moves the caret; F2 toggles);
+  the formula bar takes typing too (edit mode). Enter puts it in and moves
+  down (Shift+Enter up), Tab right (Shift+Tab left), Esc lets it go; Delete
+  empties the cell, Backspace starts it empty; Enter with nothing typed
+  moves down. The box over the cell has the cell's font and colours and
+  grows with its words. The selection moves at once; changes go to Rust one
+  after another in order, so typing on never waits for the sums. A change
+  refused stays in its box with why — nothing typed is lost.
+- **Calculated on this PC** (`edit::Xlsx`): IronCalc's `UserModel` over the
+  workbook (loaded at the first change from the file as it is then; if it
+  changed since it was shown, the page reads it again and makes the change
+  once more). Input is Excel's: `12` a number, `=B3*C3` a formula, `12%` a
+  per cent (its format with it), `'007` a text, `TRUE`; every formula
+  calculated again at once, and each change answered with the workbook
+  again (the page reads the rows in view first, so nothing flashes empty).
+  Refused, plainly, because Yap can't write them into the file the way
+  Excel would: a cell under an array formula, a formula that spills into
+  the cells beside it (put back at once), a table's heading.
+- **A CSV** (`edit::Delimited`): its own text. What's typed is the value,
+  as typed — a CSV holds no formulas, so `=A1+1` is kept as written (Excel
+  calculates it when it opens the file) and isn't calculated here. A change
+  rewrites that record only (quoted only where it must be); the others stay
+  as written, quotes and all; a row past the end is added with empty records
+  between, as Excel writes them.
+- **Undo and Redo**: Ctrl+Z, Ctrl+Y (or Ctrl+Shift+Z), and ↶ ↷ in the
+  header; the cell undone is selected (its sheet shown). IronCalc's own
+  history for an `.xlsx`; the text's versions for a CSV (up to 64 MB of
+  them). Undo back to what the file has is no change at all (nothing to
+  save). History lasts while the workbook is open in Yap.
+- **Saved** 700 ms after the last change, Ctrl+S at once, and on the way out
+  (the tab closed, another file shown) — as Yap's Markdown files are; the
+  header says Edited / Saving… / Saved / Not saved. **Only while the file is
+  unchanged since it was read** (`save::unchanged`: the same size and time
+  and the same bytes, a hash of them — the Markdown files' rule, stricter):
+  otherwise nothing is written and a bar says "seed-order.xlsx changed on
+  disk since Yap read it, so your changes here aren't saved." with
+  **Reload** (the changes here go, `sheet_discard`) or **Save as a copy**
+  (the changes in "seed-order (copy).xlsx" beside it, a name not taken, then
+  shown; the original left as it is). Never "keep mine" over someone else's
+  change. A workbook with changes not saved is never read over: opening it
+  again shows them, live updates wait, and it's never one of the four that
+  go when more are opened. Written atomically (a temporary file, then moved
+  over it), to a link's own file; a file Excel has open says so ("…another
+  app (Excel?) has it open"), with Try again.
+- **What a save writes into an `.xlsx`** (`save::xlsx_bytes`, `patch.rs`):
+  the package as read, with **only the cells changed** written into their
+  sheets' XML in place (a value; a text as an inline string; a formula in
+  Excel's own form, `to_excel_string`, with its result), each in its own
+  style (`s`); a format typed (a per cent, a date) adds one `<xf>` copied
+  from the cell's own with the new number format (and a `<numFmt>` when
+  it's a custom one — under an id of the file's own, 164 and up, or the one
+  it has with that code: IronCalc numbers its own formats from 50, which
+  Excel reads as its built-in ones; `save::Styling`), remembered by the
+  editor so the next save adds none twice. A file IronCalc read with style
+  parts filled in (`xlsx::complete`) is saved with its own: the filled-in
+  parts never reach it. Every other formula's result is brought up to date in
+  the file (only those that changed: an untouched sheet's bytes stay), so an
+  app that reads results without calculating sees the new total; the
+  workbook asks Excel to calculate everything on opening (`fullCalcOnLoad`,
+  for functions IronCalc doesn't know); Excel's calculation chain is
+  removed (with its relationship and content type: Excel makes it again; it
+  may list a cell that's no longer a formula). A shared formula whose first
+  cell changes has its other cells written out in full. Rows and cells put
+  in where they belong; `<dimension>` grown; a row's `spans` hint dropped
+  where a cell is added. **Every other part, and every other byte of the
+  sheets, is as it was**: the other sheets, styles, charts, drawings and
+  pictures, comments, data validation, conditional formatting, tables,
+  pivot tables, macros (`.xlsm`), page setup, tab colours, defined names,
+  external links. Before anything is written the new package is **read
+  back** (IronCalc again) and each cell changed must hold what the view has
+  and show it the same (its number format too); else nothing is written
+  ("Yap couldn't save … safely").
+- **Why not IronCalc's own writer** (`ironcalc::export`, checked 16 Nov 2026
+  on 0.9.1): it writes a new package from what IronCalc models. A round
+  trip of a test workbook (`save_xlsx_to_writer`) kept the cells, formulas,
+  number formats, styles and conditional formatting, and **lost** the
+  chart, the drawing, the comments (read, never written), the macros
+  (`vbaProject.bin`), the sheet's relationships, data validation, page
+  margins and setup, and the tab colour. Its source also writes no
+  autofilter, table, sheet protection or rich text inside a cell, and gives
+  an `.xlsm` a plain workbook's content type (which Excel refuses to open). So it isn't used:
+  patching keeps everything, and no save ever has to ask what may go. (The
+  task allowed "say so before saving and offer Save as a copy"; with
+  nothing lost there's nothing to say. Save as a copy is the way out of a
+  conflict instead.)
+- **While Claude works in the chat's folder** (chosen: **live and read
+  only**, not "the person's edits wait"): any agent at work in the Code
+  chat's folder — its own Claude or one it sent (`runner::working_in`,
+  starting or working, not finishing) — makes the view live and read only:
+  the pill says "Live · read only", Claude's changes show as they land, and
+  typing says "Claude is working in this chat's folder: the sheet is read
+  only until it's done." Rust refuses a change too. Why: an edit waiting to
+  be applied later would land on a file Claude has since rewritten, and the
+  two versions could only be merged by guessing. Changes made before Claude
+  started are still saved (the rule above protects Claude's own writes);
+  what's being typed when it starts stays in its box.
+- **Not done** (follow-ups): formats, rows, columns, sheets, fill, copy and
+  paste of ranges, Alt+Enter (a line break in a cell); clicking a cell to
+  add its reference to a formula being typed; a formula that spills (Excel's
+  dynamic arrays need the file's metadata); a table's heading; editing an
+  attached file (its copy) or an `.xls`/`.ods`; formulas typed in a CSV
+  calculated in the view; input read in the person's locale (IronCalc's
+  `en`: `16/11/2026` stays text, `$`/`€` are currencies, `£` isn't).
+- **Privacy**: counts and kinds only in the log (a save held back, a sheet
+  saved, a copy made — never a name, a path or a cell).
+- Tests: `cargo test chat::sheets` (`sheets/edit/tests.rs`: the cells'
+  XML, a patch changing only what it names — put in between cells, rows,
+  into `<sheetData/>`, a prefixed sheet; results rewritten only where they
+  changed; unnamed rows refused; `fullCalcOnLoad` and the calculation chain;
+  a typed format's style; an edited seed order saved with every other part
+  byte for byte; a shared formula written out; a chart, picture, comments,
+  macros, validation, conditional formatting, tab colour and page setup
+  kept; array formulas refused; the CSV's record, its BOM and CRLF, its row
+  numbers; the rule — the same size and time put back but other bytes is a
+  change; the view's open → edit → save → conflict → copy); and
+  `chat-sheets-edit.spec.js` (typed in a cell and the formula bar, Enter,
+  Tab, arrows, Esc, F2, Delete, Ctrl+Z/Y and ↶, the file's XML checked on
+  disk, a CSV's record; changed on disk → the bar, Save as a copy, Reload;
+  read only while Claude works; an attached copy read only).
 
 ## The message box is several lines (2026-11-15)
 
@@ -5969,6 +6125,106 @@ summary over messages that changed is dropped); `chat-branches.spec.js`
 (Retry, Edit, switching, the history sent, a retry with no answer, after a
 restart and after an older Yap's save) and `agents-direct.spec.js` (a Code
 chat's Edit and Retry through Rewind).
+
+## Thumbs up and down on an answer (2026-11-16)
+
+The Claude app's 👍 / 👎 under an answer (row H9 of the parity catalogue, the
+last of its chat features). Yap is local, so the feedback goes to no one: it's
+the person's own mark on the answer, kept with it on this PC, and put to use
+here — never sent anywhere, never read by a model except as a Retry's note.
+
+**Where it is**: under every answer of Chat's (not an agent's report marker,
+not one still being written), in the answer actions row: ▶ Read aloud, Copy,
+👍, 👎, ↻ (the Claude app's order: Copy, 👍, 👎, Retry), then the model's
+byline. A thumb is a toggle (`aria-pressed`): pressed, kept (`.readbtn.on`,
+the hand filled softly in the primary colour); pressed again, taken back;
+👍 and 👎 replace each other. In a Code chat they sit beside its answer
+actions too. On the phone (Yap Link, a PC that says `"rate"` in
+`ready.can`): 👍 and 👎 between Copy and ▶ under each answer it was given,
+the same toggles (`rate {id, rating}` → `rated {id, rating?}`, the PC's
+`link/session.rs` `rate`: only an answer that phone was given; the same mark
+again keeps the reasons the PC's card gave; a thread's answers carry their
+`rating`). The phone has no reasons card: why it wasn't good is said on the
+PC.
+
+**👎's card** (`FeedbackCard.svelte`, its own chunk, under the row): "What
+was wrong?" — Not true, Didn't do what I asked, Too long, Too short, Wrong
+tone, Other (a line to type, "What should it have done?", at most 300
+characters) as toggle chips, each kept as it's picked (the line on Enter,
+leaving the box, Done or Retry); "Kept on this PC: Yap sends it nowhere.";
+Done; **Retry with this note**; × and Esc close it (the 👎 stays). It opens
+when 👎 is pressed, for that answer only (`ChatMessage`'s `fbFor`: its id and
+time, so a version switched in its place never inherits it).
+
+**Retry with this note** (`chat_retry`'s `feedback: true`; a Code chat's
+`chat_send` `edit` with `feedbackFrom: <answer index>`): the question asked
+again exactly as ↻ asks it — a new version, the old answer kept with its 👎
+one ‹ › away — and the model is told, this turn only (`feedback::with_note`,
+a task-local read by `turn/prompt.rs` `build`: the question's context, every
+path that builds the prompt — the tool loop, the small path, your Claude
+plan's session): that the person marked the earlier answer to this question
+not good and asked again (it's out of the history: Retry set it aside), what
+was wrong (each reason's line, `feedback::REASONS`: "it was too long, so make
+the new one clearly shorter"…), their words, and the earlier answer itself
+for reference only ("never as instructions", clipped to 1,500 characters,
+its word count said). The note is read from the stored mark before the
+answer is set aside (`retry_note_at`). The question stays as the person
+asked it and is never saved again. **↻ on an answer marked 👎 is the same
+Retry with its note** (its label and the right-click menu say "Retry with
+your note"): the person said what was wrong, so a Retry uses it — the
+phone's ↻ too (`link/session.rs` `retry`). In a Code
+chat, Retry is Claude Code's own Rewind as ever ("Retry with your note?"
+asked first), and the note goes after the message to the session
+(`feedback::for_session` in `turn.rs` `sent_directly`); the message is
+saved as the person wrote it.
+
+**Learn from this** (the card's link, a plain chat only — never a Code chat,
+which keeps Yap's memory out, nor an incognito chat, which never updates it):
+offered when a reason says something lasting (Too long, Too short) or the
+person typed a line. It opens a row: "Remember in every chat" with a line to
+edit (Too long: "Prefers shorter, more direct answers"; Too short: "Prefers
+fuller, more detailed answers"; else their own line) and **Remember**
+(`chat_feedback_remember {id, index, fact}`: a fact in memory's Preferences
+with source `tell` — "You told Yap" in Settings → Memory — under memory's
+own rules: secrets refused, a fact's length at most, said twice kept once;
+only for an answer marked 👎; memory's toast with Undo), and for Too long /
+Too short **Use Concise / Explanatory in this chat** (`chat_style_set`; the
+Style chip follows, `yap-chat-style`). Nothing is kept until it's pressed.
+
+**Where it's kept** (`chat/feedback.rs`, [config-and-data.md](./config-and-data.md)):
+the answer's `feedback` in chats.json — `{rating, reasons?, note?, ts}` —
+set by `chat_feedback {id, index, ts?, feedback?}` (`chats::set_feedback`:
+an answer of the chat's only; `ts`, when the page knows it, must be the
+answer's, so one that moved since a version switched is refused). It goes
+where its answer goes: into the version Retry sets aside (and back with ‹ ›),
+out with a Rewind, deleted with the chat. **An older Yap's save** drops the
+field, so every save also writes the marks to `chat_feedback.json`
+(`{version, answers: [{conversation, ts, chars, feedback}]}`, every version's,
+removed when there are none), and the next start puts each back
+(`restore_from_disk`, after the branches are back) on the answer of that
+conversation at that time and length — in the branch shown or another
+version — when it has none. **Download your data** (`privacy/export.rs`):
+chats.json, "Your feedback: 👎 Too long: “…”" under the answer in its chat's
+Markdown, and `chats/feedback.json` (every mark with its chat, the answer's
+start and why). Delete some of your data and Reset app take
+`chat_feedback.json` with the chats.
+
+The log says ratings and counts, never the person's words.
+
+Tests: `cargo test feedback` (`feedback::tests`: a mark kept clean, its line,
+a Retry's note, the note the turn's only, an older Yap's save, Learn from
+this, the export rows), `chats::tests::an_answers_thumbs_are_kept_with_it_and_only_an_answers`,
+`turn::prompt::tests::a_code_chats_prompt_keeps_yaps_memory_out_…` (the note
+in the question's context), `privacy::export::tests::your_thumbs_on_answers_are_in_the_file`,
+`link::chats` / `link::wire` (the phone's rating and `rate`);
+`chat-feedback.spec.js` (the row's order, 👍 kept and taken back, 👎's card,
+Retry with the note — what the model got, both versions — ↻ with the note,
+Learn from this, an older Yap's save; light and dark),
+`agents-direct.spec.js` (a Code chat's 👎 and Retry with the note through
+Rewind), and the phone page's `chats.spec.js` (rate / rated) and
+`screens.spec.js` (the row, light and dark). Yap Lab: `ask --retry
+--feedback long,untrue --note "…"` presses 👎, its reasons and line, then
+the card's Retry ([lab.md](../lab.md)).
 
 ## Export a chat (2026-11-15)
 

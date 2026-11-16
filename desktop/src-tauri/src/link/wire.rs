@@ -158,6 +158,16 @@ pub enum In {
         #[serde(default)]
         id: String,
     },
+    /// **👍 / 👎 on answer `id`** (one this phone was given, `answer.id`; 16
+    /// Nov 2026, `chat/feedback.rs`): `rating` "good" or "bad", none to take
+    /// it back — kept with the answer in Chat, as the desktop's thumbs keep
+    /// it. [`Out::Rated`] says what's kept (`"rate"` in [`CAN`]).
+    Rate {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        rating: Option<String>,
+    },
     /// Switch Chat's model: one of `ready.models` by its `id` (the first
     /// pages), or a row of the picker (`ready.picker`) as Chat's own picker
     /// picks it — `provider`, `model`, a server's `baseUrl`, an on-device
@@ -317,8 +327,9 @@ impl Talk {
 /// in `ready.code` whether this phone may use them now ([`CodeReady`]).
 /// `"versions"` (16 Nov 2026): a thread's messages carry their ‹ k/n ›
 /// ([`Version`]) and `show_version` switches it; `"retry"`: ↻ under an
-/// answer that says `retry` ([`In::Retry`]).
-pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak", "code", "code_act", "approve", "versions", "retry"];
+/// answer that says `retry` ([`In::Retry`]). `"rate"` (16 Nov 2026): 👍 / 👎 on an
+/// answer ([`In::Rate`]).
+pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak", "code", "code_act", "approve", "versions", "retry", "rate"];
 
 /// The longest "Tell the agent…" (characters), as a typed question.
 pub const MAX_CODE_TEXT: usize = 4_000;
@@ -481,6 +492,10 @@ pub struct ThreadMessage {
     /// it as a report, not their bubble).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub kind: String,
+    /// **An answer's 👍 / 👎** (`chat/feedback.rs`): "good" or "bad", as Chat
+    /// keeps it ([`In::Rate`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rating: Option<String>,
     /// **The files an answer shared into the conversation** (`share_files`,
     /// `chat/shares.rs`; an agent's report marker's too): their names only —
     /// the files and pictures stay on the PC. The page lists them under it.
@@ -613,6 +628,13 @@ pub enum Out {
     /// What the phone said, transcribed and corrected, for its text box (a
     /// `start {mode: "words"}`): nothing was asked.
     Words { text: String },
+    /// Answer `id`'s 👍 / 👎 as Chat keeps it now ([`In::Rate`]): "good",
+    /// "bad" or none.
+    Rated {
+        id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rating: Option<String>,
+    },
     Pong,
     // ---- Remote Control (2026-11-08) ----
     /// The Code side: the workspaces that allow it (most recently used
@@ -707,6 +729,7 @@ const KNOWN: &[&str] = &[
     "interrupt",
     "ask",
     "read_aloud",
+    "rate",
     "set_model",
     "set_effort",
     "set_fast",
@@ -911,6 +934,12 @@ mod tests {
             In::Ask { text: "When is the bin day?".into(), chat: None, pictures: 0, as_text: false, speak: false }
         );
         assert_eq!(parse(r#"{"type":"read_aloud","id":"chat:3:5"}"#).unwrap(), In::ReadAloud { id: "chat:3:5".into() });
+        // 👍 / 👎 on an answer (16 Nov 2026): a rating, or none to take it back; what's kept comes back.
+        assert_eq!(parse(r#"{"type":"rate","id":"chat:3:5","rating":"bad"}"#).unwrap(), In::Rate { id: "chat:3:5".into(), rating: Some("bad".into()) });
+        assert_eq!(parse(r#"{"type":"rate","id":"chat:3:5","rating":null}"#).unwrap(), In::Rate { id: "chat:3:5".into(), rating: None });
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&Out::Rated { id: "chat:3:5".into(), rating: Some("good".into()) }.json()).unwrap(), serde_json::json!({"type":"rated","id":"chat:3:5","rating":"good"}));
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&Out::Rated { id: "chat:3:5".into(), rating: None }.json()).unwrap(), serde_json::json!({"type":"rated","id":"chat:3:5"}));
+        assert!(CAN.contains(&"rate"));
         // A row of Chat's picker: its provider, model, server or file.
         assert_eq!(
             parse(r#"{"type":"set_model","provider":"local","model":"llama3","baseUrl":"http://localhost:11434/v1"}"#).unwrap(),
@@ -1120,6 +1149,8 @@ mod tests {
         assert_eq!(shared_list("PC_TO_PHONE"), CODE_OUT);
         assert_eq!(shared_list("CODE_CAN"), ["code", "code_act", "approve"]);
         assert_eq!(&CAN[8..11], &["code", "code_act", "approve"], "after what was there before");
+        // (Then 👍 / 👎, 16 Nov 2026: `rate`, after them.)
+        assert_eq!(&CAN[13..], &["rate"]);
         for t in CODE_IN {
             assert!(KNOWN.contains(t), "{t}");
         }
@@ -1283,7 +1314,7 @@ mod tests {
             assert!(KNOWN.contains(&t), "{t}");
         }
         // Said in `ready.can`, after everything that was there before.
-        assert_eq!(&CAN[CAN.len() - 2..], &["versions", "retry"]);
+        assert_eq!(&CAN[11..13], &["versions", "retry"]);
         assert_eq!(&CAN[..11], &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak", "code", "code_act", "approve"]);
         // A thread's message with its ‹ k/n › and ↻; one without says neither.
         let j = |o: Out| serde_json::from_str::<serde_json::Value>(&o.json()).unwrap();

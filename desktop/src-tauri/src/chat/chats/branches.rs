@@ -241,6 +241,23 @@ fn collect<'a>(forks: &'a [Fork], out: &mut Vec<&'a ChatMessage>) {
     }
 }
 
+/// [`other_messages`], to change: a copy put back after an older Yap's
+/// save (an answer's 👍 / 👎, `chat/feedback.rs`). Pure.
+pub fn other_messages_mut(forks: &mut [Fork]) -> Vec<&mut ChatMessage> {
+    let mut out = Vec::new();
+    collect_mut(forks, &mut out);
+    out
+}
+
+fn collect_mut<'a>(forks: &'a mut [Fork], out: &mut Vec<&'a mut ChatMessage>) {
+    for f in forks {
+        for b in f.others.iter_mut() {
+            out.extend(b.messages.iter_mut());
+            collect_mut(&mut b.forks, out);
+        }
+    }
+}
+
 /// **A conversation's forks put right**: none past its messages; one whose
 /// shown branch is empty (Yap closed while a retry was being answered)
 /// shows its newest other branch again; one with no other branch goes.

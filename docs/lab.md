@@ -125,7 +125,7 @@ It reads the model file and writes nothing of Yap's. Stop the server when you're
 `start` on the plan, then `stop`: is Claude Code on this PC and signed in, as Yap sees
 it? Asks the model nothing.
 
-### `ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry] [--edit] [--style <name>] [--research] [--incognito] [--project <name> [--project-instructions <text>] [--project-page] [--project-files <path>[,<path>…]]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
+### `ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry [--feedback <reasons>] [--note <line>]] [--edit] [--style <name>] [--research] [--incognito] [--project <name> [--project-instructions <text>] [--project-page] [--project-files <path>[,<path>…]]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
 
 Puts a question to Chat and waits until the turn ends (answered, stopped or failed),
 **or a card waits for the person**, or `--timeout` seconds pass.
@@ -170,7 +170,12 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
 - `--retry`: ↻ **Retry** under the chat's last answer instead (15 Nov 2026, the Claude
   app's message actions: chat/chats/branches.rs), in the chat shown — its question
   answered again, the old answer kept as a version (‹ 2/2 ›; `probe --css
-  '[data-testid="chat-branch-count"]'`). No words needed. `--edit`: **Edit** the
+  '[data-testid="chat-branch-count"]'`). No words needed. `--retry --feedback
+  long,untrue [--note "…"]` (16 Nov 2026, `chat/feedback.rs`): 👎 under the last
+  answer first, its card's reasons (`untrue`, `ignored`, `long`, `short`, `tone`,
+  `other`) and line (a note alone is Other's), then the card's **Retry with this
+  note** — the question answered again with what was wrong given to the model,
+  both versions kept. `--edit`: **Edit** the
   person's last message to `<text>` — the pencil, the words in place, Save and send —
   a new version from there. Both are turns of the lab's own, waited on as `ask` is.
   In a Code chat both go through Rewind (no versions kept) and ask first ("Retry from
@@ -319,15 +324,27 @@ uses it.
 {"ok":true,"window":"thread","found":true,"theme":"light","words":"THE END","has":true}
 ```
 
-### `click --window main|thread|panel --css <selector>`
+### `click --window main|thread|panel --css <selector> [--right]`
 
 Clicks one of the test Yap's own buttons, as the person would (14 Nov 2026, for the
 message box's queue: a queued message's **Send now** — `[data-testid="chat-queued-send-now"]`
 — and **Cancel and edit** — `[data-testid="chat-queued-cancel"]`): the first match that
-shows, in Yap's own window only, never a page beside the chat.
+shows, in Yap's own window only, never a page beside the chat. `--right` right-clicks
+(16 Nov 2026: a file link's menu, `.md-filelink`).
 
 ```json
 {"ok":true,"window":"thread","css":"[data-testid=\"chat-queued-send-now\"]","clicked":true}
+```
+
+### `type --window main|thread|panel [--css <selector>] [--text <words>] [--press <keys>]`
+
+Types into the test Yap's own window as the person would (16 Nov 2026, for the sheet
+view's cells): `--css` clicked first (the first match that shows), then `--text` typed
+as real key presses, then each of `--press` (`Enter`, `Tab`, `Escape`, `Control+z`…,
+comma-separated). Yap's own windows only, never a page beside the chat.
+
+```json
+{"ok":true,"window":"panel","css":"[data-cell=\"B4\"]","typed":2,"pressed":["Enter"]}
 ```
 
 ### `side "<question>" [--keep] [--close] [--timeout 180]`
@@ -806,6 +823,13 @@ that hits one should say so, and it isn't a bug in the tool:
   its Save as itself, in the lab's folder.
 - **GitHub's `gh`**: none (a Code chat's summary says "Install GitHub's gh"), unless
   `set --gh on`: then the person's own, read only, on Yap's public repository only.
+- **Editors** (16 Nov 2026, a Code chat's file links, `agents/editors.rs`): a link
+  opened in an editor or Windows' default app starts nothing; `state`'s
+  `filesOpened` has the command it would have run (`program`, `args`,
+  `commandLine`). The editors are the ones on this PC, or the stand-ins a JSON
+  file names when `YAP_LAB_EDITORS` points at one before `start`
+  (`[{"id": "vscode", "program": "C:\\Tools\\Microsoft VS Code\\Code.exe"}]`;
+  the ids are `agents/editors.rs` `KINDS`' and `JETBRAINS`').
 - **Other apps' text**: no reading the window in front, the selection or the text
   around the cursor in another app; no pastes, no keys into other apps.
 - **Claude Code's own copies of plan chats**: a test run never looks in the person's

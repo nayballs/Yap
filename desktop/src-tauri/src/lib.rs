@@ -435,6 +435,12 @@ pub fn run() {
             chat::sheets::view::sheet_rows,
             chat::sheets::view::sheet_stamp,
             chat::sheets::view::sheet_open_app,
+            chat::sheets::view::sheet_edit,
+            chat::sheets::view::sheet_undo,
+            chat::sheets::view::sheet_redo,
+            chat::sheets::view::sheet_save,
+            chat::sheets::view::sheet_save_copy,
+            chat::sheets::view::sheet_discard,
             chat::attachments::chat_attachment_remove,
             chat::attachments::chat_files_waiting,
             chat::attachments::chat_attachment_open,
@@ -542,6 +548,8 @@ pub fn run() {
             chat::commands::chat_rename,
             chat::commands::chat_retry,
             chat::commands::chat_branch,
+            chat::feedback::chat_feedback,
+            chat::feedback::chat_feedback_remember,
             chat::commands::chat_tabs_closed,
             chat::commands::chats_archived,
             chat::commands::chat_archive,
@@ -627,6 +635,8 @@ pub fn run() {
             agents::files::code_files_check,
             agents::files::code_file_read,
             agents::files::code_file_open_editor,
+            agents::files::code_file_open,
+            agents::editors::code_editors,
             agents::files::code_chat_environment,
             agents::files::code_file_reveal,
             agents::context::code_chat_context,
@@ -1040,6 +1050,8 @@ pub fn run() {
             calendar::calendar_e2e_call_window,
             #[cfg(debug_assertions)]
             shell::commands::e2e_opened_urls,
+            #[cfg(debug_assertions)]
+            agents::editors::e2e_file_opens,
             #[cfg(debug_assertions)]
             chat::pages::view::e2e_page_view_eval,
             #[cfg(debug_assertions)]

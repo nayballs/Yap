@@ -65,6 +65,7 @@ pub mod commands;
 pub mod consent;
 pub mod context;
 pub mod diff;
+pub mod editors;
 pub mod direct;
 pub mod files;
 pub mod mention;

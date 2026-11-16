@@ -127,6 +127,8 @@ export const FIELD_DEFAULTS = {
   // "Clean up what you say in Code chats" (ai/cleanup_styles.rs `cleans_question`).
   agentsCleanSpeech: true,
   agentsDirect: true,
+  // "Open file links in" (agents/editors.rs): 'yap' (Yap's file view), 'default' (Windows' default app) or an editor's id.
+  agentsOpenFiles: 'yap',
   // Memory (MemorySection.svelte, memory.rs): the switches only.
   memorySearchChats: true,
   memoryLearnChats: true,
