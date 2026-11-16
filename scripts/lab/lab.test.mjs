@@ -69,6 +69,9 @@ describe('options', () => {
     assert.equal(plan.agentsPay, 'plan');
     assert.equal(plan.memoryLearnChats, false);
     assert.equal(plan.postProcessEnabled, false);
+    // A meeting's summary on Chat's own model, never a provider the lab didn't pick.
+    assert.deepEqual(plan.llmScopes.noteFormatting, plan.llmScopes.chat);
+    assert.equal(labConfig({ model: parseModel('ondevice') }).llmScopes.noteFormatting.provider, 'ondevice');
     assert.throws(() => labConfig({ model: parseModel('anthropic:claude-haiku-5-5') }), /YAP_LAB_ANTHROPIC_KEY/);
     const api = labConfig({ model: parseModel('anthropic:claude-haiku-5-5'), key: 'sk-ant-lab-test', effort: 'high' });
     assert.equal(api.ppApiKeys.anthropic, 'sk-ant-lab-test');

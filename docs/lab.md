@@ -399,7 +399,9 @@ Routines (`chat/routines.rs`): Skills that run by themselves, on the test Yap's 
 - `routine list`: Settings' list (`routines_list`); `on|off|delete <id>`.
 
 ```json
-{"ok":true,"turn":1,"status":"answered","conversation":2,"question":"/lighthouse-fact","answer":"The Eddystone Lighthouse…","model":{"provider":"claude-plan","id":"claude-opus-5-5"},"run":{"id":1794836421123,"routine":"r1794836301877","command":"lighthouse-fact","cause":"schedule","state":"done","why":null,"chat":2,"note":null,"thread":null,"queued":"2026-11-16T02:12:01.000Z","started":"2026-11-16T02:12:01.000Z","ended":"2026-11-16T02:12:19.000Z"},"shots":[…]}
+{"ok":true,"turn":2,"status":"answered","conversation":1,"question":"/latest-points","answer":"From **Budget check-in** (Mon 16 Nov):
+
+- **Revised budget, due Friday afternoon:** …","model":{"provider":"claude-plan","id":"claude-opus-5-5"},"run":{"id":1794793391540,"routine":"r1794793232630","command":"latest-points","cause":"schedule","state":"done","why":null,"chat":1,"note":null,"thread":null,"about":null,"queued":"2026-11-16T01:43:11.000Z","started":"2026-11-16T01:43:11.000Z","ended":"2026-11-16T01:43:17.000Z","slot":"2026-11-16T01:43:00.000Z"},"shots":[…]}
 ```
 
 #### `meeting "<title>" [--folder <f>] [--lines "them: …|you: …"]`
@@ -424,7 +426,7 @@ this time), `notice` (the quiet toast in Yap's window, or `null`), `list` and
 window.
 
 ```json
-{"ok":true,"turn":5,"kind":"lab","status":"answered","question":"Auto-archive (30 days), then Undo","days":30,"archived":[1],"lastRun":[],"notice":"Archived a chat you hadn't used in 30 days. It's in Archived. Undo","list":[{"id":2,"title":"Rainbow colour"},{"id":1,"title":"What is a haiku"}],"archivedList":[],"undone":true}
+{"ok":true,"turn":5,"kind":"lab","status":"answered","question":"Auto-archive (30 days), then Undo","days":30,"archived":[1],"lastRun":[],"notice":"Chat Archived a chat you hadn't used in 30 days It's in Archived, at the foot of Chat's list. A new message brings one back. Undo","list":[{"id":2,"title":"Name one colour of the rainbow"},{"id":1,"title":"In one sentence: what is a haiku"}],"archivedList":[],"undone":true}
 ```
 
 #### `summary [--chat <id>|same]`
@@ -735,7 +737,7 @@ numbers start at 1 again); reports, sheets and `shot`'s own files stay.
 - **The test Yap** is the e2e harness's (`desktop/e2e/support/yap.js` `launchYap`):
   a copy of the build in portable mode with its own data folder, WebView2 profile and
   CDP port, in **test mode** (`YAP_E2E=1`, `shell/e2e.rs`), seeded with the e2e suite's
-  base config plus the lab's: Chat's model, the switches asked for, debug logging, and
+  base config plus the lab's: Chat's model (a meeting's summary on it too), the switches asked for, debug logging, and
   nothing that spends the model's time behind the lab's back (no cleanup, no learning
   from chats, no meeting reminders, no spoken replies). Nothing of the person's is
   copied: no config, keys, memory or chats.

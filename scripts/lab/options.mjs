@@ -193,7 +193,9 @@ export function labConfig({ model, effort, web = true, yapCode = false, connecto
   }
   if (effort !== undefined && !EFFORTS.includes(effort)) throw new Error(`--effort is one of ${EFFORTS.join(', ')}`);
   return {
-    llmScopes: { chat },
+    // A meeting's summary (`lab meeting`) on Chat's own model: never the scope's default provider with no key behind
+    // the lab's back (16 Nov 2026: a made-up meeting's lines went to Groq's API, refused for want of a key).
+    llmScopes: { chat, noteFormatting: { ...chat } },
     ppApiKeys: keys,
     ...(effort ? { chatEffort: { [model.model]: effort } } : {}),
     webSearch: web,
