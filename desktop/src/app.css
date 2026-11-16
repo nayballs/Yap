@@ -751,7 +751,9 @@ li.md-loose > p:last-child {
   margin-bottom: 0 !important;
 }
 /* A task item: its checkbox where the bullet would be, no bullet as well
-   (the notepad's summary and a note's page style their own). */
+   (the notepad's summary and a note's page style their own; a page whose
+   box is placed in the list's indent — RichNote's, DocPanel's — undoes
+   this margin, or the box goes off the page's edge). */
 li.task {
   list-style: none;
   margin-left: -18px;
@@ -934,6 +936,50 @@ code.md-filelink {
   outline: 2px solid var(--yap-primary);
   outline-offset: 1px;
   border-radius: 3px;
+}
+/* A file link's ⋯ (ui/fileLinks.js, 16 Nov 2026): at the end of the link the pointer is on or the keyboard
+   is at, over the words after it — out of their flow, so nothing moves — and the link's menu under it.
+   Its middle is put on the link's line by the script (`translate`). */
+.md-filemore {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 22px;
+  height: 18px;
+  margin: 0 0 0 3px;
+  padding: 0;
+  border: 1px solid var(--yap-border);
+  border-radius: 6px;
+  background: var(--yap-s2);
+  color: var(--yap-muted);
+  box-shadow: var(--yap-shadow-sm);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+.md-filemore[hidden] {
+  display: none;
+}
+/* No room after the link on its line: over the link's own end instead. */
+.md-filemore.md-filemore-in {
+  margin-left: -25px;
+}
+.md-filemore:hover,
+.md-filemore[aria-expanded='true'] {
+  border-color: var(--yap-border-hover);
+  background: var(--yap-s3);
+  color: var(--yap-fg);
+}
+.md-filemore:focus-visible {
+  outline: 2px solid var(--yap-primary);
+  outline-offset: 1px;
+}
+.md-filemore svg {
+  width: 14px;
+  height: 14px;
 }
 /* ▶ Run on a one-line shell block of a Code chat's answer (ui/codeRun.js): the line, then ▶
    and its Copy at the line's end, as the Claude app has them; a long line scrolls by itself. */

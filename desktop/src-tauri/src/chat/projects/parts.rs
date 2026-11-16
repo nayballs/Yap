@@ -1,8 +1,10 @@
 //! **A project file's parts** (16 Nov 2026, the Claude app's project
 //! knowledge): a file too big to send whole with every question is read in
-//! parts of about [`TARGET`] tokens, each knowing where it is in the file —
-//! its pages, slides, rows or lines, and the section it's in — so the model
-//! can say where an answer comes from ("staff-handbook.pdf, pages 12–13").
+//! parts of a [`Size`] that fits the chat's model (about 350 tokens for an
+//! 8K model, 700 for a 32K one, 1,200 for a 200K Claude), each knowing where
+//! it is in the file — its pages, slides, rows or lines, the section it's
+//! in, and the lines of the file's text it came from — so the model can cite
+//! it ("staff-handbook.pdf, pages 12–13") and its pill opens the file there.
 //!
 //! The parts come from the text the attachments' readers made
 //! (`chat/attachments.rs` `read`), by its kind:
@@ -33,15 +35,35 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-/// A part's size it aims for, in tokens (`budget::estimate`): as Anthropic's
-/// own retrieval write-up chunks documents (about 800), a little smaller so
-/// two or three fit beside a small model's question.
-pub const TARGET: u64 = 700;
-/// …at most (a longer page, paragraph or line is cut at its lines, then its
-/// sentences, then its words).
-pub const MOST: u64 = 1_100;
-/// …and a part smaller than this goes on into the next section.
-pub const LEAST: u64 = 160;
+/// **How big a file's parts are**, in tokens (`budget::estimate`): what a
+/// part aims for, its most (a longer page, paragraph or line is cut at its
+/// lines, then its sentences, then its words), and its least (a smaller one
+/// goes on into the next section).
+///
+/// One of three, by what a question's parts may take for the chat's model
+/// (`knowledge::Room::size`): Anthropic's own retrieval write-up chunks
+/// documents at about 800 tokens; a small model's question has room for
+/// about 1,000 tokens of parts, so its parts are smaller (three fit, not
+/// one), and a big model's 16,000 take bigger ones (each with more around
+/// the answer, a dozen at most). Three sizes, not one a model: the parts
+/// are made once a size and kept, and their meaning read once a size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Size {
+    pub target: u64,
+    pub most: u64,
+    pub least: u64,
+}
+
+impl Size {
+    /// An 8K or 16K model's (the on-device one), a plan's few tokens a minute.
+    pub const SMALL: Size = Size { target: 350, most: 560, least: 80 };
+    /// A 32K or 64K model's.
+    pub const MEDIUM: Size = Size { target: 700, most: 1_100, least: 160 };
+    /// A 128K model's and up (Claude, GPT).
+    pub const LARGE: Size = Size { target: 1_200, most: 1_800, least: 280 };
+    /// Every size, smallest first.
+    pub const ALL: [Size; 3] = [Size::SMALL, Size::MEDIUM, Size::LARGE];
+}
 
 /// **One part of a file.**
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -57,6 +79,15 @@ pub struct Part {
     pub section: String,
     pub text: String,
     pub tokens: u64,
+    /// **Where it opens**: its first and last line in the file's text as Yap
+    /// read it (`projects::file_text`, from 1). The view beside the chat
+    /// goes there and marks them (`views/chat/ProjectFileTab.svelte`).
+    pub lines: (u32, u32),
+    /// Its first and last page, slide, row or line, as [`Part::at`] counts
+    /// them (`None`: cited by its section, a Word document's or Markdown's).
+    pub span: Option<(u32, u32)>,
+    /// A workbook's sheet it's in ("": a CSV, any other file).
+    pub sheet: String,
 }
 
 impl Part {
@@ -121,6 +152,8 @@ struct Unit {
     /// Its first and last page, slide, row or line.
     from: Option<u32>,
     to: Option<u32>,
+    /// Its first and last line in the file's text (from 1).
+    lines: (u32, u32),
     /// A section that starts here (its heading, as the part says it).
     heading: Option<String>,
     /// The section the next unit is in, when this one changes it (a page's
@@ -130,14 +163,21 @@ struct Unit {
     group: usize,
 }
 
+/// What every part of a group starts with (a sheet's line and table head),
+/// what its places are said with (`sheet "Budget"`), and its sheet's name.
+#[derive(Debug, Clone, Default)]
+struct Lead {
+    text: String,
+    scope: String,
+    sheet: String,
+}
+
 /// How a file's units are made into parts.
 struct Shape {
     noun: Noun,
     /// Between two units in a part: a blank line, or a line's end.
     join: &'static str,
-    /// What every part of a group starts with (a sheet's line and table head),
-    /// and what its places are said with (`sheet "Budget"`).
-    leads: std::collections::HashMap<usize, (String, String)>,
+    leads: std::collections::HashMap<usize, Lead>,
 }
 
 impl Shape {
@@ -146,10 +186,10 @@ impl Shape {
     }
 }
 
-/// **A file's text in parts**, by its `kind` (`attachments::Read::kind`:
-/// "pdf", "powerpoint", "sheet", "markdown", "word", "code", "text"). An
-/// empty text has none. Pure.
-pub fn split(text: &str, kind: &str) -> Vec<Part> {
+/// **A file's text in parts of `size`**, by its `kind`
+/// (`attachments::Read::kind`: "pdf", "powerpoint", "sheet", "markdown",
+/// "word", "code", "text"). An empty text has none. Pure.
+pub fn split(text: &str, kind: &str, size: Size) -> Vec<Part> {
     let text = text.replace("\r\n", "\n");
     if text.trim().is_empty() {
         return Vec::new();
@@ -163,7 +203,7 @@ pub fn split(text: &str, kind: &str) -> Vec<Part> {
         "code" => (block_units(&text, false), Shape::of(Noun::Line, "\n\n")),
         _ => (block_units(&text, true), Shape::of(Noun::Line, "\n\n")),
     };
-    pack(units.into_iter().flat_map(cut).collect(), &shape)
+    pack(units.into_iter().flat_map(|u| cut(u, size)).collect(), &shape, size)
 }
 
 /// Its tokens, as Chat counts them.
@@ -171,12 +211,13 @@ fn tokens(text: &str) -> u64 {
     crate::chat::budget::estimate(text)
 }
 
-/// **The units packed into parts** of about [`TARGET`] tokens: a new one at
+/// **The units packed into parts** of about `size`'s target: a new one at
 /// a section's start once the part has half that, before one would pass it
-/// (with [`LEAST`] in it; a small bit of the same section still joins, up to
-/// [`MOST`]), and at another group. A heading never ends a part: it starts
-/// the next. A part's section is the one most of its words are in. Pure.
-fn pack(units: Vec<Unit>, shape: &Shape) -> Vec<Part> {
+/// (with its least in it; a small bit of the same section still joins, up
+/// to its most), and at another group. A heading never ends a part: it
+/// starts the next. A part's section is the one most of its words are in.
+/// Pure.
+fn pack(units: Vec<Unit>, shape: &Shape, size: Size) -> Vec<Part> {
     let mut parts: Vec<Part> = Vec::new();
     let mut running = String::new();
     // The part being made: its units, each with the section it's in.
@@ -186,15 +227,20 @@ fn pack(units: Vec<Unit>, shape: &Shape) -> Vec<Part> {
             return;
         }
         let group = cur[0].0.group;
-        let (lead, scope) = shape.leads.get(&group).cloned().unwrap_or_default();
+        let Lead { text: lead, scope, sheet } = shape.leads.get(&group).cloned().unwrap_or_default();
         let body = cur.iter().map(|(u, _)| u.text.trim_end()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join(shape.join);
         let text = if lead.is_empty() { body } else { format!("{lead}\n{body}") };
         let from = cur.iter().filter_map(|(u, _)| u.from).min();
         let to = cur.iter().filter_map(|(u, _)| u.to.or(u.from)).max();
-        let counted = match (from, to) {
-            (Some(a), Some(b)) => shape.noun.said(a, b.max(a)),
-            _ => String::new(),
+        let span = match (shape.noun, from, to) {
+            (Noun::None, _, _) => None,
+            (_, Some(a), Some(b)) => Some((a, b.max(a))),
+            _ => None,
         };
+        let counted = span.map(|(a, b)| shape.noun.said(a, b)).unwrap_or_default();
+        // Its lines in the file (a unit with none, an empty sheet's: left out).
+        let first = cur.iter().map(|(u, _)| u.lines.0).filter(|&l| l > 0).min().unwrap_or(0);
+        let lines = (first, cur.iter().map(|(u, _)| u.lines.1).max().unwrap_or(0).max(first));
         let at = match (scope.is_empty(), counted.is_empty()) {
             (true, _) => counted,
             (false, true) => scope,
@@ -211,16 +257,16 @@ fn pack(units: Vec<Unit>, shape: &Shape) -> Vec<Part> {
         let best = shares.iter().map(|(_, n)| *n).max().unwrap_or(0);
         let section = shares.iter().find(|(_, n)| *n == best).map(|(s, _)| s.to_string()).unwrap_or_default();
         let tokens = tokens(&text);
-        parts.push(Part { n: parts.len() + 1, at, section, text, tokens });
+        parts.push(Part { n: parts.len() + 1, at, section, text, tokens, lines, span, sheet });
     };
     for u in units {
         let cur_tokens: u64 = cur.iter().map(|(u, _)| u.tokens).sum();
         if let Some((last, _)) = cur.last() {
             let other_group = u.group != last.group;
-            let at_section = u.heading.is_some() && cur_tokens >= TARGET / 2;
-            let small_tail = u.heading.is_none() && u.tokens < LEAST / 4;
-            let too_big = cur_tokens + u.tokens > TARGET && cur_tokens >= LEAST && !small_tail;
-            let past_most = cur_tokens + u.tokens > MOST;
+            let at_section = u.heading.is_some() && cur_tokens >= size.target / 2;
+            let small_tail = u.heading.is_none() && u.tokens < size.least / 4;
+            let too_big = cur_tokens + u.tokens > size.target && cur_tokens >= size.least && !small_tail;
+            let past_most = cur_tokens + u.tokens > size.most;
             if other_group || at_section || too_big || past_most {
                 // A heading at the part's end goes on with what it heads.
                 let mut carried: Vec<(Unit, String)> = Vec::new();
@@ -246,38 +292,45 @@ fn pack(units: Vec<Unit>, shape: &Shape) -> Vec<Part> {
 }
 
 /// **A unit too long for a part, cut** at its lines, then its sentences,
-/// then its words, each piece at most [`TARGET`]: the pieces keep its
-/// places and its heading (the first); a page's go on as "[Page n,
-/// continued]". Pure.
-fn cut(u: Unit) -> Vec<Unit> {
-    if u.tokens <= MOST {
+/// then its words, each piece at most `size`'s target: the pieces keep its
+/// places and its heading (the first), each its own lines of the file; a
+/// page's go on as "[Page n, continued]". Pure.
+fn cut(u: Unit, size: Size) -> Vec<Unit> {
+    if u.tokens <= size.most {
         return vec![u];
     }
-    let mut pieces: Vec<String> = Vec::new();
+    // Each piece, with the lines of the unit before it (its first line's offset).
+    let mut pieces: Vec<(u32, String)> = Vec::new();
     let mut piece = String::new();
-    let push = |piece: &mut String, pieces: &mut Vec<String>| {
-        if !piece.trim().is_empty() {
-            pieces.push(std::mem::take(piece));
+    let mut piece_at = 0u32;
+    let mut newlines = 0u32;
+    for bit in small_bits(&u.text, size) {
+        if !piece.is_empty() && tokens(&piece) + tokens(&bit) > size.target {
+            if !piece.trim().is_empty() {
+                pieces.push((piece_at, std::mem::take(&mut piece)));
+            }
+            piece.clear();
+            piece_at = newlines;
         }
-        piece.clear();
-    };
-    for bit in small_bits(&u.text) {
-        if !piece.is_empty() && tokens(&piece) + tokens(&bit) > TARGET {
-            push(&mut piece, &mut pieces);
-        }
+        newlines += bit.matches('\n').count() as u32;
         piece.push_str(&bit);
     }
-    push(&mut piece, &mut pieces);
+    if !piece.trim().is_empty() {
+        pieces.push((piece_at, piece));
+    }
     let page_mark = u.text.lines().next().and_then(|l| PAGE.captures(l.trim())).map(|c| c[1].to_string());
     let mut out: Vec<Unit> = pieces
         .into_iter()
         .enumerate()
-        .map(|(i, text)| {
+        .map(|(i, (at, text))| {
+            // (Its lines: from its own first to its last, the unit's at most.)
+            let first = u.lines.0 + at;
+            let lines = (first, (first + text.trim_end_matches('\n').matches('\n').count() as u32).min(u.lines.1.max(first)));
             let text = match (&page_mark, i) {
                 (Some(n), i) if i > 0 => format!("[Page {n}, continued]\n{}", text.trim_start()),
                 _ => text,
             };
-            Unit { tokens: tokens(&text), text, heading: if i == 0 { u.heading.clone() } else { None }, then: None, ..u.clone() }
+            Unit { tokens: tokens(&text), text, lines, heading: if i == 0 { u.heading.clone() } else { None }, then: None, ..u.clone() }
         })
         .collect();
     // (The section the next unit is in: the last piece's to say.)
@@ -289,21 +342,21 @@ fn cut(u: Unit) -> Vec<Unit> {
 
 /// A text in pieces small enough to pack: its lines (each with its end), a
 /// line too long cut at its sentences, a sentence too long at its words.
-fn small_bits(text: &str) -> Vec<String> {
+fn small_bits(text: &str, size: Size) -> Vec<String> {
     let mut out = Vec::new();
     for line in text.split_inclusive('\n') {
-        if tokens(line) <= TARGET {
+        if tokens(line) <= size.target {
             out.push(line.to_string());
             continue;
         }
         for sentence in line.split_inclusive(['.', '!', '?']) {
-            if tokens(sentence) <= TARGET {
+            if tokens(sentence) <= size.target {
                 out.push(sentence.to_string());
                 continue;
             }
             let mut words = String::new();
             for w in sentence.split_inclusive(' ') {
-                if !words.is_empty() && tokens(&words) + tokens(w) > TARGET {
+                if !words.is_empty() && tokens(&words) + tokens(w) > size.target {
                     out.push(std::mem::take(&mut words));
                 }
                 words.push_str(w);
@@ -405,20 +458,21 @@ static PAGE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[Page (\d+)(?:, r
 
 /// A PDF's pages, each a unit.
 fn pdf_units(text: &str) -> (Vec<Unit>, Shape) {
-    let mut pages: Vec<(Option<u32>, Vec<&str>)> = Vec::new();
-    for line in text.lines() {
+    // Each page: its number, its lines, and its first line's in the file.
+    let mut pages: Vec<(Option<u32>, Vec<&str>, u32)> = Vec::new();
+    for (i, line) in text.lines().enumerate() {
         match PAGE.captures(line.trim()) {
-            Some(c) => pages.push((c[1].parse().ok(), vec![line])),
+            Some(c) => pages.push((c[1].parse().ok(), vec![line], i as u32 + 1)),
             None => match pages.last_mut() {
-                Some((_, lines)) => lines.push(line),
-                None => pages.push((None, vec![line])),
+                Some((_, lines, _)) => lines.push(line),
+                None => pages.push((None, vec![line], i as u32 + 1)),
             },
         }
     }
     // A running head or footer: a line at the top or foot of at least 3
     // pages and a third of them.
     let mut edges: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for (_, lines) in &pages {
+    for (_, lines, _) in &pages {
         let body: Vec<&str> = lines.iter().skip(1).map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
         let mut seen = std::collections::HashSet::new();
         for l in body.iter().take(2).chain(body.iter().rev().take(2)) {
@@ -435,7 +489,7 @@ fn pdf_units(text: &str) -> (Vec<Unit>, Shape) {
     };
     let units = pages
         .into_iter()
-        .map(|(page, lines)| {
+        .map(|(page, lines, first)| {
             // Its lines that say something (not blank, not a running head or footer).
             let body: Vec<&str> = lines.iter().skip(usize::from(page.is_some())).copied().filter(|l| !l.trim().is_empty() && !running(l)).collect();
             let headings: Vec<(usize, String)> = (0..body.len()).filter(|&i| heading_like(body[i], body.get(i + 1).copied())).map(|i| (i, body[i].trim().to_string())).collect();
@@ -443,7 +497,8 @@ fn pdf_units(text: &str) -> (Vec<Unit>, Shape) {
             // A section starts with the page when its heading tops it; one
             // further down is the next page's section.
             let heading = headings.first().filter(|(i, _)| *i == 0).map(|(_, h)| h.clone());
-            Unit { tokens: tokens(&text), text, from: page, to: page, heading, then: headings.last().map(|(_, h)| h.clone()), group: 0 }
+            let then = headings.last().map(|(_, h)| h.clone());
+            Unit { tokens: tokens(&text), text, from: page, to: page, lines: (first, first + lines.len() as u32 - 1), heading, then, group: 0 }
         })
         .collect();
     (units, Shape::of(Noun::Page, "\n\n"))
@@ -454,25 +509,26 @@ static SLIDE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^Slide (\d+)(?: \(
 
 /// A presentation's slides, each a unit, its title its section.
 fn slide_units(text: &str) -> (Vec<Unit>, Shape) {
-    let mut slides: Vec<(Option<u32>, String, Vec<&str>)> = Vec::new();
-    for line in text.lines() {
+    let mut slides: Vec<(Option<u32>, String, Vec<&str>, u32)> = Vec::new();
+    for (i, line) in text.lines().enumerate() {
         match SLIDE.captures(line) {
             Some(c) => {
                 let title = c[2].trim().trim_start_matches(':').trim();
                 let title = if title == "(no text)" { "" } else { title };
-                slides.push((c[1].parse().ok(), title.to_string(), vec![line]));
+                slides.push((c[1].parse().ok(), title.to_string(), vec![line], i as u32 + 1));
             }
             None => match slides.last_mut() {
-                Some((_, _, lines)) => lines.push(line),
-                None => slides.push((None, String::new(), vec![line])),
+                Some((_, _, lines, _)) => lines.push(line),
+                None => slides.push((None, String::new(), vec![line], i as u32 + 1)),
             },
         }
     }
     let units = slides
         .into_iter()
-        .map(|(n, title, lines)| {
+        .map(|(n, title, lines, first)| {
             let text = lines.join("\n").trim_end().to_string();
-            Unit { tokens: tokens(&text), text, from: n, to: n, heading: (!title.is_empty()).then_some(title), then: None, group: 0 }
+            let last = first + text.matches('\n').count() as u32;
+            Unit { tokens: tokens(&text), text, from: n, to: n, lines: (first, last), heading: (!title.is_empty()).then_some(title), then: None, group: 0 }
         })
         .collect();
     (units, Shape::of(Noun::Slide, "\n\n"))
@@ -507,9 +563,9 @@ fn sheet_units(text: &str) -> (Vec<Unit>, Shape) {
         let scope = name.as_ref().map(|n| format!("sheet \u{201c}{n}\u{201d}")).unwrap_or_default();
         // The sheet's line and facts, then the table's head (`| |`, `|---|`).
         let head_at = sheet.iter().position(|l| l.starts_with("| |"));
-        let (intro, table_head, body) = match head_at {
-            Some(h) => (sheet[..h].join("\n").trim().to_string(), sheet[h..(h + 2).min(sheet.len())].join("\n"), &sheet[(h + 2).min(sheet.len())..]),
-            None => (sheet.join("\n").trim().to_string(), String::new(), &sheet[sheet.len()..]),
+        let (intro, table_head, body, body_at) = match head_at {
+            Some(h) => (sheet[..h].join("\n").trim().to_string(), sheet[h..(h + 2).min(sheet.len())].join("\n"), &sheet[(h + 2).min(sheet.len())..], s + (h + 2).min(sheet.len())),
+            None => (sheet.join("\n").trim().to_string(), String::new(), &sheet[sheet.len()..], end),
         };
         let sheet_line = sheet[0].trim().to_string();
         let mut lead = if table_head.is_empty() { intro.clone() } else { format!("{intro}\n\n{table_head}") };
@@ -517,30 +573,34 @@ fn sheet_units(text: &str) -> (Vec<Unit>, Shape) {
         if !book_head.is_empty() {
             lead = format!("{book_head}\n\n{lead}");
         }
-        leads.insert(g, (lead, scope.clone()));
+        let sheet_name = name.clone().unwrap_or_default();
+        leads.insert(g, Lead { text: lead, scope: scope.clone(), sheet: sheet_name.clone() });
         let mut rows: Vec<Unit> = Vec::new();
-        let mut rest: Vec<&str> = Vec::new();
-        for l in body {
+        // The lines after its rows (formulas, notes), and where each is in the file.
+        let mut rest: Vec<(u32, &str)> = Vec::new();
+        for (k, l) in body.iter().enumerate() {
+            let at = (body_at + k) as u32 + 1;
             match ROW.captures(l) {
-                Some(c) if rest.iter().all(|r| r.trim().is_empty()) => {
+                Some(c) if rest.iter().all(|(_, r)| r.trim().is_empty()) => {
                     let n = c[1].parse().ok();
-                    rows.push(Unit { text: l.to_string(), tokens: tokens(l), from: n, to: n, heading: None, then: None, group: g });
+                    rows.push(Unit { text: l.to_string(), tokens: tokens(l), from: n, to: n, lines: (at, at), heading: None, then: None, group: g });
                 }
-                _ => rest.push(l),
+                _ => rest.push((at, l)),
             }
         }
         if rows.is_empty() && table_head.is_empty() {
             // (An empty sheet: its line alone.)
-            rows.push(Unit { text: String::new(), tokens: 0, group: g, ..Unit::default() });
+            rows.push(Unit { text: String::new(), tokens: 0, lines: (s as u32 + 1, s as u32 + 1), group: g, ..Unit::default() });
         }
         units.extend(rows);
-        let rest = rest.join("\n").trim().to_string();
-        if !rest.is_empty() {
+        let said: Vec<&(u32, &str)> = rest.iter().filter(|(_, l)| !l.trim().is_empty()).collect();
+        let text = rest.iter().map(|(_, l)| *l).collect::<Vec<_>>().join("\n").trim().to_string();
+        if let (Some(first), Some(last), false) = (said.first(), said.last(), text.is_empty()) {
             // Its formulas and notes: a group of their own, the sheet's line before them.
             let group = 1000 + g;
-            let what = if rest.contains("Formulas") { "formulas" } else { "notes" };
-            leads.insert(group, (sheet_line.clone(), if scope.is_empty() { what.to_string() } else { format!("{scope}, {what}") }));
-            units.push(Unit { tokens: tokens(&rest), text: rest, group, ..Unit::default() });
+            let what = if text.contains("Formulas") { "formulas" } else { "notes" };
+            leads.insert(group, Lead { text: sheet_line.clone(), scope: if scope.is_empty() { what.to_string() } else { format!("{scope}, {what}") }, sheet: sheet_name });
+            units.push(Unit { tokens: tokens(&text), text, lines: (first.0, last.0), group, ..Unit::default() });
         }
     }
     (units, Shape { noun: Noun::Row, join: "\n", leads })
@@ -587,7 +647,7 @@ fn block_units(text: &str, headings: bool) -> Vec<Unit> {
             let one_line = !text.contains('\n');
             let next = bs.get(i + 1).map(|b| b.2.lines().next().unwrap_or(""));
             let heading = (headings && one_line && (heading_like(text, next) || md_heading(text).is_some())).then(|| md_heading(text).map(|(_, w)| w).unwrap_or_else(|| text.trim().to_string()));
-            Unit { tokens: tokens(text), text: text.clone(), from: Some(*from), to: Some(*to), heading, then: None, group: 0 }
+            Unit { tokens: tokens(text), text: text.clone(), from: Some(*from), to: Some(*to), lines: (*from, *to), heading, then: None, group: 0 }
         })
         .collect()
 }
@@ -607,7 +667,8 @@ fn markdown_units(text: &str) -> (Vec<Unit>, Shape) {
                 return;
             }
             let text = lines.iter().map(|(_, l)| *l).collect::<Vec<_>>().join("\n");
-            units.push(Unit { tokens: tokens(&text), text, from: Some(lines[0].0), to: Some(lines[lines.len() - 1].0), heading: None, then: None, group: 0 });
+            let (a, b) = (lines[0].0, lines[lines.len() - 1].0);
+            units.push(Unit { tokens: tokens(&text), text, from: Some(a), to: Some(b), lines: (a, b), heading: None, then: None, group: 0 });
             lines.clear();
         };
         for (k, line) in block.lines().enumerate() {
@@ -619,7 +680,7 @@ fn markdown_units(text: &str) -> (Vec<Unit>, Shape) {
                 Some((level, words)) => {
                     flush(&mut lines, &mut units);
                     push_heading(&mut stack, level, words);
-                    units.push(Unit { tokens: tokens(line), text: line.to_string(), from: Some(n), to: Some(n), heading: Some(path_of(&stack, title)), then: None, group: 0 });
+                    units.push(Unit { tokens: tokens(line), text: line.to_string(), from: Some(n), to: Some(n), lines: (n, n), heading: Some(path_of(&stack, title)), then: None, group: 0 });
                 }
                 None => lines.push((n, line)),
             }
@@ -634,7 +695,9 @@ fn markdown_units(text: &str) -> (Vec<Unit>, Shape) {
 /// **A Word document**: a paragraph a line (`word.rs`), each a unit; a
 /// heading its `#` marks, else a line that looks like one.
 fn word_units(text: &str) -> (Vec<Unit>, Shape) {
-    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    // Its paragraphs, each with its line in the file.
+    let numbered: Vec<(u32, &str)> = text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()).map(|(i, l)| (i as u32 + 1, l)).collect();
+    let lines: Vec<&str> = numbered.iter().map(|(_, l)| *l).collect();
     let marked = lines.iter().any(|l| md_heading(l).is_some());
     let title = titled(&lines);
     let mut stack: Vec<(usize, String)> = Vec::new();
@@ -649,7 +712,8 @@ fn word_units(text: &str) -> (Vec<Unit>, Shape) {
             } else {
                 heading_like(line, lines.get(i + 1).copied()).then(|| line.trim().to_string())
             };
-            Unit { tokens: tokens(line), text: line.to_string(), from: None, to: None, heading, then: None, group: 0 }
+            let at = numbered[i].0;
+            Unit { tokens: tokens(line), text: line.to_string(), from: None, to: None, lines: (at, at), heading, then: None, group: 0 }
         })
         .collect();
     (units, Shape::of(Noun::None, "\n"))
@@ -658,6 +722,8 @@ fn word_units(text: &str) -> (Vec<Unit>, Shape) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const M: Size = Size::MEDIUM;
 
     /// A paragraph of about `words` words about `topic` (fictional).
     fn para(topic: &str, words: usize) -> String {
@@ -670,12 +736,12 @@ mod tests {
 
     #[test]
     fn a_short_text_is_one_part_and_an_empty_one_none() {
-        let parts = split("Beans in May.\n\nPeas in March.", "text");
+        let parts = split("Beans in May.\n\nPeas in March.", "text", M);
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0].n, 1);
         assert_eq!(parts[0].at, "lines 1\u{2013}3");
         assert_eq!(parts[0].text, "Beans in May.\n\nPeas in March.");
-        assert!(split("  \n ", "text").is_empty());
+        assert!(split("  \n ", "text", M).is_empty());
     }
 
     #[test]
@@ -686,12 +752,12 @@ mod tests {
         }
         text.push_str("[Page 13, read with OCR]\nScanned notice\nThe car park closes at 7pm on Fridays from next month onwards, for resurfacing.\n\n");
         text.push_str(&format!("[Page 14]\n{}\n\n", para("Long page", 1400)));
-        let parts = split(&text, "pdf");
+        let parts = split(&text, "pdf", M);
         assert!(parts.len() >= 6, "{}", parts.len());
         assert_eq!(parts[0].at, "pages 1\u{2013}2");
         assert!(parts[0].text.starts_with("[Page 1]\n"));
         for p in &parts {
-            assert!(p.tokens <= MOST + 40, "part {} is {} tokens", p.n, p.tokens);
+            assert!(p.tokens <= M.most + 40, "part {} is {} tokens", p.n, p.tokens);
             assert!(p.at.starts_with("page"), "{}", p.at);
         }
         // The scanned page is cited by its page too.
@@ -714,7 +780,7 @@ mod tests {
             para("Carry over", 250),
             para("Sick leave", 400)
         );
-        let parts = split(&text, "pdf");
+        let parts = split(&text, "pdf", M);
         assert_eq!(parts[0].section, "4 Leave");
         // Page 2 starts in 4.1's section (its heading was on page 1).
         let p2 = parts.iter().find(|p| p.at.starts_with("page 2")).unwrap();
@@ -736,7 +802,7 @@ mod tests {
             para("Sick leave", 500),
             para("Pay", 400)
         );
-        let parts = split(&text, "markdown");
+        let parts = split(&text, "markdown", M);
         let sections: Vec<&str> = parts.iter().map(|p| p.section.as_str()).collect();
         assert!(sections.contains(&"Leave \u{203a} Annual leave"), "{sections:?}");
         assert!(sections.contains(&"Leave \u{203a} Sick leave"), "{sections:?}");
@@ -758,7 +824,7 @@ mod tests {
         for s in 1..=9 {
             text.push_str(&format!("Slide {s}: Quarter {s} plan\n{}\nSpeaker notes: Mention the dates.\n\n", para(&format!("Slide {s}"), 160)));
         }
-        let parts = split(text.trim_end(), "powerpoint");
+        let parts = split(text.trim_end(), "powerpoint", M);
         assert!(parts.len() >= 3);
         // (About 270 tokens a slide: two a part, a new part at a slide once it has half.)
         assert_eq!(parts[0].at, "slides 1\u{2013}2");
@@ -776,7 +842,7 @@ mod tests {
         }
         text.push_str("\n\nFormulas (results above calculated on this PC):\nB2:B400: =A2*3 (the same in each row, filled down)");
         text.push_str("\n\n## Sheet 2 of 2: \"Notes\"\nUsed range A1:A2 (2 rows × 1 columns).\n\n| | A |\n|---|---|\n| 1 | Ring the supplier |\n| 2 | Check the van |");
-        let parts = split(&text, "sheet");
+        let parts = split(&text, "sheet", M);
         let orders: Vec<&Part> = parts.iter().filter(|p| p.at.starts_with("sheet \u{201c}Orders\u{201d}, rows")).collect();
         assert!(orders.len() >= 3, "{:?}", parts.iter().map(|p| &p.at).collect::<Vec<_>>());
         assert_eq!(orders[0].at, format!("sheet \u{201c}Orders\u{201d}, rows 1\u{2013}{}", orders[0].text.lines().filter(|l| ROW.is_match(l)).count()));
@@ -802,7 +868,7 @@ mod tests {
         for r in 1..=300 {
             text.push_str(&format!("\n| {r} | Plot {r} on the north allotment site | {r} m² |"));
         }
-        let parts = split(&text, "sheet");
+        let parts = split(&text, "sheet", M);
         assert!(parts.len() >= 2);
         assert!(parts[0].at.starts_with("rows 1\u{2013}"), "{}", parts[0].at);
         assert!(parts[1].text.starts_with("One table; its values as written in the file.\n\n300 rows × 2 columns (A1:B300).\n\n| | A | B |\n|---|---|---|\n| "), "{}", parts[1].text);
@@ -811,18 +877,18 @@ mod tests {
     #[test]
     fn a_word_documents_marked_headings_are_its_sections() {
         let text = format!("# Leave policy\n{}\n## Annual leave\n{}\n{}\n## Parental leave\n{}", para("Policy", 60), para("Annual", 400), para("Carry", 300), para("Parental", 500));
-        let parts = split(&text, "word");
+        let parts = split(&text, "word", M);
         let sections: Vec<&str> = parts.iter().map(|p| p.section.as_str()).collect();
         assert!(sections.contains(&"Annual leave") && sections.contains(&"Parental leave"), "{sections:?}");
         assert!(parts.iter().all(|p| p.at.is_empty()));
         // A Title over several Heading 1s: each section's path keeps its own heading.
         let guide = format!("# Facilities guide\n# 9. Lockers\n{}\n## In practice\n{}\n# 10. Showers\n{}\n## In practice\n{}", para("Lockers", 450), para("Keys", 300), para("Showers", 450), para("Towels", 300));
-        let sections: Vec<String> = split(&guide, "word").into_iter().map(|p| p.section).collect();
+        let sections: Vec<String> = split(&guide, "word", M).into_iter().map(|p| p.section).collect();
         assert!(sections.iter().any(|s| s == "10. Showers \u{203a} In practice"), "{sections:?}");
         assert!(sections.iter().any(|s| s == "9. Lockers"), "{sections:?}");
         // No marks (an older .doc): lines that look like headings.
         let plain = format!("Leave policy\n{}\nAnnual leave\n{}", para("Policy", 400), para("Annual", 500));
-        let parts = split(&plain, "word");
+        let parts = split(&plain, "word", M);
         assert_eq!(parts[0].section, "Leave policy");
         assert!(parts.iter().any(|p| p.section == "Annual leave"));
     }
@@ -833,17 +899,82 @@ mod tests {
         for f in 0..40 {
             text.push_str(&format!("fn step_{f}() {{\n    let x = {f};\n    println!(\"{{x}} seeds sown in bed {f}\");\n    // Water the bed after sowing, then mark the label.\n}}\n\n"));
         }
-        let parts = split(&text, "code");
+        let parts = split(&text, "code", M);
         assert!(parts.len() >= 2);
         assert!(parts[0].at.starts_with("lines 1\u{2013}"));
-        assert!(parts.iter().all(|p| p.tokens <= MOST));
+        assert!(parts.iter().all(|p| p.tokens <= M.most));
         // Everything's somewhere, in order.
         let joined: String = parts.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join("\n\n");
         assert_eq!(joined.matches("fn step_").count(), 40);
         // One line far too long: cut at its words, never lost.
         let long = "word ".repeat(5_000);
-        let parts = split(&long, "text");
-        assert!(parts.len() >= 4 && parts.iter().all(|p| p.tokens <= MOST));
+        let parts = split(&long, "text", M);
+        assert!(parts.len() >= 4 && parts.iter().all(|p| p.tokens <= M.most));
         assert_eq!(parts.iter().map(|p| p.text.matches("word").count()).sum::<usize>(), 5_000);
+    }
+
+    /// The lines `p` names in `text` (from 1), joined.
+    fn lines_of<'a>(text: &'a str, p: &Part) -> Vec<&'a str> {
+        text.lines().skip(p.lines.0 as usize - 1).take((p.lines.1 - p.lines.0 + 1) as usize).collect()
+    }
+
+    #[test]
+    fn every_part_knows_its_lines_and_what_it_counts() {
+        // A PDF: a part's lines start at its page's line; a long page's next part, within the page.
+        let mut pdf = String::new();
+        for p in 1..=6 {
+            pdf.push_str(&format!("[Page {p}]\n{}\n\n", para(&format!("Topic {p}"), 180)));
+        }
+        pdf.push_str(&format!("[Page 7]\n{}\n{}\n", para("Long page", 900), para("Long page again", 900)));
+        let parts = split(&pdf, "pdf", M);
+        assert_eq!(lines_of(&pdf, &parts[0])[0], "[Page 1]");
+        assert_eq!(parts[0].span, Some((1, 2)));
+        let page7: Vec<&Part> = parts.iter().filter(|p| p.span == Some((7, 7))).collect();
+        assert!(page7.len() >= 2, "{:?}", parts.iter().map(|p| (&p.at, p.lines)).collect::<Vec<_>>());
+        assert_eq!(lines_of(&pdf, page7[0])[0], "[Page 7]");
+        assert!(page7[1].lines.0 > page7[0].lines.0 && page7[1].lines.1 <= pdf.lines().count() as u32, "{:?}", page7.iter().map(|p| p.lines).collect::<Vec<_>>());
+        assert!(page7[1].text.starts_with("[Page 7, continued]\n"));
+        let start: String = page7[1].text.lines().nth(1).unwrap().chars().take(40).collect();
+        assert!(lines_of(&pdf, page7[1]).iter().any(|l| l.contains(start.trim())), "its lines hold its words: {start:?} {:?}", page7[1].lines);
+        // Markdown: by its section, its lines from its heading.
+        let md = format!("# Handbook\n\n## Leave\n\n{}\n\n## Parking\n\n{}", para("Leave", 400), para("Parking", 400));
+        let parts = split(&md, "markdown", M);
+        let parking = parts.iter().find(|p| p.section == "Parking").unwrap();
+        assert_eq!(lines_of(&md, parking)[0], "## Parking");
+        assert_eq!(parking.span, None);
+        // A Word document: its paragraphs' own lines, blank lines between them skipped.
+        let doc = format!("# Lockers\n\n{}\n\n# Showers\n\n{}", para("Lockers", 500), para("Showers", 500));
+        let parts = split(&doc, "word", M);
+        let showers = parts.iter().find(|p| p.section == "Showers").unwrap();
+        assert_eq!(lines_of(&doc, showers)[0], "# Showers");
+        // A workbook: its rows' lines, its sheet named; slides by their own lines.
+        let mut book = String::from("An Excel workbook with 1 sheet: \"Plots\".\n\n## Sheet 1 of 1: \"Plots\"\nUsed range A1:B300.\n\n| | A | B |\n|---|---|---|");
+        for r in 1..=300 {
+            book.push_str(&format!("\n| {r} | Plot {r} on the north allotment site | {r} m² |"));
+        }
+        let parts = split(&book, "sheet", M);
+        assert!(parts.iter().all(|p| p.sheet == "Plots"));
+        let second = &parts[1];
+        let (a, b) = second.span.unwrap();
+        assert_eq!(lines_of(&book, second)[0], format!("| {a} | Plot {a} on the north allotment site | {a} m² |"));
+        assert_eq!(*lines_of(&book, second).last().unwrap(), format!("| {b} | Plot {b} on the north allotment site | {b} m² |"));
+        let deck: String = (1..=6).map(|n| format!("Slide {n}: Plan {n}\n{}\n\n", para(&format!("Slide {n}"), 200))).collect();
+        let parts = split(deck.trim_end(), "powerpoint", M);
+        assert!(parts.iter().all(|p| lines_of(&deck, p)[0].starts_with("Slide ")), "{:?}", parts.iter().map(|p| p.lines).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn parts_are_smaller_for_a_small_model_and_bigger_for_a_big_one() {
+        // 30 sections of six paragraphs each (about 850 tokens a section).
+        let md: String = (1..=30).map(|i| format!("## Section {i}\n\n{}\n\n", (0..6).map(|k| para(&format!("Topic {i} {k}"), 100)).collect::<Vec<_>>().join("\n\n"))).collect();
+        let count = |size: Size| split(&md, "markdown", size).len();
+        let (small, medium, large) = (count(Size::SMALL), count(Size::MEDIUM), count(Size::LARGE));
+        assert!(small > medium && medium > large, "{small} {medium} {large}");
+        for size in Size::ALL {
+            let parts = split(&md, "markdown", size);
+            assert!(parts.iter().all(|p| p.tokens <= size.most + 40), "{size:?}: {:?}", parts.iter().map(|p| p.tokens).collect::<Vec<_>>());
+            // Nothing lost at any size.
+            assert_eq!(parts.iter().map(|p| p.text.matches("matters here").count()).sum::<usize>(), 180);
+        }
     }
 }

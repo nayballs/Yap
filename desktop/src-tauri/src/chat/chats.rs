@@ -157,6 +157,13 @@ pub struct ChatMessage {
     /// (`feedback::restore_from_disk`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feedback: Option<crate::chat::feedback::Feedback>,
+    /// **A question asked with the Research switch on** (`chat/research.rs`,
+    /// 16 Nov 2026): researched because the switch under the box was, so
+    /// Retry and Edit research it again, as it was asked (one whose words
+    /// plainly ask does anyway). An older Yap's save drops it: its Retry is
+    /// then answered as an ordinary question.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub research: bool,
 }
 
 /// **Message `i` of `messages` as a model reads it** ([`ChatMessage::sent_text`])
@@ -388,6 +395,41 @@ pub struct Source {
     /// Sources row too. An older Yap drops it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cited: bool,
+    /// **A part of a big project's file** (`chat/projects/sources.rs`, 16 Nov
+    /// 2026): the file's name its title, the part's place its site
+    /// ("pages 12–13"), its words its quote, and where it opens. An older
+    /// Yap drops it, and its pill opens nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectPlace>,
+}
+
+/// **Where a project file's part is** (a big project's, searched in parts:
+/// `chat/projects/sources.rs`): its pill opens the file there, read only,
+/// beside the chat — a spreadsheet in the sheet view at its row, any other
+/// file as Yap read it at its page, slide, heading or line.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectPlace {
+    pub project: String,
+    /// The file's id in the project (`pf_…`).
+    pub file: String,
+    /// What its reader made of it: "pdf", "markdown", "word", "powerpoint",
+    /// "sheet", "code", "text".
+    pub kind: String,
+    /// The part's number in the file (at the size the turn's model read it).
+    pub part: usize,
+    /// Its first and last line in the file's text as Yap read it (from 1).
+    pub from: u32,
+    pub to: u32,
+    /// Its first page, slide, row or line, when the file counts them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<u32>,
+    /// A workbook's sheet it's in.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sheet: String,
+    /// The section it's in ("Leave › Annual leave").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub section: String,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -1233,6 +1275,18 @@ pub fn set_quote(id: u64, index: usize, quote: crate::chat::documents::Quote) {
     });
 }
 
+/// Conversation `id`'s question `index` was asked with the Research switch
+/// on ([`ChatMessage::research`]): its Retry and Edit research again.
+pub fn set_research(id: u64, index: usize) {
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "user" && !m.research {
+            m.research = true;
+            save_to_disk(s);
+        }
+    });
+}
+
 /// A conversation's scope ("" when it has none, or isn't there).
 pub fn scope_of(id: u64) -> String {
     with_store(|s| s.conversations.iter().find(|c| c.id == id).map(|c| c.scope.clone()).unwrap_or_default())
@@ -1440,6 +1494,7 @@ pub fn append_message(
             kind: String::new(),
             attachments: Vec::new(),
             feedback: None,
+            research: false,
         });
         conv.updated_ts = now_secs();
         // Asked again in an archived chat: it's back in the list.
@@ -2321,6 +2376,7 @@ mod tests {
             kind: String::new(),
             attachments: vec![],
             feedback: None,
+            research: false,
         };
         let messages = vec![
             msg("user", vec![]),
@@ -2736,5 +2792,37 @@ mod tests {
         // Deleted from the archive: gone.
         assert_eq!(delete_many(&[b.id]), 1);
         assert!(titles(list_archived()).is_empty());
+    }
+
+    #[test]
+    fn a_question_asked_with_research_on_says_so_for_its_retry_and_edit() {
+        let c = create("How did QWERTY come about?");
+        let q = append_question(c.id, "How did QWERTY come about?", false, &[]).unwrap();
+        let a = append(c.id, "assistant", "It came with the typewriter [1].", &[], None, false).unwrap();
+        // Only the person's question takes it; once is enough.
+        set_research(c.id, a);
+        set_research(c.id, q);
+        set_research(c.id, q);
+        let conv = get(c.id).unwrap();
+        assert!(conv.messages[q].research);
+        assert!(!conv.messages[a].research);
+        // Saved under its own name; none written when it wasn't, and an older file reads as none.
+        assert_eq!(serde_json::to_value(&conv.messages[q]).unwrap()["research"], json!(true));
+        assert!(serde_json::to_value(&conv.messages[a]).unwrap().get("research").is_none());
+        let older: ChatMessage = serde_json::from_value(json!({ "role": "user", "text": "Hi", "ts": 1 })).unwrap();
+        assert!(!older.research);
+        // Retry: the question it answers again still says so (chat_retry researches again)…
+        let begun = begin_retry(c.id, a).unwrap();
+        assert!(begun.question.research);
+        // (Never answered: back as it was.)
+        assert!(!end_branch(c.id, begun.at, begun.back_to, false));
+        // …and so does the message an Edit replaces (chat_send's `edit`).
+        let begun = begin_edit(c.id, q).unwrap();
+        assert!(begun.question.research);
+        // A question asked with it off: neither does.
+        let d = create("Plain");
+        let plain = append_question(d.id, "What's a typewriter?", false, &[]).unwrap();
+        append(d.id, "assistant", "A machine for typing.", &[], None, false).unwrap();
+        assert!(!begin_retry(d.id, plain + 1).unwrap().question.research);
     }
 }

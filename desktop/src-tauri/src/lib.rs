@@ -537,6 +537,7 @@ pub fn run() {
             chat::projects::projects_list,
             chat::projects::project_get,
             chat::projects::project_knowledge,
+            chat::projects::project_file_view,
             chat::projects::project_create,
             chat::projects::project_update,
             chat::projects::project_delete,

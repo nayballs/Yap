@@ -180,7 +180,9 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 ///
 /// `research`: the Research switch under the box was on (chat/research.rs):
 /// this question researched — its plan first, then many searches and page
-/// reads, then a report as a document beside the chat.
+/// reads, then a report as a document beside the chat — and kept with it, so
+/// an Edit of a message asked so researches again whatever the switch says
+/// now (`ChatMessage::research`).
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -286,8 +288,10 @@ pub async fn chat_send(
     // never an incognito or a Code chat.
     let in_project = project.filter(|p| conversation_id.is_none() && code_folder_none && !ghost && !p.trim().is_empty());
     let send = Box::pin(crate::chat::projects::with_new(in_project, send));
-    // The Research switch (chat/research.rs).
-    let send = Box::pin(crate::chat::research::scoped(research.unwrap_or(false), send));
+    // The Research switch (chat/research.rs) — or, an Edit, the message it
+    // replaces asked with it on: researched again, as it was asked.
+    let research = research.unwrap_or(false) || editing.as_ref().is_some_and(|e| e.question.research);
+    let send = Box::pin(crate::chat::research::scoped(research, send));
     // A Retry with its 👎's note: given to the model (or the Code chat's session) this turn only.
     let send = Box::pin(crate::chat::feedback::with_note(note, send));
     // Chat's own turn: Think pressed (the model on this PC), or a cloud
@@ -403,8 +407,9 @@ fn skill_again(text: &str) -> Option<crate::chat::skills::SkillTurn> {
 /// **Retry** (15 Nov 2026, the Claude app's): conversation `conversationId`'s
 /// answer `index` set aside as a branch with everything after it
 /// (`chats::begin_retry`), and the person's question before it answered
-/// again — its screenshots, the passage it was about and the Skill it ran
-/// with it; ‹ 2/2 › on the new answer switches back. Streamed like
+/// again — its screenshots, the passage it was about, the Skill it ran
+/// with and the Research switch it was asked with (`ChatMessage::research`);
+/// ‹ 2/2 › on the new answer switches back. Streamed like
 /// [`chat_send`] (`onStream`, `turnId` for ■), the same reply, with the
 /// chat's `forks`. An answer that never comes (an error, ■ before any of
 /// it) puts the old one back. Not in a Code chat: there Retry is an Edit
@@ -441,6 +446,8 @@ pub async fn chat_retry(
     let turn = send_turn(&app, Some(conversation_id), question.sent_words(), None, Some(question.voice), on_stream, turn_id, image_ids, Vec::new(), None);
     let turn = crate::chat::attachments::with(question.attachments.clone(), turn);
     let send = crate::chat::skills::with(skill_again(&question.text), turn);
+    // Asked with the Research switch on: researched again, as it was asked (chat/research.rs).
+    let send = Box::pin(crate::chat::research::scoped(question.research, send));
     let send = Box::pin(crate::chat::feedback::with_note(note, crate::chat::turn::again(conversation_id, begun.question_at, send)));
     let (out, thought) = crate::chat::think::scoped(false, send).await;
     let out = keep_thought(out, thought);

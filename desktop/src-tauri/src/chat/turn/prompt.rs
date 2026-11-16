@@ -20,9 +20,12 @@
 //! runs BOTH eager RAG and the notes tools: the model gets relevant notes
 //! up front AND can search for more.
 
+use std::sync::Arc;
+
 use super::gates::Gates;
 use super::history::Sizing;
 use super::{Asked, Opened};
+use crate::chat::projects::sources::Cites;
 use crate::chat::tools::FirstStep;
 
 /// What the notes the eager RAG found ([`rag_context`]) come under, in the
@@ -297,8 +300,11 @@ impl Prompt {
     /// at most two thirds of the room the turn has left beside what's measured
     /// so far (the budget: the system prompt, the context, the tools' schemas
     /// and the question), so the history keeps some. Their chips (one a
-    /// part), to the page at once and first under the answer.
-    async fn project_parts(&mut self, t: &Asked<'_>, sizing: &Sizing, conv: &crate::chat::chats::Conversation) -> Vec<String> {
+    /// part), to the page at once and first under the answer, with the
+    /// parts as the turn's first numbered sources (a "[1]" draws as a pill
+    /// as it's written: chat/projects/sources.rs), and how to cite them.
+    /// The turn's numbering of them (`None`: no project searched in parts).
+    async fn project_parts(&mut self, t: &Asked<'_>, sizing: &Sizing, conv: &crate::chat::chats::Conversation) -> (Vec<String>, Option<Arc<Cites>>) {
         let fixed = crate::chat::budget::estimate(&self.system)
             + crate::chat::chats::context_block(&self.context).map(|b| crate::chat::budget::estimate(&b)).unwrap_or(0)
             + sizing.schemas
@@ -306,13 +312,17 @@ impl Prompt {
         let left = crate::chat::budget::budget(sizing.context_size, sizing.context_known, fixed, sizing.kind, t.gates.tools, sizing.knowledge.cap).history;
         let previous = conv.messages.iter().rev().find(|m| m.role == "user").map(|m| m.text.as_str());
         let Some(found) = crate::chat::projects::knowledge::for_question(Some(conv.id), &t.text, previous, sizing.knowledge, left * 2 / 3, t.gates.tools).await else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
         if let (Some(w), false) = (t.watcher, found.chips.is_empty()) {
-            w.send(crate::chat::stream::Event::Chips { chips: found.chips.clone(), sources: Vec::new(), web: false });
+            w.send(crate::chat::stream::Event::Chips { chips: found.chips.clone(), sources: found.cites.sources(), web: false });
         }
+        let parts = !found.cites.is_empty();
         self.add(found.block);
-        found.chips
+        if parts {
+            self.add(crate::chat::projects::knowledge::CITE_LINE.to_string());
+        }
+        (found.chips, Some(found.cites))
     }
 
     /// **How to answer this one**: out loud (`spoken`), the Voice Assistant's
@@ -424,7 +434,7 @@ pub(super) struct Built {
     pub(super) calendar_chip: Option<String>,
     /// The documents of this chat (documents.rs) and the ones this turn
     /// makes or changes, for its pills.
-    pub(super) doc_turn: crate::chat::documents::Turn,
+    pub(super) doc_turn: std::sync::Arc<crate::chat::documents::Turn>,
     /// **A strong model writing a document** (2026-10-31, as the Claude app
     /// writes one): it may research deeper — how far is sized to the
     /// model's request (`web::Reach::deep`, `deep_reach`), said in the
@@ -470,6 +480,11 @@ pub(super) struct Built {
     /// A big project's parts sent with the question
     /// (chat/projects/knowledge.rs): a chip each, first under the answer.
     pub(super) project_chips: Vec<String>,
+    /// **The turn's numbering of a big project's parts** (chat/projects/
+    /// sources.rs): the question's parts [1]…, then each a tool reads; the
+    /// ones the answer cites are its sources (`finish.rs`). `None`: no
+    /// project searched in parts this turn.
+    pub(super) project: Option<Arc<Cites>>,
 }
 
 /// **A chat's own blocks** for a model with `room`: its project's
@@ -479,7 +494,7 @@ pub(super) struct Built {
 /// them and the fixed part counts them (`fit.rs`). `conv` `None`: the new
 /// chat being made.
 pub(super) fn chat_blocks(conv: Option<u64>, room: crate::chat::projects::knowledge::Room, incognito: bool, tools: bool) -> String {
-    let project = if incognito { None } else { crate::chat::projects::prompt_block(conv, room, tools) };
+    let project = if incognito { None } else { crate::chat::projects::prompt_block(conv, room, tools, true) };
     [project, crate::chat::styles::prompt_block(conv)].into_iter().flatten().collect::<Vec<_>>().join("
 
 ")
@@ -509,7 +524,7 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     // the person changed since the model last saw them, for a model that
     // can change them; the ones this turn makes or changes, for its pills.
     let chat_docs = crate::chat::documents::of_conversation(&conv.messages);
-    let doc_turn = crate::chat::documents::Turn::new(&chat_docs);
+    let doc_turn = std::sync::Arc::new(crate::chat::documents::Turn::new(&chat_docs));
     // A strong model writing a document, and a new one outlined first
     // ([`Built::writes_doc`]).
     let writes_doc = g.strong && !t.meetings && crate::chat::documents::writes_document(&t.text, &chat_docs, selection.is_some());
@@ -574,7 +589,7 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     // **A big project's parts for this question** (chat/projects/knowledge.rs):
     // the parts of its files that match it, in its context (never a Code or
     // incognito chat's).
-    let project_chips = if code || opened.conv.incognito { Vec::new() } else { prompt.project_parts(t, sizing, &opened.conv).await };
+    let (project_chips, project) = if code || opened.conv.incognito { (Vec::new(), None) } else { prompt.project_parts(t, sizing, &opened.conv).await };
     let spoken = t.by_voice && (t.scope == Some("assistant") || t.cfg.speak_replies);
     prompt.how_to_answer(t, spoken, &chat_docs, selection, sizing.context_size);
     let deep_reach = prompt.research(t, sizing, writes_doc, outline_first);
@@ -609,6 +624,7 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
         incognito: opened.conv.incognito,
         calendar_zone,
         project_chips,
+        project,
     }
 }
 

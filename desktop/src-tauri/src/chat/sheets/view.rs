@@ -58,6 +58,9 @@ pub enum Src {
     Workspace { conversation: u64, rel: String },
     /// An attached file (its id): its kept copy.
     Attachment { id: String },
+    /// A project's file (`chat/projects.rs`, its ids): its kept copy, read
+    /// only — a big project's part's pill opens it at its row.
+    Project { project: String, file: String },
 }
 
 /// A file's size and time: what changes when it's written.
@@ -90,6 +93,10 @@ pub fn resolve(src: &Src) -> Result<(PathBuf, String, Option<String>), String> {
         Src::Attachment { id } => {
             let (a, path) = crate::chat::attachments::copy_of(id).ok_or("That file isn't in this chat any more.")?;
             (path, a.name, None)
+        }
+        Src::Project { project, file } => {
+            let (name, path) = crate::chat::projects::copy_of(project, file).ok_or("That file isn't in the project any more.")?;
+            (path, name, None)
         }
     };
     if Format::of(&name).is_none() {
@@ -476,7 +483,12 @@ pub fn save_copy(id: u64) -> Result<String, String> {
 pub async fn sheet_open(src: Src) -> Result<Opened, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let (path, name, folder) = resolve(&src)?;
-        open(path, name, folder)
+        let mut opened = open(path, name, folder)?;
+        // (A project's copy is read only too, said as the project's.)
+        if matches!(src, Src::Project { .. }) {
+            opened.edit.note = Some("This is the project's copy of the file, so it's read only here.".into());
+        }
+        Ok(opened)
     })
     .await
     .map_err(|e| e.to_string())?

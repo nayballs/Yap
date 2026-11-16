@@ -2063,9 +2063,12 @@ endpoint (`claude_live/eyes.rs`), the screenshots shown with the question, a
 page's tab, its shots in the turn's steps and a picture beside the chat, kept with the answer. Its
 pictures go to Claude Code as MCP image content, which 2.1.296's MCP client
 turns into image blocks the model reads (resized to its limits; read in its
-bundle, 7 Nov 2026). It never edits notes or documents beside the chat,
-never acts on a page (clicks, types), and never runs commands except through
-an agent ([chat-and-assistant.md](./chat-and-assistant.md#chat-on-your-claude-plan-2026-11-07)).
+bundle, 7 Nov 2026). A plain plan chat also **makes and changes documents
+beside the chat** (16 Nov 2026: the tool loop's rich set over the run
+endpoint, `claude_live/documents.rs` — a new one's outline on the person's
+card first, their own edits winning). It never edits the person's other
+notes, and never runs commands except through an agent
+([chat-and-assistant.md](./chat-and-assistant.md#chat-on-your-claude-plan-2026-11-07)).
 
 **Claude Code's own copy of a plan chat.** A chat session has to be saved
 for `--resume`, so Claude Code keeps its transcript in its own config folder

@@ -16,6 +16,11 @@
 //   <source> naming the file and its section; the model reads another with
 //   read_project_file; the answer's steps say which parts were used; the project's page says
 //   how the files are read.
+// - **Its parts as numbered sources** (chat/projects/sources.rs, 16 Nov 2026, the Claude app's citations to project
+//   files): the parts sent with the question are [1]…, a part a tool reads the next number; the answer's "[2]" is a
+//   pill naming the file and its place, and its row says "From the project". A pill opens the file beside the chat:
+//   the PDF as Yap read it at its page, the Markdown at its heading (ProjectFileTab), the spreadsheet in the sheet
+//   view at its row.
 //
 // The model is the scripted fake (support/fake-llm.js). Every detail is fictional.
 import fs from 'node:fs';
@@ -25,11 +30,59 @@ import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
 import { chipKind, stepsSummary } from '../src/lib/views/chat/chatSteps.js';
 import { knowledgeLine } from '../src/lib/views/chat/projectLines.js';
+import { blockLines, blocksOf, drawnAs, inPart, partView, placeLabel } from '../src/lib/views/chat/projectFile.js';
 
 const HERE = path.join(RUNS, 'chat-projects-spec');
 const SOWING = path.join(HERE, 'sowing-plan.md');
 const SHEET = path.join(HERE, 'seed-costs.xlsx');
 const HANDBOOK = path.join(HERE, 'staff-handbook.md');
+const FACILITIES = path.join(HERE, 'facilities-handbook.pdf');
+const SEATS = path.join(HERE, 'seat-plan.csv');
+
+/** A PDF whose pages are `pages` (a line of text each), its cross-reference table right (made here: nobody's file). */
+function textPdf(pages) {
+  const esc = (t) => t.replace(/[\\()]/g, (c) => '\\' + c);
+  // (Each page's contents, then the page: objects 4 and 5, 6 and 7…)
+  const kids = pages.map((_, i) => `${5 + i * 2} 0 R`).join(' ');
+  const objects = [Buffer.from('<< /Type /Catalog /Pages 2 0 R >>'), Buffer.from(`<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`), Buffer.from('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')];
+  for (const text of pages) {
+    const content = `BT /F1 10 Tf 40 760 Td (${esc(text)}) Tj ET`;
+    objects.push(Buffer.from(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`));
+    objects.push(Buffer.from(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${objects.length} 0 R /Resources << /Font << /F1 3 0 R >> >> >>`));
+  }
+  const parts = [Buffer.from('%PDF-1.4\n')];
+  let size = parts[0].length;
+  const offsets = [];
+  objects.forEach((o, i) => {
+    offsets.push(size);
+    const obj = Buffer.concat([Buffer.from(`${i + 1} 0 obj\n`), o, Buffer.from('\nendobj\n')]);
+    parts.push(obj);
+    size += obj.length;
+  });
+  let tail = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets) tail += `${String(off).padStart(10, '0')} 00000 n \n`;
+  tail += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${size}\n%%EOF\n`;
+  return Buffer.concat([...parts, Buffer.from(tail)]);
+}
+
+/** A fictional facilities handbook as a PDF: 40 pages, page 23 the only one about the bike shed. */
+function facilities() {
+  const pages = [];
+  for (let p = 1; p <= 40; p++) {
+    let text = '';
+    while (text.split(/\s+/).length < 190) text += `The facilities policy at Example Ltd covers every member of staff on floor ${p}, and the office manager checks it each month. `;
+    if (p === 23) text += 'The Kellbrook bike shed is behind the north gate, and its code is 4417.';
+    pages.push(text);
+  }
+  return textPdf(pages);
+}
+
+/** A fictional seat plan: 120 seats, one of them in the Kellbrook room. */
+function seats() {
+  let s = 'Seat,Floor,Wing\n';
+  for (let r = 2; r <= 121; r++) s += `Seat ${r},Floor ${1 + (r % 4)},${r === 88 ? 'Kellbrook room' : 'North wing'}\n`;
+  return s;
+}
 
 /** A fictional staff handbook in Markdown, far too long for an 8K model: 40 sections, one the leave policy. */
 function handbook() {
@@ -63,6 +116,8 @@ const test = base.extend({
       fs.writeFileSync(SOWING, '# Sowing plan\n\nBroad beans go in on 3 March, in bed 4.\n');
       fs.writeFileSync(SHEET, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]));
       fs.writeFileSync(HANDBOOK, handbook());
+      fs.writeFileSync(FACILITIES, facilities());
+      fs.writeFileSync(SEATS, seats());
       await use({
         name: 'chat-projects',
         config: {
@@ -227,6 +282,154 @@ test('a big project: its files searched in parts, the matching part sent, anothe
   await theme(yap, main, 'light');
   const saved = (await yap.invoke('chats_list')).find((c) => c.title.startsWith('How many days'));
   expect(saved).toBeTruthy();
+  await yap.invoke('project_delete', { id: p.id });
+});
+
+test('the project file view draws each kind as Yap read it and finds the part', () => {
+  // Where a source opens: a spreadsheet in the sheet view at its row, any other file in the project file view.
+  const pdf = { n: 1, title: 'h.pdf', site: 'page 23', project: { project: 'p-1', file: 'pf_1', kind: 'pdf', part: 9, from: 120, to: 124, at: 23, section: '' } };
+  expect(partView(pdf)).toEqual({ file: { project: 'p-1', file: 'pf_1', name: 'h.pdf', kind: 'pdf', from: 120, to: 124, at: 23, place: 'page 23', section: '' } });
+  const sheet = { n: 2, title: 'seats.csv', site: 'rows 61–90', project: { project: 'p-1', file: 'pf_2', kind: 'sheet', part: 3, from: 70, to: 99, at: 61, sheet: '' } };
+  expect(partView(sheet)).toEqual({ sheet: { src: { from: 'project', project: 'p-1', file: 'pf_2' }, name: 'seats.csv', at: { sheet: '', row: 61 } } });
+  expect(partView({ n: 3, url: 'https://example.com/' })).toBeNull();
+  expect(placeLabel({ place: 'pages 12–13' })).toBe('Pages 12–13');
+  expect(placeLabel({ place: '“Annual leave”', section: 'Leave › Annual leave' })).toBe('“Annual leave”');
+  expect(drawnAs('markdown')).toBe('markdown');
+  expect(drawnAs('code')).toBe('lines');
+  expect(drawnAs('pdf')).toBe('blocks');
+  // A PDF page by page, its lines kept; a deck slide by slide, its notes apart; a Word document's headings.
+  const pages = blocksOf('[Page 1]\nWelcome\nto the office\n\n[Page 2, read with OCR]\nBike shed', 'pdf');
+  expect(pages.map((b) => [b.kind, b.from, b.to])).toEqual([['page', 1, 1], ['para', 2, 3], ['page', 5, 5], ['para', 6, 6]]);
+  expect(pages[2]).toMatchObject({ n: 2, ocr: true });
+  const deck = blocksOf('Slide 1: Spring\nBeans\nSpeaker notes: Mention frost.\n\nSlide 2 (hidden): (no text)', 'powerpoint');
+  expect(deck.map((b) => b.kind)).toEqual(['slide', 'para', 'note', 'slide']);
+  expect(deck[3]).toMatchObject({ n: 2, text: '', hidden: true });
+  const word = blocksOf('# Lockers\nKeys from reception.\nA £5 deposit.', 'word');
+  expect(word.map((b) => [b.kind, b.text])).toEqual([['heading', 'Lockers'], ['para', 'Keys from reception.'], ['para', 'A £5 deposit.']]);
+  expect(blocksOf('fn a() {}\n\nfn b() {}\n', 'code').map((b) => b.n)).toEqual([1, 2, 3]);
+  // The part: its blocks by their lines (a Markdown block's from the renderer's data-line, 0-based and past its end).
+  expect(inPart({ from: 120, to: 121 }, 121, 140)).toBe(true);
+  expect(inPart({ from: 100, to: 119 }, 120, 140)).toBe(false);
+  expect(blockLines('4-7')).toEqual({ from: 5, to: 7 });
+  expect(blockLines('x')).toBeNull();
+});
+
+test("a big project's parts are the answer's numbered sources, each opening its file at its page, heading or row", async ({ yap, main, fakeLlm, shot }) => {
+  await openView(main, 'Chat');
+  const p = await yap.invoke('project_create', { name: 'Facilities', description: 'Office questions' });
+  const out = await yap.invoke('project_files_add', { id: p.id, paths: [FACILITIES, HANDBOOK, SEATS] });
+  expect(out.added.map((f) => f.name)).toEqual(['facilities-handbook.pdf', 'staff-handbook.md', 'seat-plan.csv']);
+  expect(out.added[0].pages).toBe(40);
+  await main.getByRole('button', { name: 'Projects', exact: true }).click();
+  await main.getByRole('button', { name: /Facilities/ }).click();
+  await page(main).getByRole('button', { name: 'New chat in Facilities' }).click();
+
+  // The question's parts ([1], [2]) and one a search reads ([3]): the fake cites each where its words are.
+  const docsOf = (record) => {
+    const user = record.messages.filter((m) => m.role === 'user').at(-1);
+    const text = typeof user.content === 'string' ? user.content : user.content.map((c) => c.text ?? '').join('');
+    return [...text.matchAll(/<document index="(\d+)">\n<source>([^<]*)<\/source>\n<document_content>\n([\s\S]*?)\n<\/document_content>/g)].map((m) => ({ n: Number(m[1]), source: m[2], text: m[3] }));
+  };
+  const searched = (record) => {
+    const result = record.messages.find((m) => m.role === 'tool');
+    try {
+      return JSON.parse(result.content).data.parts;
+    } catch {
+      return [...String(result.content).matchAll(/"n":(\d+),"of":\d+,"part":\d+,"source":"([^"]*)"/g)].map((m) => ({ n: Number(m[1]), source: m[2] }));
+    }
+  };
+  let cited = null;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'search_project_files', args: { query: 'annual leave carry over', file: 'staff-handbook.md' } }] },
+    {
+      content: (record) => {
+        const docs = docsOf(record);
+        const shed = docs.find((d) => d.text.includes('bike shed'));
+        const seat = docs.find((d) => d.text.includes('Kellbrook room'));
+        // (Its text may be cut to fit the fake's 8K: found by its section.)
+        const leave = searched(record).find((part) => String(part.source).endsWith('section “3. Annual leave”'));
+        cited = { shed, seat, leave, docs };
+        return `The bike shed is behind the north gate [${shed?.n}]. Seat 88 is in the Kellbrook room [${seat?.n}]. Full-time staff get 27 days of annual leave [${leave?.n}].`;
+      },
+    },
+  ]);
+  await box(main).fill('Where is the Kellbrook bike shed, and what is in the Kellbrook room?');
+  await main.getByRole('button', { name: 'Send' }).click();
+  const answer = main.locator('.cbubble.assistant').last();
+  await expect(answer).toContainText('27 days of annual leave');
+  expect(cited.shed, JSON.stringify(cited.docs.map((d) => d.source))).toBeTruthy();
+  expect(cited.seat).toBeTruthy();
+  expect(cited.leave).toBeTruthy();
+  // Numbered in the files' order (the PDF's part first), the search's part after the question's.
+  expect(cited.shed.n).toBe(1);
+  expect(cited.seat.n).toBeGreaterThan(1);
+  expect(cited.shed.source).toMatch(/^facilities-handbook\.pdf \(a PDF, 40 pages: [^)]*\): part \d+ of \d+, page 23/);
+  expect(cited.leave.n).toBeGreaterThan(cited.docs.length);
+
+  // In the answer: three pills, each naming its file and place.
+  const pills = answer.locator('a.md-cite');
+  await expect(pills).toHaveCount(3);
+  await expect(pills.nth(0)).toHaveAttribute('title', 'facilities-handbook.pdf · page 23');
+  await expect(pills.nth(2)).toHaveAttribute('title', /^staff-handbook\.md · “3\. Annual leave”$/);
+  // Under it: "From the project", a chip a part.
+  const row = main.locator('.msgs').getByTestId('chat-sources').last();
+  await expect(row).toContainText('From the project');
+  const chips = row.getByTestId('chat-project-source');
+  await expect(chips).toHaveCount(3);
+  await expect(chips.nth(0)).toContainText('facilities-handbook.pdf');
+  await expect(chips.nth(0)).toContainText('page 23');
+  await expect(chips.nth(1)).toContainText('seat-plan.csv');
+  await expect(chips.nth(1)).toContainText(/rows \d+–\d+/);
+  // Kept with the answer: each its place in its file.
+  const conv = (await yap.invoke('chats_list')).find((c) => c.title.startsWith('Where is the Kellbrook'));
+  const saved = (await yap.invoke('chat_get', { id: conv.id })).messages.at(-1).sources;
+  expect(saved.map((s) => [s.n, s.title, s.project.kind])).toEqual([
+    [1, 'facilities-handbook.pdf', 'pdf'],
+    [cited.seat.n, 'seat-plan.csv', 'sheet'],
+    [cited.leave.n, 'staff-handbook.md', 'markdown'],
+  ]);
+  expect(saved[0].project.at).toBe(23);
+  await shot(main, '07-project-sources');
+
+  // [1] in the answer: the PDF as Yap read it, at page 23, that page marked and in view.
+  await pills.nth(0).click();
+  const view = main.getByTestId('chat-project-file');
+  await expect(view).toBeVisible();
+  await expect(view.getByTestId('chat-project-file-name')).toHaveText('facilities-handbook.pdf');
+  await expect(view.getByTestId('chat-project-file-place')).toHaveText('Page 23');
+  const p23 = view.locator('[data-page="23"]');
+  await expect(p23).toHaveClass(/pfmark/);
+  await expect(p23).toBeInViewport();
+  await expect(view.locator('.pfmark').filter({ hasText: 'Kellbrook bike shed' })).toBeInViewport();
+  await expect(view.locator('[data-page="1"]')).not.toBeInViewport();
+  await expect(view.getByTestId('chat-project-file-facts')).toContainText('40 pages · read only');
+  await shot(main, '08-project-pdf-at-its-page');
+  await theme(yap, main, 'dark');
+  await shot(main, '09-project-pdf-at-its-page-dark');
+  await theme(yap, main, 'light');
+
+  // The Markdown handbook's chip: its section, as the document panel draws a document, marked.
+  await chips.nth(2).click();
+  await expect(view.getByTestId('chat-project-file-name')).toHaveText('staff-handbook.md');
+  await expect(view.getByTestId('chat-project-file-place')).toHaveText('“3. Annual leave”');
+  const marked = view.locator('.pfmd > .pfmark');
+  await expect(marked.filter({ hasText: '27 days of annual leave' })).toBeInViewport();
+  await expect(view.locator('.pfmd h2', { hasText: '1. Working hours' })).not.toBeInViewport();
+  await shot(main, '10-project-markdown-at-its-heading');
+
+  // The seat plan's chip: the sheet view, read only, at its part's first row.
+  await chips.nth(1).click();
+  const sheetView = main.getByTestId('chat-sheet');
+  await expect(sheetView).toBeVisible();
+  await expect(sheetView.getByTestId('chat-sheet-name')).toHaveText('seat-plan.csv');
+  await expect(sheetView.getByTestId('chat-sheet-readonly')).toBeVisible();
+  await expect(sheetView.getByTestId('chat-sheet-cell')).toHaveText(`A${saved[1].project.at}`);
+  await expect(sheetView.getByTestId('chat-sheet-grid')).toContainText(`Seat ${saved[1].project.at}`);
+  expect(saved[1].project.at).toBeGreaterThan(30);
+  await shot(main, '11-project-sheet-at-its-row');
+  await theme(yap, main, 'dark');
+  await shot(main, '12-project-sheet-at-its-row-dark');
+  await theme(yap, main, 'light');
   await yap.invoke('project_delete', { id: p.id });
 });
 

@@ -107,8 +107,9 @@ old or **not signed in, it says so and stops** — the lab never signs in.
 ### A model of Yap's own tool loop: the on-device one
 
 A plan chat is the person's own Claude Code: Yap's tool loop never runs there, so what
-only the tool loop has — documents beside the chat and their outline card, among others —
-can't be tried on the plan. `--model ondevice` tries them on a real model for free: the
+only the tool loop has — its research's caps, the small context's fitting, among others —
+can't be tried on the plan (documents and their outline card can since 16 Nov 2026: over
+Yap's run endpoint). `--model ondevice` tries them on a real model for free: the
 on-device Qwen, served by llama.cpp's own `llama-server` that **you** start (the lab never
 starts or downloads one), with Yap's own sidecar arguments:
 
@@ -159,7 +160,9 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   chat starts in it. A feature script's `ask` step takes `style`, `incognito`,
   `project`, `projectInstructions`, `projectFiles` (a list) and `projectPage` too.
 - `--research` (16 Nov 2026): Research under the message box switched on first
-  (`chat/research.rs`; refused when it can't be, its tooltip saying why). Its plan is a
+  (`chat/research.rs`; refused when it can't be, its tooltip saying why — waited on up to
+  5 s: the chip asks Yap whether Chat's model can research before it turns on, and read
+  at once it said "can't" though it came on a moment later). Its plan is a
   card (`kind: "outline"`, its `outline` the plan): `answer confirm:<n> allow` clicks
   **Start research**, `edit` changes it, as a document's outline. A plain "research …"
   researches without the switch. A feature script's `ask` step takes `research` too.
@@ -278,9 +281,12 @@ or the same as `ask "the second one" --spoken --chat same` while the card waits.
 Edit's Go (each section a heading, or `{key, intent}`), and `said "drop the second part"`
 (or `ask "…" --spoken --chat same`) answers it out loud. The lab seeds the e2e suite's
 config, which has "Show the outline before writing" off: `set '{"config":{"chatOutlineReview":true}}'`
-first. A plan chat makes no documents (it's Claude Code's: no `create_document`): the outline
-needs a model of the tool loop — `--model ondevice` (free: [below](#a-model-of-yaps-own-tool-loop-the-on-device-one)),
-`--fake`, or `--model anthropic:…` (money). The `outline-card` script.
+first. Any model shows it: a plan chat's `create_document` comes over Yap's run endpoint
+(16 Nov 2026, `claude_live/documents.rs`; before, a plan chat made no documents), the tool
+loop's on `--model ondevice` (free: [below](#a-model-of-yaps-own-tool-loop-the-on-device-one)),
+`--fake` or `--model anthropic:…` (money). The `outline-card` script. Typing into the
+document yourself: `type --window panel --css '.docedit p' --text "…"` (the person's words,
+which the next edit must keep).
 
 **Comments on an agent's plan** (`claude_live/approve.rs`, 15 Nov 2026): `answer approve:<n>
 revise "seedlings every morning::Every other morning is enough|::Water the herbs too"` sends
@@ -318,19 +324,27 @@ shows it under "Shot “<name>”").
 What's on screen, over CDP: how many elements match `--css` in that window and how
 many of them show; whether `--text` is in its visible words (`thread`: Chat's thread;
 `panel`: the panel beside the chat); and the window's theme. A script's `expect`
-uses it.
+uses it. With `--css` (16 Nov 2026), whether something else is over the first match
+that shows, at its centre (`covered`), and what (`over`: a toast's words, or the
+element on top) — a toast over the message box's Send, say. (Toasts never cover the
+message box since 16 Nov 2026, `ui/toastClear.js`, so `ask` clicks Send as the person
+does, closing nothing first.)
 
 ```json
 {"ok":true,"window":"thread","found":true,"theme":"light","words":"THE END","has":true}
+{"ok":true,"window":"main","css":"button[aria-label=\"Send\"]","found":true,"theme":"light","count":1,"visible":1,"covered":false}
 ```
 
-### `click --window main|thread|panel --css <selector> [--right]`
+### `click --window main|thread|panel --css <selector> [--right|--hover]`
 
 Clicks one of the test Yap's own buttons, as the person would (14 Nov 2026, for the
 message box's queue: a queued message's **Send now** — `[data-testid="chat-queued-send-now"]`
 — and **Cancel and edit** — `[data-testid="chat-queued-cancel"]`): the first match that
 shows, in Yap's own window only, never a page beside the chat. `--right` right-clicks
-(16 Nov 2026: a file link's menu, `.md-filelink`).
+(16 Nov 2026: a file link's menu, `.md-filelink`). `--hover` puts the pointer on it and
+clicks nothing (16 Nov 2026: a file link's ⋯ comes up, `[data-testid="md-filelink-more"]`
+to click next; `shot` takes it). Playwright's own `:has-text("…")` picks a menu's item:
+`--css '[role="menuitem"]:has-text("Open in VS Code")'`.
 
 ```json
 {"ok":true,"window":"thread","css":"[data-testid=\"chat-queued-send-now\"]","clicked":true}
@@ -434,7 +448,10 @@ Routines (`chat/routines.rs`): Skills that run by themselves, on the test Yap's 
   while it runs (test mode's focus), so its one quiet card goes on the Yap bar — shot
   first ("The Yap bar as the run ended") — then they're back in Yap.
 - `routine now [<id>]`: Settings' Run now (no id: the routine `routine new` made last),
-  waited on the same way (`--no-wait`).
+  waited on the same way (`--no-wait`). A routine's turn still waiting for its time (no run
+  yet: `routine new --at 23:50`) gives way to it, set aside as `stopped` — so a routine made
+  for later can be run now (16 Nov 2026: refused until its time before). Any other turn still
+  going is waited on first.
 - `routine list`: Settings' list (`routines_list`); `on|off|delete <id>`.
 
 ```json
@@ -680,7 +697,7 @@ warn).
 | `set` | As the `set` command: `{ "web": true, "yapCode": true, "config": {…}, "files": [ … ] }`. |
 | `expect` | Checks on the last turn (below). |
 | `fake` | The fake AI's next calls (as `fake`): played only in a `--fake` lab, skipped otherwise, so one script can be checked offline too. |
-| `lab` | One of the lab's own commands (16 Nov 2026): `"lab": "archive"` or `["routine", "new"]` / `["age", "40"]` (its words), `args` its flags (`{ "skill": "…", "in": 2 }`). `routine`, `meeting`, `age`, `archive`, `summary`, `kept`. One that's a turn is the last turn after it (`routine new`'s is still running: `wait` next). |
+| `lab` | One of the lab's own commands (16 Nov 2026): `"lab": "archive"` or `["routine", "new"]` / `["age", "40"]` (its words), `args` its flags (`{ "skill": "…", "in": 2 }`). `routine`, `meeting`, `age`, `archive`, `summary`, `kept`; and `click` and `type` on Yap's own window (`args` `{ "window": "thread", "css": "…", "hover": true }`: not turns, a probe `expect` checks what shows after). One that's a turn is the last turn after it (`routine new`'s is still running: `wait` next). |
 | `note` | Just words, in the summary. |
 
 | `expect` | Passes when |
@@ -715,8 +732,9 @@ warn).
 | `routines` | the default `start` (`--fake` passes too) | Routines (16 Nov 2026; #131 had only its e2e spec): a made-up meeting (`meeting`), then a Skill of the person's own on a schedule two minutes away, run by the scheduler with the person in another app — its own chat, marked in Chat's list, its one quiet card on the bar (shot) — following its instructions (on the plan they never reached Claude Code before: fixed, `chat/turn/plan.rs` `across_lines`); Run now into the same chat (`run.sameChat`); then a Skill on one meeting after another made-up meeting, with the meeting's note: a new Ask thread on it. |
 | `auto-archive` | any `start` | Auto-archive (16 Nov 2026; #125 had only its e2e spec) on the lab's own chats: two real chats made 40 days older one by one (`age --chat same`), the rule set to 30 days — the chat not shown archived, the one Chat shows kept; the notice in Yap's window and its Undo; the next run takes it again; then the other once another chat is shown, a day-old one kept. |
 | `code-chat-prs` | `start --yap-code on` (live) | A Code chat summary's Changes from the real `gh` (16 Nov 2026; #128): the lab's read-only `gh` on, the scratch workspace on a merged branch of Yap's repository (`set --git`, `--gh`), one short question, then `summary`: the branch's pull requests, merged, each `nayballs/Yap #N` with Archive; `gh` off, the quiet line. |
+| `code-chat-file-links` | `start --yap-code on` (live) | A Code chat's file links and Outputs, and Changes on a real pull request with cancelled checks (16 Nov 2026): the scratch workspace on `claude/lab-untested` (#146: two cancelled E2E shards, CodeQL's neutral) with the read-only `gh`; one change to `src/convert.js` asked in a Bypass Code chat; the answer's link hovered (`click --hover`), its ⋯ shown and clicked (the link's menu under it), Open in Yap from it; then the summary: the row "Checks cancelled · N of M passed", never "Checks failing"; the changed file's Outputs row with links opening in Notepad (Windows' own, so on every PC; the file view stays shut: `state`'s `filesOpened` has the command; an editor the PC hasn't opens in Yap instead, as the first pass found with VS Code) and under Windows' default app (a `.js`: shown in Yap instead, said so). Shots of the ⋯, its menu, the outputs' menu and the toast. |
 | `kept-page-outside` | the default `start` | A kept page outside Yap (16 Nov 2026; #130): Chat's model keeps a tip calculator (`save_page`), then `kept save` (Windows' dialog answered by the lab: the suggested `.html` name, the toast, the file with the sandbox's policy and a title) and `kept open` (the copy test mode would have opened, run in the lab's own browser, light and dark; no console errors or policy refusals: soft). |
-| `outline-card` | `start --model ondevice` (or `--fake`) | A new document's outline before the writing on a real model (16 Nov 2026; #129 was checked on `--fake` only: a plan chat makes no documents): asked for a short guide, its `create_document` is a card first, nothing written; Edit's Go with a section renamed, one taken out and a note; the document made with those sections. Its `fake` steps make it pass on `--fake` too. |
+| `outline-card` | any `start`: the plan (since 16 Nov 2026), `--model ondevice` or `--fake` | A new document's outline before the writing on a real model (16 Nov 2026; #129 was checked on `--fake` only): asked for a short guide, its `create_document` is a card first, nothing written; Edit's Go with a section renamed, one taken out and a note; the document made with those sections. Its `fake` steps make it pass on `--fake` too. |
 | `code-chat-retry` | `start --yap-code on` (live) | ↻ Retry and Edit in a Code chat that works directly (16 Nov 2026): the new answer read back — it came back empty before, Rewind having cut the thread where the old one was — with `branch` and the question it answered again. |
 | `agent-sizing` | `start --yap-code on` | Chat sizes each agent (8 Nov 2026, `agents/sizing.rs`): in a Code chat on `lab-sandbox`, a trivial change ("rename the variable x to count in convert.js"), then a hard one ("the tests fail intermittently, find the root cause and fix it"). Soft checks on each turn's `model` and `effort` (the model's judgement): the first small (Haiku or Sonnet, low or medium), the second big (Opus or Fable, high or above); the panel's rows shot. Its `fake` steps size them as the guide says, so `--fake` checks the plumbing. |
 

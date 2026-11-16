@@ -45,7 +45,9 @@ one side.
   some; `opened` / `cited` when a page was read or a document cites it,
   2026-10-31: "The Sources row, compact" below). An answer asked across the meetings keeps its passages the same way
   (`Source` with `note`, `field`, `line`, `ts`, `quote`: the moment its pill
-  opens), and the conversation keeps `scope: "meetings"` (`set_scope` /
+  opens), an answer in a big project the parts of its files it cites
+  (`Source` with `project`: the file and its place, [below](#big-projects-searched-in-parts-2026-11-16)),
+  and the conversation keeps `scope: "meetings"` (`set_scope` /
   `scope_of`), so its follow-ups are asked across the meetings too — the
   passages, the citation rules and checks are [search.md](./search.md#ask-across-meetings-in-chat).
   **Every answer is checked before it's shown and saved**
@@ -5986,8 +5988,46 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   turn's thread, a no is a refusal the model reads; the chip and line are
   wave 4's; a server's answer is outside content (a later write asks, an
   agent is refused): [integrations.md](./integrations.md#connectors-in-plan-chats-wave-7).
-- **What a plan turn doesn't do** (`gates.rs` `on_the_plan`): documents
-  beside the chat, Think's budget (effort covers it). "Remember that…" goes through Yap's own memory
+- **Documents beside the chat** (16 Nov 2026; before, a plan chat made
+  none, so the outline card never showed where most people use Chat): a
+  plain plan chat's session lists the tool loop's rich set —
+  `create_document`, `write_section`, `read_document`, `edit_document`,
+  `document_history`, `restore_document` — over the same endpoint
+  (`claude_live/documents.rs`: [integrations.md](./integrations.md#claude-code-runs-endpoint-integrationsclaude_livers-2026-11-07)),
+  all in `--allowedTools`, named in the prompt with Claude Code's names
+  (`plan.rs` `documents_lines`: what they are, the outline the person sees
+  first, a page cited as a link with the site's name, then
+  `documents::rich::INSTRUCTIONS` mapped). Each call is the tool loop's for
+  its turn (`turn::Context::docs`: the plan turn's own `documents::Turn`,
+  `Built::doc_turn` shared as an `Arc`, so the answer keeps the pill and the
+  chat its document): **a new one's outline first** — the card in the plan
+  turn's thread wherever the tool loop shows it ([The outline before the
+  writing](#the-outline-before-the-writing-2026-11-15): "Show the outline
+  before writing" on, a question card possible, someone watching), the HTTP
+  call held for Go or Edit, the result telling the model what the person
+  made of it; ■ Stop or a newer question makes nothing. The panel opens on
+  it (`Event::Document` through the turn's stream), each section streams in
+  as Claude Code writes its arguments (`claude_plan/map.rs` `ToolArgs`), and
+  the chips fold ("Wrote 3 sections in …"). **The person's words win**: the
+  model's picture follows every call (`documents::after_call`), so an
+  `edit_document` on a block they changed since is refused with the block as
+  it is; the next question's context says what they changed
+  (`documents::context`, as for any model); the panel's saves merge
+  (`merge3`). Only this chat's documents change (`Turn::refuses`), the same
+  title twice a turn is one document (`Turn::made_already`), and the safety
+  rule holds (`tools::refused_after_outside` on the turn's web and
+  connector flags; every plan model is strong, so its documents go on after
+  the web, as on an API key). Claude Code's own `WebSearch` can't be held
+  for the outline as the tool loop's web is (`web::Turn::outline_first`), so
+  a question that makes a new document gets a line in its context
+  (`plan.rs` `new_document_line`: `create_document` now, before any
+  WebSearch). A turn that ends with its new document half written is
+  asked to finish it on the same session first (`plan.rs` `finish_line`,
+  the tool loop's `documents::finish_note`, at most `FINISH_NUDGES` times;
+  each result counted). Never a Code chat's (its changes are an agent's) nor
+  a research's (its report is Yap's, `documents::create_report`).
+- **What a plan turn doesn't do** (`gates.rs` `on_the_plan`): Think's
+  budget (effort covers it). "Remember that…" goes through Yap's own memory
   pass, as for a model without tools (`turn.rs` `remembered`). Yap's own
   summary of a long chat is skipped (`compact.rs`): Claude Code compacts its
   own session.
@@ -6005,7 +6045,7 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   ring not shown: [ai-models.md](./ai-models.md#plan-usage-limits-2026-11-07)).
   A turn's rate-limit events move the ring live; after it, `get_usage` is
   asked on its session once it's free.
-- E2E: `claude-plan*.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
+- E2E: `claude-plan*.spec.js`; documents: `plan-documents.spec.js` (the outline card, then the document beside the chat; an edit; the person's typing kept; Edit on the card) and `cargo test claude_live::documents` ([`docs/e2e-tests.md`](../e2e-tests.md)).
 
 ## Yap Code in Chat (2026-11-07)
 
@@ -6144,7 +6184,10 @@ keeps its screenshots (`Conversation::every_message`: `image_ids`,
 the same versions, the version shown being this one — one a conversation,
 the last switch winning wherever it was made. A phone's ‹ › is `switch_branch`
 (`link/session.rs` `show_version`), its ↻ in a plain chat `begin_retry` with
-the question asked the phone's way under `turn::again`; a change here
+the question asked the phone's way under `turn::again`, its ✎ in a plain
+chat `begin_edit` with the new words asked the phone's way (the question
+named by its place and its time in Chat; kept unless it ended in an error,
+as an edit here is); a change here
 (`chat_branch`, `chat_retry`, an edit's end) tells the phones
 (`link::versions_changed`), and one there tells this view
 (`yap-chat-versions` → `chatState.onVersions`, the chat open read again).
@@ -6527,8 +6570,10 @@ but the outline opened straight into the panel and the writing went on.
   Chat or the Voice Assistant, never across the meetings nor a phone's
   question), any model's tool loop — not only the strong ones' outline-first
   turns. A small context that sheds the card tools (`fit.rs`
-  `Family::Cards`) keeps it: it isn't a tool and takes no room. A plan chat
-  makes no documents (ai-models.md), so it never comes there. Nobody to ask
+  `Family::Cards`) keeps it: it isn't a tool and takes no room. A plan
+  chat's `create_document` comes over Yap's run endpoint and waits on the
+  same card (16 Nov 2026, `claude_live/documents.rs`: [Chat on your Claude
+  plan](#chat-on-your-claude-plan-2026-11-07)). Nobody to ask
   (no page watching, Bypass permissions, an evaluation): made at once.
 - **Its place in the turn** (`tools/agent/dispatch.rs`, `outline::create`):
   `create_document` (the tool loop's `Source::Notes`, the turn's documents
@@ -6595,7 +6640,7 @@ but the outline opened straight into the panel and the writing went on.
   `with_the_outline_off…`); e2e `chat-outline.spec.js` (the card before any
   writing and Go, light and dark; Edit renamed, moved, taken out, added and a
   note, the writing following it; switched off; the Settings switch; asked
-  out loud from another app and "Go ahead, but drop the second part").
+  out loud from another app and "Go ahead, but drop the second part"); on the plan, `plan-documents.spec.js` and `cargo test claude_live::documents`.
 
 ## Styles (2026-11-15)
 
@@ -6692,8 +6737,11 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   tools the deeper ones (`max_uses`, its fetches as many as the reads), a
   provider's own search gets Yap's `read_page` beside it too (the report
   cites only pages read; decided 16 Nov 2026, against "own tools only" for
-  this one mode) —; the gate runs only the web's tools and the notes' reads
-  (`research::allows`; anything else — an app, the clipboard, memory, a
+  this one mode) —; the gate runs only the web's tools, the notes' reads and
+  a big project's two reads (`read_project_file`, `search_project_files`:
+  offered only in a project chat searched in parts — until 16 Nov 2026 they
+  were offered there and then refused, while the plan's session could use
+  them) (`research::allows`; anything else — an app, the clipboard, memory, a
   note, a document, an agent, a page click — refused with
   `research::refusal`); `STEPS` (40) steps; a first step that answers before
   any search is asked once to search first (`SEARCH_FIRST`); past its time
@@ -6748,20 +6796,49 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   rule runs on every call as ever (`tools::refused_after_outside`) — and a
   research runs none of the tools it locks anyway. The plan step has no
   tools and reads no outside content.
-- **Retry and Edit**: a question that plainly asks ("research …") researches
-  again; one researched by the switch alone is answered as an ordinary
-  question (the switch isn't kept with the question).
+- **Retry and Edit** (16 Nov 2026): a question that plainly asks ("research
+  …") researches again; so does one researched by the switch alone,
+  whatever the switch says by then — a question asked with it on keeps it
+  (`ChatMessage::research`, set by `turn.rs` as the research starts;
+  `chats::set_research`), and `chat_retry` runs the question again under
+  `research::scoped(question.research)`, an Edit under its message's
+  (`chat_send`'s `edit`): the plan first, as it was asked. One asked with
+  it off is answered again as ever. An older Yap's save drops the field
+  (its Retry then answers plainly).
+- **Pages by their own titles** (16 Nov 2026): a page read that came with
+  no title of its own — Claude Code's `WebFetch` gives none, so a page no
+  search found showed its address ("en.wikipedia.org/wiki/QWERTY"), as did
+  a fetch with no title, a search result titled only with its site ("www.cambridge.org", Opus in Yap Lab) — gets its own before the report is made
+  (`web::title_read_pages`, `web/page.rs`): its `og:title`, else its
+  `<title>` (`title_in`), from its first 160 KB read on this PC with a page
+  read's guards (a page Yap read in the last minutes: from the cache, nothing
+  fetched), at most the research's reads at once, each within 8 s
+  (`TITLES_WITHIN`; one not back keeps its address); never after a ■. The
+  Sources row and the report's ## Sources then name it. Decided against a
+  read for every plan answer's fetched pages: only Research, whose turn is
+  long already.
+- **A word before the report** (16 Nov 2026; Opus on the plan: "I have
+  enough sources now, so here's the report." then the # title, which made
+  the document's title the plan's and its first lines that word and the
+  title again): at most three short lines with no heading before the first
+  # heading (`research::preamble`) go, and that heading is the title.
 - The log has counts, caps and times, never the question, a plan's words, a
   query or an address.
 - Tests: `cargo test chat::research` (a plain ask, the caps, the reads sized
   to the request, the plan read, the loop's words, citations only to pages
   read and numbered as first cited, progress, the quiet stream, a plan turn's
-  caps); `chat::tools::agent` (a research turn's gate); e2e
+  caps, a word before the title); `chat::chats` (a question kept as
+  researched, for its Retry and Edit); `web::page` (a page's own title, the
+  read pages titled); `chat::tools::agent` (a research turn's gate); e2e
   `chat-research.spec.js` (the switch, the plan before any search, the loop on
   the free sources with its progress, an app and memory refused, the report
   beside the chat with its citations and Sources, ■ Stop, a plain ask, a
-  greeting, web search off; light and dark); Yap Lab on Opus on the plan
-  (`research the history of the QWERTY keyboard layout`).
+  greeting, web search off; Retry and Edit of a switch-researched question
+  researching again with the switch off, a plain one's Retry not; on the
+  plan, a page `WebFetch` read that no search found titled in the row and
+  the report, a word before the title gone; light and dark); Yap Lab on Opus
+  on the plan (`research the history of the QWERTY keyboard layout`; then ↻,
+  the row's titles).
 
 ## Projects (2026-11-15)
 
@@ -6833,9 +6910,25 @@ reads only what a question needs. Yap does the same
   the chat's model (`knowledge::searched`; an 8K model's half is about
   3.5K, a 200K Claude's about 96K). Decided per turn, by the model asked:
   the same project goes whole to Claude and in parts to the on-device 4B.
-- **The parts** (`parts::split`, pure): about 700 tokens each (at most
-  1,100; a smaller section goes on into the next), from the text the
-  attachments' readers made, by its kind — a PDF by its `[Page n]` lines
+- **The parts** (`parts::split`, pure): **sized to the model**
+  (`parts::Size`, `knowledge::Room::size`, by what a question's parts may
+  take, `Room::parts`, from `budget::budget`): up to 2,000 tokens of room
+  (an 8K or 16K model, the on-device one, a plan's few tokens a minute)
+  **small** parts of about 350 tokens (at most 560), so two or three fit
+  where one 700-token part did; up to 8,000 (a 32K or 64K model) the
+  middle size, about 700 (at most 1,100); past it (128K and up, Claude,
+  GPT) **large** ones of about 1,200 (at most 1,800), a dozen at most each
+  with more around the answer. Three sizes, not one a model (Anthropic's
+  own retrieval write-up chunks at about 800): each size's parts are made
+  once a file and kept apart (`knowledge::SPLITS` by file and size, 96 at
+  most), so a turn on another model never takes another size's parts and
+  its part numbers are its own list's; the search index reads the
+  meaning of **every size a model may read a project in**
+  (`knowledge::passages`, `searched_from`: small parts over 4K tokens, the
+  middle size over 10K, large over 40K), a part's key what the embedding
+  model reads of it, so a size's vectors are its own and the sweep drops
+  a size no longer read. A smaller section goes on into the next. From
+  the text the attachments' readers made, by its kind — a PDF by its `[Page n]` lines
   (a scanned page's OCR'd text too; a long page goes on as "[Page n,
   continued]"), a presentation by its slides, a spreadsheet by its sheets'
   rows (each part starting with the sheet's line and the table's head, so
@@ -6845,7 +6938,9 @@ reads only what a question needs. Yap does the same
   lines. Each part knows **where it is**: "pages 12–13", "slides 3–5",
   "sheet "Orders", rows 2–180", "lines 40–120", and the section it's in
   (a heading's path, "Leave › Annual leave"; in a PDF or an older `.doc`, a
-  line that looks like a heading, never a running head or footer). A
+  line that looks like a heading, never a running head or footer), and
+  the lines of the file's text it came from (`Part::lines`, a long page's
+  pieces each their own; `span`, `sheet`: what its pill opens at). A
   project's spreadsheet is read up to 250,000 tokens (a question's is cut
   to 40,000: `sheet::with_most`). The parts are made once a file (its text
   never changes), kept in memory for 64 files.
@@ -6853,13 +6948,18 @@ reads only what a question needs. Yap does the same
   says the files are too long to send whole, lists them with their parts
   (`<project_files>`: "- staff-handbook.pdf (a PDF, 60 pages: …): 40 parts:
   1 pages 1–2, "Welcome"; 2 …"; past 1,500 tokens, each file's count and
-  range), and how to cite ("(staff-handbook.pdf, page 12)"). A model with
+  range), and how to cite: by the part's number in square brackets, before
+  the full stop ("…27 days of leave [2]."), its `<document index>` or the
+  `"n"` a tool gives it, no list of sources (a side question's, whose
+  answer has no sources, in words: "(staff-handbook.pdf, page 12)"). A model with
   tools is told to read what it wasn't given rather than guess.
 - **Each question** gets the parts that match it in its own context
   (`Prompt::project_parts`): "From the project's files, the parts that
-  match this question:" and a `<documents>` block, each part's `<source>`
+  match this question:" and a `<documents>` block, each part's index its
+  citation number (from 1, the files' order), its `<source>`
   its file's (`attachments::source`) then "part 12 of 40, pages 23–24,
-  "4.1 Annual leave"". At most a tenth of a request (1,000 to 16,000
+  "4.1 Annual leave"", then a line on citing them
+  (`knowledge::CITE_LINE`). At most a tenth of a request (1,000 to 16,000
   tokens, `Room::parts`), 12 parts, and two thirds of the room the turn has
   left beside its system prompt, context, tools and question (the budget),
   so the history keeps some. A follow-up of two words or fewer ("and sick
@@ -6894,8 +6994,70 @@ reads only what a question needs. Yap does the same
   (`Event::Chips`); the tool loop starts with them (`Extra::project_chips`),
   the plan's stream too (`ToChat::lead`), and the answer keeps them
   (`finish.rs` `with_first`).
+- **The parts an answer cites are its numbered sources** (16 Nov 2026,
+  `chat/projects/sources.rs`; the Claude app's answers cite a project's
+  files with pills that open them), as a web answer's pages are:
+  - **One numbering** (`sources::Cites`, made with the question's parts
+    and kept in the turn's `Built::project`): the question's parts [1] to
+    [k]; a part a tool reads the next number the turn has, a part read
+    again its own. In Chat's tool loop the web's pages are numbered after
+    the question's parts (`web::Turn::reserve_number` k times, `run.rs`)
+    and a tool's part takes the web's next (as the calendar's meetings
+    do), else the next after the calendar's meetings and the parts so far
+    (`dispatch.rs`, `knowledge::Numbering`). On your Claude plan, whose
+    pages Yap numbers itself as Claude Code's searches come in, one shared
+    numbering (`sources::Numbers`): the plan's `Mapper::numbered` and the
+    project tools over the run endpoint (`claude_live` `Context::project`,
+    `rpc.rs`) both take from it. A tool's part says its `"n"` and how to
+    cite it.
+  - **While it's written**: the question's parts go to the page as sources
+    with their chips (`Event::Chips`), the tool loop's reports and the
+    plan's stream add them to the pages' (`agent.rs` `report`, `plan.rs`
+    `ToChat::chips`), so a "[2]" is a pill as it streams.
+  - **Kept** (`finish::cited_parts`, before the answer's checks, every
+    path): a citation in words naming one of the turn's parts —
+    "(staff-handbook.pdf, page 12)", "(see handbook.md, section "Annual
+    leave")" — becomes its "[n]" (`sources::cite_mentions`; a longer
+    parenthesis keeps its words, the number after it; two parts it could
+    be, or none: left alone); then the parts it cites join its sources,
+    by number, `cited` — never a number another source has (a small
+    model's web pipeline writes its own prompt without the parts and
+    numbers its pages from 1). An answer that cites none keeps none: the
+    chips still say which parts it was given. A part is a `chats::Source`
+    with the file's name its title, its place its site ("page 23", "rows
+    61–90", its section's heading in quotes), its words its quote, and
+    `project` (`ProjectPlace`: the project, the file's id and kind, the
+    part's number, its lines, its first page, slide or row, its sheet and
+    section; an older Yap drops it, and its pill opens nothing).
+  - **In the thread**: the pill (`core/markdown.js`: a project part is a
+    passage, `a.md-cite.md-passage`, titled "staff-handbook.pdf · page
+    23") and a chip under the answer (`SourcesRow.svelte`, a file's mark,
+    "From the project" when they're all parts, else "Sources").
+  - **Opened beside the chat** (`chatState.openSource`, `projectFile.js`
+    `partView`), read only. Chosen per kind, the simplest that works:
+    **a spreadsheet** (a workbook, a CSV) in **the sheet view** (#132),
+    as Excel draws it, from the project's kept copy (`sheets/view.rs`
+    `Src::Project`, `projects::copy_of`; "the project's copy … read only
+    here"), at its sheet and the part's first row, that row's first cell
+    selected (SheetTab's `at`); **any other file** in **the project file
+    view** (`ProjectFileTab.svelte`, a tab of its own, `pfile:<file>`, in
+    the document panel's row): the file as Yap read it — the text the
+    model was given (`project_file_view`, at most 2 MB, only a file of
+    that project by its ids) — scrolled to the part's lines and the part
+    marked (a bar in the accent on a tint), its place in the header
+    ("Page 23", "“3. Annual leave”"). **A PDF** page by page, each
+    `[Page n]` a page's heading (its OCR said), at its page; **Markdown**
+    as the document panel draws a document (`renderMarkdown` with its
+    blocks' lines, the part's blocks marked by them), at its heading; **a
+    Word document**'s paragraphs with its heading styles as headings; **a
+    presentation** slide by slide, its speaker notes quieter, at its
+    slide; **code** as numbered lines (the Code chat file view's look,
+    #109). Not the PDF's own pages as pictures: Yap keeps its copy, but
+    showing it needs a PDF viewer in the panel — the text view is what the
+    model read, OCR'd scans too, and works for every file.
 - **A side question** (Ctrl+;, no tools): the list of parts and the parts
-  that match the side question (`knowledge::for_side`).
+  that match the side question (`knowledge::for_side`), cited in words
+  (its answer has no sources).
 - **The project's page** says how Chat's model reads the files, under them
   (`project_knowledge`, `projectLines.js` `knowledgeLine`): "About 130K
   tokens: too much to send Claude Opus 5.5 whole with every question, so
@@ -6903,14 +7065,23 @@ reads only what a question needs. Yap does the same
   whole".
 - **Privacy**: the log has counts, tokens and parts, never names or words.
 - **Not done**: a part's meaning is read only with search by meaning on
-  (keywords otherwise); a project's parts aren't cited as numbered sources
-  with a pill that opens the file at the page (the answer names them in its
-  words); parts aren't re-split for a model's size (one size for all).
+  (keywords otherwise); a PDF's own pages as pictures beside the chat (its
+  text is shown); a whole small project's files aren't numbered sources
+  (only a big project's parts are); the spreadsheet view selects the
+  part's first row, not every row of it; a research's report keeps only
+  the pages it read as its sources (`research.rs` renumbers them), so a
+  part it cites there isn't a pill.
 - Tests: `cargo test chat::projects` (`parts.rs`: every reader's parts and
-  places, sections, running heads, sizes; `knowledge.rs`: whole or in parts
-  by the model's room, the ranking by words and by meaning, follow-ups, the
-  room, the blocks, the tools); `claude_live` (the plan's run lists and runs
-  them); `word.rs` (heading styles); `chat-projects.spec.js`.
+  places, sections, running heads, sizes, each part's lines, the three
+  sizes; `knowledge.rs`: whole or in parts by the model's room, its size,
+  each size kept and indexed apart, the ranking by words and by meaning,
+  follow-ups, the room, the blocks, the numbered documents, the tools and
+  their numbers; `sources.rs`: one numbering, the cited kept, citations in
+  words); `turn::finish` (the cited parts beside the web's); `claude_live`
+  (the plan's run lists and runs them); `word.rs` (heading styles);
+  `chat-projects.spec.js` (the parts as pills and a row, a PDF opened at
+  its page, Markdown at its heading, a CSV in the sheet view at its row,
+  light and dark).
 
 ## Auto-archive (2026-11-15)
 

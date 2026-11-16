@@ -4,7 +4,10 @@
 // question was edited (‹ 2/2 › under its bubble) and whose answer was
 // retried (‹ 3/3 › first under it, then Copy, 👍 / 👎, ▶ and ↻: the fullest row), a ↻ under way (its
 // answer written afresh, what followed gone with the old version), and the
-// new answer in with its ‹ 4/4 ›. Also checks nothing overflows sideways and
+// new answer in with its ‹ 4/4 ›; then ✎ Edit: a question in the box with
+// "Editing your message" over it and its bubble marked (`edit-open-*`), the
+// new words answered in its place (`edit-answering-*`), and ‹ 2/2 › with ✎
+// under it once the PC says so (`edit-versions-*`). Also checks nothing overflows sideways and
 // every control is a thumb's size (44 px or more). Chromium only, as the
 // page's other screenshots.
 import { test, expect } from '@playwright/test';
@@ -95,6 +98,63 @@ for (const scheme of ['light', 'dark']) {
         pc.send({ type: 'versions', chat: 41 });
         await expect(page.getByTestId('answer-versions').getByTestId('version-count')).toHaveText('4/4');
         await shot(page, `versions-retried-${at}`);
+        expect(await tooSmall(page)).toEqual([]);
+        expect(await noSideways(page)).toBe(true);
+      });
+
+      test(`✎ Edit (${at})`, async ({ page }) => {
+        await servePage(page);
+        await seedDevice(page);
+        await page.addInitScript(() => {
+          if (!sessionStorage.getItem('in-chat')) {
+            localStorage.setItem('yap.link.chat', '41');
+            sessionStorage.setItem('in-chat', '1');
+          }
+        });
+        const questions = { role: 'user', text: 'Is a 35-litre rucksack enough?', edit: 1_731_772_800_300 };
+        const thread = {
+          title: 'Trip packing list',
+          messages: [{ ...THREAD.messages[0], edit: 1_731_772_800_100 }, THREAD.messages[1], questions, THREAD.messages[3]],
+        };
+        const pc = await mockPc(page, { can: [...CAN, 'versions', 'retry', 'rate', 'edit'], threads: { 41: thread } });
+        await open(page);
+        await ready(page, pc);
+        await expect(page.getByTestId('turn')).toHaveCount(2);
+        // ✎ on the second question: in the box, "Editing your message" over it, its bubble marked.
+        await page.getByTestId('turn').nth(1).getByTestId('edit').click();
+        await expect(page.getByTestId('editing')).toBeVisible();
+        await page.getByTestId('input').fill('Is a 35-litre rucksack enough for five days, camping two nights?');
+        await page.getByTestId('input').blur();
+        await shot(page, `edit-open-${at}`);
+        expect(await tooSmall(page)).toEqual([]);
+        expect(await noSideways(page)).toBe(true);
+
+        // Sent: the new words in its place, answered.
+        await page.getByTestId('send').click();
+        await expect.poll(() => pc.of('edit').length).toBe(1);
+        pc.send({ type: 'state', phase: 'thinking' });
+        pc.send({ type: 'step', label: 'Thinking' });
+        pc.send({ type: 'answer', text: 'For two nights out, a 45-litre pack is', final: false });
+        await expect(page.getByTestId('answer').last()).toHaveText('For two nights out, a 45-litre pack is');
+        await shot(page, `edit-answering-${at}`);
+        expect(await noSideways(page)).toBe(true);
+
+        // The answer in, the thread again: ‹ 2/2 › and ✎ under the edited question.
+        const text = 'For two nights out, a 45-litre pack is safer: the tent and stove need the room.';
+        pc.send({ type: 'answer', text, final: true, id: 'chat:41:3', retry: true, edit: 1_731_772_800_900 });
+        pc.send({ type: 'state', phase: 'idle' });
+        pc.threads[41] = {
+          title: 'Trip packing list',
+          messages: [
+            thread.messages[0],
+            thread.messages[1],
+            { role: 'user', text: 'Is a 35-litre rucksack enough for five days, camping two nights?', edit: 1_731_772_800_900, version: { at: 2, shown: 2, count: 2 } },
+            { role: 'assistant', text, id: 'chat:41:3', retry: true },
+          ],
+        };
+        pc.send({ type: 'versions', chat: 41 });
+        await expect(page.getByTestId('turn').nth(1).getByTestId('question-versions').getByTestId('version-count')).toHaveText('2/2');
+        await shot(page, `edit-versions-${at}`);
         expect(await tooSmall(page)).toEqual([]);
         expect(await noSideways(page)).toBe(true);
       });

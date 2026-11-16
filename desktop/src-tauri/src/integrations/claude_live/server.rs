@@ -120,6 +120,9 @@ impl Endpoint {
         // A big project's tools: a Chat run's only.
         spec.projects = spec.projects && tools == super::Tools::Chat;
         let projects = spec.projects;
+        // The documents beside the chat: a Chat run's only.
+        spec.documents = spec.documents && tools == super::Tools::Chat;
+        let documents = spec.documents;
         let eyes = spec.eyes;
         let cards = spec.cards;
         // Yap's own data read by an agent's run: its session's only (a Chat run reads it anyway).
@@ -135,7 +138,7 @@ impl Endpoint {
             runs.len()
         };
         tracing::info!(run = %id, tools = ?tools, agents, eyes = eyes.any(), connectors = connectors.len(), runs = count, "Claude Code endpoint: a run registered");
-        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, agents, memory, eyes, connectors, reads, servers, cards, projects, turn })
+        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, agents, memory, eyes, connectors, reads, servers, cards, projects, documents, turn })
     }
 
     /// The run's URLs answer 404 from now on; its prompts still waiting

@@ -73,7 +73,9 @@ phone: a message with versions shows the PC's ‹ k/n ›, ‹ › on the phone
 switches the version shown on the PC too, and ↻ Retry asks a plain chat's
 answer again from the phone. One version shown a conversation, the last
 switch winning wherever it was made: "Retry and versions on the phone",
-below.
+below. Later that day **✎ Edit** followed: the pencil under the person's
+own question puts it in the phone's box, and Send makes a new version of
+it with its own answer (plain chats only).
 
 The long-term design (yap-private `docs/phone-remote-design.md`: a PWA on
 Yap's website, WebRTC, away from home through a relay) keeps this protocol's
@@ -88,10 +90,10 @@ messages: moving there is a change of transport only.
 | `link/cert.rs` | The self-signed certificate (rcgen, ECDSA P-256, on ring), kept in `<data>/link/`. |
 | `link/pairing.rs` | The QR's one-time token, the 4-digit code, who may say hello (`judge`, pure), hellos per address (`Limiter`). |
 | `link/devices.rs` | Paired phones in `link_devices.json` (a hash of each phone's secret only). |
-| `link/session.rs` | One phone's conversation: the hello, pairing, its questions one at a time (spoken or typed), Talk's words for the phone's box (transcribed only), ▶ on an answer, interrupt, ‹ › on a message's versions and ↻ Retry (`show_version`, `retry`). |
+| `link/session.rs` | One phone's conversation: the hello, pairing, its questions one at a time (spoken or typed), Talk's words for the phone's box (transcribed only), ▶ on an answer, interrupt, ‹ › on a message's versions, ↻ Retry and ✎ Edit (`show_version`, `retry`, `edit`, its checks `edit_refused`). |
 | `link/voice.rs` | Yap's voice for the phone: the speaker's output sent down the socket, never this PC's speakers. |
 | `link/models.rs` | Chat's model and the others it can use (`ready.models`, the first pages'), what Chat's picker shows (`picker`: the very data the desktop picker reads — `ai_model::status` without keys, `model_catalog::snapshot`, `local_llm_status`'s models, "Reads images"), and a switch, an effort or Fast mode from the phone, set as the picker sets them (`ai_model::chat_set_model`, `effort::chat_set_effort`). |
-| `link/chats.rs` | Chat's conversations for the phone's drawer (`recents`: Chat's list, not archived, not a meeting's Ask thread, newest first, 200 at most) and a conversation opened (`thread`: its last 40 messages' words, 6,000 characters each at most, an answer's id for ▶, a question's screenshot text left out; a message's versions, `version_of`, and the answers ↻ may ask again, `retryable`), pure. |
+| `link/chats.rs` | Chat's conversations for the phone's drawer (`recents`: Chat's list, not archived, not a meeting's Ask thread, newest first, 200 at most) and a conversation opened (`thread`: its last 40 messages' words, 6,000 characters each at most, an answer's id for ▶, a question's screenshot text left out; a message's versions, `version_of`, the answers ↻ may ask again, `retryable`, and the questions ✎ may edit, by their time in Chat, `editable`), pure. |
 | `link/pictures.rs` | A question's pictures as they come (`picture` and its `0x03` frames): in order, whole, 4 at most, 3 MB each; the question takes them all or none, and says why. Pure. |
 | `link/lan.rs` | This PC's addresses (IP Helper), which peers may connect, Windows' Public networks (Network List Manager). |
 | `link/wire.rs` | The protocol (below), pure. Its Code side's part is defined once in `desktop/src/lib/core/codeWire.js` (the page imports it; `wire.rs`'s tests hold the two together). |
@@ -231,6 +233,7 @@ is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 | `read_aloud {id}` ⁺ | Say answer `id` (`answer.id`, one this phone was given while Yap runs) on the phone, whole, in Yap's voice. |
 | `show_version {chat, at, place}` ⁺ | ‹ › on a message: conversation `chat`'s message at `at` (its `version.at`) shows its version `place` (1…count) — **on the PC too** ("Retry and versions on the phone", below). Answered with the chat's `thread`; refused (`error`) while that chat is answering, or when it's gone. |
 | `retry {id}` ⁺ | ↻ under answer `id` (one this phone was given, marked `retry`): its question asked again, the old answer kept as a version: `state thinking`, the answer as a typed question's (no `heard`, not said), `state idle`, then `versions`. Refused: `error`, then `state idle`. |
+| `edit {chat, at, ts, text, speak?}` ⁺ | ✎ on a question (16 Nov 2026): conversation `chat`'s question at `at` whose time in Chat is `ts` (its thread message's `edit`, or the checked `answer`'s after it) replaced by `text` (4,000 characters at most) as a new version of it, the old one and what followed it kept: `heard`, `state thinking`, the answer as a typed question's (with `speak`, Talk's words in the box, as a spoken one's: said on the phone), `state idle`, then `versions`. Refused: `error`, then `state idle` (a Code chat, that chat answering, a question that isn't the one the phone showed any more). Offered when `ready.can` has `"edit"`. |
 | `rate {id, rating}` ⁺ | 👍 / 👎 on answer `id` (one this phone was given; 16 Nov 2026, `chat/feedback.rs`): `rating` `"good"` or `"bad"`, `null` to take it back — kept with the answer in Chat on the PC, as the desktop's thumbs keep it (the same mark again keeps the reasons the PC's 👎 card gave). Answered with `rated`. Offered when `ready.can` has `"rate"`. |
 | `set_model {id}` | Switch Chat's model (one of `ready.models`). |
 | `set_model {provider, model, baseUrl?, file?}` ⁺ | Switch Chat's model to a row of Chat's picker, as the desktop picker does (`chat_set_model`'s own checks: a provider with a key, a server Settings knows, an on-device model on this PC). |
@@ -245,9 +248,9 @@ is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 | `pair_wait {code}` | The pairing waits for a yes on the PC, which shows the same code. |
 | `paired {device:{id, secret}}` | Paired: the phone keeps these for its next visits. |
 | `denied {reason}` | Refused, in words the phone can show ("Too many tries from this phone. Try again in 4 minutes."); the socket closes. |
-| `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}], can⁺, picker⁺}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others; `can`: what it answers beyond v1 (`["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak"]`, Remote Control's three, then `"versions"`, `"retry"` and `"rate"`, 16 Nov 2026); `picker`: what Chat's picker shows (`{status, catalog, local, images}`, `link/models.rs`; never a key; `status.images` and `status.imagesSwitch` say whether Chat's model reads pictures and which would). Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
+| `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}], can⁺, picker⁺}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others; `can`: what it answers beyond v1 (`["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak"]`, Remote Control's three, then `"versions"`, `"retry"`, `"rate"` and `"edit"`, 16 Nov 2026); `picker`: what Chat's picker shows (`{status, catalog, local, images}`, `link/models.rs`; never a key; `status.images` and `status.imagesSwitch` say whether Chat's model reads pictures and which would). Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
 | `chats {items:[{id, title, ts}]}` ⁺ | Chat's conversations, newest first (`link/chats.rs`). |
-| `thread {id, title, messages:[{role, text, id?, voice?, pictures?, version?, retry?, rating?}], more}` ⁺ | A conversation's latest messages (words only; an answer's `id` for ▶; `pictures`: how many a question carried; ⁺ `version {at, shown, count}`: its versions' ‹ k/n ›, the one shown being the PC's; ⁺ `retry`: an answer ↻ may ask again; ⁺ `rating`: its 👍 / 👎), `more` when older ones were left out; `id: null` for a new chat (or one that's gone, after an `error`). |
+| `thread {id, title, messages:[{role, text, id?, voice?, pictures?, version?, retry?, rating?, edit?}], more}` ⁺ | A conversation's latest messages (words only; an answer's `id` for ▶; `pictures`: how many a question carried; ⁺ `version {at, shown, count}`: its versions' ‹ k/n ›, the one shown being the PC's; ⁺ `retry`: an answer ↻ may ask again; ⁺ `rating`: its 👍 / 👎; ⁺ `edit`: a question ✎ may edit, its time in Chat, which `edit` names it by), `more` when older ones were left out; `id: null` for a new chat (or one that's gone, after an `error`). |
 | `versions {chat}` ⁺ | Conversation `chat`'s version shown changed (a ‹ ›, a Retry or an Edit on the PC or another phone, or this phone's ↻ at its end; every phone hears): a phone showing it asks for its `thread` again (`open_chat`), once nothing of its own is under way there. |
 | `chat {id, title}` ⁺ | This phone's question went to conversation `id` (the one chosen for it, or a new chat's): its questions go there from now on. |
 | `title {id, title}` ⁺ | Conversation `id` was renamed in Chat (every phone hears it). Chat's titles are a conversation's first words; a rename is the only change. |
@@ -257,7 +260,7 @@ is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 | `rated {id, rating?}` ⁺ | Answer `id`'s 👍 / 👎 as Chat keeps it now (`rate`'s reply): `"good"`, `"bad"`, or none. |
 | `words {text}` ⁺ | Talk's words for the phone's box (`start {mode:"words"}`), transcribed and corrected, trimmed: nothing was asked. Then `state idle`. |
 | `step {label}` | What the answer is doing, in Chat's activity line's words (`chat/activity.rs`: "Searching the web · …"). |
-| `answer {text, final, id⁺, retry⁺}` | **The whole answer so far** (each replaces the last; `""` = words taken back before a tool call); `final:true` with the checked answer and its `id` in Chat (`chat:<conversation>:<index>`, for ▶), and `retry` when ↻ may ask it again from the phone. |
+| `answer {text, final, id⁺, retry⁺, edit⁺}` | **The whole answer so far** (each replaces the last; `""` = words taken back before a tool call); `final:true` with the checked answer and its `id` in Chat (`chat:<conversation>:<index>`, for ▶), `retry` when ↻ may ask it again from the phone, and `edit` when ✎ may edit the question just before it (that question's time in Chat). |
 | `speak_start {rate}`, down frames, `speak_end` | Yap's voice (24 kHz). |
 | `error {message}` | In plain words. |
 | `pong` | |
@@ -386,9 +389,53 @@ phone hears `versions` (this one too: its thread comes back with ‹ 2/2 ›)
 and the PC's Chat view reads the chat again. The phone's page
 ([README](../../phone/web/README.md#retry-and-versions-16-nov-2026)) writes
 the answer afresh in place, what followed leaving the thread, and puts it
-all back if the PC says no (`error`, then `state idle`). **Edit** stays the
-PC's for now: the phone shows an edited question's versions and switches
-them, but has no pencil.
+all back if the PC says no (`error`, then `state idle`).
+
+**✎ Edit on the phone** (`edit {chat, at, ts, text, speak?}`, later on 16
+Nov; the Claude app's pencil under your own message, #106 on the PC): under
+a question the PC marks `edit` — the person's own (what `chats::begin_edit`
+takes), **not in a Code chat** (there Edit is Claude Code's Rewind, as
+Retry is: the PC's, asked first), and one the phone can send again as it
+was: no passage it was asked about and no files from Chat's box with it
+(the phone's questions carry neither; one with them is the PC's to edit),
+its words no longer than a typed question from the phone (4,000
+characters, `link/chats.rs` `editable`). The mark is **the question's time
+in Chat** (`ChatMessage::ts`), and the `edit` names the question by its
+place *and* that time: a question switched away on another screen while
+the person was writing — the same place, another version — is never the
+one changed ("That message changed on your PC…", `EDIT_GONE`). Why the
+time and not the words: the words can be 4,000 characters, twice over in a
+16 KiB frame with the new ones, and a version's time is its own already.
+A question just asked from the phone gets its ✎ from its checked `answer`
+(`edit`: the question's time), so the pencil is there without asking for
+the thread again. The PC (`session.rs` `edit`, its checks the pure
+`edit_refused`): whatever was under way on the phone stopped first, the
+words not empty nor too long, not during a meeting, the chat one the phone
+may use, not a Code chat, not while that chat is answering, the question
+still the one the phone showed; then `begin_edit` sets it and everything
+after it aside as a version, and the new words go **the way the phone's
+questions go** — the Voice Assistant's path (`answer` →
+`assistant::ask_from_phone`: `heard`, thinking, the answer on screen as a
+typed question's, or with `speak` — Talk's words in the box — said on the
+phone), its pictures still on the PC going again (`commands::images_again`;
+their text read again where they went as text, as the PC's Edit does).
+`end_branch` keeps the new version as any question is kept — answered, or
+stopped part-way or before its answer began — and puts the question back
+as it was when it ended in an error or pictures its model can't read
+(`Turn::failed`: `chat_send`'s rule for an edit); then every phone hears
+`versions` (this one's thread comes back with ‹ 2/2 › on the question) and
+the PC's Chat view reads the chat again. In a plain chat Edit is a question
+asked anew in the place of one the phone may already ask again with ↻, so
+it goes through Yap Link's rules as they are: its question is marked the
+phone's when it's saved (`Phone::question_saved` → `remote::asked`, the
+very path every phone question takes), so anything its answer sets going
+is a phone's turn — at most at Auto — and nothing a phone may not do gets a
+new way in. The page
+([README](../../phone/web/README.md#edit-16-nov-2026)): ✎ puts the question
+in the composer's box with **"Editing your message"** over it (✕, ✎ again
+or Escape leave it as it was, and the box gets back what it had); Send
+takes the question and what followed off the thread, the new words in their
+place, and the PC saying no puts them back with the words in the box again.
 
 ## Remote Control (Yap Code from the phone, 2026-11-08)
 
@@ -767,8 +814,10 @@ Settings filled with copies of it. Now:
   last 40 messages' words — never a meeting's Ask thread, an archived chat,
   a screenshot or a file); have one of the answers it was given or opened
   read out (▶: only those, by their id); switch the version shown of a
-  conversation it may open and ask again a plain chat's answer it was given
-  (‹ › and ↻, 16 Nov 2026: Chat's own rules, never a Code chat's Rewind);
+  conversation it may open, ask again a plain chat's answer it was given and
+  send a plain chat's question of the person's own again in new words, the
+  old version kept (‹ ›, ↻ and ✎, 16 Nov 2026: Chat's own rules, never a
+  Code chat's Rewind);
   and switch Chat's model, its effort and Fast mode as Chat's picker does. It can't type into the PC (no
   dictation), add a key, download a model, start meeting notes, delete or
   rename a chat, or read anything else. The picker's data never carries a
@@ -1040,7 +1089,15 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   `versions` and `answer.retry` written (`wire.rs`); a message's ‹ k/n ›
   through a retry, an edit and a switch back, and which answers ↻ may ask
   again — none in a Code chat, nor after a report or another answer
-  (`chats.rs`). **Remote
+  (`chats.rs`). **Edit** (16 Nov 2026): `edit` read (no place or no
+  conversation: not understood), `"edit"` last in `can`, a question's and an
+  answer's `edit` (a time in Chat, left out when none) written (`wire.rs`);
+  which questions ✎ may edit — the person's own with their time, never an
+  answer, a report, a Code chat's, one with a passage or files from the box,
+  one too long for the phone (its screenshot's text not counted) (`chats.rs`
+  `editable`); an edit refused unless it names the question the phone showed
+  — a switched version's, an answer, a gone or archived chat, a Code chat,
+  one answering (`session.rs` `edit_refused`). **Remote
   Control**: the Code side's messages both ways held to the shared
   `core/codeWire.js` (its type lists, its limits, each example parsed or
   written exactly), `ready.code`, a thread's `code` part and `kind`
@@ -1077,7 +1134,12 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   the fake model read —, answered on screen and not said, ‹ 2/2 › on the
   phone and in this PC's Chat view), ‹ on the phone switching this PC's
   version shown, › on this PC switching the phone's (`04f`–`04h`
-  screenshots); Chat's picker over the wire
+  screenshots); ✎ under the typed question (its words in the phone's box,
+  changed and sent: a new version with the fake model's own answer, the old
+  question and its answer not in what it read and kept as a version in
+  `chats.json`, ‹ 2/2 › on the question on the phone and in this PC's Chat
+  view), ‹ on the phone back to the question as it was, on this PC too
+  (`04i`–`04k`); Chat's picker over the wire
   switching Chat's model; Remove cutting the phone off; a replayed link, a
   wrong secret, Deny and another site's page refused; a phone's tabs — three
   restored with old codes (the one it paired with among them) connecting on
@@ -1132,9 +1194,18 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   answer, ‹ › as `show_version` and the PC's thread, its refusal, `versions`
   asking for the thread at once or once the phone's own question is over,
   ↻ as `retry` and its new answer, ↻ refused and the thread put back, ▶
-  stopped first, a PC from before; Chromium and Firefox) and
+  stopped first, a PC from before; ✎ Edit: the question in the box with
+  "Editing your message", sent as `edit` with its place and time, the
+  thread's question and what followed it replaced by the new words, its
+  answer and ✎ on the new words from the answer's `edit`, then ‹ 2/2 › and
+  ‹ › between the versions; ✕, ✎ again and Escape leaving it with the box's
+  draft back; the PC's refusal putting the thread and the words back; a
+  version switched elsewhere leaving the words as a new message; Talk's
+  words in an edit sent as said; ✎ on a question just asked; none from a PC
+  from before, none in a Code chat; Chromium and Firefox) and
   `versions-screens.spec.js` (`versions-thread-*`, `versions-retrying-*`,
-  `versions-retried-*`, light and dark at 360 and 390 px; 44 px targets,
+  `versions-retried-*`, `edit-open-*`, `edit-answering-*`,
+  `edit-versions-*`, light and dark at 360 and 390 px; 44 px targets,
   nothing sideways).
 - The page on its own: `npm run test:link` (`phone/web/tests/`, the PC mocked): the
   sound maths in Node (the resampler both ways, the jitter buffer, the voice

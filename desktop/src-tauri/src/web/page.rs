@@ -309,6 +309,111 @@ pub async fn read_page(ep: &Endpoints, url: &str) -> Result<Page, String> {
     Ok(page)
 }
 
+/// The most of a page read for its title alone ([`page_title`]): its
+/// `<head>` comes first.
+const TITLE_BYTES: usize = 160 * 1024;
+
+/// **A page's own title, read on this PC** (16 Nov 2026), for a page another
+/// tool read that gave none (Claude Code's `WebFetch`, a fetch with no
+/// title): its `og:title`, else its `<title>` ([`title_in`]), from the
+/// page's first part — the guards of a page read, through privacy/net.rs as
+/// a web page. One Yap read in the last minutes: its title as read, nothing
+/// fetched. `None`: it has none, isn't a web page, or didn't open.
+pub async fn page_title(ep: &Endpoints, url: &str) -> Option<String> {
+    let checked = check_url(url).ok()?;
+    let key = format!("{}|{}", ep.cache_scope(), normal_url(checked.as_str()));
+    if let Some((at, page)) = PAGES.lock().unwrap_or_else(|p| p.into_inner()).get(&key) {
+        if at.elapsed() < CACHE_FOR {
+            // (A page with no title of its own is titled with its site.)
+            return (page.title != page.site).then(|| page.title.clone());
+        }
+    }
+    let want = Want {
+        accept: "text/html,application/xhtml+xml;q=0.9",
+        purpose: crate::privacy::net::Purpose::WebPage,
+        max_bytes: TITLE_BYTES,
+        whole: false,
+        kind_ok: &html_kind,
+    };
+    let fetched = fetch(ep, checked, &want).await.ok()?;
+    let title = title_in(&String::from_utf8_lossy(&fetched.body));
+    (!title.is_empty()).then(|| tidy(&title, 120))
+}
+
+/// A page's answer that has a title: HTML (an answer with no type counts).
+/// Pure.
+fn html_kind(kind: &str) -> Result<(), String> {
+    if kind.is_empty() || kind.contains("html") {
+        return Ok(());
+    }
+    Err("Not an HTML page.".into())
+}
+
+/// **A page's own title** from its HTML (or its first part): its
+/// `og:title` (the page's name for itself, without the site's), else the
+/// `<title>` in its head (else any `<title>`, never an SVG's), on one line;
+/// empty when it has neither. Pure.
+pub fn title_in(html: &str) -> String {
+    let doc = dom_query::Document::from(html);
+    let one = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let og = doc.select(r#"meta[property="og:title"], meta[name="og:title"]"#).attr("content").map(|v| one(&v)).filter(|v| !v.is_empty());
+    if let Some(og) = og {
+        return og;
+    }
+    let head = one(&doc.select("head > title").first().text());
+    if !head.is_empty() {
+        return head;
+    }
+    doc.select("svg").remove();
+    one(&doc.select("title").first().text())
+}
+
+/// **The pages a turn read that came with no title of their own**
+/// ([`untitled`]) titled with theirs ([`page_title`]): at most `most`, read
+/// at once, each within `within` — one that has none, or isn't back by then,
+/// keeps the title it had (its address); the others are titled whatever it
+/// does. How many were titled.
+pub async fn title_read_pages(ep: &Endpoints, sources: &mut [crate::chat::chats::Source], most: usize, within: Duration) -> usize {
+    let wanted: Vec<(usize, String)> = sources.iter().enumerate().filter(|(_, s)| untitled(s)).take(most).map(|(i, s)| (i, s.url.clone())).collect();
+    if wanted.is_empty() {
+        return 0;
+    }
+    let titles = futures_util::future::join_all(wanted.iter().map(|(_, url)| async move { tokio::time::timeout(within, page_title(ep, url)).await.ok().flatten() })).await;
+    let mut titled = 0;
+    for ((i, _), title) in wanted.iter().zip(titles) {
+        if let (Some(title), Some(s)) = (title, sources.get_mut(*i)) {
+            s.site = super::source_site(&title, &s.url);
+            s.title = title;
+            titled += 1;
+        }
+    }
+    tracing::info!(pages = wanted.len(), titled, "Web: read pages titled with their own titles");
+    titled
+}
+
+/// **A page read with no title of its own**: one the turn opened whose
+/// title is none or only says where it is — its address (as a page with no
+/// title shows it: `short_url`, the address itself), its site with or
+/// without "www." (a search's result titled so: "www.cambridge.org", Yap
+/// Lab on Opus, 16 Nov 2026), or a part of that address. Pure.
+pub fn untitled(s: &crate::chat::chats::Source) -> bool {
+    if !s.opened || s.note.is_some() || s.screen || check_url(&s.url).is_err() {
+        return false;
+    }
+    let title = s.title.trim();
+    if title.is_empty() || title == s.url.trim() || title == super::short_url(&s.url) {
+        return true;
+    }
+    // Words with a space are a title, however short.
+    if title.contains(char::is_whitespace) {
+        return false;
+    }
+    let site = site_of(&s.url);
+    let bare = title.to_ascii_lowercase();
+    let bare = bare.trim_start_matches("https://").trim_start_matches("http://").trim_start_matches("www.").trim_end_matches('/');
+    !site.is_empty() && (bare == site || bare.starts_with(&format!("{site}/")) || site.ends_with(&format!(".{bare}")) || bare.ends_with(&format!(".{site}")))
+}
+
 /// A page's answer: HTML or plain text (an answer with no type counts as
 /// HTML). Pure.
 fn page_kind(kind: &str) -> Result<(), String> {
@@ -880,5 +985,103 @@ mod tests {
         assert!(picture_kind("image/svg+xml").unwrap_err().contains("SVG"));
         assert!(picture_kind("text/html; charset=utf-8").unwrap_err().contains("isn't a picture (text/html)"));
         assert!(picture_kind("").unwrap_err().contains("no type"));
+    }
+
+    #[test]
+    fn a_pages_own_title_is_its_og_title_else_the_title_in_its_head() {
+        assert_eq!(title_in(r#"<html><head><meta property="og:title" content=" QWERTY   layout "><title>QWERTY - Wikipedia</title></head></html>"#), "QWERTY layout");
+        assert_eq!(title_in(r#"<html><head><meta name="og:title" content="Dvorak"></head></html>"#), "Dvorak");
+        assert_eq!(title_in("<html><head><title>\n  QWERTY -\n Wikipedia </title></head><body></body></html>"), "QWERTY - Wikipedia");
+        // Its first part only (cut mid-head): still there; entities read.
+        assert_eq!(title_in("<!doctype html><html><head><title>Sholes &amp; Glidden typewriter</title><style>body{"), "Sholes & Glidden typewriter");
+        // An empty og:title: the page's <title>.
+        assert_eq!(title_in(r#"<head><meta property="og:title" content=" "><title>Typewriters</title></head>"#), "Typewriters");
+        // A drawing's title is never the page's; none at all: empty.
+        assert_eq!(title_in("<html><body><svg><title>Logo</title></svg><p>Hi</p></body></html>"), "");
+        assert_eq!(title_in("<p>No head at all</p>"), "");
+    }
+
+    #[test]
+    fn a_page_read_with_its_address_for_a_title_wants_its_own() {
+        use crate::chat::chats::Source;
+        let read = |title: &str| Source { n: 1, title: title.into(), url: "https://en.wikipedia.org/wiki/QWERTY".into(), site: "en.wikipedia.org".into(), opened: true, ..Default::default() };
+        for bare in ["", "en.wikipedia.org/wiki/QWERTY", "https://en.wikipedia.org/wiki/QWERTY", "en.wikipedia.org", " EN.wikipedia.org "] {
+            assert!(untitled(&read(bare)), "{bare:?}");
+        }
+        assert!(!untitled(&read("QWERTY - Wikipedia")));
+        // A search's result titled with the site, "www." and all (Yap Lab on Opus, 16 Nov 2026); a word that's a title.
+        let at = |title: &str| Source { title: title.into(), url: "https://www.cambridge.org/core/product/696CCF7347".into(), ..read("") };
+        for bare in ["www.cambridge.org", "cambridge.org", "https://www.cambridge.org/", "cambridge.org/core/product/696CCF7347"] {
+            assert!(untitled(&at(bare)), "{bare:?}");
+        }
+        for title in ["Cambridge", "Dewey", "Cambridge Core", "org chart"] {
+            assert!(!untitled(&at(title)), "{title:?}");
+        }
+        // Only found (never read), a meeting's passage, the screen, an address Yap never opens: never.
+        assert!(!untitled(&Source { opened: false, ..read("") }));
+        assert!(!untitled(&Source { note: Some(4), ..read("") }));
+        assert!(!untitled(&Source { screen: true, ..read("") }));
+        assert!(!untitled(&Source { url: "http://localhost/wiki/QWERTY".into(), ..read("localhost/wiki/QWERTY") }));
+    }
+
+    /// A stand-in web serving `pages` (its path under the stand-in, its HTML), every path asked kept.
+    fn standin(pages: Vec<(&'static str, &'static str)>) -> (Endpoints, std::sync::Arc<Mutex<Vec<String>>>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("a local port");
+        let port = server.server_addr().to_ip().expect("ip").port();
+        let asked = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let kept = asked.clone();
+        std::thread::spawn(move || {
+            for req in server.incoming_requests() {
+                let url = req.url().to_string();
+                kept.lock().unwrap().push(url.clone());
+                let header = tiny_http::Header::from_bytes("content-type", "text/html; charset=utf-8").unwrap();
+                let resp = match pages.iter().find(|(p, _)| url == format!("/standin/{p}")) {
+                    Some((_, html)) => tiny_http::Response::from_string(*html).with_header(header),
+                    None => tiny_http::Response::from_string("gone").with_status_code(404),
+                };
+                let _ = req.respond(resp);
+            }
+        });
+        (Endpoints { exa: String::new(), tavily: String::new(), standin: Some(format!("http://127.0.0.1:{port}/standin")), offline: false }, asked)
+    }
+
+    #[tokio::test]
+    async fn the_pages_read_with_no_title_get_their_own_and_the_rest_stay_as_they_were() {
+        use crate::chat::chats::Source;
+        let (ep, asked) = standin(vec![
+            ("en.wikipedia.org/wiki/Dvorak_keyboard_layout", "<!doctype html><html><head><title>Dvorak keyboard layout - Wikipedia</title></head><body><p>Patented in 1936.</p></body></html>"),
+            ("en.wikipedia.org/wiki/Typewriter", r#"<html><head><meta property="og:title" content="Typewriter"><title>Typewriter - Wikipedia</title></head></html>"#),
+            ("en.wikipedia.org/wiki/Untitled", "<html><body><p>No title here.</p></body></html>"),
+        ]);
+        let page = |n: usize, title: &str, path: &str, opened: bool| {
+            let url = format!("https://en.wikipedia.org/wiki/{path}");
+            Source { n, title: title.into(), site: site_of(&url), url, opened, ..Default::default() }
+        };
+        let mut sources = vec![
+            // Read, titled by its search result: kept, never fetched.
+            page(1, "QWERTY - Wikipedia", "QWERTY", true),
+            // Read by Claude Code's WebFetch, not in the results: its address.
+            page(2, "en.wikipedia.org/wiki/Dvorak_keyboard_layout", "Dvorak_keyboard_layout", true),
+            page(3, "", "Typewriter", true),
+            // A page with no title, one that's gone: as they were.
+            page(4, "en.wikipedia.org/wiki/Untitled", "Untitled", true),
+            page(5, "en.wikipedia.org/wiki/Gone", "Gone", true),
+            // Only found: never read, never fetched.
+            page(6, "", "Remington", false),
+        ];
+        assert_eq!(title_read_pages(&ep, &mut sources, 12, Duration::from_secs(10)).await, 2);
+        let titles: Vec<&str> = sources.iter().map(|s| s.title.as_str()).collect();
+        assert_eq!(titles, ["QWERTY - Wikipedia", "Dvorak keyboard layout - Wikipedia", "Typewriter", "en.wikipedia.org/wiki/Untitled", "en.wikipedia.org/wiki/Gone", ""]);
+        assert_eq!(sources[1].site, "en.wikipedia.org");
+        let mut paths = asked.lock().unwrap().clone();
+        paths.sort();
+        assert_eq!(paths, ["/standin/en.wikipedia.org/wiki/Dvorak_keyboard_layout", "/standin/en.wikipedia.org/wiki/Gone", "/standin/en.wikipedia.org/wiki/Typewriter", "/standin/en.wikipedia.org/wiki/Untitled"]);
+        // At most `most`; and a test run with no stand-in never goes out (nothing titled, nothing changed).
+        let mut more = vec![page(1, "", "Dvorak_keyboard_layout", true), page(2, "", "Typewriter", true)];
+        assert_eq!(title_read_pages(&ep, &mut more, 1, Duration::from_secs(10)).await, 1);
+        assert_eq!((more[0].title.as_str(), more[1].title.as_str()), ("Dvorak keyboard layout - Wikipedia", ""));
+        let mut away = vec![page(1, "", "Dvorak_keyboard_layout", true)];
+        assert_eq!(title_read_pages(&offline(), &mut away, 12, Duration::from_secs(10)).await, 0);
+        assert_eq!(away[0].title, "");
     }
 }

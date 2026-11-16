@@ -2,8 +2,10 @@
   // **A chat's Outputs, beside it** (15 Nov 2026; after the Claude app's Outputs list): every page it kept,
   // document it wrote, file its work changed and file it shared — the one list (outputs.js `outputItems`,
   // drawn by OutputsList.svelte, as a Code chat's summary draws it), each row opening where it lives
-  // (outputsOpen.js). Any chat's: from the panel's row or the conversation's ⋯ → Outputs.
-  // Each row's right-click menu: Open, Show in folder, Copy path, Open in editor (outputsOpen.js).
+  // (outputsOpen.js: a workspace file where "Open file links in" says). Any chat's: from the panel's row or the
+  // conversation's ⋯ → Outputs.
+  // Each row's right-click menu: Open, Open in Yap (when links open elsewhere), Show in folder, Copy path, Open in
+  // editor (outputsOpen.js).
   import { untrack } from 'svelte';
   import { agents as agentsStore } from '../../stores/agents.svelte.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';

@@ -21,6 +21,13 @@
 //   `files.menu(e, { rel, line, abs }, el)` (Open in Yap, Open in <editor>,
 //   Show in folder, Copy path). A Chat (non-Code) chat has no `files`
 //   (null): nothing is looked for and every path stays text.
+// - **Its ⋯** (16 Nov 2026, as Yap's other items have one): a small button
+//   that comes up at the end of the link the pointer is on or the keyboard is
+//   at, over the words after it, and opens the same menu under itself. One
+//   per answer, moved to the link in question, so it's always the next Tab
+//   stop after the focused link (Shift+Tab back to it) and nothing moves in
+//   the words: it's out of their flow (`position: absolute` where it stands:
+//   app.css `.md-filemore`). It stays while its menu is open.
 // - **Never markup**: the words are split into text nodes and an `a` made
 //   here, never set as HTML.
 //
@@ -207,30 +214,213 @@ function linker(node, files, find) {
   }
   /** Its menu (Yap's, at the pointer or under the link): nothing without a `menu`, so the message's own shows. */
   function menu(e) {
+    if (onMore(e)) return moreMenu(e);
     const el = linkOf(e);
     if (!el || !ctx?.menu) return false;
     return ctx.menu(e, refOf(el), el) !== false;
   }
-  const click = (e) => opened(e);
+
+  // ---- The ⋯: one button, after the link the pointer is on or the keyboard is at ----
+  const more = new MoreButton(node, {
+    menu: (e, link, button) => (ctx?.menu ? ctx.menu(e, refOf(link), button) !== false : false),
+  });
+  const onMore = (e) => more.has(e.target);
+  const moreMenu = (e) => more.menu(e);
+  const over = (e) => {
+    const el = linkOf(e);
+    if (el && ctx?.menu) more.show(el);
+  };
+  const out = (e) => {
+    if (linkOf(e) || onMore(e)) more.hideSoon();
+  };
+  const focusIn = (e) => {
+    const el = linkOf(e);
+    if (el && ctx?.menu) more.show(el);
+    else if (!onMore(e)) more.hideSoon();
+  };
+  const focusOut = () => more.hideSoon();
+
+  const click = (e) => {
+    // (The ⋯ handles its own click: its menu, never the file.)
+    if (!onMore(e)) opened(e);
+  };
   const key = (e) => {
+    if (onMore(e)) {
+      if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) moreMenu(e);
+      return;
+    }
     if (e.key === 'Enter') opened(e);
     else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) menu(e);
   };
   node.addEventListener('click', click);
   node.addEventListener('keydown', key);
   node.addEventListener('contextmenu', menu);
+  node.addEventListener('pointerover', over);
+  node.addEventListener('pointerout', out);
+  node.addEventListener('focusin', focusIn);
+  node.addEventListener('focusout', focusOut);
   return {
     update(next) {
       ctx = next;
+      if (!ctx?.menu) more.hide();
       soon();
     },
     destroy() {
       here = false;
       clearTimeout(timer);
       seen.disconnect();
+      more.destroy();
       node.removeEventListener('click', click);
       node.removeEventListener('keydown', key);
       node.removeEventListener('contextmenu', menu);
+      node.removeEventListener('pointerover', over);
+      node.removeEventListener('pointerout', out);
+      node.removeEventListener('focusin', focusIn);
+      node.removeEventListener('focusout', focusOut);
     },
   };
+}
+
+/** How long the ⋯ waits before it goes (ms): long enough to move the pointer onto it. */
+const MORE_GRACE_MS = 220;
+const SVG = 'http://www.w3.org/2000/svg';
+
+/**
+ * **A file link's ⋯** (app.css `.md-filemore`): made the first time it's needed, put right after the link in
+ * question (so the focus goes link → ⋯ → the next link), hidden when neither is hovered or focused and its menu
+ * is shut. `menu(event, link, button)` opens the link's menu under it.
+ */
+class MoreButton {
+  constructor(node, { menu }) {
+    this.node = node;
+    this.open = menu;
+    this.el = null;
+    this.link = null;
+    this.timer = 0;
+    this.menuUp = false;
+  }
+
+  /** Whether `t` is the ⋯ or in it. */
+  has(t) {
+    return !!this.el && t instanceof Node && this.el.contains(t);
+  }
+
+  button() {
+    if (this.el) return this.el;
+    const doc = this.node.ownerDocument;
+    const b = doc.createElement('button');
+    b.type = 'button';
+    b.className = 'md-filemore';
+    b.hidden = true;
+    // (`data-more`: Yap's menus open under a ⋯, its right edge at the button's: ui/contextMenu.svelte.js.)
+    b.dataset.more = '';
+    b.dataset.testid = 'md-filelink-more';
+    b.setAttribute('aria-haspopup', 'menu');
+    b.setAttribute('aria-expanded', 'false');
+    const svg = doc.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'currentColor');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const cx of [5.5, 12, 18.5]) {
+      const c = doc.createElementNS(SVG, 'circle');
+      c.setAttribute('cx', String(cx));
+      c.setAttribute('cy', '12');
+      c.setAttribute('r', '1.9');
+      svg.append(c);
+    }
+    b.append(svg);
+    // (Its own click: the menu under it. Stopped there, so the answer never takes it for a click on its words.)
+    b.addEventListener('click', (e) => this.menu(e));
+    this.el = b;
+    return b;
+  }
+
+  /** At the end of `link`, shown (unless it's busy with another: focused there, or its menu up). */
+  show(link) {
+    const b = this.button();
+    if (this.link !== link || !b.isConnected || b.previousSibling !== link) {
+      // (Busy with its own link: left there, and whatever watches its menu left running.)
+      const busy = this.menuUp || (b.isConnected && b.ownerDocument.activeElement === b);
+      if (busy && this.link?.isConnected) return;
+      link.after(b);
+      this.link = link;
+    }
+    // (Its menu up: the timer is what watches it shut, so it runs on.)
+    if (!this.menuUp) {
+      clearTimeout(this.timer);
+      this.timer = 0;
+    }
+    const rel = link.dataset.rel || '';
+    b.setAttribute('aria-label', `More for ${rel}`);
+    b.title = `More for ${rel}`;
+    b.hidden = false;
+    this.fit();
+  }
+
+  /**
+   * Over the words after the link (over the link's own end when the line has no room), its middle on the
+   * middle of the link's last line: where an out-of-flow box lands in a line depends on the font and the line's
+   * height, so it's measured.
+   */
+  fit() {
+    const b = this.el;
+    const rects = this.link?.getClientRects?.();
+    const last = rects?.length ? rects[rects.length - 1] : null;
+    b.classList.remove('md-filemore-in');
+    b.style.translate = '';
+    if (!last) return;
+    const room = (this.node.closest('.cbubble') || this.node).getBoundingClientRect();
+    if (b.getBoundingClientRect().right > room.right - 1) b.classList.add('md-filemore-in');
+    const box = b.getBoundingClientRect();
+    const dy = Math.round((last.top + last.bottom) / 2 - (box.top + box.bottom) / 2);
+    if (dy) b.style.translate = `0 ${dy}px`;
+  }
+
+  /** Gone in a moment, unless the pointer or the focus is on it or its link, or its menu is up. */
+  hideSoon() {
+    if (!this.el || this.el.hidden) return;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      this.timer = 0;
+      const b = this.el;
+      if (!b) return;
+      const doc = b.ownerDocument;
+      if (this.menuUp && doc.querySelector('[role="menu"]')) return this.hideSoon();
+      if (this.menuUp) {
+        this.menuUp = false;
+        b.setAttribute('aria-expanded', 'false');
+      }
+      const here = (el) => !!el?.isConnected && (el.matches(':hover') || el === doc.activeElement);
+      if (here(b) || here(this.link)) return;
+      this.hide();
+    }, MORE_GRACE_MS);
+  }
+
+  hide() {
+    clearTimeout(this.timer);
+    this.timer = 0;
+    if (this.el) this.el.hidden = true;
+  }
+
+  /** The link's menu under the ⋯ (a click, Enter or Space; a right-click on it at the pointer). */
+  menu(e) {
+    const b = this.el;
+    const link = this.link;
+    if (!b || !link?.isConnected) return false;
+    const opened = this.open(e, link, b);
+    if (opened) {
+      this.menuUp = true;
+      b.setAttribute('aria-expanded', 'true');
+      // (Watched until it's shut: the focus comes back here, and the ⋯ goes as usual after.)
+      this.hideSoon();
+    }
+    return opened;
+  }
+
+  destroy() {
+    clearTimeout(this.timer);
+    this.el?.remove();
+    this.el = null;
+    this.link = null;
+  }
 }

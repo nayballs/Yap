@@ -9,7 +9,9 @@
   //   (remoteControl.js: the same as the "Code · garden-planner" card's);
   // - **Changes**: the branch's pull requests (agents/prs.rs
   //   `code_chat_pull_requests`: the person's own `gh`), newest first — title,
-  //   `owner/repo #N`, state, checks; a click opens it in their browser, a
+  //   `owner/repo #N`, state, checks (GitHub's words: a cancelled one
+  //   cancelled, never failing; "8 of 10 passed"; every state on hover:
+  //   contextBreakdown.js `prChecks`); a click opens it in their browser, a
   //   merged one's Archive archives this chat; a quiet line when there's no
   //   `gh`, no sign-in or no GitHub remote, no section without git;
   // - **Context**: broken down by category from Claude Code's own `/context`
@@ -48,7 +50,7 @@
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import OutputsList from './OutputsList.svelte';
   import { outputMenuItems, outputPath, outputRefs } from './outputsOpen.js';
-  import { contextView, fmtTokens, CATEGORY_TIPS, PR_STATE, PR_CHECKS, prsNote } from './contextBreakdown.js';
+  import { contextView, fmtTokens, CATEGORY_TIPS, PR_STATE, PR_CHECKS, prChecks, prsNote } from './contextBreakdown.js';
   import { REMOTE_ASK, remoteStatus, remoteOn, toggleRemote, remoteOnEverywhere } from './remoteControl.js';
 
   /** `doc`: the panel's state; `conversationId`: the Code chat (null: a new one); `workspace`: its folder's path; `messages`: its thread. */
@@ -349,11 +351,17 @@
                   <span class="mono">{p.repo} #{p.number}</span>
                   <span class="prstate" data-state={p.state}>{PR_STATE[p.state] || p.state}</span>
                   {#if PR_CHECKS[p.checks]}
-                    <span class="prchecks" data-checks={p.checks}>
+                    {@const ck = prChecks(p)}
+                    <span class="prchecks" data-checks={p.checks} title={ck.title} data-testid="chat-summary-pr-checks">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        {#if p.checks === 'passing'}<path d="m5 12 4 4L19 6" />{:else if p.checks === 'failing'}<path d="M6 6l12 12M18 6 6 18" />{:else}<circle cx="12" cy="12" r="7" stroke-dasharray="4 3" />{/if}
+                        {#if p.checks === 'passing'}<path d="m5 12 4 4L19 6" />
+                        {:else if p.checks === 'failing'}<path d="M6 6l12 12M18 6 6 18" />
+                        {:else if p.checks === 'cancelled'}<circle cx="12" cy="12" r="8" /><path d="M6.5 17.5 17.5 6.5" />
+                        {:else if p.checks === 'skipped'}<path d="M5 6l8 6-8 6zM18 6v12" />
+                        {:else if p.checks === 'neutral'}<rect x="6" y="6" width="12" height="12" rx="2.5" />
+                        {:else}<circle cx="12" cy="12" r="7" stroke-dasharray="4 3" />{/if}
                       </svg>
-                      {PR_CHECKS[p.checks]}
+                      <span>{ck.word}{#if ck.detail}<span class="prchecksn">{` · ${ck.detail}`}</span>{/if}</span>
                     </span>
                   {/if}
                 </span>
@@ -952,6 +960,11 @@
   }
   .prchecks[data-checks='running'] {
     color: var(--yap-warning);
+  }
+  /* Cancelled, skipped, neutral: GitHub's grey, never a failure's red. "8 of 10 passed" quieter still. */
+  .prchecksn {
+    color: var(--yap-paper-muted);
+    white-space: nowrap;
   }
   .prarchive {
     flex: 0 0 auto;

@@ -73,6 +73,11 @@ pub(super) async fn with_tools(
         if let Some(b) = research {
             turn = turn.research(b);
         }
+        // A big project's parts sent with the question are [1]…[k]: the
+        // web's pages are numbered after them (chat/projects/sources.rs).
+        for _ in 0..built.project.as_deref().map_or(0, crate::chat::projects::sources::Cites::len) {
+            turn.reserve_number();
+        }
         turn
     });
     let mut messages: Vec<Value> = if built.replay {
@@ -108,13 +113,15 @@ pub(super) async fn with_tools(
         file_pictures: files.as_ref(),
         // Each tool result within what the request has left.
         room: (sizing.mode != crate::chat::budget::Mode::Messages).then_some(fitted.budget.request),
-        docs: Some(&built.doc_turn),
+        docs: Some(built.doc_turn.as_ref()),
         // Words selected in another app or on a page beside the chat (never
         // one of Yap's own windows): web content.
         // (An element picked on a page is web content too: `pages/pick.rs`.)
         web_question: t.about_selection.as_ref().is_some_and(|s| s.web) || crate::chat::pages::pick::has_element(&t.text),
-        // A big project's parts sent with the question: their chips first.
+        // A big project's parts sent with the question: their chips first,
+        // and the turn's numbering of its parts.
         project_chips: &built.project_chips,
+        project_cites: built.project.as_deref(),
         research,
         ..g.extra(memory, Some(conv.id), calendar, agents, connectors.as_ref())
     };
@@ -151,7 +158,8 @@ pub(super) async fn with_tools(
         }
     };
     // gpt-oss sometimes cites as "【1】" (its own browsing style): Yap's [1].
-    let reply = if web.is_some() || calendar_log.len() > 0 { crate::web::bracket_citations(&reply) } else { reply };
+    let cites_parts = built.project.as_deref().is_some_and(|c| !c.is_empty());
+    let reply = if web.is_some() || calendar_log.len() > 0 || cites_parts { crate::web::bracket_citations(&reply) } else { reply };
     // A meeting the answer names without its number gets it.
     let reply = crate::chat::tools::calendar::cite_mentions(&reply, &calendar_log.all());
     let looked = web.as_ref().is_some_and(crate::web::Turn::looked);

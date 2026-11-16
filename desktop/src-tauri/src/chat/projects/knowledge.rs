@@ -7,13 +7,15 @@
 //!   tokens take at most half of what one request to the chat's model
 //!   carries (`budget::budget`: its context less the answer's room, within
 //!   a plan's tokens a minute and a model's cheaper rate).
-//! - **Else in parts** ([`searched`]): each file in parts of about 700
-//!   tokens (`parts.rs`), every part knowing its file and its pages, slides,
-//!   rows or section. The system prompt (stable from turn to turn) says so
-//!   and lists the files and their parts ([`index_block`]); each question
-//!   gets the parts that match it in its own context ([`for_question`]),
-//!   each with a `<source>` naming its file and where it is, so the answer
-//!   can cite it.
+//! - **Else in parts** ([`searched`]): each file in parts of a size for the
+//!   chat's model ([`Room::size`]: about 350 tokens for an 8K model, 700 for
+//!   a 32K one, 1,200 for a 200K Claude; `parts.rs`), every part knowing its
+//!   file and its pages, slides, rows or section. The system prompt (stable
+//!   from turn to turn) says so and lists the files and their parts
+//!   ([`index_block`]); each question gets the parts that match it in its
+//!   own context ([`for_question`]), each numbered (its `<document index>`,
+//!   `sources.rs`) with a `<source>` naming its file and where it is, so the
+//!   answer cites it as "[2]" — its pill opens the file there.
 //! - **Which parts** ([`rank`]): the meetings' hybrid ranking
 //!   (`search/rank.rs`): BM25 over each part's words, with its file's name
 //!   and section as its title, and — when search by meaning is on and its
@@ -28,7 +30,8 @@
 //!   run endpoint (`claude_live/rpc.rs`). Read only.
 //! - **The chat says which parts were used**: a chip each ("Used from the
 //!   project: staff-handbook.pdf, pages 23–24"), the tools' too, folded
-//!   under the answer as its other steps are (`chatSteps.js`).
+//!   under the answer as its other steps are (`chatSteps.js`); the ones the
+//!   answer cites are its numbered sources (`sources.rs`).
 //!
 //! The log has counts and tokens, never names or words.
 
@@ -37,7 +40,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 
-use super::parts::{self, Part};
+use super::parts::{self, Part, Size};
+use super::sources::Cites;
 use super::{Project, ProjectFile};
 use crate::search::store::Key;
 
@@ -98,6 +102,41 @@ impl Room {
     pub fn list(&self) -> u64 {
         (self.whole() / 25).clamp(LIST_LEAST, LIST_MOST)
     }
+
+    /// **The parts' size for this model**, by what a question's parts may
+    /// take ([`Room::parts`]): up to [`SMALL_ROOM`] (an 8K or 16K model, a
+    /// plan's few tokens a minute) small ones, so two or three fit; up to
+    /// [`MEDIUM_ROOM`] (a 32K or 64K model) the middle size; past it (128K
+    /// and up) large ones, a dozen at most each with more around the answer.
+    /// Pure.
+    pub fn size(&self) -> Size {
+        match self.parts() {
+            n if n <= SMALL_ROOM => Size::SMALL,
+            n if n <= MEDIUM_ROOM => Size::MEDIUM,
+            _ => Size::LARGE,
+        }
+    }
+}
+
+/// [`Room::size`]'s steps: a question's parts' room up to this takes small
+/// parts…
+pub const SMALL_ROOM: u64 = 2_000;
+/// …up to this the middle size, and past it large ones.
+pub const MEDIUM_ROOM: u64 = 8_000;
+
+/// **The least a project's files take to be searched at `size`** by any
+/// model that reads parts of it ([`Room::size`]): an 8K model's whole is
+/// about 3.5K tokens (small parts from 4K, as the index has always read),
+/// a 24K one's about 10K (the middle size), a 90K one's about 40K (large).
+/// What the search index reads the meaning of. Pure.
+pub fn searched_from(size: Size) -> u64 {
+    if size == Size::SMALL {
+        PARTS_LEAST * 4
+    } else if size == Size::MEDIUM {
+        10_000
+    } else {
+        40_000
+    }
 }
 
 /// A project's files' tokens, all together.
@@ -132,8 +171,8 @@ pub struct Split {
 }
 
 impl Split {
-    fn of(f: &ProjectFile, text: &str) -> Split {
-        let parts = parts::split(text, &f.kind);
+    fn of(f: &ProjectFile, text: &str, size: Size) -> Split {
+        let parts = parts::split(text, &f.kind, size);
         let terms = parts.iter().map(|p| crate::search::rank::terms(&p.text)).collect();
         let titles = parts.iter().map(|p| crate::search::rank::terms(&format!("{} {}", f.name, p.section))).collect();
         let model = crate::search::embedder::model().tag.to_string();
@@ -148,51 +187,60 @@ fn embedded(f: &ProjectFile, p: &Part) -> String {
     crate::search::embedder::document(&format!("{} \u{2014} {}", f.name, p.place()), &p.text)
 }
 
-/// The files' parts, by file id (a file's text never changes once added).
-static SPLITS: Mutex<Option<HashMap<String, Arc<Split>>>> = Mutex::new(None);
-/// Files whose parts are kept, at most (then it starts again).
-const KEPT: usize = 64;
+/// **The files' parts, by file id and size** (a file's text never changes
+/// once added; each size its own parts, so a turn on another model never
+/// takes another size's, and their search keys are their own: a part's key
+/// is what the embedding model reads of it).
+static SPLITS: Mutex<Option<Splits>> = Mutex::new(None);
+/// [`SPLITS`]' map: by file id and size.
+type Splits = HashMap<(String, Size), Arc<Split>>;
+/// Files' parts kept, at most (then it starts again).
+const KEPT: usize = 96;
 
-/// **File `f` of project `project` in parts**, made once (`None`: its text
-/// is gone). Reads it.
-pub fn split_of(project: &str, f: &ProjectFile) -> Option<Arc<Split>> {
+/// **File `f` of project `project` in parts of `size`**, made once (`None`:
+/// its text is gone). Reads it.
+pub fn split_of(project: &str, f: &ProjectFile, size: Size) -> Option<Arc<Split>> {
     let tag = crate::search::embedder::model().tag;
-    if let Some(s) = SPLITS.lock().ok().and_then(|g| g.as_ref().and_then(|m| m.get(&f.id).cloned())).filter(|s| s.model == tag) {
+    let key = (f.id.clone(), size);
+    if let Some(s) = SPLITS.lock().ok().and_then(|g| g.as_ref().and_then(|m| m.get(&key).cloned())).filter(|s| s.model == tag) {
         return Some(s);
     }
     let text = super::file_text(project, &f.id)?;
-    let s = Arc::new(Split::of(f, &text));
+    let s = Arc::new(Split::of(f, &text, size));
     if let Ok(mut g) = SPLITS.lock() {
         let m = g.get_or_insert_with(HashMap::new);
         if m.len() >= KEPT {
             m.clear();
         }
-        m.insert(f.id.clone(), s.clone());
+        m.insert(key, s.clone());
     }
     Some(s)
 }
 
-/// A file taken out: its parts go too.
+/// A file taken out: its parts go too, every size's.
 pub fn forget(file: &str) {
     if let Ok(mut g) = SPLITS.lock() {
         if let Some(m) = g.as_mut() {
-            m.remove(file);
+            m.retain(|(id, _), _| id != file);
         }
     }
 }
 
 /// **Every searched part's key and what the embedding model reads of it**,
-/// across every project (the search index's background pass: `index.rs`).
-/// Only the files of projects big enough to be searched for some model
-/// (over [`PARTS_LEAST`]·4 tokens): a small one always goes whole. Reads
-/// the files.
+/// across every project (the search index's background pass: `index.rs`),
+/// at every size a model may read it in ([`searched_from`]: a project over
+/// 4K tokens in small parts, over 10K in the middle size too, over 40K in
+/// large ones too): whichever model Chat asks next, its parts' meaning is
+/// there. A small project always goes whole. Reads the files.
 pub fn passages() -> Vec<(Key, String)> {
     let projects: Vec<Project> = super::with_store(|s| s.projects.clone());
     let mut out = Vec::new();
-    for p in projects.iter().filter(|p| total(p) > PARTS_LEAST * 4) {
-        for f in &p.files {
-            let Some(s) = split_of(&p.id, f) else { continue };
-            out.extend(s.parts.iter().zip(&s.keys).map(|(part, k)| (*k, embedded(f, part))));
+    for p in &projects {
+        for size in Size::ALL.into_iter().filter(|s| total(p) > searched_from(*s)) {
+            for f in &p.files {
+                let Some(s) = split_of(&p.id, f, size) else { continue };
+                out.extend(s.parts.iter().zip(&s.keys).map(|(part, k)| (*k, embedded(f, part))));
+            }
         }
     }
     out
@@ -300,14 +348,14 @@ fn source(f: &ProjectFile, p: &Part, count: usize) -> String {
     format!("{file}: part {} of {count}, {}", p.n, p.place())
 }
 
-/// The parts as documents, as attachments go (`<documents>`).
-fn documents(files: &[&ProjectFile], splits: &[Arc<Split>], chosen: &[(usize, usize)]) -> String {
+/// The parts as documents, as attachments go (`<documents>`), each its
+/// citation number its index (`numbers`, in `chosen`'s order).
+fn documents(files: &[&ProjectFile], splits: &[Arc<Split>], chosen: &[(usize, usize)], numbers: &[usize]) -> String {
     let mut out = String::from("<documents>\n");
-    for (i, &(fi, pi)) in chosen.iter().enumerate() {
+    for (&(fi, pi), n) in chosen.iter().zip(numbers) {
         let p = &splits[fi].parts[pi];
         out.push_str(&format!(
-            "<document index=\"{}\">\n<source>{}</source>\n<document_content>\n{}\n</document_content>\n</document>\n",
-            i + 1,
+            "<document index=\"{n}\">\n<source>{}</source>\n<document_content>\n{}\n</document_content>\n</document>\n",
             source(files[fi], p, splits[fi].parts.len()),
             p.text.trim_end()
         ));
@@ -321,14 +369,26 @@ pub fn used_chip(f: &ProjectFile, p: &Part) -> String {
     format!("Used from the project: {}, {}", f.name, p.named())
 }
 
+/// How an answer cites a part (`numbered`: by its number, a pill that opens
+/// it; else in words, a side question's, whose answer has no sources).
+fn citing(numbered: bool) -> &'static str {
+    if numbered {
+        " Use them when they help, and cite the part each fact comes from by its number in square brackets, right after the fact and before the full stop, like \"Full-time staff get 27 days of leave [2].\": the index of its <document>, or the \"n\" a tool gives it. Yap shows each cited part with its file and place, so write no list of sources."
+    } else {
+        " Use them when they help, and say which file and where in it each fact comes from, as its source names it, like (staff-handbook.pdf, page 12)."
+    }
+}
+
 /// **The system prompt's lines for a searched project** (after its name
 /// and instructions): that its files go in parts, how to read more (`tools`:
-/// the model has the tools), how to cite, and the files with their parts —
-/// each part named while the list takes at most `list` tokens
-/// ([`Room::list`]), else each file's count. Stable from turn to turn.
-/// Reads the files.
-pub fn index_block(p: &Project, tools: bool, list: u64) -> String {
-    let splits: Vec<(&ProjectFile, Option<Arc<Split>>)> = p.files.iter().map(|f| (f, split_of(&p.id, f))).collect();
+/// the model has the tools), how to cite (`numbered`: by number, as Chat's
+/// answers do), and the files with their parts in `room`'s size — each part
+/// named while the list takes at most [`Room::list`] tokens, else each
+/// file's count. Stable from turn to turn. Reads the files.
+pub fn index_block(p: &Project, tools: bool, room: Room, numbered: bool) -> String {
+    let size = room.size();
+    let list = room.list();
+    let splits: Vec<(&ProjectFile, Option<Arc<Split>>)> = p.files.iter().map(|f| (f, split_of(&p.id, f, size))).collect();
     let k = (total(p) / 1000).max(1);
     let mut out = format!(
         "\nThe project's files are its knowledge: {} file{}, about {k}K tokens in all, too long to send whole. So each question comes with the parts of them that match it, under \"From the project's files\" in its context, each with a <source> naming its file and where it is in it.",
@@ -338,7 +398,7 @@ pub fn index_block(p: &Project, tools: bool, list: u64) -> String {
     if tools {
         out.push_str(&format!(" Each file is in numbered parts (listed below). When the answer may be in a part you weren't given, read it with {READ} (the file's name and the part's number) or look for words across the files with {SEARCH}; never guess what a file says."));
     }
-    out.push_str(" Use them when they help, and say which file and where in it each fact comes from, as its source names it, like (staff-handbook.pdf, page 12).");
+    out.push_str(citing(numbered));
     let lines = |named: bool| -> Vec<String> {
         splits
             .iter()
@@ -377,11 +437,14 @@ pub fn index_block(p: &Project, tools: bool, list: u64) -> String {
 }
 
 /// **What a question gets of a searched project**: the parts that match it,
-/// as documents (`block`, for the question's context), and a chip each.
-#[derive(Debug, Clone, Default, PartialEq)]
+/// as documents (`block`, for the question's context), a chip each, and
+/// the turn's numbering of them (`cites`: theirs first, then the tools',
+/// `sources.rs`).
+#[derive(Debug, Clone)]
 pub struct Found {
     pub block: String,
     pub chips: Vec<String>,
+    pub cites: Arc<Cites>,
 }
 
 /// What's said when no part matches the question.
@@ -393,51 +456,59 @@ fn nothing_matched(tools: bool) -> String {
     }
 }
 
-/// **The parts of `p`'s files for `query`** within `room` tokens, ranked
-/// with `similarity` (pure but for the files' reads).
-pub fn found_in(p: &Project, query: &Query, similarity: &dyn Fn(&Key) -> Option<f32>, room: u64, tools: bool) -> Found {
-    let (files, splits): (Vec<&ProjectFile>, Vec<Arc<Split>>) = p.files.iter().filter_map(|f| split_of(&p.id, f).map(|s| (f, s))).unzip();
+/// **The parts of `p`'s files for `query`** within `room` tokens, in
+/// `cites`' size, ranked with `similarity`, each numbered there from 1 in
+/// the files' order (pure but for the files' reads).
+pub fn found_in(p: &Project, query: &Query, similarity: &dyn Fn(&Key) -> Option<f32>, room: u64, tools: bool, cites: Arc<Cites>) -> Found {
+    let (files, splits): (Vec<&ProjectFile>, Vec<Arc<Split>>) = p.files.iter().filter_map(|f| split_of(&p.id, f, cites.size).map(|s| (f, s))).unzip();
     let ranked = rank_query(&splits, query, similarity, MOST_PARTS);
     let mut chosen = within(&ranked, &splits, room);
     if chosen.is_empty() {
-        return Found { block: nothing_matched(tools), chips: Vec::new() };
+        return Found { block: nothing_matched(tools), chips: Vec::new(), cites };
     }
     // In the files' own order, as they read.
     chosen.sort();
     let chips = chosen.iter().map(|&(fi, pi)| used_chip(files[fi], &splits[fi].parts[pi])).collect();
+    let numbers: Vec<usize> = chosen.iter().map(|&(fi, pi)| cites.number_own(&p.id, files[fi], &splits[fi].parts[pi])).collect();
     let block = format!(
         "From the project's files, the parts that match this question{}:\n{}",
         if tools { format!(" ({READ} reads any other part)") } else { String::new() },
-        documents(&files, &splits, &chosen)
+        documents(&files, &splits, &chosen, &numbers)
     );
-    Found { block, chips }
+    Found { block, chips, cites }
 }
+
+/// What a Chat turn says after the question's parts (never a side
+/// question's, cited in words): how to cite them.
+pub const CITE_LINE: &str = "Cite a part of the project's files by its number in square brackets, like [1] (its <document index>), right after what it says.";
 
 /// **The parts for this question** (`previous`: the person's question before
 /// it, for a short follow-up) when conversation `conv` is in a project
-/// searched for `room`; at most `allow` tokens of them (the room the turn
-/// has left, `turn/prompt.rs`). `None`: in no project, or one that goes
-/// whole.
+/// searched for `room`, in parts of its size ([`Room::size`]); at most
+/// `allow` tokens of them (the room the turn has left, `turn/prompt.rs`).
+/// `None`: in no project, or one that goes whole.
 pub async fn for_question(conv: Option<u64>, question: &str, previous: Option<&str>, room: Room, allow: u64, tools: bool) -> Option<Found> {
     let p = super::of_conversation(conv)?;
     if !searched(&p, room) {
         return None;
     }
+    let size = room.size();
     let vector = meaning(question).await;
-    let splits: Vec<Arc<Split>> = p.files.iter().filter_map(|f| split_of(&p.id, f)).collect();
+    let splits: Vec<Arc<Split>> = p.files.iter().filter_map(|f| split_of(&p.id, f, size)).collect();
     let sims = similarities(&splits, vector.as_deref());
     let query = query_terms(question, previous);
-    let found = found_in(&p, &query, &|k| sims.get(k).copied(), room.parts().min(allow), tools);
-    tracing::info!(files = p.files.len(), parts = found.chips.len(), meaning = vector.is_some(), tokens = crate::chat::budget::estimate(&found.block), "Chat: a project's files searched for a question");
+    let found = found_in(&p, &query, &|k| sims.get(k).copied(), room.parts().min(allow), tools, Arc::new(Cites::new(size)));
+    tracing::info!(files = p.files.len(), parts = found.chips.len(), size = size.target, meaning = vector.is_some(), tokens = crate::chat::budget::estimate(&found.block), "Chat: a project's files searched for a question");
     Some(found)
 }
 
 /// **A side question's project block** (`chat/side.rs`: one call, no
-/// tools): the whole files while they fit, else the index and the parts that
-/// match the side question. `None`: the chat's in no project.
+/// tools, no sources under its answer): the whole files while they fit,
+/// else the index and the parts that match the side question, cited in
+/// words. `None`: the chat's in no project.
 pub async fn for_side(conv: u64, question: &str, room: Room) -> Option<String> {
     let p = super::of_conversation(Some(conv))?;
-    let stable = super::prompt_block(Some(conv), room, false)?;
+    let stable = super::prompt_block(Some(conv), room, false, false)?;
     if !searched(&p, room) {
         return Some(stable);
     }
@@ -542,31 +613,55 @@ fn names(p: &Project) -> String {
     p.files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", ")
 }
 
-/// A part as a tool gives it.
-fn part_json(f: &ProjectFile, s: &Split, pi: usize) -> Value {
+/// A part as a tool gives it: with its citation number (`n`), when the turn
+/// numbers its sources.
+fn part_json(f: &ProjectFile, s: &Split, pi: usize, n: Option<usize>) -> Value {
     let p = &s.parts[pi];
-    json!({ "file": f.name, "part": p.n, "of": s.parts.len(), "where": p.place(), "source": source(f, p, s.parts.len()), "text": p.text })
+    let mut v = json!({ "file": f.name, "part": p.n, "of": s.parts.len(), "where": p.place(), "source": source(f, p, s.parts.len()), "text": p.text });
+    if let Some(n) = n {
+        v["n"] = json!(n);
+    }
+    v
+}
+
+/// What a tool's result says about citing its parts.
+const CITE_NOTE: &str = "Cite a part by its \"n\" in square brackets, like [3], right after what it says.";
+
+/// **The turn's numbering for a tool's parts** (`sources.rs`): the turn's
+/// cites, and where its next number comes from (Chat's tool loop: after
+/// the web's and the calendar's; your Claude plan: the turn's own).
+pub struct Numbering<'a> {
+    pub cites: &'a Cites,
+    pub next: &'a mut (dyn FnMut() -> usize + Send),
+}
+
+impl Numbering<'_> {
+    fn number(&mut self, project: &str, f: &ProjectFile, p: &Part) -> usize {
+        self.cites.number(project, f, p, &mut *self.next)
+    }
 }
 
 /// **A call to one of the tools** in conversation `conv` (`None`: no
-/// project; said so).
-pub async fn execute(name: &str, args: &Value, conv: Option<u64>) -> Value {
+/// project; said so), its parts numbered with the turn's sources
+/// (`numbering`: none, a turn that keeps none), in the turn's size.
+pub async fn execute(name: &str, args: &Value, conv: Option<u64>, numbering: Option<Numbering<'_>>) -> Value {
     let Some(p) = super::of_conversation(conv) else {
         return failed("This chat isn't in a project: there are no project files to read.".into(), "No project files here".into());
     };
     match name {
-        READ => read(&p, args),
-        SEARCH => search(&p, args).await,
+        READ => read(&p, args, numbering),
+        SEARCH => search(&p, args, numbering).await,
         _ => failed(format!("Unknown tool: {name}"), "Didn't read the project's files".into()),
     }
 }
 
-fn read(p: &Project, args: &Value) -> Value {
+fn read(p: &Project, args: &Value, mut numbering: Option<Numbering<'_>>) -> Value {
+    let size = numbering.as_ref().map_or(Size::MEDIUM, |n| n.cites.size);
     let asked = args["file"].as_str().unwrap_or("");
     let Some(f) = file_named(p, asked) else {
         return failed(format!("No file in this project is called \"{}\". Its files: {}.", asked.trim(), names(p)), "Didn't find that file in the project".into());
     };
-    let Some(s) = split_of(&p.id, f) else {
+    let Some(s) = split_of(&p.id, f, size) else {
         return failed(format!("{} is gone from this PC.", f.name), format!("Couldn't read {} from the project", f.name));
     };
     let n = args["part"].as_u64().or_else(|| args["part"].as_str().and_then(|t| t.trim().parse().ok())).unwrap_or(1).max(1) as usize;
@@ -574,15 +669,20 @@ fn read(p: &Project, args: &Value) -> Value {
         return failed(format!("{} has {} part{} (1 to {}).", f.name, s.parts.len(), if s.parts.len() == 1 { "" } else { "s" }, s.parts.len()), format!("Didn't read part {n} of {}", f.name));
     }
     let pi = n - 1;
-    let mut data = part_json(f, &s, pi);
+    let cite = numbering.as_mut().map(|nb| nb.number(&p.id, f, &s.parts[pi]));
+    let mut data = part_json(f, &s, pi, cite);
     if let Some(next) = s.parts.get(pi + 1) {
         data["next"] = json!(format!("part {}: {}", next.n, next.place()));
+    }
+    if cite.is_some() {
+        data["cite"] = json!(CITE_NOTE);
     }
     tracing::info!(part = n, of = s.parts.len(), "Chat: a project file's part read");
     ok(data, format!("Read from the project: {}, {}", f.name, s.parts[pi].named()))
 }
 
-async fn search(p: &Project, args: &Value) -> Value {
+async fn search(p: &Project, args: &Value, mut numbering: Option<Numbering<'_>>) -> Value {
+    let size = numbering.as_ref().map_or(Size::MEDIUM, |n| n.cites.size);
     let query = args["query"].as_str().unwrap_or("").trim().to_string();
     if query.is_empty() {
         return failed("Say what to look for.".into(), "Didn't search the project's files".into());
@@ -595,7 +695,7 @@ async fn search(p: &Project, args: &Value) -> Value {
         },
         None => p.files.iter().collect(),
     };
-    let (files, splits): (Vec<&ProjectFile>, Vec<Arc<Split>>) = files.into_iter().filter_map(|f| split_of(&p.id, f).map(|s| (f, s))).unzip();
+    let (files, splits): (Vec<&ProjectFile>, Vec<Arc<Split>>) = files.into_iter().filter_map(|f| split_of(&p.id, f, size).map(|s| (f, s))).unzip();
     let vector = meaning(&query).await;
     let sims = similarities(&splits, vector.as_deref());
     let ranked = rank(&splits, &crate::search::rank::terms(&query), &|k| sims.get(k).copied(), SEARCH_PARTS);
@@ -604,8 +704,18 @@ async fn search(p: &Project, args: &Value) -> Value {
     if ranked.is_empty() {
         return ok(json!({ "parts": [], "note": "No part of the project's files matches those words. Try other words, or read a part by its number." }), display);
     }
-    let parts: Vec<Value> = ranked.iter().map(|&(fi, pi)| part_json(files[fi], &splits[fi], pi)).collect();
-    ok(json!({ "parts": parts }), display)
+    let parts: Vec<Value> = ranked
+        .iter()
+        .map(|&(fi, pi)| {
+            let cite = numbering.as_mut().map(|nb| nb.number(&p.id, files[fi], &splits[fi].parts[pi]));
+            part_json(files[fi], &splits[fi], pi, cite)
+        })
+        .collect();
+    let mut data = json!({ "parts": parts });
+    if numbering.is_some() {
+        data["cite"] = json!(CITE_NOTE);
+    }
+    ok(data, display)
 }
 
 /// Whitespace runs as one space, at most `max` characters.
@@ -631,9 +741,19 @@ pub fn claude_code_names(text: &str) -> String {
 }
 
 /// **A tool's result as Yap's run endpoint answers** (your Claude plan):
-/// its JSON, as text (its `displayText` the chip), and whether it failed.
-pub async fn mcp_call(name: &str, args: &serde_json::Map<String, Value>, conv: Option<u64>) -> (String, bool) {
-    let out = execute(name, &Value::Object(args.clone()), conv).await;
+/// its JSON, as text (its `displayText` the chip), and whether it failed;
+/// its parts numbered from the turn's own numbering (`cites`: the plan
+/// turn's, shared with Claude Code's pages).
+pub async fn mcp_call(name: &str, args: &serde_json::Map<String, Value>, conv: Option<u64>, cites: Option<&Cites>) -> (String, bool) {
+    let mut next = cites.map(|c| {
+        let numbers = c.numbers.clone();
+        move || numbers.next()
+    });
+    let numbering = match (cites, next.as_mut()) {
+        (Some(cites), Some(next)) => Some(Numbering { cites, next }),
+        _ => None,
+    };
+    let out = execute(name, &Value::Object(args.clone()), conv, numbering).await;
     let failed = out["success"] == json!(false);
     (out.to_string(), failed)
 }
@@ -688,10 +808,43 @@ mod tests {
         assert_eq!(small.parts(), PARTS_LEAST);
         assert_eq!(claude.parts(), PARTS_MOST);
         assert_eq!(Room::new(32_768, None).parts(), (32_768 - 4_096) / 10);
+        // The parts' size: small for an 8K model (and a plan's few tokens a minute), large for a 200K one.
+        assert_eq!(small.size(), Size::SMALL);
+        assert_eq!(Room::new(131_072, Some(7_200)).size(), Size::SMALL);
+        assert_eq!(Room::new(32_768, None).size(), Size::MEDIUM);
+        assert_eq!(Room::new(65_536, None).size(), Size::MEDIUM);
+        assert_eq!(Room::new(128_000, None).size(), Size::LARGE);
+        assert_eq!(claude.size(), Size::LARGE);
+        // A question's room holds two or three parts of its size, at most a dozen.
+        for room in [small, Room::new(32_768, None), claude] {
+            let fit = room.parts() / room.size().target;
+            assert!((2..=MOST_PARTS as u64 + 2).contains(&fit), "{room:?}: {fit}");
+        }
+    }
+
+    #[test]
+    fn each_size_is_kept_apart_and_read_by_meaning_where_a_model_may_search_it() {
+        let p = super::super::project_create("Sizes".into(), None).unwrap();
+        let hb = handbook(90, 400);
+        let f = super::super::add_bytes(&p.id, "staff-handbook.md", hb.into_bytes()).unwrap();
+        let small = split_of(&p.id, &f, Size::SMALL).unwrap();
+        let large = split_of(&p.id, &f, Size::LARGE).unwrap();
+        assert!(small.parts.len() > large.parts.len(), "{} {}", small.parts.len(), large.parts.len());
+        // Kept: the same size again is the same parts; another's never.
+        assert!(Arc::ptr_eq(&small, &split_of(&p.id, &f, Size::SMALL).unwrap()));
+        assert!(!Arc::ptr_eq(&small, &large));
+        // The index reads each size a model may search it at (this one's over 40K tokens: all three).
+        assert!(f.tokens > searched_from(Size::LARGE), "{}", f.tokens);
+        let keys: std::collections::HashSet<Key> = passages().into_iter().map(|(k, _)| k).collect();
+        assert!(small.keys.iter().chain(&large.keys).all(|k| keys.contains(k)));
+        // Taken out: every size goes.
+        forget(&f.id);
+        assert!(!Arc::ptr_eq(&small, &split_of(&p.id, &f, Size::SMALL).unwrap()));
+        let _ = std::fs::remove_dir_all(super::super::dir());
     }
 
     fn splits_of(files: &[(&ProjectFile, &str)]) -> Vec<Arc<Split>> {
-        files.iter().map(|(f, t)| Arc::new(Split::of(f, t))).collect()
+        files.iter().map(|(f, t)| Arc::new(Split::of(f, t, Size::MEDIUM))).collect()
     }
 
     #[test]
@@ -776,19 +929,22 @@ mod tests {
         let small = Room::new(8_192, None);
         assert!(searched(&p, small));
         // The system prompt: no file's text, its parts listed (tools), the way to cite.
-        let b = super::super::block_for(&p, small, true);
+        let b = super::super::block_for(&p, small, true, true);
         assert!(b.starts_with("This chat is in the user's project \"People team\"."), "{b}");
         assert!(b.contains("too long to send whole") && b.contains("read_project_file") && b.contains("search_project_files"), "{b}");
-        assert!(b.contains("(staff-handbook.pdf, page 12)"), "{b}");
+        assert!(b.contains("cite the part each fact comes from by its number in square brackets") && b.contains("27 days of leave [2]."), "{b}");
+        // A side question's (no sources under it): cited in words.
+        let side = super::super::block_for(&p, small, false, false);
+        assert!(side.contains("(staff-handbook.pdf, page 12)") && !side.contains("square brackets"), "{side}");
         assert!(b.contains("<project_files>\n- staff-handbook.md: "), "{b}");
         assert!(b.contains("- rota.txt: 1 part"), "{b}");
         assert!(!b.contains("27 days of annual leave"), "never the files' text: {b}");
         // Without tools: the files named, nothing about reading more.
-        let plain = super::super::block_for(&p, small, false);
+        let plain = super::super::block_for(&p, small, false, true);
         assert!(!plain.contains("read_project_file") && plain.contains("- staff-handbook.md\n- rota.txt"), "{plain}");
         // The question's parts: the leave section, with its source, and a chip.
         let q = query_terms("How many days of annual leave do I get?", None);
-        let found = found_in(&p, &q, &|_| None, small.parts(), true);
+        let found = found_in(&p, &q, &|_| None, small.parts(), true, Arc::new(Cites::new(small.size())));
         assert!(found.block.starts_with("From the project's files, the parts that match this question (read_project_file reads any other part):\n<documents>"), "{}", found.block);
         assert!(found.block.contains("27 days of annual leave"), "{}", found.block);
         assert!(found.block.contains("<source>staff-handbook.md: part "), "{}", found.block);
@@ -797,12 +953,28 @@ mod tests {
         assert!(found.chips.iter().all(|c| c.starts_with("Used from the project: staff-handbook.md, part ")), "{:?}", found.chips);
         assert!(found.chips.iter().any(|c| c.ends_with("Annual leave\u{201d}")), "{:?}", found.chips);
         assert!(crate::chat::budget::estimate(&found.block) <= small.parts() * 2);
+        // Numbered from 1 in the files' order, each its <document index>, each a source that opens it.
+        let sources = found.cites.sources();
+        assert_eq!(sources.iter().map(|s| s.n).collect::<Vec<_>>(), (1..=found.chips.len()).collect::<Vec<_>>());
+        for s in &sources {
+            assert!(found.block.contains(&format!("<document index=\"{}\">", s.n)), "{}", found.block);
+            let place = s.project.as_ref().unwrap();
+            assert_eq!((s.title.as_str(), place.project.as_str(), place.file.as_str(), place.kind.as_str()), ("staff-handbook.md", p.id.as_str(), f.id.as_str(), "markdown"));
+            assert!(place.from >= 1 && place.to >= place.from, "{place:?}");
+        }
+        let leave = sources.iter().find(|s| s.project.as_ref().unwrap().section == "3. Annual leave").expect("the leave part");
+        assert_eq!(leave.site, "\u{201c}3. Annual leave\u{201d}");
+        // Its lines are where it is in the file's text.
+        let text = super::super::file_text(&p.id, &f.id).unwrap();
+        let place = leave.project.as_ref().unwrap();
+        let lines: Vec<&str> = text.lines().skip(place.from as usize - 1).take((place.to - place.from + 1) as usize).collect();
+        assert!(lines.iter().any(|l| l.contains("27 days of annual leave")), "{lines:?}");
         // Nothing matching: said, no chips.
-        let none = found_in(&p, &query_terms("hello", None), &|_| None, small.parts(), true);
+        let none = found_in(&p, &query_terms("hello", None), &|_| None, small.parts(), true, Arc::new(Cites::new(small.size())));
         assert!(none.chips.is_empty() && none.block.contains("no part matches"), "{}", none.block);
         // A 200K model reads it all whole.
         assert!(!searched(&p, Room::new(200_000, None)));
-        let whole = super::super::block_for(&p, Room::new(200_000, None), true);
+        let whole = super::super::block_for(&p, Room::new(200_000, None), true, true);
         assert!(whole.contains("27 days of annual leave") && whole.contains("<source>staff-handbook.md</source>"));
         let _ = f;
         let _ = std::fs::remove_dir_all(super::super::dir());
@@ -815,32 +987,54 @@ mod tests {
         super::super::add_bytes(&p.id, "Staff Handbook.md", hb.into_bytes()).unwrap();
         super::super::chat_project_set(21, Some(p.id.clone())).unwrap();
         // Part 2, by a name in another case.
-        let r = execute(READ, &json!({ "file": "staff handbook.md", "part": 2 }), Some(21)).await;
+        let r = execute(READ, &json!({ "file": "staff handbook.md", "part": 2 }), Some(21), None).await;
         assert_eq!(r["success"], true, "{r}");
         assert_eq!(r["data"]["part"], 2);
         assert!(r["data"]["source"].as_str().unwrap().starts_with("Staff Handbook.md: part 2 of "), "{r}");
         assert!(r["data"]["next"].as_str().unwrap().starts_with("part 3: "), "{r}");
         assert!(r["displayText"].as_str().unwrap().starts_with("Read from the project: Staff Handbook.md, "), "{r}");
         // A part past the end, a file that isn't there: said, with what is.
-        let r = execute(READ, &json!({ "file": "Staff Handbook.md", "part": 999 }), Some(21)).await;
+        let r = execute(READ, &json!({ "file": "Staff Handbook.md", "part": 999 }), Some(21), None).await;
         assert_eq!(r["success"], false);
         assert!(r["error"].as_str().unwrap().contains("parts (1 to"), "{r}");
-        let r = execute(READ, &json!({ "file": "budget.xlsx", "part": 1 }), Some(21)).await;
+        let r = execute(READ, &json!({ "file": "budget.xlsx", "part": 1 }), Some(21), None).await;
         assert!(r["error"].as_str().unwrap().contains("Its files: Staff Handbook.md."), "{r}");
         // A near miss of a name finds it.
-        let r = execute(READ, &json!({ "file": "Staff Handbok.md", "part": 1 }), Some(21)).await;
+        let r = execute(READ, &json!({ "file": "Staff Handbok.md", "part": 1 }), Some(21), None).await;
         assert_eq!(r["success"], true, "{r}");
         // A search: the parking part.
-        let r = execute(SEARCH, &json!({ "query": "Kellbrook Road car park permits" }), Some(21)).await;
+        let r = execute(SEARCH, &json!({ "query": "Kellbrook Road car park permits" }), Some(21), None).await;
         assert_eq!(r["success"], true);
         assert!(r["data"]["parts"][0]["text"].as_str().unwrap().contains("level two of the Kellbrook Road car park"), "{r}");
         assert_eq!(r["displayText"], "Searched the project's files: \u{201c}Kellbrook Road car park permits\u{201d}");
         // A chat in no project.
-        let r = execute(READ, &json!({ "file": "x", "part": 1 }), Some(22)).await;
+        let r = execute(READ, &json!({ "file": "x", "part": 1 }), Some(22), None).await;
         assert_eq!(r["success"], false);
         // The plan's endpoint: the same, as text.
-        let (text, failed) = mcp_call(READ, json!({ "file": "Staff Handbook.md", "part": 1 }).as_object().unwrap(), Some(21)).await;
+        let (text, failed) = mcp_call(READ, json!({ "file": "Staff Handbook.md", "part": 1 }).as_object().unwrap(), Some(21), None).await;
         assert!(!failed && text.contains("\"part\":1"), "{text}");
+        // Numbered with the turn's sources: the next number the turn has, the same part again its own.
+        let cites = Cites::new(Size::MEDIUM);
+        let mut web = 3;
+        let mut next = || {
+            web += 1;
+            web
+        };
+        let r = execute(READ, &json!({ "file": "Staff Handbook.md", "part": 2 }), Some(21), Some(Numbering { cites: &cites, next: &mut next })).await;
+        assert_eq!(r["data"]["n"], 4, "{r}");
+        assert!(r["data"]["cite"].as_str().unwrap().contains("square brackets"), "{r}");
+        let r = execute(SEARCH, &json!({ "query": "Kellbrook Road car park permits" }), Some(21), Some(Numbering { cites: &cites, next: &mut next })).await;
+        let ns: Vec<u64> = r["data"]["parts"].as_array().unwrap().iter().map(|p| p["n"].as_u64().unwrap()).collect();
+        assert!(ns.iter().all(|n| *n >= 4), "{ns:?}");
+        assert_eq!(cites.len(), ns.len() + usize::from(!ns.contains(&4)), "{ns:?}");
+        let r = execute(READ, &json!({ "file": "Staff Handbook.md", "part": 2 }), Some(21), Some(Numbering { cites: &cites, next: &mut next })).await;
+        assert_eq!(r["data"]["n"], 4, "read again: its number");
+        // On the plan: the turn's own numbering.
+        let plan = Cites::new(Size::LARGE);
+        plan.numbers.next();
+        let (text, _) = mcp_call(READ, json!({ "file": "Staff Handbook.md", "part": 1 }).as_object().unwrap(), Some(21), Some(&plan)).await;
+        assert!(text.contains("\"n\":2"), "{text}");
+        assert_eq!(plan.sources()[0].project.as_ref().unwrap().part, 1);
         let _ = std::fs::remove_dir_all(super::super::dir());
     }
 
@@ -849,12 +1043,12 @@ mod tests {
         // A PDF's pages, a deck's slides, a sheet's rows: each part says where.
         let pdf: String = (1..=30).map(|n| format!("[Page {n}]\n{}\n\n", "Holiday requests go to the line manager two weeks ahead. ".repeat(20))).collect();
         let f = file("pf_00000000000000a4", "handbook.pdf", "pdf", &pdf);
-        let s = Split::of(&f, &pdf);
+        let s = Split::of(&f, &pdf, Size::MEDIUM);
         assert!(s.parts.iter().all(|p| p.at.starts_with("page")), "{:?}", s.parts.iter().map(|p| &p.at).collect::<Vec<_>>());
         let src = source(&ProjectFile { pages: Some(30), ..f.clone() }, &s.parts[1], s.parts.len());
         assert!(src.starts_with("handbook.pdf (a PDF, 30 pages: its text, read on the person's PC): part 2 of "), "{src}");
         let deck: String = (1..=20).map(|n| format!("Slide {n}: Quarter plan {n}\n{}\n\n", "Targets for the shop floor this quarter. ".repeat(12))).collect();
-        let s = Split::of(&file("pf_00000000000000a5", "plan.pptx", "powerpoint", &deck), &deck);
+        let s = Split::of(&file("pf_00000000000000a5", "plan.pptx", "powerpoint", &deck), &deck, Size::MEDIUM);
         assert!(s.parts.iter().all(|p| p.at.starts_with("slide")));
     }
 }

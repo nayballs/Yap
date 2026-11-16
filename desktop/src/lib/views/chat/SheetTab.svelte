@@ -442,6 +442,27 @@
     return { into, read };
   }
 
+  // The ask (`ref.seq`) whose place (`ref.at`) was gone to.
+  let atDone = null;
+
+  /**
+   * **Go to a place** (`{sheet, row}`: a project part's first row, its sheet by name — none, a CSV's one): that
+   * sheet, the row near the top with its first cell selected.
+   */
+  async function goTo(at) {
+    if (!book) return;
+    const i = at?.sheet ? book.sheets.findIndex((s) => s.name === at.sheet) : -1;
+    if (i >= 0 && i !== current) await toSheet(i);
+    await tick();
+    if (!grid || !scroller) return;
+    const r = Math.max(1, Math.min(grid.rows, Number(at?.row) || 1));
+    select(r, 1, { show: false });
+    const frozen = grid.rowAt[grid.frozenRows + 1] ?? 0;
+    scroller.scrollTop = Math.max(0, (grid.rowAt[r] ?? 0) - frozen - 2 * (grid.rowPx[r] || 20));
+    scroller.scrollLeft = 0;
+    measure();
+  }
+
   /** Open it (again): `keep` its sheet, place and selection (the same file changed, or asked again). */
   async function open({ keep = false, livePass = false } = {}) {
     const src = ref?.src;
@@ -486,6 +507,11 @@
       }
       await tick();
       measure();
+      // Asked for at a place (a project part's source, chat/projects/sources.rs): its sheet and row, once an ask.
+      if (ref?.at && ref.seq !== atDone) {
+        atDone = ref.seq;
+        await goTo(ref.at);
+      }
     } catch (e) {
       if (mine !== opening) return;
       // Changed while shown and not readable now (half-written): what's shown stays, tried again when it changes.

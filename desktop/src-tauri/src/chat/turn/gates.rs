@@ -210,9 +210,12 @@ impl Gates {
     }
 
     /// **Your Claude plan** (chat/turn/plan.rs): it answers, with Claude
-    /// Code's web search and page reads and Yap's read-only tools. No
-    /// documents beside the chat: those stay Yap's tool loop's, which a plan
-    /// turn never runs. The look at the screen, the browser beside the chat
+    /// Code's web search and page reads and Yap's read-only tools. Its
+    /// documents beside the chat (16 Nov 2026) go over Yap's run endpoint,
+    /// the tool loop's own code (`integrations/claude_live/documents.rs`;
+    /// the cards' `outline` kept, so a new one's outline shows first). `strong`
+    /// is the tool loop's (its gate, its research lines): the plan turn tells
+    /// its run the model's own (`plan.rs` `run_context`). The look at the screen, the browser beside the chat
     /// (acting on its pages too, since 8 Nov 2026, each buy, send or sign-in
     /// on the person's card) and the pictures from the web stay as the tool
     /// loop has them here: their tools go over Yap's run endpoint
@@ -278,6 +281,7 @@ impl Gates {
             visuals: self.visuals && self.tools,
             project: self.project_files && self.tools,
             project_chips: &[],
+            project_cites: None,
             research: None,
         }
     }
