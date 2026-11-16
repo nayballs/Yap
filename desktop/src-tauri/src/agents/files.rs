@@ -17,10 +17,12 @@
 //! - **Read only** ([`read`]): at most [`READ_MAX`] bytes and [`LINES_MAX`]
 //!   lines shown (the rest said), a file with a NUL in its first bytes is
 //!   "not text", its text decoded as UTF-8 with any bad bytes replaced.
-//! - **Open in editor** ([`open_editor`]): the person's code editor, started
-//!   directly (never through a shell, never the file's own default app,
-//!   which for a `.js` or `.ps1` would run it): VS Code or Cursor at the
-//!   line (`-g file:line`), else Notepad++ (`-n<line>`), else Notepad.
+//! - **Opened elsewhere** ([`open`], 16 Nov 2026): a link's click goes
+//!   where Settings → Yap Code's "Open file links in" says (Yap's file view,
+//!   an editor at the line, or Windows' default app), and a link's menu
+//!   offers each; the editors and the command: `agents/editors.rs`. Only a
+//!   file [`resolve`] found; an editor started directly (never through a
+//!   shell), a default app only for a file Windows wouldn't run.
 //! - **The Environment** of the summary panel ([`environment`]): the
 //!   workspace's git branch and whether it's a linked worktree, read from
 //!   `.git` itself (no git run).
@@ -32,7 +34,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 
-use super::code_chat;
+use super::{code_chat, editors};
 use crate::chat::pictures::local;
 
 /// The most bytes of a file the view shows.
@@ -266,91 +268,67 @@ pub fn read(root: &Path, raw: &str) -> Result<FileView, Refused> {
     Ok(FileView { file, text, size, truncated, binary: false })
 }
 
-// ---- Open in editor -----------------------------------------------------------------------------
+// ---- Opening a file elsewhere -------------------------------------------------------------------
 
-/// The code editors Yap starts, in the order it looks for them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Editor {
-    VsCode,
-    Cursor,
-    NotepadPlusPlus,
-    Notepad,
+/// **Where a file went** (`code_file_open`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "how", rename_all = "camelCase")]
+pub enum Opened {
+    /// The page shows it in Yap's own view: the setting's choice, or what it
+    /// fell back to (`note` says why).
+    Yap {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
+    },
+    /// In this editor.
+    Editor { name: String },
+    /// In Windows' default app for it.
+    App,
 }
 
-impl Editor {
-    pub fn name(self) -> &'static str {
-        match self {
-            Editor::VsCode => "VS Code",
-            Editor::Cursor => "Cursor",
-            Editor::NotepadPlusPlus => "Notepad++",
-            Editor::Notepad => "Notepad",
-        }
-    }
+/// The workbooks only Yap's sheet view shows (an editor would show their bytes).
+const WORKBOOKS: &[&str] = &["xlsx", "xlsm", "xls", "xlsb", "ods"];
 
-    /// Its arguments to open `abs` at `line`. Pure.
-    pub fn args(self, abs: &str, line: Option<u32>) -> Vec<String> {
-        match (self, line) {
-            (Editor::VsCode | Editor::Cursor, Some(l)) => vec!["-g".into(), format!("{abs}:{l}")],
-            (Editor::NotepadPlusPlus, Some(l)) => vec![format!("-n{l}"), abs.into()],
-            _ => vec![abs.into()],
-        }
-    }
-}
-
-/// Where each editor is usually installed, and its program's name on PATH's
-/// `bin` (VS Code's `code.cmd` sits in `bin\` beside `..\Code.exe`).
-fn editor_at() -> Option<(Editor, PathBuf)> {
-    let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
-    let mut tries: Vec<(Editor, PathBuf)> = Vec::new();
-    if let Some(l) = env("LOCALAPPDATA") {
-        tries.push((Editor::VsCode, l.join(r"Programs\Microsoft VS Code\Code.exe")));
-        tries.push((Editor::Cursor, l.join(r"Programs\cursor\Cursor.exe")));
-    }
-    for k in ["ProgramFiles", "ProgramFiles(x86)"] {
-        if let Some(p) = env(k) {
-            tries.push((Editor::VsCode, p.join(r"Microsoft VS Code\Code.exe")));
-        }
-    }
-    // VS Code found on PATH by its `code.cmd`.
-    if let Some(path) = std::env::var_os("PATH") {
-        for d in std::env::split_paths(&path) {
-            if d.join("code.cmd").is_file() {
-                if let Some(app) = d.parent() {
-                    tries.push((Editor::VsCode, app.join("Code.exe")));
-                }
-            }
-        }
-    }
-    for k in ["ProgramFiles", "ProgramFiles(x86)"] {
-        if let Some(p) = env(k) {
-            tries.push((Editor::NotepadPlusPlus, p.join(r"Notepad++\notepad++.exe")));
-        }
-    }
-    if let Some(w) = env("SystemRoot") {
-        tries.push((Editor::Notepad, w.join(r"System32\notepad.exe")));
-    }
-    tries.into_iter().find(|(_, p)| p.is_file())
-}
-
-/// **Open the file `raw` names in the person's code editor** (see the
-/// module's rules). Which editor it was.
-pub fn open_editor(root: &Path, raw: &str, line: Option<u32>) -> Result<&'static str, String> {
+/// **Open the file `raw` names** in the workspace at `root`, at `line`, the
+/// way `with` says (see `agents/editors.rs`): [`editors::YAP`], [`editors::DEFAULT_APP`],
+/// [`editors::ANY_EDITOR`] or an editor's id. `link`: a link's click (the
+/// setting's way), where a workbook stays in Yap's sheet view.
+pub fn open(root: &Path, raw: &str, line: Option<u32>, with: &str, link: bool) -> Result<Opened, String> {
     let file = resolve(root, raw).map_err(|r| r.words().to_string())?;
     let line = line.or(file.line);
+    let workspace = local::plain(&std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()));
+    if with == editors::YAP || (with != editors::DEFAULT_APP && with != editors::ANY_EDITOR && !editors::known(with)) {
+        return Ok(Opened::Yap { note: None });
+    }
+    if with == editors::DEFAULT_APP {
+        if let Some(why) = editors::runs_when_opened(Path::new(&file.abs)) {
+            tracing::info!("Code chat: a file Windows would run shown in Yap instead");
+            return Ok(Opened::Yap { note: Some(why) });
+        }
+        editors::open_default(&file.abs, &file.rel, line)?;
+        return Ok(Opened::App);
+    }
+    if link && editors::ending(Path::new(&file.abs)).is_some_and(|e| WORKBOOKS.contains(&e.as_str())) {
+        return Ok(Opened::Yap { note: None });
+    }
+    let list = editors::found(false);
+    let editor = if with == editors::ANY_EDITOR {
+        let choice = crate::config::load().agents_open_files;
+        editors::preferred(&list, &choice).ok_or("Yap couldn't find a code editor on this PC.")?
+    } else {
+        match list.iter().find(|e| e.id == with) {
+            Some(e) => e,
+            None => {
+                return Ok(Opened::Yap { note: Some(format!("{} isn't on this PC, so the file is shown here. Settings → Yap Code chooses where files open.", editors::name_of(with))) });
+            }
+        }
+    };
+    // (The suite's older record, kept: `editor:<rel>:<line>`.)
     if crate::shell::e2e::active() {
         crate::shell::commands::e2e_kept(&format!("editor:{}:{}", file.rel, line.unwrap_or(0)));
-        return Ok("VS Code");
     }
-    let (editor, exe) = editor_at().ok_or("Yap couldn't find a code editor on this PC.")?;
-    std::process::Command::new(&exe)
-        .args(editor.args(&file.abs, line))
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("Couldn't start {}: {e}", editor.name()))?;
-    tracing::info!(editor = editor.name(), at_line = line.is_some(), "Code chat: a file opened in an editor");
-    Ok(editor.name())
+    editors::start(editor, &file.abs, &file.rel, line, &workspace)?;
+    Ok(Opened::Editor { name: editor.name.clone() })
 }
 
 // ---- Environment --------------------------------------------------------------------------------
@@ -456,11 +434,30 @@ pub async fn code_file_read(conversation: u64, path: String) -> Result<FileView,
     tauri::async_runtime::spawn_blocking(move || read(&root, &path).map_err(|r| r.words().to_string())).await.map_err(|e| e.to_string())?
 }
 
-/// **Open in editor**: the file at its line in the person's code editor.
+/// **Open in editor**: the file at its line in the person's code editor
+/// (the setting's, else the first found). Which editor it was.
 #[tauri::command]
 pub async fn code_file_open_editor(conversation: u64, path: String, line: Option<u32>) -> Result<String, String> {
     let root = root_of(conversation)?;
-    tauri::async_runtime::spawn_blocking(move || open_editor(&root, &path, line).map(str::to_string)).await.map_err(|e| e.to_string())?
+    let opened = tauri::async_runtime::spawn_blocking(move || open(&root, &path, line, editors::ANY_EDITOR, false)).await.map_err(|e| e.to_string())??;
+    match opened {
+        Opened::Editor { name } => Ok(name),
+        Opened::Yap { note } => Err(note.unwrap_or_else(|| "Yap couldn't find a code editor on this PC.".into())),
+        Opened::App => Ok("its app".into()),
+    }
+}
+
+/// **A file link opened** (a click, or its menu): the file at its line where
+/// `with` says — `None`, the setting (Settings → Yap Code → "Open file links
+/// in"); `yap`, `default`, `editor` or an editor's id from the menu. Yap's
+/// own view is the page's to show (`{how: "yap"}`, with a `note` when it
+/// stands in for what was asked).
+#[tauri::command]
+pub async fn code_file_open(conversation: u64, path: String, line: Option<u32>, with: Option<String>) -> Result<Opened, String> {
+    let root = root_of(conversation)?;
+    let link = with.is_none();
+    let with = with.unwrap_or_else(|| crate::config::load().agents_open_files);
+    tauri::async_runtime::spawn_blocking(move || open(&root, &path, line, &with, link)).await.map_err(|e| e.to_string())?
 }
 
 /// **Show in folder**: Explorer at a file of Code chat `conversation`'s

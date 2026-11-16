@@ -835,7 +835,19 @@ A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 No
   What Rust said is kept while the window lives (a miss for 8 s: a file a turn is writing turns up). A Chat (non-Code) chat has no context, and nothing is looked for.
 - **The file view** (`FileTab.svelte`, a `file:<rel>` tab of the panel, `chatDoc.svelte.js` `showFile`): read only, numbered, in colour (`core/codeColours.js`, as the rows: tokens as text, never markup), scrolled to the line and that line marked; read again each time it's opened and with ↻. At most 1 MB and 20,000 lines (said: "only its start is shown"); a file with a NUL in its first 8 KB is "not text".
   - **Copy path**: its full path.
-  - **Open in editor** (`code_file_open_editor`): VS Code or Cursor at the line (`-g file:line`), else Notepad++ (`-n`), else Notepad, started directly: never through a shell, never the file's own default app (which for a `.js` or `.ps1` would run it).
+  - **Open in <editor>** (`code_file_open_editor`): the editor "Open file links in" chose, else the first one found on this PC (below), at the line.
+- **Where a link opens** (16 Nov 2026, Settings → Assistant → Yap Code → Files in Code chats → **Open file links in**, `agentsOpenFiles`; `agents/editors.rs`, `code_file_open`, the page's side `views/chat/fileOpen.svelte.js`): a click (or Enter) on an answer's link, an @-mention's pill or a row's file goes to
+  - **Yap's file view** (the default; a spreadsheet as a sheet);
+  - **VS Code**, **Cursor**, or **another editor found on this PC**: VS Code Insiders, Windsurf, VSCodium, Zed, Sublime Text, Notepad++, JetBrains' IDEs (IntelliJ IDEA and its Community Edition, PyCharm, WebStorm, PhpStorm, Rider, GoLand, CLion, RubyMine, RustRover, DataGrip, DataSpell, Android Studio), Notepad. The setting lists VS Code and Cursor always, greyed out "(not on this PC)" when they aren't; the others only when found; a chosen editor that's gone stays shown, said so;
+  - **Windows' default app** for the file.
+
+  **Found** (`detect`, as `apps.rs` finds apps; read only, kept 2 minutes, looked for afresh when the setting's page opens): the App Paths registry (`HKCU` then `HKLM`, each editor's program by name), the Uninstall registry's installs (`InstallLocation`, `DisplayIcon`; a folder looked in only when the install's name may be an editor's), their usual folders (`%LOCALAPPDATA%\Programs\…`, `%ProgramFiles%\…`, `JetBrains\*\bin`, Toolbox's `apps\`), and PATH: a launcher leads to its program (`code.cmd` in `bin\` → `..\Code.exe`; Cursor's `resources\app\bin\cursor.cmd` → three up), a JetBrains Toolbox script (`idea.cmd`) names its IDE's exe in quotes. Every program checked to be there; each editor once, the newest version of an IDE first; a Community Edition (its folder says so, or Toolbox's `-C`) is `<id>-ce`.
+
+  **Started** (`editors::start`): the program itself, never a launcher script (`code.cmd` would go through `cmd.exe`) nor a shell; its arguments as written (`raw_arg`), **every path in quotes** (`quote`: the C runtime's rules); in the workspace's folder, no window for a console program (Zed's `bin\zed.exe`), not tied to the kill-on-close job (an editor outlives Yap). At the line: VS Code and its kin `"<workspace>" -g "<file>:<line>"` (the workspace's window, the file in it), Zed's command line and Sublime Text `"<file>:<line>"` (Zed with no `bin\zed.exe`: the file alone), Notepad++ `-n<line> "<file>"`, JetBrains `--line <line> "<file>"`, Notepad the file alone. **Nothing from the chat's words runs**: the file is one `resolve` found in the chat's workspace (from the conversation, never the page), the program one `detect` found; a `with` the page sends that isn't Yap's, the default app's or a known editor's id opens Yap's view. A workbook (`.xlsx`…) a link opens stays in the sheet view under an editor.
+
+  **Windows' default app** (`runs_when_opened`): never for a file it would run rather than open — the shared files' list of endings (`chat/shares.rs` `RUNS`: programs, scripts, web pages), Windows' own `AssocIsDangerous`, or a type whose Open goes to a script host or an interpreter (`AssocQueryStringW`'s executable: `wscript`, `python`, `pwsh`, `node`, AutoHotkey…). Such a file, and one whose editor isn't on this PC any more, opens in Yap's view with a toast that says why ("Opened in Yap instead").
+- **A link's menu** (a right-click, the ContextMenu key or Shift+F10 on the focused link; Yap's own menu, `fileLinkMenuItems`): **Open in Yap**, **Open in <editor>** (the setting's, else the first found), **Show in folder** (`code_file_reveal`), **Copy path** (its full path, the link's `data-abs`). The message's own menu doesn't come up over a link.
+- **A test run** starts nothing: each open is kept with its program, arguments and whole command line (`e2e_file_opens`; Yap Lab's `state` `filesOpened`), the editors are the stand-ins `YAP_E2E_EDITORS` names (`[{id, program}]`; the lab's `YAP_LAB_EDITORS`), else this PC's.
 - **The rows**: a read's file name ("Read lab.md") and an edit's path over its diff open it too, at the first line read or changed (`StepRows.svelte`; a path outside the workspace, which `steps.rs` `shown_path` leaves whole, is no link).
 - **A spreadsheet opens as a sheet** (15 Nov 2026: `.xlsx`, `.xlsm`, `.xls`, `.xlsb`, `.ods`, `.csv`, `.tsv`; ChatView's `CODE_FILES` `open`, `outputsOpen.js`): a link to one, its row, or its Outputs row opens the **sheet view** instead of the file view (`SheetTab.svelte`, a `sheet:ws:<rel>` tab, `chatDoc.svelte.js` `showSheet`; Rust `chat/sheets/view.rs`, the same workspace-only `resolve`), drawn as Excel draws it, with Open in Excel. It's **live**: every 1.2 s the page asks for the file's size and time (`sheet_stamp`, nothing read) and, changed, opens it again on the same sheet, scrolled where it was, the same cell selected, "Updated" for a moment — so the person watches Claude build a workbook (openpyxl, exceljs: formulas with no results in the file are calculated by IronCalc). A file caught half-written keeps what's shown ("Changing…") until it changes again. The whole view: [chat-and-assistant.md, Spreadsheets](./chat-and-assistant.md#spreadsheets-2026-11-15).
 
@@ -3028,7 +3040,9 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 | `claude_approve_answer {id, allow}` / `claude_approve_pending` | a permission prompt's answer; the prompts waiting (`integrations/claude_live.rs`) |
 | `code_files_check {conversation, paths}` | (`agents/files.rs`) each path a file in the Code chat's workspace (`{rel, abs, line?}`) or `null`; at most 200 |
 | `code_file_read {conversation, path}` | the file view's `{rel, abs, line?, text, size, truncated, binary}`; refused outside the workspace |
-| `code_file_open_editor {conversation, path, line?}` | Open in editor; which editor it was |
+| `code_file_open_editor {conversation, path, line?}` | Open in <editor> (the setting's, else the first found); which editor it was |
+| `code_file_open {conversation, path, line?, with?}` | (16 Nov 2026) a file link opened: `with` null = the setting (`agentsOpenFiles`), else `yap`, `default`, `editor` or an editor's id; `{how: "yap", note?}` (the page shows it; `note` when it stands in for what was asked), `{how: "editor", name}` or `{how: "app"}`; refused outside the workspace |
+| `code_editors {refresh?}` | (`agents/editors.rs`) `{choice, choiceName?, editors: [{id, name}], preferred?, missing}`: the setting, the editors on this PC, "Open in …"'s editor |
 | `sheet_open {src}` / `sheet_rows {id, sheet, from, to}` / `sheet_stamp {src}` / `sheet_open_app {src}` | (`chat/sheets/view.rs`) the sheet view: `src` is `{from: "workspace", conversation, rel}` (refused outside the workspace) or `{from: "attachment", id}`; a workbook opened without its cells (sheets, styles, widths, merges, frozen panes), its rows a stretch at a time (at most 1,000; "gone" once it isn't kept), the file's `{len, ms}`, Open in Excel |
 | `code_chat_environment {conversation?, workspace?}` | the summary's Environment: `{name, path, exists, repo, branch?, detached, worktree}` |
 | `code_run_check {conversation, lang}` / `code_run_start {conversation, command, lang, asked}` / `code_run_stop {id}` / `code_runs {conversation}` | (`agents/run_block.rs`) ▶ Run: whether it asks (`{asks, mode, workspace, path, ranIn, note?}`), the run started (refused unasked outside Bypass), Stop, a Code chat's runs with their output |
@@ -3036,8 +3050,10 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 
 Debug builds, test mode only: `e2e_claude_script {script?}` (Claude Code is
 the build's own stand-in replaying `script` from now on),
-`e2e_claude_approve_auto {allow?}` (every prompt answered at once) and
-`e2e_workspace {path}` (the folder the next Add workspace… takes).
+`e2e_claude_approve_auto {allow?}` (every prompt answered at once),
+`e2e_workspace {path}` (the folder the next Add workspace… takes) and
+`e2e_file_opens {clear?}` (each file a link opened in an editor or the default
+app: `{with, name, program, args, commandLine, rel, line}`, nothing started).
 
 ## Tests
 
@@ -3103,7 +3119,19 @@ the build's own stand-in replaying `script` from now on),
     Bypass, a long run's clock and Stop in the summary's Background tasks;
     the summary's Environment (branch, Worktree), Context, Connectors and
     Outputs, from the title bar (the row has no copy); a Chat (non-Code) chat with none
-    of it.
+    of it. "Open file links in" (16 Nov 2026, stand-in editors): the
+    setting's list (Cursor greyed out, not on this PC), a click per
+    setting — VS Code, Zed, IntelliJ IDEA Community, each command checked
+    to the letter with its paths quoted —, the default app (a `.md` there,
+    a `.js` in Yap instead, said so), an editor that's gone (Yap, said so),
+    Rust's refusals whatever the page sends; a link's menu by right-click
+    and Shift+F10 (Open in Yap, Open in <editor> following the setting,
+    Show in folder, Copy path); light and dark. Unit `cargo test
+    agents::editors`: every argument quoted by the C runtime's rules, each
+    editor's line arguments, detection on a made-up PC (usual folders,
+    App Paths, Uninstall folders, PATH launchers, Toolbox scripts, the
+    newest IDE, a Community Edition, a launcher with no program), what
+    Windows would run (`AssocIsDangerous` too), runners.
   - `chat-sheets.spec.js` (15 Nov 2026): a Code chat's workbook from a link
     in its answer and its Outputs row, the view following the file as the
     test rewrites it (same sheet, same cell; a half-written one kept), one

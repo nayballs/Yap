@@ -21,7 +21,7 @@
 //   shot [--window thread|main|bar|panel|page] [--theme light|dark|both]
 //        [--name <n>] [--selector <css>]
 //   probe --window <w> [--css <selector>] [--text <words>]
-//   click --window main|thread|panel --css <selector>   (one of Yap's own buttons, as the person would)
+//   click --window main|thread|panel --css <selector> [--right]   (one of Yap's own buttons, as the person would)
 //   pick "<words on the page>" | pick --css <selector>   select an element beside the chat
 //   side "<question>" [--keep] [--close] [--timeout 180]   a side question (Ctrl+;) about the chat shown
 //   set '<json>' | set [--web on|off] [--yap-code on|off] [--connectors on|off]

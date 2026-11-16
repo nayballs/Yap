@@ -9,6 +9,14 @@
 //   outside the workspace (`../outside/secret.txt`) is never a link, nor
 //   readable by asking Rust for it. A row's file (an edit's path, a read's
 //   name) opens it too.
+// - **Where links open** (16 Nov 2026, agents/editors.rs): Settings → Yap
+//   Code → "Open file links in" — Yap's file view, VS Code, Cursor, another
+//   editor found on this PC (here the stand-ins `YAP_E2E_EDITORS` names), or
+//   Windows' default app; a click goes there at the line, the command a test
+//   run keeps (`e2e_file_opens`) checked to the letter (paths quoted); an
+//   editor that's gone and a file Windows would run open in Yap instead,
+//   said so. A link's right-click menu: Open in Yap, Open in <editor>, Show
+//   in folder, Copy path.
 // - **▶ Run** on a one-line shell block: under Auto it asks first, then runs
 //   the line in the workspace, its output in the Runs tab beside the chat
 //   (Stop, Run again, Add to message); under Bypass permissions nothing asks.
@@ -27,7 +35,7 @@
 // way); the workspace and the folder "outside" it are in this run's own folder.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, setConfig } from './support/fixtures.js';
+import { test as base, expect, openView, setConfig, openSettings, closeSettings, closeToasts } from './support/fixtures.js';
 import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat, toSide } from './support/code-chats.js';
@@ -178,12 +186,29 @@ async function theme(yap, main, which) {
   await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe(which);
 }
 
+/** The editors "on this PC" (stand-ins: never started, a test run keeps the command instead). */
+const EDITORS_FILE = path.join(HERE, 'editors.json');
+const VS_CODE = 'C:\\Tools\\Microsoft VS Code\\Code.exe';
+const ZED_CLI = 'C:\\Tools\\Zed\\bin\\zed.exe';
+const STAND_INS = [
+  { id: 'vscode', program: VS_CODE },
+  { id: 'zed', program: ZED_CLI },
+  { id: 'notepadpp', program: 'C:\\Tools\\Notepad++\\notepad++.exe' },
+  { id: 'idea-ce', program: 'C:\\Tools\\IntelliJ IDEA Community Edition\\bin\\idea64.exe' },
+  { id: 'notepad', program: 'C:\\Windows\\System32\\notepad.exe' },
+];
+function writeEditors(list) {
+  fs.mkdirSync(HERE, { recursive: true });
+  fs.writeFileSync(EDITORS_FILE, JSON.stringify(list));
+}
+
 const test = base.extend({
   yapOptions: [
     async ({}, use) => {
+      writeEditors(STAND_INS);
       await use({
         name: 'code-chat-files',
-        env: fakeClaude(writeScript('idle', [{ _wait_user: true }])),
+        env: { ...fakeClaude(writeScript('idle', [{ _wait_user: true }])), YAP_E2E_EDITORS: EDITORS_FILE },
         config: planConfig({ 'claude-plan': 'claude-plan' }, { memoryLearnChats: false }),
       });
     },
@@ -222,7 +247,7 @@ test.beforeEach(async ({ yap, main }) => {
   await yap.invoke('e2e_claude_approve_auto', { allow: true });
   // No gh on this PC unless a test says otherwise.
   await yap.invoke('e2e_gh_script', { script: null });
-  await setConfig(yap, main, { agentsEnabled: true, agentsDirect: true, agentsAsk: 'new-or-web', agentsSpeak: 'never', agentsMode: 'auto', webSearch: false, speakReplies: false, assistantScreen: false });
+  await setConfig(yap, main, { agentsEnabled: true, agentsDirect: true, agentsAsk: 'new-or-web', agentsSpeak: 'never', agentsMode: 'auto', agentsOpenFiles: 'yap', webSearch: false, speakReplies: false, assistantScreen: false });
   if (!(await yap.invoke('workspaces_list')).some((f) => f.name === 'garden-planner')) await yap.invoke('workspaces_add', { path: GARDEN });
 });
 
@@ -271,6 +296,132 @@ test('a path in a Code chat’s answer opens the file beside the chat at its lin
   await expect(file).toHaveAttribute('data-rel', 'docs/lab.md');
   // What Claude said as it worked: its path a link too.
   await expect(work.getByTestId('chat-agent-work-said').locator('.md-filelink')).toHaveText(['src/convert.js']);
+  await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+});
+
+test('“Open file links in”: Yap, an editor at the line (its command quoted), Windows’ default app, an editor that’s gone; a link’s menu', async ({ yap, main, shot }) => {
+  writeEditors(STAND_INS);
+  await yap.invoke('e2e_file_opens', { clear: true });
+  const conversation = await rounded(yap, main);
+  const [convert] = await yap.invoke('code_files_check', { conversation, paths: ['src/convert.js'] });
+  const lab = convert.abs.replace(/src\\convert\.js$/, 'docs\\lab.md');
+  const ws = convert.abs.replace(/\\src\\convert\.js$/, '');
+  const links = answer(main).locator('.md-filelink');
+  const opens = () => yap.invoke('e2e_file_opens');
+  const lastOpen = async () => (await opens()).at(-1) ?? null;
+  const file = main.getByTestId('chat-file');
+
+  // The setting: Yap's view first, VS Code and Cursor always (Cursor greyed out: not here), the others found, the default app last.
+  const dialog = await openSettings(main, 'Yap Code');
+  const row = dialog.locator('[data-setting="yap-code-open-files"]');
+  const select = row.getByRole('combobox', { name: 'Open file links in' });
+  await row.scrollIntoViewIfNeeded();
+  await expect(select).toHaveValue('yap');
+  await expect(select.locator('option')).toHaveText(["Yap's file view", 'VS Code', 'Cursor (not on this PC)', 'Zed', 'Notepad++', 'IntelliJ IDEA Community', 'Notepad', "Windows' default app"]);
+  await expect(select.locator('option[value="cursor"]')).toBeDisabled();
+  await expect(row).toContainText('Right-click a link');
+  await shot(main, '02b-open-file-links-in-the-setting');
+  await theme(yap, main, 'dark');
+  await shot(main, '02c-open-file-links-in-the-setting-dark');
+  await theme(yap, main, 'light');
+  // Picked there: VS Code. Links now open in it, at the line, and Yap's view stays shut.
+  await select.selectOption('vscode');
+  await expect(row).toContainText('At the line, in VS Code');
+  await expect.poll(async () => (await yap.invoke('get_config')).agentsOpenFiles).toBe('vscode');
+  await closeSettings(main);
+  await links.first().click();
+  await expect.poll(lastOpen).toEqual({
+    with: 'vscode',
+    name: 'VS Code',
+    program: VS_CODE,
+    args: [`"${ws}"`, '-g', `"${convert.abs}:5"`],
+    commandLine: `"${VS_CODE}" "${ws}" -g "${convert.abs}:5"`,
+    rel: 'src/convert.js',
+    line: 5,
+  });
+  await expect(file).toHaveCount(0);
+
+  // Zed: its command line, the line after the path.
+  await setConfig(yap, main, { agentsOpenFiles: 'zed' });
+  await answer(main).locator('.md-filelink', { hasText: 'the lab notes' }).click();
+  await expect.poll(lastOpen).toEqual(expect.objectContaining({ with: 'zed', program: ZED_CLI, args: [`"${lab}:3"`], rel: 'docs/lab.md', line: 3 }));
+  // A JetBrains IDE: --line.
+  await setConfig(yap, main, { agentsOpenFiles: 'idea-ce' });
+  await links.first().click();
+  await expect.poll(lastOpen).toEqual(expect.objectContaining({ with: 'idea-ce', name: 'IntelliJ IDEA Community', args: ['--line', '5', `"${convert.abs}"`] }));
+
+  // Windows' default app: a file it opens goes there (the lab notes); one it would run (a .js script) opens in Yap, said so.
+  await setConfig(yap, main, { agentsOpenFiles: 'default' });
+  await answer(main).locator('.md-filelink', { hasText: 'the lab notes' }).click();
+  await expect.poll(lastOpen).toEqual({ with: 'default', name: "Windows' default app", program: null, args: [], commandLine: null, rel: 'docs/lab.md', line: 3 });
+  const before = (await opens()).length;
+  await links.first().click();
+  await expect(file).toHaveAttribute('data-rel', 'src/convert.js');
+  await expect(main.getByRole('status').filter({ hasText: 'Opened in Yap instead' })).toContainText('.js file');
+  expect((await opens()).length).toBe(before);
+  await shot(main, '02f-a-script-opens-in-yap-instead');
+  await closeToasts(main);
+  await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+
+  // An editor that's gone (uninstalled since it was picked): Yap's view, and why.
+  await setConfig(yap, main, { agentsOpenFiles: 'cursor' });
+  const n = (await opens()).length;
+  await links.first().click();
+  await expect(file).toHaveAttribute('data-rel', 'src/convert.js');
+  await expect(main.getByRole('status').filter({ hasText: 'Opened in Yap instead' })).toContainText("Cursor isn't on this PC");
+  expect((await opens()).length).toBe(n);
+  await closeToasts(main);
+  await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+
+  // Rust's rules, whatever the page asks: never a file outside the workspace, never a program the page names.
+  await expect(yap.invoke('code_file_open', { conversation, path: '../outside/secret.txt', line: null, with: 'vscode' })).rejects.toThrow(/isn't in this chat's workspace/);
+  expect(await yap.invoke('code_file_open', { conversation, path: 'src/convert.js', line: null, with: 'C:\\Windows\\System32\\cmd.exe' })).toEqual({ how: 'yap' });
+  expect((await opens()).length).toBe(n);
+
+  // A link's menu (right-click): Open in Yap, Open in <the setting's editor, else the first found>, Show in folder, Copy path.
+  await setConfig(yap, main, { agentsOpenFiles: 'yap' });
+  const menuOf = async (link) => {
+    await link.click({ button: 'right' });
+    const menu = main.getByRole('menu');
+    await expect(menu).toBeVisible();
+    return menu;
+  };
+  let menu = await menuOf(links.first());
+  await expect(menu.getByRole('menuitem')).toHaveText(['Open in Yap', 'Open in VS Code', 'Show in folder', 'Copy path']);
+  await shot(main, '02d-a-file-links-menu');
+  await theme(yap, main, 'dark');
+  await shot(main, '02e-a-file-links-menu-dark');
+  await theme(yap, main, 'light');
+  await menu.getByRole('menuitem', { name: 'Open in VS Code' }).click();
+  await expect.poll(lastOpen).toEqual(expect.objectContaining({ with: 'vscode', args: [`"${ws}"`, '-g', `"${convert.abs}:5"`] }));
+  await expect(file).toHaveCount(0);
+  menu = await menuOf(links.nth(1));
+  await menu.getByRole('menuitem', { name: 'Show in folder' }).click();
+  await expect.poll(() => yap.invoke('e2e_opened_urls')).toContainEqual('reveal:docs/lab.md');
+  menu = await menuOf(links.first());
+  await menu.getByRole('menuitem', { name: 'Copy path' }).click();
+  await expect(main.getByRole('status').filter({ hasText: 'Path copied' })).toBeVisible();
+  await closeToasts(main);
+  // Picked Zed: the menu names Zed. Open in Yap: the file view, whatever the setting.
+  await setConfig(yap, main, { agentsOpenFiles: 'zed' });
+  await expect
+    .poll(async () => {
+      const m = await menuOf(links.first());
+      const second = (await m.getByRole('menuitem').nth(1).textContent()).trim();
+      await main.keyboard.press('Escape');
+      return second;
+    })
+    .toBe('Open in Zed');
+  menu = await menuOf(links.first());
+  await menu.getByRole('menuitem', { name: 'Open in Yap' }).click();
+  await expect(file).toHaveAttribute('data-rel', 'src/convert.js');
+  await expect(file.locator('.fl.mark')).toHaveAttribute('data-no', '5');
+  // The keyboard: Shift+F10 on the focused link.
+  await links.nth(2).focus();
+  await main.keyboard.press('Shift+F10');
+  await expect(main.getByRole('menu').getByRole('menuitem').first()).toHaveText('Open in Yap');
+  await main.keyboard.press('Escape');
+  await setConfig(yap, main, { agentsOpenFiles: 'yap' });
   await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
 });
 
@@ -474,7 +625,7 @@ test('the summary after the Claude app: context by category from /context, the b
   await pulls.first().locator('.propen').click();
   await expect.poll(() => yap.invoke('e2e_opened_urls')).toContainEqual('https://github.com/example-org/garden-planner/pull/131');
 
-  // An output's right-click menu: Open, Show in folder, Copy path, Open in editor.
+  // An output's right-click menu: Open, Show in folder, Copy path, Open in <editor> (the first found: VS Code).
   const output = summary.getByTestId('chat-summary-outputs').getByTestId('chat-output').first();
   const menuItems = async () => {
     await output.click({ button: 'right' });
@@ -482,12 +633,12 @@ test('the summary after the Claude app: context by category from /context, the b
     await main.keyboard.press('Escape');
     return names.map((n) => n.trim());
   };
-  await expect.poll(menuItems).toEqual(['Open', 'Show in folder', 'Copy path', 'Open in editor']);
+  await expect.poll(menuItems).toEqual(['Open', 'Show in folder', 'Copy path', 'Open in VS Code']);
   await output.click({ button: 'right' });
   await main.getByRole('menu').getByRole('menuitem', { name: 'Show in folder' }).click();
   await expect.poll(() => yap.invoke('e2e_opened_urls')).toContainEqual('reveal:src/convert.js');
   await output.click({ button: 'right' });
-  await main.getByRole('menu').getByRole('menuitem', { name: 'Open in editor' }).click();
+  await main.getByRole('menu').getByRole('menuitem', { name: 'Open in VS Code' }).click();
   await expect.poll(() => yap.invoke('e2e_opened_urls')).toContainEqual('editor:src/convert.js:0');
 
   // A merged pull request's Archive: this chat archived, as the list archives it.

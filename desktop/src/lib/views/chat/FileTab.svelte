@@ -11,14 +11,15 @@
   // file that isn't text said so. Read again each time it's opened (a link
   // after Claude changed it) and with ↻.
   //
-  // - **Copy path**: its full path. **Open in editor**: VS Code or Cursor at
-  //   the line, else Notepad++ or Notepad (`code_file_open_editor`; never
-  //   the file's own default app, which could run it).
+  // - **Copy path**: its full path. **Open in <editor>**: the editor Settings → Yap Code chose, else the first found, at
+  //   the line (`code_file_open_editor`, agents/editors.rs; started directly, never
+  //   through a shell or the file's own default app, which could run it).
   import { invoke } from '@tauri-apps/api/core';
   import { tick, untrack } from 'svelte';
   import { colourLines, languageOf, loadColours } from '../../core/codeColours.js';
   import { copyText } from '../../core/itemMenus.js';
   import { toast } from '../../ui/toast.svelte.js';
+  import { editorLabel } from './fileOpen.svelte.js';
 
   /** `doc`: the panel's state (`doc.file`: `{rel, line, seq}`); `conversationId`: the Code chat. */
   let { doc, narrow = false, conversationId = null } = $props();
@@ -114,7 +115,7 @@
       </button>
       <button type="button" class="fbtn wide" onclick={openInEditor} title="Open in your code editor" data-testid="chat-file-open-editor" disabled={!view}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
-        <span>Open in editor</span>
+        <span>{editorLabel()}</span>
       </button>
       {#if !narrow}
         <button
