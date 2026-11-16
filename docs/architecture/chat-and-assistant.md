@@ -6650,20 +6650,49 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   rule runs on every call as ever (`tools::refused_after_outside`) — and a
   research runs none of the tools it locks anyway. The plan step has no
   tools and reads no outside content.
-- **Retry and Edit**: a question that plainly asks ("research …") researches
-  again; one researched by the switch alone is answered as an ordinary
-  question (the switch isn't kept with the question).
+- **Retry and Edit** (16 Nov 2026): a question that plainly asks ("research
+  …") researches again; so does one researched by the switch alone,
+  whatever the switch says by then — a question asked with it on keeps it
+  (`ChatMessage::research`, set by `turn.rs` as the research starts;
+  `chats::set_research`), and `chat_retry` runs the question again under
+  `research::scoped(question.research)`, an Edit under its message's
+  (`chat_send`'s `edit`): the plan first, as it was asked. One asked with
+  it off is answered again as ever. An older Yap's save drops the field
+  (its Retry then answers plainly).
+- **Pages by their own titles** (16 Nov 2026): a page read that came with
+  no title of its own — Claude Code's `WebFetch` gives none, so a page no
+  search found showed its address ("en.wikipedia.org/wiki/QWERTY"), as did
+  a fetch with no title, a search result titled only with its site ("www.cambridge.org", Opus in Yap Lab) — gets its own before the report is made
+  (`web::title_read_pages`, `web/page.rs`): its `og:title`, else its
+  `<title>` (`title_in`), from its first 160 KB read on this PC with a page
+  read's guards (a page Yap read in the last minutes: from the cache, nothing
+  fetched), at most the research's reads at once, each within 8 s
+  (`TITLES_WITHIN`; one not back keeps its address); never after a ■. The
+  Sources row and the report's ## Sources then name it. Decided against a
+  read for every plan answer's fetched pages: only Research, whose turn is
+  long already.
+- **A word before the report** (16 Nov 2026; Opus on the plan: "I have
+  enough sources now, so here's the report." then the # title, which made
+  the document's title the plan's and its first lines that word and the
+  title again): at most three short lines with no heading before the first
+  # heading (`research::preamble`) go, and that heading is the title.
 - The log has counts, caps and times, never the question, a plan's words, a
   query or an address.
 - Tests: `cargo test chat::research` (a plain ask, the caps, the reads sized
   to the request, the plan read, the loop's words, citations only to pages
   read and numbered as first cited, progress, the quiet stream, a plan turn's
-  caps); `chat::tools::agent` (a research turn's gate); e2e
+  caps, a word before the title); `chat::chats` (a question kept as
+  researched, for its Retry and Edit); `web::page` (a page's own title, the
+  read pages titled); `chat::tools::agent` (a research turn's gate); e2e
   `chat-research.spec.js` (the switch, the plan before any search, the loop on
   the free sources with its progress, an app and memory refused, the report
   beside the chat with its citations and Sources, ■ Stop, a plain ask, a
-  greeting, web search off; light and dark); Yap Lab on Opus on the plan
-  (`research the history of the QWERTY keyboard layout`).
+  greeting, web search off; Retry and Edit of a switch-researched question
+  researching again with the switch off, a plain one's Retry not; on the
+  plan, a page `WebFetch` read that no search found titled in the row and
+  the report, a word before the title gone; light and dark); Yap Lab on Opus
+  on the plan (`research the history of the QWERTY keyboard layout`; then ↻,
+  the row's titles).
 
 ## Projects (2026-11-15)
 

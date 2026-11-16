@@ -318,10 +318,15 @@ shows it under "Shot “<name>”").
 What's on screen, over CDP: how many elements match `--css` in that window and how
 many of them show; whether `--text` is in its visible words (`thread`: Chat's thread;
 `panel`: the panel beside the chat); and the window's theme. A script's `expect`
-uses it.
+uses it. With `--css` (16 Nov 2026), whether something else is over the first match
+that shows, at its centre (`covered`), and what (`over`: a toast's words, or the
+element on top) — a toast over the message box's Send, say. (Toasts never cover the
+message box since 16 Nov 2026, `ui/toastClear.js`, so `ask` clicks Send as the person
+does, closing nothing first.)
 
 ```json
 {"ok":true,"window":"thread","found":true,"theme":"light","words":"THE END","has":true}
+{"ok":true,"window":"main","css":"button[aria-label=\"Send\"]","found":true,"theme":"light","count":1,"visible":1,"covered":false}
 ```
 
 ### `click --window main|thread|panel --css <selector> [--right]`

@@ -17,6 +17,10 @@ use crate::chat::stream::{unless_stopped, Event, Halt, Live, Sink, Watch};
 /// What a research stopped before its report says.
 const STOPPED: &str = "Research stopped before the report was written.";
 
+/// The most the read pages' own titles may take, all at once, before the
+/// report ([`crate::web::title_read_pages`]): those not back keep their address.
+const TITLES_WITHIN: std::time::Duration = std::time::Duration::from_secs(8);
+
 /// **Does this turn research?** The Research switch, or a message that
 /// plainly asks ([`research::asks`]) — typed (or dictated) in Chat, never a
 /// Code chat, across the meetings, a Skill, a passage selected, the Voice
@@ -153,6 +157,18 @@ pub(super) async fn answer(
         };
         run::with_tools(t, &opened.conv, built, fitted, sizing, quiet_live, watch, Some(budget)).await?
     };
+    // The pages read that came with no title of their own (Claude Code's
+    // WebFetch gives none; a page not in the results then showed its address):
+    // their own, read on this PC, for the Sources row and the report's list.
+    let mut found = found;
+    if !found.stopped {
+        let ep = crate::web::Endpoints::current();
+        let titled = crate::web::title_read_pages(&ep, &mut found.sources, caps.reads, TITLES_WITHIN);
+        // (■ now: the report's written; it's kept, as its pages had them.)
+        if let Err(Halt::Superseded) = unless_stopped(titled, Some(t.stop)).await {
+            return Err(superseded());
+        }
+    }
     // 4. The report.
     Ok(Some(report(t, built, found, &plan, budget, sink)))
 }
