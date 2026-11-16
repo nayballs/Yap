@@ -262,6 +262,29 @@ pub async fn e2e_chat_auto_archive(app: AppHandle) -> Result<Vec<u64>, String> {
     Ok(run(&app))
 }
 
+/// Test mode only (Yap Lab's `age`, 16 Nov 2026): chats `ids` (none: every
+/// chat but a meeting's Ask thread or an incognito one) made `days` days
+/// older — when they started, were last used and each message's time — so
+/// auto-archive can be tried on a lab's own chats without waiting days.
+/// Chat's list is told (its dates move). The chats aged.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn e2e_chat_age(app: AppHandle, ids: Option<Vec<u64>>, days: u32) -> Result<Vec<u64>, String> {
+    if !crate::shell::e2e::active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    if days == 0 || days > 3650 {
+        return Err("Age chats by 1 to 3650 days".to_string());
+    }
+    let aged = chats::age_by(ids.as_deref(), u64::from(days) * DAY_SECS);
+    chats::saved().map_err(|e| e.to_string())?;
+    tracing::info!(chats = aged.len(), days, "e2e: chats aged");
+    if !aged.is_empty() {
+        let _ = app.emit(CHANGED_EVENT, serde_json::json!({ "ids": aged, "archived": false }));
+    }
+    Ok(aged)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,6 +387,27 @@ mod tests {
         // A message in an archived chat brings it back.
         chats::append(old.id, "user", "And rye?", &[], None, false).unwrap();
         assert_eq!(titles(chats::list_archived()), ["Build scripts"]);
+    }
+
+    #[test]
+    fn the_labs_aging_moves_a_chats_times_back_and_leaves_a_meetings_ask_alone() {
+        let a = chats::create("Seed swaps");
+        chats::append(a.id, "user", "Which seeds keep?", &[], None, false).unwrap();
+        let b = chats::create("Bike routes");
+        let meeting = chats::create_for_note(78, "Ask");
+        let before = chats::get(a.id).unwrap();
+        // Every chat (none named): not a meeting's thread.
+        let aged = chats::age_by(None, 40 * DAY_SECS);
+        assert!(aged.contains(&a.id) && aged.contains(&b.id) && !aged.contains(&meeting.id), "{aged:?}");
+        let after = chats::get(a.id).unwrap();
+        assert_eq!(after.updated_ts, before.updated_ts - 40 * DAY_SECS);
+        assert_eq!(after.created_ts, before.created_ts - 40 * DAY_SECS);
+        assert_eq!(after.messages[0].ts, before.messages[0].ts - 40 * DAY_SECS, "its messages' times too");
+        assert_eq!(chats::get(meeting.id).unwrap().updated_ts, meeting.updated_ts);
+        // Now due for a 30-day rule; one named alone, only it.
+        let due_now = due(&[after, chats::get(meeting.id).unwrap()], now_secs(), 30, &HashSet::new());
+        assert_eq!(due_now, [a.id]);
+        assert_eq!(chats::age_by(Some(&[b.id]), DAY_SECS), [b.id]);
     }
 
     #[test]

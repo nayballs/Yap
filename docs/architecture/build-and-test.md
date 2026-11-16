@@ -456,7 +456,12 @@ ever reaches it, or anyone's Claude account.
   `stdout` (`gh pr list --json`'s array), `stderr` and `code`, and appends
   what it was started with to `dump`; `e2e_gh_script {script?}` switches it
   (`null`: no `gh`), `YAP_GH_EXE` / `YAP_GH_ARGS_PREFIX` as Claude Code's. A
-  test run without one finds no `gh`, never the person's own.
+  test run without one finds no `gh`, never the person's own — except Yap
+  Lab's read-only one (16 Nov 2026, `set --gh on`, a live lab only:
+  `e2e_gh_lab`): `yap.exe lab-gh <gh.exe> …` (`agents/prs/lab.rs`) runs the
+  person's `gh` only for `gh pr list` / `gh pr view` with their reading flags,
+  on `nayballs/Yap` only, everything else refused before `gh` starts
+  ([lab.md](../lab.md#set-json-or-set---web-onoff---yap-code-onoff---connectors-onoff)).
 - **The recordings**: `desktop/src-tauri/src/ai/claude_code/fixtures/<version>/`,
   per Claude Code version — `real-*` recorded from the real one **signed out,
   with an empty config folder** (`CLAUDE_CONFIG_DIR`), so no login and no

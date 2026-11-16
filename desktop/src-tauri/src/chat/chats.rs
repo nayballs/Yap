@@ -638,6 +638,29 @@ pub fn backdate(id: u64, ts: u64) {
     });
 }
 
+/// **Test mode** (Yap Lab's `age`, `chat/auto_archive.rs`): conversations
+/// `ids` (none: every one but a meeting's Ask thread or an incognito chat)
+/// made `secs` older — their start, their last use and each message's time
+/// moved back by as much, nothing else — and saved. The ones aged.
+#[cfg(debug_assertions)]
+pub fn age_by(ids: Option<&[u64]>, secs: u64) -> Vec<u64> {
+    with_store(|s| {
+        let mut aged = Vec::new();
+        for c in s.conversations.iter_mut().filter(|c| ids.map_or(c.note.is_none() && !c.incognito, |ids| ids.contains(&c.id))) {
+            c.created_ts = c.created_ts.saturating_sub(secs);
+            c.updated_ts = c.updated_ts.saturating_sub(secs);
+            for m in &mut c.messages {
+                m.ts = m.ts.saturating_sub(secs);
+            }
+            aged.push(c.id);
+        }
+        if !aged.is_empty() {
+            save_to_disk(s);
+        }
+        aged
+    })
+}
+
 /// chats.json as a save would write it now (tests: never an incognito chat).
 #[cfg(test)]
 pub fn saved_json() -> String {

@@ -315,6 +315,42 @@ export function answerOf(conv, fromIndex = 0) {
   return null;
 }
 
+/** A routine's run over (chat/routines.rs `State`). */
+const RUN_OVER = { done: 'answered', failed: 'failed', skipped: 'failed' };
+
+/**
+ * **A routine's run, as a lab turn** (`routine new|now`, 16 Nov 2026): in
+ * Settings' listing (`routines_list`), the newest run of routine `id` queued
+ * at `after` (unix seconds) or later — `{ done, status, error, run }`, done
+ * once it's over (done → "answered", failed or skipped → "failed", its
+ * `why` the error); `run` null while none has started. Pure.
+ */
+export function routineEnd(listing, { id, after = 0 }) {
+  const runs = (listing?.runs ?? []).filter((r) => r.routine === id && Number(r.queued) >= after - 1);
+  const run = runs.sort((a, b) => Number(b.queued) - Number(a.queued) || Number(b.id) - Number(a.id))[0] ?? null;
+  if (!run) return { done: false, status: 'running', error: null, run: null };
+  const over = RUN_OVER[run.state];
+  if (!over) return { done: false, status: 'running', error: null, run };
+  return { done: true, status: over, error: over === 'failed' ? run.why || `the run ${run.state}` : null, run };
+}
+
+/**
+ * **Where a new version of `conv` starts** (`ask --retry` / `--edit`): its
+ * person's last message, `{ index, text }`, or null. A Retry answers that
+ * message again; in a Code chat it goes through Rewind, which cuts the thread
+ * there and asks again — so the conversation is no longer than it was, and
+ * its length (a new turn's start) would find no answer at all (16 Nov 2026).
+ * Pure.
+ */
+export function branchFrom(conv) {
+  const messages = conv?.messages ?? [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    // (The person's own: an agent's report is a "user" message of its own kind, `agentReport`.)
+    if (messages[i].role === 'user' && !messages[i].kind) return { index: i, text: String(messages[i].text ?? '') };
+  }
+  return null;
+}
+
 /** The question a turn asked in conversation `conv`: its first person's
  * message from `fromIndex` on (Chat's saved one). Pure. */
 export function questionOf(conv, fromIndex = 0) {
