@@ -177,7 +177,7 @@ test('a workbook dropped on Chat opens beside it as Excel draws it, and the mode
   await expect(view(main).getByTestId('chat-sheet-formula')).toHaveValue('=B5*C5');
   await expect(view(main).getByTestId('chat-sheet-facts')).toHaveText('A1:F8 · 7 formulas, calculated by Yap · 1 hidden sheet');
   // Nothing in it is editable.
-  await expect(view(main).locator('[contenteditable], textarea')).toHaveCount(0);
+  await expect(view(main).locator('[contenteditable], textarea:not([readonly])')).toHaveCount(0);
   await expect(view(main).getByTestId('chat-sheet-formula')).toHaveAttribute('readonly', '');
   await shot(main, '01-a-workbook-beside-the-chat');
   await theme(yap, main, 'dark');
@@ -283,8 +283,9 @@ test("a Code chat's workbook opens from Claude's answer and its Outputs, follows
   await expect(at(main, 'D6')).toHaveText('£17.00');
   await closePanel(main);
 
-  // A big sheet: its rows come as they scroll into view, the header frozen at the top.
-  await answer.locator('.md-filelink', { hasText: 'beds.xlsx' }).click();
+  // A big sheet: its rows come as they scroll into view, the header frozen at the top. (Clicked at its start:
+  // a short link at the end of its line has its ⋯ over its end, ui/fileLinks.js.)
+  await answer.locator('.md-filelink', { hasText: 'beds.xlsx' }).click({ position: { x: 4, y: 6 } });
   await expect(view(main)).toHaveAttribute('data-name', 'beds.xlsx');
   await expect(view(main).getByTestId('chat-sheet-facts')).toHaveText('A1:E5000 · 4,999 formulas, calculated by Yap');
   await expect(at(main, 'E2')).toHaveText('36');

@@ -294,35 +294,35 @@ fn attrs_without(e: &BytesStart, drop: &[&str]) -> String {
 }
 
 /// The text written so far into `out`, from `src`, and what's next to copy.
-struct Splice<'a> {
+pub(super) struct Splice<'a> {
     src: &'a str,
     out: String,
     at: usize,
 }
 
 impl<'a> Splice<'a> {
-    fn new(src: &'a str) -> Self {
+    pub(super) fn new(src: &'a str) -> Self {
         Splice { src, out: String::with_capacity(src.len() + 1024), at: 0 }
     }
     /// Copy the source up to `to`.
-    fn copy_to(&mut self, to: usize) {
+    pub(super) fn copy_to(&mut self, to: usize) {
         if to > self.at {
             self.out.push_str(&self.src[self.at..to]);
             self.at = to;
         }
     }
     /// `text` in place of the source's `from..to`.
-    fn replace(&mut self, from: usize, to: usize, text: &str) {
+    pub(super) fn replace(&mut self, from: usize, to: usize, text: &str) {
         self.copy_to(from);
         self.out.push_str(text);
         self.at = to;
     }
     /// `text` put in at `at`.
-    fn insert(&mut self, at: usize, text: &str) {
+    pub(super) fn insert(&mut self, at: usize, text: &str) {
         self.copy_to(at);
         self.out.push_str(text);
     }
-    fn finish(mut self) -> String {
+    pub(super) fn finish(mut self) -> String {
         let end = self.src.len();
         self.copy_to(end);
         self.out

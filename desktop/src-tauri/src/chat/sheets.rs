@@ -27,6 +27,7 @@ pub mod delimited;
 pub mod edit;
 pub mod patch;
 pub mod save;
+pub mod shift;
 pub mod view;
 pub mod xls;
 pub mod xlsx;

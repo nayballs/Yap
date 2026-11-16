@@ -16,11 +16,109 @@ use ironcalc::base::Model;
 
 use super::{keep_rows, Book, Cell, Cols, Edge, Format, Kind, Merge, Row, RowLook, Sheet, Style, Why, MAX_CELLS};
 
-/// The language and locale IronCalc reads formulas and formats numbers in
-/// (a file's own formats win: "dd/mm/yyyy" stays that).
+/// The language IronCalc reads formulas in (function names: Excel's English).
 const LANGUAGE: &str = "en";
-const LOCALE: &str = "en";
+/// The locale when nothing says otherwise: IronCalc's own (the US's).
+pub const LOCALE: &str = "en";
 const TZ: &str = "UTC";
+
+// ---- the locale: what typed input means ----------------------------------------------------------
+
+/// **The locale a workbook is read and typed into in** (16 Nov 2026): the
+/// person's Region (Settings → About you → Region, `ai/about_you.rs`) when
+/// IronCalc has one for it ([`locale_for_region`]: in the UK, `16/11/2026`
+/// typed is a date and `£12.50` a currency value), else the file's own (the
+/// language its formats name, `[$-809]`: [`locale_of_file`]), else
+/// IronCalc's own `en` (the US's). It's also how numbers show where the
+/// file's format leaves it to the locale; a file's own formats win
+/// ("dd/mm/yyyy" stays that).
+pub fn locale_for(bytes: &[u8]) -> &'static str {
+    let id = region_locale().or_else(|| locale_of_file(bytes)).unwrap_or(LOCALE);
+    if ironcalc::base::locale::get_locale(id).is_ok() {
+        id
+    } else {
+        LOCALE
+    }
+}
+
+/// The person's Region's locale, if IronCalc has one for it (a test: none, never this PC's).
+fn region_locale() -> Option<&'static str> {
+    #[cfg(test)]
+    {
+        None
+    }
+    #[cfg(not(test))]
+    {
+        let cfg = crate::config::load();
+        let r = crate::ai::about_you::resolve(&crate::ai::about_you::detected(), &cfg.region_country);
+        locale_for_region(r.language.as_deref(), r.country.as_deref())
+    }
+}
+
+/// Where dates are day first, as in the UK, numbers written `1,234.50`, and
+/// English spoken: typed in as IronCalc's `en-GB` reads them.
+const DAY_FIRST_ENGLISH: [&str; 12] = ["GB", "IE", "AU", "NZ", "IN", "SG", "HK", "MT", "JE", "GG", "IM", "GI"];
+
+/// **IronCalc's locale for a Region** (`language` "en-GB", `country`
+/// "GB"), when it has one whose dates, numbers and currency are that
+/// country's: a country written as the UK writes ([`DAY_FIRST_ENGLISH`]:
+/// `en-GB`), or a language's home (Germany and Austria `de`, France `fr`,
+/// Spain `es`, Italy `it`, the US `en`). None: no match, so a date typed is
+/// never read the wrong way round. Pure.
+pub fn locale_for_region(language: Option<&str>, country: Option<&str>) -> Option<&'static str> {
+    let country = country.map(str::to_ascii_uppercase);
+    let lang = language.map(|l| crate::ai::about_you::split_tag(l).0.to_ascii_lowercase()).unwrap_or_default();
+    let c = country.as_deref()?;
+    if DAY_FIRST_ENGLISH.contains(&c) {
+        return Some("en-GB");
+    }
+    Some(match (c, lang.as_str()) {
+        ("US", _) => "en",
+        ("DE" | "AT", _) => "de",
+        ("LU", "de") => "de",
+        ("FR" | "MC", _) => "fr",
+        ("LU" | "BE", "fr") => "fr",
+        ("ES", _) => "es",
+        ("IT" | "SM" | "VA", _) => "it",
+        _ => return None,
+    })
+}
+
+/// **The locale a workbook's own formats name** (`[$-809]dd/mm/yyyy`,
+/// `[$£-809]#,##0.00`: Windows' language ids), the one they name most, if
+/// IronCalc has it. Pure.
+pub fn locale_of_file(bytes: &[u8]) -> Option<&'static str> {
+    use std::io::Read;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
+    let mut styles = String::new();
+    zip.by_name("xl/styles.xml").ok()?.read_to_string(&mut styles).ok()?;
+    let mut counts: HashMap<&'static str, usize> = HashMap::new();
+    let mut rest = styles.as_str();
+    while let Some(at) = rest.find("[$") {
+        rest = &rest[at + 2..];
+        let Some(close) = rest.find(']') else { break };
+        let inside = &rest[..close];
+        if let Some((_, id)) = inside.rsplit_once('-') {
+            if let Some(locale) = u32::from_str_radix(id.trim(), 16).ok().and_then(|lcid| locale_of_lcid(lcid & 0xFFFF)) {
+                *counts.entry(locale).or_default() += 1;
+            }
+        }
+    }
+    counts.into_iter().max_by_key(|(id, n)| (*n, std::cmp::Reverse(*id))).map(|(id, _)| id)
+}
+
+/// IronCalc's locale for a Windows language id (LCID). Pure.
+fn locale_of_lcid(lcid: u32) -> Option<&'static str> {
+    Some(match lcid {
+        0x0409 => "en",
+        0x0809 | 0x1809 | 0x0C09 | 0x1409 | 0x4009 | 0x4809 => "en-GB",
+        0x0407 | 0x0C07 => "de",
+        0x040C | 0x180C => "fr",
+        0x040A | 0x0C0A => "es",
+        0x0410 => "it",
+        _ => return None,
+    })
+}
 
 /// **Read an `.xlsx`.** Blocking (the caller's own thread: `sheets::read`).
 ///
@@ -36,18 +134,13 @@ pub fn read(bytes: &[u8]) -> Result<Book, Why> {
     if super::is_encrypted_office(bytes) {
         return Err(Why::Locked);
     }
-    match with_full_styles(bytes) {
-        Some(fixed) => {
-            tracing::info!("Chat: an .xlsx's missing style parts filled in for its reader");
-            load(&fixed)
-        }
-        None => load(bytes),
-    }
+    let locale = locale_for(bytes);
+    load(&complete(bytes), locale)
 }
 
 /// IronCalc reading and calculating `bytes`, its panic an error.
-fn load(bytes: &[u8]) -> Result<Book, Why> {
-    let (model, kept) = model_now(bytes)?;
+fn load(bytes: &[u8], locale: &str) -> Result<Book, Why> {
+    let (model, kept) = model_now(bytes, locale)?;
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| book_of(&model, &kept))).map_err(|_| Why::Failed)
 }
 
@@ -55,9 +148,9 @@ fn load(bytes: &[u8]) -> Result<Book, Why> {
 /// results the file kept (a function IronCalc doesn't know keeps the
 /// file's): the sheet view's editor's (`edit.rs`). `bytes` with its style
 /// parts filled in already ([`complete`]). A panic is an error.
-pub(super) fn model_now(bytes: &[u8]) -> Result<(Model<'static>, Kept), Why> {
+pub(super) fn model_now(bytes: &[u8], locale: &str) -> Result<(Model<'static>, Kept), Why> {
     std::panic::catch_unwind(|| {
-        let workbook = ironcalc::import::load_from_xlsx_bytes(bytes, "workbook", LOCALE, TZ).map_err(|_| Why::Failed)?;
+        let workbook = ironcalc::import::load_from_xlsx_bytes(bytes, "workbook", locale, TZ).map_err(|_| Why::Failed)?;
         let mut model = Model::from_workbook(workbook, LANGUAGE).map_err(|_| Why::Failed)?;
         for f in model.workbook.styles.num_fmts.iter_mut() {
             if let Some(q) = quoted_literals(&f.format_code) {
@@ -117,9 +210,107 @@ pub fn quoted_literals(code: &str) -> Option<String> {
 /// **The package IronCalc reads**: `bytes` with its missing style parts
 /// filled in ([`with_full_styles`]), or as it is. A save writes into the
 /// file's own (`save.rs`): the parts filled in never reach it (they'd be
-/// out of the stylesheet's order).
+/// out of the stylesheet's order). Also: an empty cell a writer gave a type
+/// (openpyxl's styled empty cell, `<c r="B3" s="1" t="n"/>`) read as empty,
+/// as Excel shows it, not IronCalc's 0 ([`without_typed_empties`]).
 pub(super) fn complete(bytes: &[u8]) -> Vec<u8> {
-    with_full_styles(bytes).unwrap_or_else(|| bytes.to_vec())
+    prepared(bytes).unwrap_or_else(|| bytes.to_vec())
+}
+
+/// **A sheet's XML with its empty cells' types left out** (`<c r="B3" s="1"
+/// t="n"/>` → `<c r="B3" s="1"/>`): a cell with nothing in it is empty
+/// whatever its type says (Excel's reading; IronCalc reads an empty number
+/// as 0). None: there's none. Pure.
+pub fn without_typed_empties(xml: &str) -> Option<String> {
+    use quick_xml::events::Event;
+    if !xml.contains("t=") {
+        return None;
+    }
+    let mut reader = quick_xml::Reader::from_str(xml);
+    let mut out = String::new();
+    let mut at = 0;
+    loop {
+        let start = reader.buffer_position() as usize;
+        let event = reader.read_event().ok()?;
+        let end = reader.buffer_position() as usize;
+        match event {
+            Event::Eof => break,
+            Event::Empty(e) if e.local_name().as_ref() == "c" && e.try_get_attribute("t").ok().flatten().is_some() => {
+                let mut tag = format!("<{}", e.name().as_ref());
+                for a in e.attributes().with_checks(false).flatten() {
+                    if a.key.as_ref() != "t" {
+                        tag.push_str(&format!(" {}=\"{}\"", a.key.as_ref(), a.value.replace('"', "&quot;")));
+                    }
+                }
+                tag.push_str("/>");
+                out.push_str(&xml[at..start]);
+                out.push_str(&tag);
+                at = end;
+            }
+            _ => {}
+        }
+    }
+    if at == 0 {
+        return None;
+    }
+    out.push_str(&xml[at..]);
+    Some(out)
+}
+
+/// The package IronCalc reads, when it differs from `bytes`: its style
+/// parts filled in ([`full_styles`]; a whole `styles.xml` when it has
+/// none), its sheets' typed empty cells untyped; every other part as it was.
+fn prepared(bytes: &[u8]) -> Option<Vec<u8>> {
+    use std::io::{Read, Write};
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
+    let mut new: HashMap<String, String> = HashMap::new();
+    let styles = match zip.by_name("xl/styles.xml") {
+        Ok(mut f) => {
+            let mut s = String::new();
+            f.read_to_string(&mut s).ok()?;
+            full_styles(&s)
+        }
+        Err(_) => {
+            let parts: String = STYLE_PARTS.iter().map(|(_, xml)| *xml).collect();
+            Some(format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">{parts}</styleSheet>"#))
+        }
+    };
+    if let Some(styles) = styles {
+        tracing::info!("Chat: an .xlsx's missing style parts filled in for its reader");
+        new.insert("xl/styles.xml".into(), styles);
+    }
+    let sheets: Vec<String> = zip.file_names().filter_map(|n| n.ok().map(|n| n.into_owned())).filter(|n| n.starts_with("xl/worksheets/") && n.ends_with(".xml") && !n.contains("/_rels/")).collect();
+    for name in sheets {
+        let mut s = String::new();
+        if zip.by_name(&name).ok()?.read_to_string(&mut s).is_err() {
+            continue;
+        }
+        if let Some(fixed) = without_typed_empties(&s) {
+            new.insert(name, fixed);
+        }
+    }
+    if new.is_empty() {
+        return None;
+    }
+    let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let mut wrote_styles = false;
+    for i in 0..zip.len() {
+        let file = zip.by_index_raw(i).ok()?;
+        let name = file.name().ok()?.into_owned();
+        if let Some(text) = new.get(&name) {
+            drop(file);
+            wrote_styles |= name == "xl/styles.xml";
+            out.start_file(name, zip::write::SimpleFileOptions::default()).ok()?;
+            out.write_all(text.as_bytes()).ok()?;
+        } else {
+            out.raw_copy_file(file).ok()?;
+        }
+    }
+    if let (false, Some(styles)) = (wrote_styles, new.get("xl/styles.xml")) {
+        out.start_file("xl/styles.xml", zip::write::SimpleFileOptions::default()).ok()?;
+        out.write_all(styles.as_bytes()).ok()?;
+    }
+    Some(out.finish().ok()?.into_inner())
 }
 
 /// The parts of `xl/styles.xml` IronCalc can't do without, each with the
@@ -157,43 +348,6 @@ pub fn full_styles(styles: &str) -> Option<String> {
     }
     let end = styles.rfind(&format!("</{prefix}styleSheet"))?;
     Some(format!("{}{missing}{}", &styles[..end], &styles[end..]))
-}
-
-/// **The workbook `bytes` with `xl/styles.xml` complete** ([`full_styles`];
-/// a whole one when it has none), every other part as it was; `None` when
-/// there's nothing to fill in or it isn't a zip.
-fn with_full_styles(bytes: &[u8]) -> Option<Vec<u8>> {
-    use std::io::{Read, Write};
-    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
-    let styles = match zip.by_name("xl/styles.xml") {
-        Ok(mut f) => {
-            let mut s = String::new();
-            f.read_to_string(&mut s).ok()?;
-            full_styles(&s)?
-        }
-        Err(_) => {
-            let parts: String = STYLE_PARTS.iter().map(|(_, xml)| *xml).collect();
-            format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">{parts}</styleSheet>"#)
-        }
-    };
-    let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    let mut wrote = false;
-    for i in 0..zip.len() {
-        let file = zip.by_index_raw(i).ok()?;
-        if matches!(file.name().as_deref(), Ok("xl/styles.xml")) {
-            drop(file);
-            out.start_file("xl/styles.xml", zip::write::SimpleFileOptions::default()).ok()?;
-            out.write_all(styles.as_bytes()).ok()?;
-            wrote = true;
-        } else {
-            out.raw_copy_file(file).ok()?;
-        }
-    }
-    if !wrote {
-        out.start_file("xl/styles.xml", zip::write::SimpleFileOptions::default()).ok()?;
-        out.write_all(styles.as_bytes()).ok()?;
-    }
-    Some(out.finish().ok()?.into_inner())
 }
 
 /// What a formula's result says, as the file kept it: `(text, kind)`.
@@ -351,9 +505,49 @@ pub(super) fn book_of(model: &Model, kept: &Kept) -> Book {
             }
             sheet.row_looks.push(RowLook { r: row.r as u32, px, hidden: row.hidden, style });
         }
+        fit_wrapped_rows(&mut sheet, &book, ws.rows.iter().filter(|r| r.custom_height).map(|r| r.r as u32).collect());
         book.sheets.push(sheet);
     }
     book
+}
+
+/// **Rows fitted to their wrapped text, as Excel fits them** (16 Nov 2026):
+/// a row with no height of its own (`custom`: the rows that have one) is as
+/// tall as the most lines a wrapped cell in it takes at its column's width
+/// (`edit::wrapped_lines`), 15 points a line of an 11-point font — a line
+/// break typed (Alt+Enter), or a long text. A merge's cell isn't (Excel
+/// doesn't fit those either).
+fn fit_wrapped_rows(sheet: &mut Sheet, book: &Book, custom: std::collections::HashSet<u32>) {
+    let col_px = |c: u32| sheet.cols.iter().find(|k| k.from <= c && c <= k.to).and_then(|k| k.px).unwrap_or(super::COLUMN_PX) as f64;
+    let merged = |r: u32, c: u32| sheet.merges.iter().any(|m| m.row == r && m.col == c);
+    let mut fits: Vec<(u32, f32)> = Vec::new();
+    for row in &sheet.rows {
+        if custom.contains(&row.r) {
+            continue;
+        }
+        let mut need = 0.0f64;
+        for c in &row.cells {
+            let Some(st) = book.styles.get(c.style as usize).filter(|st| st.wrap) else { continue };
+            if c.text.is_empty() || merged(row.r, c.col) {
+                continue;
+            }
+            let size = st.size.map(|s| s as f64 / 10.0).unwrap_or(book.size as f64).max(1.0);
+            let lines = super::edit::wrapped_lines(&c.text, col_px(c.col), size);
+            if lines > 1 {
+                need = need.max(height_px(lines as f64 * 15.0 * size / 11.0) as f64);
+            }
+        }
+        if need > 0.0 {
+            fits.push((row.r, need as f32));
+        }
+    }
+    for (r, px) in fits {
+        match sheet.row_looks.iter_mut().find(|l| l.r == r) {
+            Some(look) => look.px = Some(look.px.unwrap_or(0.0).max(px)),
+            None => sheet.row_looks.push(RowLook { r, px: Some(px), hidden: false, style: None }),
+        }
+    }
+    sheet.row_looks.sort_by_key(|l| l.r);
 }
 
 /// A column width as Excel keeps it (characters of its widest digit, with
