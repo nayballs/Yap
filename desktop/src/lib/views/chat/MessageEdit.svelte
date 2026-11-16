@@ -4,6 +4,8 @@
   // in a Code chat, a Rewind to before it first (agents/rewind.rs). Enter saves and sends, Shift+Enter is a new line,
   // Esc cancels. `text`: its words; `note`: a line beside the buttons (what else goes again: its screenshots).
   import { onMount } from 'svelte';
+  // Toasts never cover the box or its Save and send (ui/toastClear.js).
+  import { keepClear } from '../../ui/toastClear.js';
 
   let { text = '', note = '', onsave, oncancel } = $props();
   // (Its words as it opened: what's typed after is this box's own.)
@@ -42,7 +44,7 @@
   }
 </script>
 
-<div class="medit" data-testid="chat-edit">
+<div class="medit" data-testid="chat-edit" use:keepClear>
   <textarea bind:this={el} bind:value={draft} oninput={fit} onkeydown={key} rows="2" aria-label="Edit your message" data-testid="chat-edit-input"></textarea>
   <div class="meditbar">
     {#if note}<span class="meditnote">{note}</span>{/if}
