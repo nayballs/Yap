@@ -989,11 +989,16 @@ async function probe({ window: which = 'main', css, text }) {
  * (14 Nov 2026, the message box's queue: a queued message's Send now and Cancel and edit). Only Yap's own windows,
  * never a page beside the chat (that's Claude's to act on, with its rules); the first match that shows.
  */
-async function click({ window: which = 'main', css, right = false }) {
+async function click({ window: which = 'main', css, right = false, hover = false }) {
   if (!css) throw new Error('click needs --css');
   if (!['main', 'thread', 'panel'].includes(which)) throw new Error("click works in Yap's own window: main, thread or panel");
   const scope = which === 'panel' ? '[data-testid="chat-panel-slot"] ' : which === 'thread' ? '[data-testid="chat-column"] ' : '';
   const target = main().locator(`${scope}${css}`).first();
+  // `--hover`: the pointer put on it, no click (a file link's ⋯, 16 Nov 2026): what shows then, `shot` or `click` next.
+  if (hover) {
+    await target.hover({ timeout: 5_000 });
+    return { window: which, css, hovered: true };
+  }
   // `--right`: a right-click (a file link's menu, 16 Nov 2026).
   await target.click({ timeout: 5_000, button: right ? 'right' : 'left' });
   return { window: which, css, clicked: true, ...(right ? { right: true } : {}) };

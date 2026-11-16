@@ -39,9 +39,18 @@ fn gh_s_list_is_read_newest_first() {
     assert_eq!(list.iter().map(|p| p.number).collect::<Vec<_>>(), [131, 128, 117, 112]);
     assert_eq!(
         list[0],
-        Pr { number: 131, title: "Round toInches to one decimal".into(), repo: "example-org/garden-planner".into(), url: "https://github.com/example-org/garden-planner/pull/131".into(), state: "open", checks: "running" }
+        Pr {
+            number: 131,
+            title: "Round toInches to one decimal".into(),
+            repo: "example-org/garden-planner".into(),
+            url: "https://github.com/example-org/garden-planner/pull/131".into(),
+            state: "open",
+            checks: "running",
+            counts: Counts { pending: 1, successful: 1, ..Default::default() }
+        }
     );
     assert_eq!(list.iter().map(|p| (p.state, p.checks)).collect::<Vec<_>>(), [("open", "running"), ("draft", "none"), ("merged", "passing"), ("closed", "failing")]);
+    assert_eq!(list[1].counts, Counts::default());
     assert_eq!(parse_list("[]"), Some(Vec::new()));
     assert_eq!(parse_list("Showing 0 of 0 pull requests"), None, "not the JSON asked for");
     assert_eq!(parse_list("{\"number\":1}"), None);
@@ -59,9 +68,57 @@ fn checks_roll_up_as_github_shows_them() {
     assert_eq!(of(vec![run("QUEUED", ""), ctx("PENDING")]), "running");
     assert_eq!(of(vec![run("COMPLETED", "SUCCESS"), run("COMPLETED", "FAILURE"), run("IN_PROGRESS", "")]), "failing", "a failure wins over one still running");
     assert_eq!(of(vec![run("COMPLETED", "TIMED_OUT")]), "failing");
-    assert_eq!(of(vec![run("COMPLETED", "CANCELLED")]), "failing");
+    assert_eq!(of(vec![run("COMPLETED", "ACTION_REQUIRED")]), "failing");
+    assert_eq!(of(vec![run("COMPLETED", "STARTUP_FAILURE")]), "failing");
     assert_eq!(of(vec![ctx("ERROR")]), "failing");
+    assert_eq!(of(vec![ctx("FAILURE")]), "failing");
     assert_eq!(of(vec![ctx("EXPECTED")]), "running");
+    assert_eq!(of(vec![run("COMPLETED", "")]), "running", "finished with no conclusion yet");
+}
+
+#[test]
+fn cancelled_skipped_and_neutral_are_what_they_are_never_failing() {
+    let run = |name: &str, status: &str, conclusion: &str| serde_json::json!({"__typename": "CheckRun", "name": name, "workflowName": "CI", "status": status, "conclusion": conclusion});
+    let of = |items: Vec<Value>| {
+        let rollup = Value::Array(items);
+        (checks_of(Some(&rollup)), counts_of(Some(&rollup)))
+    };
+    // A cancelled check: cancelled, never "failing" (16 Nov 2026: it read "Checks failing").
+    assert_eq!(of(vec![run("e2e", "COMPLETED", "CANCELLED")]), ("cancelled", Counts { cancelled: 1, ..Default::default() }));
+    assert_eq!(
+        of(vec![run("e2e (1/3)", "COMPLETED", "CANCELLED"), run("e2e (2/3)", "COMPLETED", "SUCCESS"), run("CodeQL", "COMPLETED", "NEUTRAL")]),
+        ("cancelled", Counts { cancelled: 1, neutral: 1, successful: 1, ..Default::default() })
+    );
+    // Skipped and neutral pass, as GitHub counts them; with nothing else, they're said as they are.
+    assert_eq!(of(vec![run("check", "COMPLETED", "SUCCESS"), run("deploy", "COMPLETED", "SKIPPED"), run("CodeQL", "COMPLETED", "NEUTRAL")]).0, "passing");
+    assert_eq!(of(vec![run("deploy", "COMPLETED", "SKIPPED"), run("docs", "COMPLETED", "SKIPPED")]), ("skipped", Counts { skipped: 2, ..Default::default() }));
+    assert_eq!(of(vec![run("CodeQL", "COMPLETED", "NEUTRAL")]), ("neutral", Counts { neutral: 1, ..Default::default() }));
+    // A real failure wins over a cancelled one, one still running over a cancelled one.
+    assert_eq!(of(vec![run("a", "COMPLETED", "CANCELLED"), run("b", "COMPLETED", "FAILURE")]).0, "failing");
+    assert_eq!(of(vec![run("a", "COMPLETED", "CANCELLED"), run("b", "IN_PROGRESS", "")]).0, "running");
+    // STALE never finished: pending, as `gh pr checks` has it.
+    assert_eq!(of(vec![run("old", "COMPLETED", "STALE")]).1, Counts { pending: 1, ..Default::default() });
+}
+
+#[test]
+fn only_the_latest_run_of_each_check_counts() {
+    // A run a workflow's concurrency cancelled, then the same check run again and passing (as on a real PR).
+    let run = |name: &str, workflow: &str, started: &str, conclusion: &str| serde_json::json!({"__typename": "CheckRun", "name": name, "workflowName": workflow, "startedAt": started, "status": "COMPLETED", "conclusion": conclusion});
+    let rollup = Value::Array(vec![
+        run("check", "CI", "2026-11-11T08:22:09Z", "CANCELLED"),
+        run("e2e (1/3)", "E2E", "2026-11-11T08:22:19Z", "FAILURE"),
+        run("check", "CI", "2026-11-11T08:22:19Z", "SUCCESS"),
+        run("e2e (1/3)", "E2E", "2026-11-11T08:22:09Z", "CANCELLED"),
+        // The same name in another workflow is another check.
+        run("check", "Lint", "2026-11-11T08:22:01Z", "CANCELLED"),
+        serde_json::json!({"__typename": "StatusContext", "context": "deploy/preview", "state": "SUCCESS"}),
+    ]);
+    assert_eq!(counts_of(Some(&rollup)), Counts { failing: 1, cancelled: 1, successful: 2, ..Default::default() });
+    let names: Vec<(&str, &str)> = latest_checks(rollup.as_array().unwrap()).iter().map(|c| (c["name"].as_str().or(c["context"].as_str()).unwrap(), c["conclusion"].as_str().or(c["state"].as_str()).unwrap())).collect();
+    assert_eq!(names, [("e2e (1/3)", "FAILURE"), ("check", "SUCCESS"), ("check", "CANCELLED"), ("deploy/preview", "SUCCESS")]);
+    // Every run replaced by a passing one: passing.
+    let rerun = Value::Array(vec![run("check", "CI", "2026-11-11T08:22:09Z", "CANCELLED"), run("check", "CI", "2026-11-11T08:30:00Z", "SUCCESS")]);
+    assert_eq!(checks_of(Some(&rerun)), "passing");
 }
 
 #[test]

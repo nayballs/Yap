@@ -16,7 +16,7 @@ export const SCRIPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '
 export const KINDS = ['ask', 'answer', 'wait', 'shot', 'set', 'expect', 'fake', 'lab', 'note'];
 
 /** The lab's own commands a `lab` step may send (16 Nov 2026): each a turn of the lab's own, or a routine's. */
-export const LAB_STEPS = ['routine', 'meeting', 'age', 'archive', 'summary', 'kept'];
+export const LAB_STEPS = ['routine', 'meeting', 'age', 'archive', 'summary', 'kept', 'click', 'type'];
 
 /** Which kind a step is: its first key that's a kind. Pure. */
 export function kindOf(step) {
