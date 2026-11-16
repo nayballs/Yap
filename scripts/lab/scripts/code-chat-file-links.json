@@ -1,0 +1,50 @@
+{
+  "name": "code-chat-file-links",
+  "about": "Three leftovers of a Code chat's files and summary (16 Nov 2026), on a real model: a file link's ⋯ (ui/fileLinks.js: it comes up on a hover, its menu the right-click's, Open in Yap from it); an Outputs row that opens where Settings → Yap Code's \"Open file links in\" says (outputsOpen.js: Notepad there — test mode keeps the command, `state`'s filesOpened — and a .js file under Windows' default app shown in Yap instead, as #147's links); and the summary's Changes on a real pull request of Yap's own with cancelled checks (agents/prs.rs: \"Checks cancelled · 8 of 10 passed\", never \"Checks failing\"), through the lab's read-only gh on branch claude/lab-untested (#146: two cancelled E2E shards, CodeQL's neutral). Needs a live lab and Yap Code.",
+  "needs": { "yapCode": true, "live": true },
+  "steps": [
+    { "set": { "git": "claude/lab-untested", "gh": "on", "bypass": true, "config": { "agentsDirect": true, "agentsOpenFiles": "yap" } }, "note": "A branch of Yap's own repository whose pull request (#146) has two cancelled checks." },
+    { "ask": "Add a function toFeet(cm) to src/convert.js that returns cm / 30.48. Then say in one short sentence which file you changed, writing its path as inline code.", "chat": "code:lab-sandbox", "timeout": 420 },
+    { "expect": { "status": "answered", "selector": { "window": "thread", "css": ".cbody .md-filelink" } }, "note": "The path in the answer is a link to the workspace's file." },
+
+    { "lab": "click", "args": { "window": "thread", "css": ".cbody .md-filelink", "hover": true }, "note": "The pointer on the link: its ⋯ comes up at its end." },
+    { "expect": { "selector": { "window": "thread", "css": "[data-testid=\"md-filelink-more\"]", "count": 1 } } },
+    { "shot": "file-link-more", "window": "main" },
+    { "lab": "click", "args": { "window": "thread", "css": "[data-testid=\"md-filelink-more\"]" }, "note": "A click on the ⋯: the link's own menu, under it." },
+    { "expect": { "selector": [{ "window": "main", "css": "[role=\"menu\"]", "count": 1 }, { "window": "main", "css": "[role=\"menuitem\"]", "count": { "min": 3, "max": 4 } }, { "window": "thread", "css": "[data-testid=\"md-filelink-more\"][aria-expanded=\"true\"]", "count": 1 }] }, "note": "Open in Yap, Open in <editor> (when one is found), Show in folder, Copy path." },
+    { "shot": "file-link-more-menu", "window": "main" },
+    { "lab": "click", "args": { "window": "main", "css": "[role=\"menuitem\"]:has-text(\"Open in Yap\")" }, "note": "Open in Yap from the ⋯'s menu: the file view beside the chat." },
+    { "expect": { "selector": { "window": "panel", "css": "[data-testid=\"chat-file\"][data-rel=\"src/convert.js\"]", "count": 1 } } },
+    { "shot": "file-view", "window": "panel" },
+
+    { "set": { "config": { "agentsOpenFiles": "notepad" } }, "note": "Links open in Notepad now (Windows' own: on every PC, so the script runs anywhere; an editor the PC hasn't opens in Yap instead)." },
+    { "lab": "summary", "args": { "chat": "same" } },
+    {
+      "expect": {
+        "status": "answered",
+        "result": [
+          { "path": "prs.status", "equals": "ok" },
+          { "path": "prs.branch", "equals": "claude/lab-untested" },
+          { "path": "rows.0.checks", "equals": "cancelled" },
+          { "path": "rows.0.text", "matches": "/Checks cancelled · \\d+ of \\d+ passed/" },
+          { "path": "rows.0.text", "notMatches": "/Checks failing/" },
+          { "path": "prs.list.0.counts.cancelled", "gte": 1 },
+          { "path": "prs.list.0.counts.failing", "equals": 0 }
+        ]
+      },
+      "note": "#146's cancelled E2E shards: cancelled, as GitHub says it, not failing."
+    },
+    { "lab": "click", "args": { "window": "panel", "css": "[data-testid=\"chat-summary-outputs\"] [data-testid=\"chat-output\"][data-kind=\"changed\"]" }, "note": "The changed file's Outputs row, with links opening in Notepad: Notepad (test mode keeps the command: state's filesOpened), not Yap's view." },
+    { "expect": { "selector": [{ "window": "panel", "css": "[data-testid=\"chat-summary\"]", "count": 1 }, { "window": "panel", "css": "[data-testid=\"chat-file\"]", "present": false }] } },
+    { "lab": "click", "args": { "window": "panel", "css": "[data-testid=\"chat-summary-outputs\"] [data-testid=\"chat-output\"][data-kind=\"changed\"]", "right": true }, "note": "Its menu: Open (Notepad), Open in Yap, Show in folder, Copy path, Open in Notepad." },
+    { "expect": { "selector": { "window": "main", "css": "[role=\"menuitem\"]", "count": { "min": 4, "max": 5 } } } },
+    { "shot": "outputs-menu-editor", "window": "main" },
+    { "lab": "type", "args": { "window": "main", "press": "Escape" } },
+
+    { "set": { "config": { "agentsOpenFiles": "default" } }, "note": "Windows' default app: convert.js is a script it would run." },
+    { "lab": "click", "args": { "window": "panel", "css": "[data-testid=\"chat-summary-outputs\"] [data-testid=\"chat-output\"][data-kind=\"changed\"]" } },
+    { "expect": { "selector": [{ "window": "panel", "css": "[data-testid=\"chat-file\"][data-rel=\"src/convert.js\"]", "count": 1 }, { "window": "main", "css": "[role=\"status\"]", "count": { "min": 1 } }] }, "note": "Shown in Yap instead, said so — never run." },
+    { "shot": "outputs-default-app-script", "window": "main" },
+    { "set": { "config": { "agentsOpenFiles": "yap" } } }
+  ]
+}

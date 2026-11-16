@@ -113,9 +113,9 @@
       <button type="button" class="fbtn" onclick={() => copyText(view?.abs || file?.rel || '', 'Path copied')} aria-label="Copy path" title="Copy path" data-testid="chat-file-copy-path">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
       </button>
-      <button type="button" class="fbtn wide" onclick={openInEditor} title="Open in your code editor" data-testid="chat-file-open-editor" disabled={!view}>
+      <button type="button" class="fbtn wide" onclick={openInEditor} aria-label={editorLabel()} title={`${editorLabel()}${file?.line ? ` at line ${file.line}` : ''}`} data-testid="chat-file-open-editor" disabled={!view}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
-        <span>{editorLabel()}</span>
+        <span class="flabel">{editorLabel()}</span>
       </button>
       {#if !narrow}
         <button
@@ -167,6 +167,8 @@
     min-width: 0;
     min-height: 0;
     color: var(--yap-paper-ink);
+    /* (Its header fits the panel's width: below, Open in <editor> keeps only its icon.) */
+    container: filetab / inline-size;
   }
   .filehead {
     display: flex;
@@ -185,8 +187,10 @@
     display: flex;
     align-items: baseline;
     gap: 8px;
-    flex: 0 1 auto;
-    min-width: 0;
+    /* (It takes the room the buttons leave, its folder giving way first; never narrower than the file's
+       name — the editor's name gives way before it — but in the narrowest panel, below.) */
+    flex: 1 1 0;
+    min-width: min-content;
     margin: 0;
     overflow: hidden;
     white-space: nowrap;
@@ -196,10 +200,17 @@
   }
   .fname {
     flex: 0 0 auto;
+    max-width: 22ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font-family: ui-monospace, Consolas, monospace;
   }
   .fdir {
+    /* (What room there is, its own width never counted: so the title's least is the file's name.) */
+    flex: 1 1 auto;
+    contain: inline-size;
     min-width: 0;
+    text-align: left;
     overflow: hidden;
     text-overflow: ellipsis;
     direction: rtl;
@@ -218,9 +229,10 @@
   }
   .fileactions {
     display: flex;
+    flex: 0 1 auto;
     align-items: center;
     gap: 2px;
-    margin-left: auto;
+    min-width: 0;
   }
   .fbtn {
     display: inline-flex;
@@ -239,12 +251,39 @@
     cursor: pointer;
   }
   .fbtn.wide {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
+    min-width: 28px;
     padding: 0 8px;
     border-color: var(--yap-paper-rule);
     color: var(--yap-paper-text-2);
-    /* "Open in IntelliJ IDEA Community" stays one line: the file's name gives way instead. */
+    /* "Open in IntelliJ IDEA Community" stays one line, never two (16 Nov 2026, checked at the Lab's
+       narrowest panel): the folder gives way first, then its label ends in "…" (the whole on hover), and
+       the narrowest panel has the icon alone; never past the panel's edge. */
     white-space: nowrap;
+    overflow: hidden;
+  }
+  .flabel {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* The panel at its narrowest (320 px): no room for any editor's name beside the buttons, so the icon alone
+     (its name on hover and to a screen reader). */
+  @container filetab (max-width: 380px) {
+    .filetitle {
+      min-width: 0;
+    }
+    .fname {
+      flex-shrink: 1;
+      min-width: 0;
+    }
+    .fbtn.wide {
+      width: 28px;
+      padding: 0;
+    }
+    .flabel {
+      display: none;
+    }
   }
   .fbtn:hover:not(:disabled) {
     background: var(--yap-paper-s2);

@@ -1,15 +1,28 @@
 // **Opening one of a chat's Outputs** (outputs.js's rows; OutputsList.svelte's `onopen`): where each kind
-// lives — a kept page or a document beside the chat (KeptPageTab, the document panel), a file the work
-// changed in the file view, a shared picture in its tab, a shared file in the file view when it's in the
-// workspace, else as its card opens it. For the Code chat's summary (SummaryTab) and any chat's Outputs tab.
+// lives — a kept page or a document beside the chat (KeptPageTab, the document panel), a shared picture in
+// its tab, a file of a Code chat's workspace (one its work changed, or one it shared) where Settings → Yap
+// Code's "Open file links in" says, as a file link opens (fileOpen.svelte.js `openFileLink`, 16 Nov 2026:
+// Yap's file view, an editor, the default app — Rust decides, from the conversation's own workspace, and a
+// file Windows would run opens in Yap), any other shared file as its card opens it. For the Code chat's
+// summary (SummaryTab) and any chat's Outputs tab.
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../../ui/toast.svelte.js';
 import { copyText } from '../../core/itemMenus.js';
-import { isSheetName } from './sheetView.js';
-import { editorLabel } from './fileOpen.svelte.js';
+import { editorLabel, editors, openFileLink, showInYap } from './fileOpen.svelte.js';
 
-/** A Code chat's spreadsheet beside the chat (SheetTab), as Excel draws it. */
-const showSheet = (doc, conversationId, rel) => doc.showSheet({ src: { from: 'workspace', conversation: conversationId, rel }, name: String(rel).split('/').pop() });
+/**
+ * **The workspace's file at `path`**, as Rust finds it in Code chat `conversationId`'s own workspace
+ * (`code_files_check`: `{rel, abs, line}`), or null: outside it, not a Code chat, or Rust couldn't say.
+ */
+async function workspaceFile(conversationId, path) {
+  if (conversationId == null || !path) return null;
+  try {
+    const [ref] = await invoke('code_files_check', { conversation: conversationId, paths: [path] });
+    return ref || null;
+  } catch {
+    return null;
+  }
+}
 
 /** Open `it` (an outputs.js row) from `doc` (the panel) in chat `conversationId`. */
 export async function openOutput(it, { doc, conversationId }) {
@@ -22,8 +35,10 @@ export async function openOutput(it, { doc, conversationId }) {
     return;
   }
   if (it?.kind === 'changed') {
-    if (isSheetName(it.rel)) showSheet(doc, conversationId, it.rel);
-    else doc.showFile({ rel: it.rel, line: null });
+    // A file of the workspace: where its links open. One Rust doesn't find there: Yap's view, which says why.
+    const ref = await workspaceFile(conversationId, it.rel);
+    if (ref) await openFileLink({ rel: ref.rel, line: null }, { doc, conversation: conversationId });
+    else showInYap({ rel: it.rel, line: null }, { doc, conversation: conversationId });
     return;
   }
   if (it?.kind === 'shared') {
@@ -31,14 +46,13 @@ export async function openOutput(it, { doc, conversationId }) {
       doc.showPicture({ id: it.item.id, w: it.item.w, h: it.item.h, caption: it.item.name });
       return;
     }
-    // A file in the workspace: the file view; any other as its card opens it.
+    // A file in the workspace: where its links open; any other as its card opens it.
+    const ref = await workspaceFile(conversationId, it.item.path);
+    if (ref) {
+      await openFileLink({ rel: ref.rel, line: null }, { doc, conversation: conversationId });
+      return;
+    }
     try {
-      const [ref] = await invoke('code_files_check', { conversation: conversationId, paths: [it.item.path] });
-      if (ref) {
-        if (isSheetName(ref.rel)) showSheet(doc, conversationId, ref.rel);
-        else doc.showFile(ref);
-        return;
-      }
       await invoke('chat_file_open', { conversation: conversationId, path: it.item.path });
     } catch (e) {
       toast({ title: "Couldn't open it", description: String(e?.message ?? e), variant: 'destructive' });
@@ -47,12 +61,16 @@ export async function openOutput(it, { doc, conversationId }) {
 }
 
 /**
- * **An output's right-click menu** (Yap's menus: ui/contextMenu.svelte.js): Open; for a file, Show in folder
- * and Copy path; for a file in a Code chat's workspace, Open in <editor> (fileOpen.svelte.js: the setting's, else the first found). `ref`: the workspace's file the row
- * is (`code_files_check`'s `{rel, abs}`: a changed file's, or a shared file inside the workspace), else null.
+ * **An output's right-click menu** (Yap's menus: ui/contextMenu.svelte.js): Open (where its links open); for a
+ * file in a Code chat's workspace whose links open elsewhere, Open in Yap too; for a file, Show in folder and
+ * Copy path; for a file in the workspace, Open in <editor> (fileOpen.svelte.js: the setting's, else the first
+ * found). `ref`: the workspace's file the row is (`code_files_check`'s `{rel, abs}`: a changed file's, or a
+ * shared file inside the workspace), else null. `ed`: what Rust said of the editors (fileOpen.svelte.js).
  */
-export function outputMenuItems(it, { doc, conversationId, ref = null }) {
+export function outputMenuItems(it, { doc, conversationId, ref = null, ed = editors }) {
   const items = [{ label: 'Open', icon: 'open', onselect: () => openOutput(it, { doc, conversationId }) }];
+  // (Open goes to an editor or the default app: Yap's own view one click away.)
+  if (ref && ed?.choice && ed.choice !== 'yap') items.push({ label: 'Open in Yap', icon: 'open', onselect: () => showInYap({ rel: ref.rel, line: null }, { doc, conversation: conversationId }) });
   const shared = it?.kind === 'shared' && it.item?.path ? it.item.path : null;
   const path = ref?.abs || shared;
   if (!path) return items;

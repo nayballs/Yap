@@ -42,7 +42,7 @@ import { newCodeChat, toSide } from './support/code-chats.js';
 import { looksLikePath, pathsIn } from '../src/lib/ui/fileLinks.js';
 import { runnable, blockLang } from '../src/lib/ui/codeRun.js';
 import { outputItems, splitPath } from '../src/lib/views/chat/outputs.js';
-import { contextView, fmtTokens, fmtShare, shortPath, prsNote } from '../src/lib/views/chat/contextBreakdown.js';
+import { contextView, fmtTokens, fmtShare, shortPath, prsNote, prChecks } from '../src/lib/views/chat/contextBreakdown.js';
 
 const HERE = path.join(RUNS, 'code-chat-files-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -169,10 +169,26 @@ const USAGE = {
     { name: 'pdf', source: 'plugin', tokens: 904 },
   ],
 };
-/** `gh pr list --json …`'s answer for the branch: one open (its checks running), one merged. */
+/** `gh pr list --json …`'s answer for the branch: one open (its checks running), one open with a cancelled check, one merged. */
 const PULLS = [
   { number: 117, title: 'Measure the beds in centimetres', state: 'MERGED', isDraft: false, url: 'https://github.com/example-org/garden-planner/pull/117', statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS', name: 'check' }] },
   { number: 131, title: 'Round toInches to one decimal', state: 'OPEN', isDraft: false, url: 'https://github.com/example-org/garden-planner/pull/131', statusCheckRollup: [{ __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: '', name: 'e2e' }] },
+  // A run its workflow's concurrency cancelled (16 Nov 2026: it read "Checks failing"), CodeQL's neutral, and a
+  // check cancelled then run again and passing (only its latest run counts).
+  {
+    number: 129,
+    title: 'Show the beds on a map',
+    state: 'OPEN',
+    isDraft: false,
+    url: 'https://github.com/example-org/garden-planner/pull/129',
+    statusCheckRollup: [
+      { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'CANCELLED', name: 'e2e (1/2)', workflowName: 'E2E', startedAt: '2026-11-16T02:08:42Z' },
+      { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS', name: 'e2e (2/2)', workflowName: 'E2E', startedAt: '2026-11-16T02:08:42Z' },
+      { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'CANCELLED', name: 'check', workflowName: 'CI', startedAt: '2026-11-16T02:01:00Z' },
+      { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS', name: 'check', workflowName: 'CI', startedAt: '2026-11-16T02:09:10Z' },
+      { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'NEUTRAL', name: 'CodeQL', workflowName: '', startedAt: '2026-11-16T02:09:59Z' },
+    ],
+  },
 ];
 function writeGh(name, body) {
   fs.mkdirSync(SCRIPTS, { recursive: true });
@@ -425,6 +441,248 @@ test('“Open file links in”: Yap, an editor at the line (its command quoted),
   await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
 });
 
+test('a file link’s ⋯: on hover or focus, the link’s menu under it; the next Tab stop; nothing in the words moves', async ({ yap, main, shot }) => {
+  writeEditors(STAND_INS);
+  await yap.invoke('e2e_file_opens', { clear: true });
+  const conversation = await rounded(yap, main);
+  const [convert] = await yap.invoke('code_files_check', { conversation, paths: ['src/convert.js'] });
+  const ws = convert.abs.replace(/\\src\\convert\.js$/, '');
+  const links = answer(main).locator('.md-filelink');
+  await expect(links).toHaveText(['src/convert.js:5', 'the lab notes', 'src/convert.js']);
+  const more = answer(main).getByTestId('md-filelink-more');
+  const file = main.getByTestId('chat-file');
+  const words = await answer(main).locator('.cbody').evaluate((el) => el.textContent);
+  const placeOf = (loc) => loc.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+  });
+  // None until a link is pointed at.
+  await expect(more).toBeHidden();
+  /** Where a link is in the answer (the thread may scroll as the pointer moves). */
+  const inAnswer = (loc) =>
+    loc.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const a = el.closest('.cbody').getBoundingClientRect();
+      return { left: r.left - a.left, top: r.top - a.top, width: r.width, height: r.height };
+    });
+  const before = await inAnswer(links.nth(1));
+
+  // The pointer on a link: its ⋯ at the link's end, its middle on the link's line; the link where it was.
+  await links.first().hover();
+  await expect(more).toBeVisible();
+  await expect(more).toHaveAccessibleName('More for src/convert.js');
+  await expect(more).toHaveAttribute('aria-haspopup', 'menu');
+  const link0 = await placeOf(links.first());
+  const btn = await placeOf(more);
+  expect(Math.abs(btn.left - link0.right)).toBeLessThanOrEqual(5);
+  expect(Math.abs((btn.top + btn.bottom) / 2 - (link0.top + link0.bottom) / 2)).toBeLessThanOrEqual(2);
+  expect(await inAnswer(links.nth(1))).toEqual(before);
+  // Its icon only: the answer's words are as they were (a copy of them has no "⋯").
+  expect(await answer(main).locator('.cbody').evaluate((el) => el.textContent)).toBe(words);
+  await shot(main, '02g-a-file-links-more-on-hover');
+  await theme(yap, main, 'dark');
+  await shot(main, '02h-a-file-links-more-on-hover-dark');
+  await theme(yap, main, 'light');
+
+  // Onto it, and a click: the link's own menu, under the ⋯.
+  await more.hover();
+  await expect(more).toBeVisible();
+  await more.click();
+  const menu = main.getByRole('menu');
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem')).toHaveText(['Open in Yap', 'Open in VS Code', 'Show in folder', 'Copy path']);
+  await expect(more).toHaveAttribute('aria-expanded', 'true');
+  const menuBox = await placeOf(menu);
+  const at = await placeOf(more);
+  expect(menuBox.top).toBeGreaterThanOrEqual(at.bottom);
+  await shot(main, '02i-a-file-links-more-menu');
+  await theme(yap, main, 'dark');
+  await shot(main, '02j-a-file-links-more-menu-dark');
+  await theme(yap, main, 'light');
+  // Its items do what the right-click's do: VS Code at the link's line.
+  await menu.getByRole('menuitem', { name: 'Open in VS Code' }).click();
+  await expect.poll(async () => (await yap.invoke('e2e_file_opens')).at(-1)).toEqual(expect.objectContaining({ with: 'vscode', args: [`"${ws}"`, '-g', `"${convert.abs}:5"`] }));
+  await expect(file).toHaveCount(0);
+  // The menu shut, the focus back on the ⋯ (so it stays); the focus and the pointer elsewhere, it goes.
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await main.getByRole('textbox', { name: 'Message' }).focus();
+  await main.mouse.move(5, 5);
+  await expect(more).toBeHidden();
+
+  // The keyboard: the focused link's ⋯ is the next Tab stop; Enter opens the menu; Escape gives the ⋯ the focus
+  // back; Shift+Tab goes back to its link.
+  const focused = () => main.evaluate(() => document.activeElement?.dataset?.testid || document.activeElement?.textContent || '');
+  await links.nth(1).focus();
+  await expect(more).toBeVisible();
+  await expect(more).toHaveAccessibleName('More for docs/lab.md');
+  await main.keyboard.press('Tab');
+  await expect.poll(focused).toBe('md-filelink-more');
+  await main.keyboard.press('Enter');
+  await expect(main.getByRole('menu').getByRole('menuitem').first()).toHaveText('Open in Yap');
+  await main.keyboard.press('Escape');
+  await expect(main.getByRole('menu')).toHaveCount(0);
+  await expect.poll(focused).toBe('md-filelink-more');
+  await main.keyboard.press('Shift+Tab');
+  await expect.poll(focused).toBe('the lab notes');
+  // Space on it too, and Open in Yap: the file view at the link's line.
+  await main.keyboard.press('Tab');
+  await main.keyboard.press('Space');
+  await main.getByRole('menu').getByRole('menuitem', { name: 'Open in Yap' }).click();
+  await expect(file).toHaveAttribute('data-rel', 'docs/lab.md');
+  await expect(file.locator('.fl.mark')).toHaveAttribute('data-no', '3');
+  // The focus elsewhere: no ⋯.
+  await main.getByRole('textbox', { name: 'Message' }).focus();
+  await expect(more).toBeHidden();
+  // A link a turn's own words carry (as Claude works) has one too.
+  const said = thread(main).getByTestId('chat-agent-work-said');
+  await said.locator('.md-filelink').first().hover();
+  await expect(said.getByTestId('md-filelink-more')).toBeVisible();
+  await main.mouse.move(5, 5);
+  await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+});
+
+test('an Outputs row opens where “Open file links in” says, safely: workspace files only, a file Windows would run in Yap', async ({ yap, main, shot }) => {
+  writeEditors(STAND_INS);
+  await yap.invoke('e2e_file_opens', { clear: true });
+  const conversation = await rounded(yap, main);
+  const [convert] = await yap.invoke('code_files_check', { conversation, paths: ['src/convert.js'] });
+  const ws = convert.abs.replace(/\\src\\convert\.js$/, '');
+  const opens = () => yap.invoke('e2e_file_opens');
+  const file = main.getByTestId('chat-file');
+  await main.getByTestId('chat-summary-button').click();
+  const output = main.getByTestId('chat-summary').getByTestId('chat-summary-outputs').getByTestId('chat-output').first();
+  await expect(output).toContainText('convert.js');
+  const menuItems = async () => {
+    await output.click({ button: 'right' });
+    const names = await main.getByRole('menu').getByRole('menuitem').allTextContents();
+    await main.keyboard.press('Escape');
+    return names.map((n) => n.trim());
+  };
+
+  // VS Code: a click on the row opens it there (the workspace's window, the file in it), not in Yap's view.
+  await setConfig(yap, main, { agentsOpenFiles: 'vscode' });
+  await output.click();
+  await expect.poll(async () => (await opens()).at(-1)).toEqual({
+    with: 'vscode',
+    name: 'VS Code',
+    program: VS_CODE,
+    args: [`"${ws}"`, `"${convert.abs}"`],
+    commandLine: `"${VS_CODE}" "${ws}" "${convert.abs}"`,
+    rel: 'src/convert.js',
+    line: null,
+  });
+  await expect(file).toHaveCount(0);
+  // Its menu: Open (there), Open in Yap (Yap's view one click away), Show in folder, Copy path, Open in VS Code.
+  await expect.poll(menuItems).toEqual(['Open', 'Open in Yap', 'Show in folder', 'Copy path', 'Open in VS Code']);
+  await output.click({ button: 'right' });
+  await shot(main, '07c-an-outputs-menu-when-links-open-in-an-editor');
+  await main.getByRole('menu').getByRole('menuitem', { name: 'Open in Yap' }).click();
+  await expect(file).toHaveAttribute('data-rel', 'src/convert.js');
+  await main.getByTestId('chat-summary-button').click();
+
+  // Windows' default app: convert.js is a script Windows would run, so it opens in Yap's view instead, said so.
+  await setConfig(yap, main, { agentsOpenFiles: 'default' });
+  const n = (await opens()).length;
+  await output.click();
+  await expect(file).toHaveAttribute('data-rel', 'src/convert.js');
+  await expect(main.getByRole('status').filter({ hasText: 'Opened in Yap instead' })).toContainText('.js file');
+  expect((await opens()).length).toBe(n);
+  await closeToasts(main);
+  await main.getByTestId('chat-summary-button').click();
+
+  // Yap's view (the default): as before, and no Open in Yap twice.
+  await setConfig(yap, main, { agentsOpenFiles: 'yap' });
+  await expect.poll(menuItems).toEqual(['Open', 'Show in folder', 'Copy path', 'Open in VS Code']);
+  await output.click();
+  await expect(file).toHaveAttribute('data-rel', 'src/convert.js');
+  expect((await opens()).length).toBe(n);
+  await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+});
+
+test('the file view’s Open in <editor> stays one line at the Lab’s sizes: the folder gives way first, then the label', async ({ yap, main, shot }) => {
+  // (The window as it was, put back after.)
+  const [w0, h0] = await main.evaluate(() => [window.innerWidth, window.innerHeight]);
+  writeEditors(STAND_INS);
+  // The Lab's own window (1280 × 860) and its narrowest (860 × 600), the longest editor's name of the stand-ins.
+  await setConfig(yap, main, { agentsOpenFiles: 'idea-ce' });
+  await main.setViewportSize({ width: 1280, height: 860 });
+  await rounded(yap, main);
+  const links = answer(main).locator('.md-filelink');
+  await links.first().click({ button: 'right' });
+  await main.getByRole('menu').getByRole('menuitem', { name: 'Open in Yap' }).click();
+  const file = main.getByTestId('chat-file');
+  await expect(file).toHaveAttribute('data-rel', 'src/convert.js');
+  const button = file.getByTestId('chat-file-open-editor');
+  await expect(button).toHaveAccessibleName('Open in IntelliJ IDEA Community');
+  const split = main.getByRole('separator', { name: 'Resize the panel' });
+  /** The button's height and whether it and ✕ are inside the panel; its label's width shown and whole. */
+  const measure = () =>
+    file.evaluate((el) => {
+      const panelBox = el.getBoundingClientRect();
+      const b = el.querySelector('[data-testid="chat-file-open-editor"]').getBoundingClientRect();
+      const close = el.querySelector('[aria-label="Close the panel"]').getBoundingClientRect();
+      const label = el.querySelector('.flabel');
+      const name = el.querySelector('[data-testid="chat-file-name"]');
+      return {
+        panel: Math.round(panelBox.width),
+        height: Math.round(b.height),
+        inside: b.right <= panelBox.right + 0.5 && close.right <= panelBox.right + 0.5,
+        label: label.offsetParent ? Math.round(label.getBoundingClientRect().width) : 0,
+        whole: !!label.offsetParent && label.scrollWidth <= label.clientWidth,
+        name: name.scrollWidth <= name.clientWidth && name.getBoundingClientRect().right <= b.left,
+      };
+    });
+  // (The panel's width as it was, put back after: it's remembered.)
+  const was = Number(await split.getAttribute('aria-valuenow'));
+  const sizes = [];
+  for (const [w, h] of [
+    [1280, 860],
+    [860, 600],
+  ]) {
+    await main.setViewportSize({ width: w, height: h });
+    // The panel as it opens, then at its narrowest (End on the split; none when the panel covers the chat).
+    for (const narrowest of [false, true]) {
+      if (narrowest) {
+        if (!(await split.count())) continue;
+        await split.focus();
+        await main.keyboard.press('End');
+      }
+      await main.waitForTimeout(200);
+      const m = await measure();
+      sizes.push({ w, narrowest, ...m });
+      // One line (the button's own 28 px), the button and ✕ inside the panel.
+      expect(m.height, JSON.stringify(m)).toBeLessThanOrEqual(30);
+      expect(m.inside, JSON.stringify(m)).toBe(true);
+      // The file's name whole as the panel opens (the folder, then the editor's name, gave way first).
+      if (!narrowest) expect(m.name, JSON.stringify(m)).toBe(true);
+      await shot(main, `02k-the-file-view-${w}${narrowest ? '-narrowest' : ''}`);
+      if (narrowest && w === 860) {
+        await theme(yap, main, 'dark');
+        await shot(main, '02l-the-file-view-860-narrowest-dark');
+        await theme(yap, main, 'light');
+      }
+    }
+    if (await split.count()) {
+      await split.focus();
+      await main.keyboard.press('End');
+      for (let i = 0; i < Math.round((was - 320) / 24); i++) await main.keyboard.press('ArrowLeft');
+    }
+  }
+  // At the Lab's own size, as the panel opens, the longest name ends in "…" but reads ("Open in IntelliJ ID…");
+  // "Open in VS Code" shows whole.
+  expect(sizes[0].label, JSON.stringify(sizes)).toBeGreaterThan(80);
+  console.log(`file view header: ${JSON.stringify(sizes)}`);
+  await main.setViewportSize({ width: 1280, height: 860 });
+  await setConfig(yap, main, { agentsOpenFiles: 'vscode' });
+  await expect(button).toHaveAccessibleName('Open in VS Code');
+  await expect.poll(async () => (await measure()).whole).toBe(true);
+  expect((await measure()).name).toBe(true);
+  await shot(main, '02m-the-file-view-1280-vs-code');
+  await main.setViewportSize({ width: w0, height: h0 });
+  await setConfig(yap, main, { agentsOpenFiles: 'yap' });
+  await panel(main).getByRole('button', { name: 'Close the panel' }).first().click();
+});
+
 test('▶ Run on a one-line shell block: asked first under Auto, run in the workspace, its output beside the chat; Bypass asks nothing', async ({ yap, main, shot }) => {
   const conversation = await rounded(yap, main);
   // One ▶: the PowerShell line; the two-line bash block has none.
@@ -587,16 +845,23 @@ test('the summary after the Claude app: context by category from /context, the b
   // Changes: the branch's pull requests, newest first, from the person's own gh.
   const changes = summary.getByTestId('chat-summary-changes');
   const pulls = changes.getByTestId('chat-summary-pr');
-  await expect(pulls).toHaveCount(2);
+  await expect(pulls).toHaveCount(3);
   await expect(pulls.first()).toHaveAttribute('data-state', 'open');
   await expect(pulls.first()).toHaveAttribute('data-checks', 'running');
   await expect(pulls.first()).toContainText('Round toInches to one decimal');
   await expect(pulls.first()).toContainText('example-org/garden-planner #131');
-  await expect(pulls.first()).toContainText('Checks running');
-  await expect(pulls.nth(1)).toHaveAttribute('data-state', 'merged');
-  await expect(pulls.nth(1)).toContainText('Checks passing');
+  await expect(pulls.first().getByTestId('chat-summary-pr-checks')).toHaveText('Checks running · 0 of 1 passed');
+  // A cancelled check is cancelled, as GitHub says it, never "failing"; skipped and neutral ones passed.
+  const cancelled = pulls.nth(1);
+  await expect(cancelled).toHaveAttribute('data-checks', 'cancelled');
+  await expect(cancelled.getByTestId('chat-summary-pr-checks')).toHaveText('Checks cancelled · 3 of 4 passed');
+  await expect(cancelled.getByTestId('chat-summary-pr-checks')).toHaveAttribute('title', '1 cancelled, 1 neutral, 2 successful checks');
+  await expect(changes).not.toContainText('Checks failing');
+  await expect(pulls.nth(2)).toHaveAttribute('data-state', 'merged');
+  await expect(pulls.nth(2).getByTestId('chat-summary-pr-checks')).toHaveText('Checks passing');
+  await expect(pulls.nth(2).getByTestId('chat-summary-pr-checks')).toHaveAttribute('title', '1 successful check');
   await expect(pulls.first().getByTestId('chat-summary-pr-archive')).toHaveCount(0);
-  await expect(pulls.nth(1).getByTestId('chat-summary-pr-archive')).toBeVisible();
+  await expect(pulls.nth(2).getByTestId('chat-summary-pr-archive')).toBeVisible();
   const gh = dumped(GH_DUMP)[0];
   expect(gh.args).toEqual(expect.arrayContaining(['pr', 'list', '--head=claude/round-inches', '--state', 'all']));
   expect(gh.prompts).toBe(false);
@@ -642,7 +907,7 @@ test('the summary after the Claude app: context by category from /context, the b
   await expect.poll(() => yap.invoke('e2e_opened_urls')).toContainEqual('editor:src/convert.js:0');
 
   // A merged pull request's Archive: this chat archived, as the list archives it.
-  await pulls.nth(1).getByTestId('chat-summary-pr-archive').click();
+  await pulls.nth(2).getByTestId('chat-summary-pr-archive').click();
   await expect.poll(async () => (await yap.invoke('chats_archived')).some((c) => c.id === conversation)).toBe(true);
   await expect(main.getByText('Chat archived')).toBeVisible();
   await yap.invoke('chat_archive', { ids: [conversation], archived: false });
@@ -786,4 +1051,16 @@ test('ui/fileLinks.js, ui/codeRun.js and outputs.js: what may be a path, which b
   expect(prsNote({ status: 'ok', list: [] })).toBe('No pull requests for this branch yet.');
   expect(prsNote({ status: 'ok', list: [{ number: 1 }] })).toBe('');
   expect(prsNote({ status: 'signed-out' })).toMatch(/gh auth login/);
+  // A pull request's checks in GitHub's words (agents/prs.rs `checks`, `counts`): cancelled is cancelled, never failing;
+  // skipped and neutral passed ("8 of 10 checks passed"); every state on hover, in GitHub's order.
+  const n = (o) => ({ failing: 0, cancelled: 0, pending: 0, skipped: 0, neutral: 0, successful: 0, ...o });
+  expect(prChecks({ checks: 'cancelled', counts: n({ cancelled: 2, neutral: 1, successful: 7 }) })).toEqual({ word: 'Checks cancelled', detail: '8 of 10 passed', title: '2 cancelled, 1 neutral, 7 successful checks' });
+  expect(prChecks({ checks: 'failing', counts: n({ failing: 1, cancelled: 1, neutral: 1, successful: 7 }) })).toEqual({ word: 'Checks failing', detail: '8 of 10 passed', title: '1 failing, 1 cancelled, 1 neutral, 7 successful checks' });
+  expect(prChecks({ checks: 'passing', counts: n({ skipped: 1, neutral: 1, successful: 3 }) })).toEqual({ word: 'Checks passing', detail: '', title: '1 skipped, 1 neutral, 3 successful checks' });
+  expect(prChecks({ checks: 'skipped', counts: n({ skipped: 1 }) })).toEqual({ word: 'Checks skipped', detail: '', title: '1 skipped check' });
+  expect(prChecks({ checks: 'neutral', counts: n({ neutral: 2 }) }).word).toBe('Checks neutral');
+  expect(prChecks({ checks: 'running', counts: n({ pending: 2, successful: 1 }) })).toEqual({ word: 'Checks running', detail: '1 of 3 passed', title: '2 pending, 1 successful checks' });
+  expect(prChecks({ checks: 'none', counts: n({}) })).toEqual({ word: '', detail: '', title: '' });
+  // (An older Yap's answer, with no counts: its word alone.)
+  expect(prChecks({ checks: 'failing' })).toEqual({ word: 'Checks failing', detail: '', title: 'Checks failing' });
 });
