@@ -373,7 +373,7 @@ an older Retry's ‹ k/n ›, Copy, the speaker (▶ Read aloud) and its time
 `core/whenSaid.js`, served beside the page, moved on every half minute).
 Fork from here and Pin as chapter are the PC's: the phone has no chapters,
 and a fork opens on the PC. Its buttons keep a thumb's 44 px target, their
-ink about 0.8 of the answer's text, as the app's.
+ink about 0.87 of the answer's text and its time about 0.9, as the app's measured beside Yap on one screen.
 
 **✎ Edit on the phone** (`edit {chat, at, ts, text, speak?}`, later on 16
 Nov; the Claude app's pencil under your own message, #106 on the PC): under
