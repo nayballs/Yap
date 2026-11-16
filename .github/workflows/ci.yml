@@ -15,10 +15,11 @@ on:
 permissions:
   contents: read
 
-# A newer push supersedes an in-flight run of the same branch.
+# A newer push supersedes a branch's run in progress. Not main's: a run there
+# always finishes, so every batch of merges gets a result (as e2e.yml).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   check:
@@ -57,6 +58,10 @@ jobs:
       # new issues unlabelled), and its script on made-up events.
       - name: Issue labels (the bug form's areas)
         run: node --test scripts/issue-labels.test.mjs
+
+      # e2e.yml's shards: every spec file in exactly one, split by time.
+      - name: E2E shards (desktop/e2e/shards.mjs)
+        run: node --test desktop/e2e/shards.test.mjs
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable

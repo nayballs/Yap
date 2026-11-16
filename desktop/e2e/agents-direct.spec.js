@@ -48,7 +48,7 @@
 // real Claude Code, account or files.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, setConfig } from './support/fixtures.js';
+import { test as base, expect, openView, setConfig, jsonLines } from './support/fixtures.js';
 import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat, toSide } from './support/code-chats.js';
@@ -230,7 +230,7 @@ const ECHOES_NO_FLAG = [{ _exit_if_arg: { arg: '--resume-session-at', stderr: "e
 /** ECHOES on one that knows the flag but can't find the point (its transcript changed): the branched run never starts. */
 const ECHOES_NO_POINT = [{ _exit_if_arg: { arg: '--resume-session-at', stderr: 'No message found with message.uuid of: end-One', code: 1 } }, ...ECHOES];
 /** The words the latest turn's first message carried, as the stand-in saw them. */
-const lastUserText = () => fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).at(-1)?.user_text ?? '';
+const lastUserText = () => jsonLines(ARGS).at(-1)?.user_text ?? '';
 /** The row under the person's message `text`: ✓✓ and its time, Copy, Rewind to here, Fork from here. */
 const actionsOf = (main, text) => thread(main).locator('.cbubble.user', { hasText: text }).locator('xpath=following-sibling::*[1][@data-testid="chat-message-actions"]');
 const queuedBubble = (main) => thread(main).getByTestId('chat-queued');
@@ -312,7 +312,7 @@ const READS_YAP = [
   { _wait_user: true },
 ];
 /** What Yap's endpoint gave the stand-in so far: a list of its tools, then each call's answer. */
-const toolDumps = () => (fs.existsSync(TOOLS) ? fs.readFileSync(TOOLS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const toolDumps = () => jsonLines(TOOLS);
 
 /** Says back the words it was given, exactly (the stand-in's `{{user_text}}`): a reply, no work. */
 const SAYS_BACK = [{ _wait_user: true }, { _dump_args: ARGS }, init(), said('b1', [{ type: 'text', text: 'Got: {{user_text}}' }], 'end_turn'), result('Got: {{user_text}}', 0.001), { _wait_user: true }];
@@ -2198,8 +2198,8 @@ test('its session has Claude Code’s developer tools: the console, the network 
   expect(of('browser_console')).toContain('[log] Guide loaded');
   // Once: a line is never repeated by Yap (the same one again at once is counted, "(×N)").
   expect(of('browser_console').match(/Guide loaded/g)).toHaveLength(1);
-  // The request, its token hidden, its status (the fake web has no such page). (Its host is the test web's own:
-  // a request outside the stand-in's prefix isn't turned back to the page's address, as a real page's needs no turning.)
+  // The request, its token hidden, its status (the site has no such page: the stand-in's 404), at the page's own
+  // address (support/fake-web.js says why it's relative).
   expect(of('browser_network')).toMatch(/GET \S+\/api\/progress\?token=REDACTED&level=20 4\d\d \[Fetch\]/);
   expect(of('browser_network')).not.toContain('abc123');
   expect(of('browser_javascript')).toContain('Leveling guide - Example Wiki / 2');
@@ -2384,7 +2384,7 @@ test('Select an element on a page beside the chat: DevTools’ own inspect mode,
   await send(main, 'Make this line bold.');
   const agent = await newAgent(yap, before);
   const done = await ended(yap, agent.id, 60_000);
-  const seen = fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).at(-1);
+  const seen = jsonLines(ARGS).at(-1);
   expect(seen.user_text).toMatch(/^Make this line bold\.\n\n<selected-element page="[^"]*guide\/leveling" tag="p" id="build" picture="attached">/);
   expect(seen.user_text).toContain('<text>Build: Healing</text>');
   // (No React on the guide: no React part, nothing about it on its card.)
@@ -2442,7 +2442,7 @@ test('Select an element on a React page: its component, owners, props and source
   await send(main, 'Make this button red.');
   const agent = await newAgent(yap, before);
   await ended(yap, agent.id, 60_000);
-  const seen = fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).at(-1);
+  const seen = jsonLines(ARGS).at(-1);
   expect(seen.user_text).toMatch(/^Make this button red\.\n\n<selected-element page="[^"]*shop\.example\.com\/basket" tag="button" id="remove-2"/);
   expect(seen.user_text).toMatch(new RegExp(`<react component="BasketRow" source="src/Basket\\.js:${line}:\\d+ \\(as the page serves it\\)" build="development">\\n<owners>BasketPage ‹ App</owners>\\n<props>`));
   expect(seen.user_text).toContain('onRemove: ƒ handleRemove');

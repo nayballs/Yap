@@ -9,10 +9,12 @@
 // desktop/src-tauri/Cargo.toml. It uses its own Cargo target dir (YAP_E2E_TARGET_DIR,
 // default desktop/src-tauri/target/e2e), so it never fights a running `tauri dev` over
 // a target dir's lock or artifacts, and keeps only line-table debug info
-// (enough for backtraces, a fraction of the size and build time).
+// (enough for backtraces, a fraction of the size and build time). The target dir
+// goes to cargo as --target-dir, never CARGO_TARGET_DIR, so the shared compile
+// cache's entries serve every task's build (`cargoEnv`).
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { APP, TARGET_DIR, packageFile } from './support/yap.js';
+import { APP, TARGET_DIR, cargoEnv, packageFile } from './support/yap.js';
 
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { cwd: APP, stdio: 'inherit', ...opts });
@@ -22,12 +24,8 @@ function run(cmd, args, opts = {}) {
 
 // The frontend first: tauri's generate_context! embeds dist/ at compile time.
 run(process.execPath, [packageFile('vite', 'bin/vite.js'), 'build']);
-run('cargo', ['build', '--locked', '--features', 'custom-protocol'], {
+run('cargo', ['build', '--locked', '--features', 'custom-protocol', '--target-dir', TARGET_DIR], {
   cwd: path.join(APP, 'src-tauri'),
-  env: {
-    CARGO_PROFILE_DEV_DEBUG: 'line-tables-only',
-    ...process.env,
-    CARGO_TARGET_DIR: TARGET_DIR,
-  },
+  env: cargoEnv({ CARGO_PROFILE_DEV_DEBUG: 'line-tables-only' }),
 });
 console.log(`\ne2e test build: ${path.join(TARGET_DIR, 'debug', 'yap.exe')}`);

@@ -40,10 +40,12 @@ if (build) {
     const s = run(process.execPath, [vite, 'build'], { cwd: APP });
     if (s !== 0) process.exit(s);
   }
-  const s = run('cargo', ['build', '--locked'], {
-    cwd: path.join(APP, 'src-tauri'),
-    env: { CARGO_PROFILE_DEV_DEBUG: 'line-tables-only', ...process.env, CARGO_TARGET_DIR: TARGET_DIR },
-  });
+  // --target-dir, never CARGO_TARGET_DIR: the shared compile cache keys every
+  // crate on each CARGO_* variable (desktop/e2e/support/yap.js `cargoEnv`).
+  const env = { CARGO_PROFILE_DEV_DEBUG: 'line-tables-only', ...process.env };
+  delete env.CARGO_TARGET_DIR;
+  delete env.CARGO_BUILD_TARGET_DIR;
+  const s = run('cargo', ['build', '--locked', '--target-dir', TARGET_DIR], { cwd: path.join(APP, 'src-tauri'), env });
   if (s !== 0) process.exit(s);
 }
 process.exit(run(exe, ['eval', ...args]));

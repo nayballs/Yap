@@ -17,7 +17,7 @@
 // Every person and detail is fictional.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, setConfig } from './support/fixtures.js';
+import { test as base, expect, openView, setConfig, jsonLines } from './support/fixtures.js';
 import { startFakeLlm, SIDE_QUESTION } from './support/fake-llm.js';
 import { fakeClaude, PLAN_CHAT } from './support/claude-plan.js';
 import { newCodeChat } from './support/code-chats.js';
@@ -86,7 +86,7 @@ const sideAnswer = (main) => main.getByTestId('chat-sideq-answer');
 const keepIt = (main) => main.getByTestId('chat-sideq-keep');
 const sideAsks = (fakeLlm) => fakeLlm.requests.filter((r) => r.kind === 'side');
 const chatsFile = (yap) => JSON.stringify(yap.readJson('chats.json') ?? {});
-const launches = () => (fs.existsSync(ARGS) ? fs.readFileSync(ARGS, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const launches = () => jsonLines(ARGS);
 /** Every transcript the stand-in kept (Claude Code's own sessions' files), as one text. */
 function transcripts() {
   const out = [];

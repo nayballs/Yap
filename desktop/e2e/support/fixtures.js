@@ -257,6 +257,20 @@ async function hotkeyEvents(page, types) {
   }
 }
 
+/**
+ * The JSON lines a stand-in has written to `file` so far (fake Claude's
+ * `_dump_args` and `dump`, the fake MCP's log), [] before it exists. Only
+ * whole lines: a writer appends a line and its newline in more than one
+ * write, so a test polling meanwhile can read half a line (agents-direct on
+ * CI, 16 Nov 2026: "Unterminated string in JSON"); it's read next time.
+ */
+export function jsonLines(file) {
+  if (!fs.existsSync(file)) return [];
+  const lines = fs.readFileSync(file, 'utf8').split('\n');
+  lines.pop(); // '' after the last newline, or a line still being written
+  return lines.filter((l) => l.trim()).map((l) => JSON.parse(l));
+}
+
 /** Poll a JSON store in the portable data dir until `check` passes. */
 export async function expectStore(yap, file, check, message) {
   await expect

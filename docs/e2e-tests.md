@@ -19,6 +19,7 @@ npm run test:app                       # build the test app, then run the suite
 npm run test:app:build                 # only the build
 npx playwright test -c desktop/e2e             # only the suite, against the last build
 npx playwright test -c desktop/e2e -g notes    # tests whose title matches "notes"
+npx playwright test -c desktop/e2e --workers=1 # one test Yap at a time (the default is four)
 npx playwright show-report test-results/app/report
 ```
 
@@ -139,6 +140,42 @@ after the second had started deleted the second's files: on CI,
 `rmSync`'s retries on WebView2's locked profile froze the runner for 5
 minutes — notes-summary's Ask-thread test, 2026-10-26.)
 
+### Several at once (2026-11-16)
+
+The suite runs **four test Yaps at once** on a PC (Playwright workers;
+`--workers=N`, or `YAP_E2E_WORKERS=N`, to change it). Each spec file still
+has one worker-scoped Yap and runs its tests in order on it; the files are
+shared out between the workers. On CI it's one a runner, the suite split
+into shards instead (below). What lets several run side by side on one PC:
+
+- **Nothing shared between instances**: each has its own run folder
+  (`runs/<name>-w<worker>`, the worker's number in it), portable `Data/`,
+  WebView2 profile and DevTools port (port 0), Yap Link port
+  (`YAP_E2E_LINK_PORT=0`), closed account-service port and local-API
+  discovery file; every stand-in a spec starts (fake AI, fake web, fake MCP
+  servers, the update feed…) listens on a port of its own (port 0); its
+  ChatGPT and connector secrets are files in its own `Data/`, never names in
+  Credential Manager; a spec's own folders are named after the spec.
+- **Nothing global touched**: no keyboard hook, nothing pasted, the pages'
+  clipboard stubbed (never the real one), the snip's monitors made up, no
+  Windows notifications, no installed apps read. Every test Yap's windows
+  go behind yours, as with one.
+- **What only one Yap on a PC can have runs alone**: the connectors' sign-in
+  listener wants its fixed port (`127.0.0.1:51439`), so the three specs that
+  sign in (`connectors-signin`, `connectors-discover`, `connectors`) are the
+  `solo` project in `playwright.config.js`: one at a time, beside the rest.
+  A new spec that needs such a thing (a fixed port, a real screen position)
+  goes on that list.
+- **Files a stand-in is still writing**: the fake Claude and fake MCP
+  servers append a JSON line in more than one write, so a spec reading one
+  while it polls can catch half a line. `jsonLines(file)` (fixtures.js)
+  returns only whole lines; read them with it.
+
+Four test Yaps make the PC busier, so what "Flaky under load" (below) says
+applies; the suite's checks wait long enough for that. On this PC (16
+threads) the whole suite went from about 35 minutes at one at a time to
+SUITE_MINUTES_TBD at four.
+
 ## Where the results go
 
 Everything lands in `test-results/app/` (git-ignored, cleared at the start of
@@ -155,11 +192,32 @@ each run):
 ## CI
 
 `.github/workflows/e2e.yml` runs the suite on every push and PR to `main`, and
-on demand (`gh workflow run e2e.yml --repo nayballs/Yap`). It builds the test
-app and runs the suite in three shards side by side (`--shard=n/3`, by spec file),
-each uploading its `test-results/app` as **`e2e-results-1`** … **`e2e-results-3`**
-on every run, pass or fail (one runner outgrew the 30-minute limit on 24 Oct 2026,
-one of two the 40-minute one on 2 Nov).
+on demand (`gh workflow run e2e.yml --repo nayballs/Yap`, `-f workers=2` for
+two test Yaps a runner). One job builds the test app and hands its `yap.exe`
+to **eight shards** side by side (`YAP_E2E_EXE`), each uploading its
+`test-results/app` as **`e2e-results-1`** … **`e2e-results-8`** on every run,
+pass or fail. A newer push cancels a branch's run in progress, but never
+main's: a run on main always finishes, so every batch of merges gets a result.
+
+**The shards are split by time** (2026-11-16, `desktop/e2e/shards.mjs`): each
+spec file, whole, goes to the shard with the least time so far, longest first,
+by the seconds in `desktop/e2e/timings.json`, and the shard runs its list with
+`--test-list`. Playwright's own `--shard` splits the files in name order by how
+many tests each has, which put the long `agents-*` specs together: three such
+shards ran 31–37 minutes of tests each by 16 Nov, most runs hit the job's
+40-minute limit, and main had no finished run for two days. Eight shards by time
+are about 12.5 minutes each. A new spec counts as the median until its time is
+recorded; refresh the timings now and then from the shards' JSON reports:
+
+```bash
+gh run download <run-id> --repo nayballs/Yap --pattern 'e2e-results-*' --dir e2e-<run-id>
+node desktop/e2e/shards.mjs --record e2e-<run-id>/*/results.json
+```
+
+(`npm run test:shards` checks the split: every spec in exactly one shard. One
+runner outgrew the 30-minute limit on 24 Oct 2026, one of two the 40-minute one
+on 2 Nov.)
+
 The runner has no audio devices, so the run also proves Yap starts and works
 without a microphone (the stub dictation test is skipped there), and its
 screen is 1024×768, so CI screenshots are a little smaller than local ones.
@@ -175,7 +233,7 @@ To review a run's screenshots and logs:
 
 ```bash
 gh run list --workflow=e2e.yml --repo nayballs/Yap --limit 5
-gh run download <run-id> --repo nayballs/Yap --name e2e-results --dir e2e-results-<run-id>
+gh run download <run-id> --repo nayballs/Yap --name e2e-results-1 --dir e2e-results-<run-id>
 ```
 
 then open `screenshots/` (Claude can read the PNGs directly) or

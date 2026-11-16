@@ -47,6 +47,20 @@ export const RUNS = path.join(OUT, 'runs');
  */
 export const WEBVIEW2_ARGS = '--remote-debugging-port=0 --disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows';
 
+/**
+ * The environment for a `cargo build` given its target dir as `--target-dir`:
+ * this one's, without CARGO_TARGET_DIR. sccache (the shared compile cache,
+ * docs/architecture/build-and-test.md) keys every crate on each CARGO_*
+ * variable rustc sees, so a target dir of each task's own named there made
+ * every crate a miss in every other task's build (0 hits in 946, 16 Nov 2026).
+ */
+export function cargoEnv(extra = {}) {
+  const env = { ...extra, ...process.env };
+  delete env.CARGO_TARGET_DIR;
+  delete env.CARGO_BUILD_TARGET_DIR;
+  return env;
+}
+
 /** Where `npm run test:app:build` puts the binary (see desktop/e2e/build.mjs). */
 export const TARGET_DIR =
   process.env.YAP_E2E_TARGET_DIR || path.join(APP, 'src-tauri', 'target', 'e2e');

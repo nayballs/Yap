@@ -21,7 +21,7 @@
 // The fallback to the key and Sign in: claude-plan-scopes-signed-out.spec.js.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openSettings, closeSettings, expectStore, setConfig } from './support/fixtures.js';
+import { test as base, expect, openSettings, closeSettings, expectStore, setConfig, jsonLines } from './support/fixtures.js';
 import { fakeClaude } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 
@@ -76,7 +76,7 @@ const test = base.extend({
 });
 
 /** Every call the stand-in served: `{ pid, args, cwd, user_text }`. */
-const calls = () => (fs.existsSync(CALLS) ? fs.readFileSync(CALLS, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const calls = () => jsonLines(CALLS);
 const after = (argv, flag) => argv[argv.indexOf(flag) + 1];
 const spares = (yap, opts = {}) => yap.invoke('e2e_claude_spares', opts).then((r) => r.waiting);
 const log = (yap) => fs.readFileSync(yap.logPath, 'utf8');

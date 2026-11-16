@@ -388,6 +388,12 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 GPU policy: **universal, no CUDA** (Whisper → Vulkan, ONNX → DirectML); building
 `engines` needs the **Vulkan SDK**. Details: [build-and-test.md](./docs/architecture/build-and-test.md).
 
+**Shared compile cache:** on the maintainer's PC every `cargo` (dev.bat's included) goes
+through **sccache** (`~/.cargo/config.toml`'s `rustc-wrapper`; cache `E:\Builds\sccache`,
+30 GiB). Give cargo a task's own target dir as **`--target-dir`, never `CARGO_TARGET_DIR`**:
+sccache keys crates on every `CARGO_*` variable, so a per-task one shares nothing
+(the e2e/robot/eval builds do it themselves) — [build-and-test.md](./docs/architecture/build-and-test.md#the-shared-compile-cache-sccache-2026-11-16).
+
 **Dev:** `scripts/dev.bat` (= `npm run tauri dev -- --features engines`, Vite on
 **:51437**, hot-reloads `desktop/src/`) behind the **"Yap - Dev"** desktop shortcut; the plain
 **"Yap"** shortcut is the *installed* app (nightly channel). It runs behind an animated
@@ -415,7 +421,9 @@ Accounts in debug builds: `cd cloud && npm run dev` (wrangler dev on :8787; see 
 then `cargo clippy --locked --release -- -D warnings` (debug-only code is dead in release:
 gate it with `#[cfg(debug_assertions)]`), and the phone app's tests (`npm run test:link`, Chromium and Firefox).
 ⚠ Zero-warnings ratchet on the **latest stable** toolchain — keep local Rust current
-(`rustup update`). `e2e.yml` runs the e2e suite on the same triggers. Dependabot opens
+(`rustup update`). `e2e.yml` runs the e2e suite on the same triggers (one build, eight
+shards split by time: `desktop/e2e/shards.mjs`); a newer push cancels a branch's runs, never
+main's, so every batch of merges gets a result. Dependabot opens
 weekly update PRs; `pins.yml` keeps an issue open while a pinned download is behind
 upstream (`npm run pins:check`); `issue-labels.yml` labels bug reports by area
 (`npm run test:issue-labels`); both in build-and-test.md.

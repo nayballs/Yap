@@ -143,9 +143,12 @@ const PAGES = {
     <input id="notes" aria-label="Notes" autofocus>
     </article>
     <script>
-      // (For the developer's tools: a line in its console, a request with a secret in its address.)
+      // (For the developer's tools: a line in its console, a request with a secret in its address. Relative:
+      // the page's own site, which has no such page, so a 404 from the stand-in. Not '/api/…': that's this PC
+      // beside the stand-in, refused by Yap's view with a 403 WebView2 itself makes, which DevTools reports as
+      // a 403 on one runtime and as "canceled" on another (CI's, 14–16 Nov 2026).)
       console.log('Guide loaded');
-      fetch('/api/progress?token=abc123&level=20').catch(() => {});
+      fetch('api/progress?token=abc123&level=20').catch(() => {});
       // The keys it got (real keystrokes, or a script's own: said so).
       document.addEventListener('keydown', (e) => { document.getElementById('keys').textContent += ' ' + (e.ctrlKey ? 'Ctrl+' : '') + e.key + (e.isTrusted ? '' : '(script)'); });
       const rows = document.getElementById('rows');
