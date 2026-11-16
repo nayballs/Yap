@@ -203,8 +203,11 @@ pub async fn chat_send(
     project: Option<String>,
     feedback_from: Option<usize>,
 ) -> Result<serde_json::Value, String> {
-    // The files attached in the box (chat/attachments.rs): each still there.
-    let files = crate::chat::attachments::taken(&files.unwrap_or_default())?;
+    // The files attached in the box (chat/attachments.rs): each still there,
+    // and out of the box now (a question asked out loud can't take them too).
+    let files = files.unwrap_or_default();
+    crate::chat::attachments::sent_from_box(&files);
+    let files = crate::chat::attachments::taken(&files)?;
     // A Retry with its 👎's note (an edit with the same words): read before the edit rewinds past the answer.
     let note = match (edit, conversation_id, feedback_from) {
         (Some(_), Some(id), Some(answer)) => crate::chat::feedback::retry_note_at(id, answer),
@@ -297,6 +300,8 @@ pub async fn chat_send(
             if crate::chat::chats::end_branch(id, b.at, b.back_to, kept) {
                 crate::memory::read_again_from(id, b.at);
             }
+            // A phone showing this chat follows the version shown (link.rs).
+            crate::link::versions_changed(id);
             with_forks(out, id)
         }
         _ => out,
@@ -356,7 +361,7 @@ async fn begin_edit(id: u64, at: usize, files: bool) -> Result<Editing, String> 
 /// A message's screenshots, to go again (Retry, Edit): those still on this
 /// PC; and whether they went as their text (read again on this PC). Pure
 /// but for the files.
-fn images_again(m: &crate::chat::chats::ChatMessage) -> (Vec<String>, bool) {
+pub(crate) fn images_again(m: &crate::chat::chats::ChatMessage) -> (Vec<String>, bool) {
     let here: Vec<&crate::chat::chats::ChatImage> = m.images.iter().filter(|i| crate::snip::images::exists(&i.id)).collect();
     let as_text = here.iter().any(|i| i.as_text);
     (here.into_iter().map(|i| i.id.clone()).collect(), as_text)
@@ -435,6 +440,8 @@ pub async fn chat_retry(
     if crate::chat::chats::end_branch(conversation_id, begun.at, begun.back_to, true) {
         crate::memory::read_again_from(conversation_id, begun.at);
     }
+    // A phone showing this chat follows the version shown (link.rs).
+    crate::link::versions_changed(conversation_id);
     let out = with_forks(out, conversation_id);
     crate::shell::lab::sent(Some(conversation_id), &out);
     out
@@ -451,6 +458,8 @@ pub fn chat_branch(id: u64, at: usize, place: u32) -> Result<crate::chat::chats:
     }
     let conv = crate::chat::chats::switch_branch(id, at, place)?;
     crate::memory::read_again_from(id, at);
+    // One version shown a conversation: a phone showing it follows (link.rs).
+    crate::link::versions_changed(id);
     Ok(conv)
 }
 

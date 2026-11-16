@@ -102,7 +102,7 @@ old or **not signed in, it says so and stops** — the lab never signs in.
 `start` on the plan, then `stop`: is Claude Code on this PC and signed in, as Yap sees
 it? Asks the model nothing.
 
-### `ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry [--feedback <reasons>] [--note <line>]] [--edit] [--style <name>] [--incognito] [--project <name> [--project-instructions <text>]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
+### `ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry [--feedback <reasons>] [--note <line>]] [--edit] [--style <name>] [--incognito] [--project <name> [--project-instructions <text>] [--project-page]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
 
 Puts a question to Chat and waits until the turn ends (answered, stopped or failed),
 **or a card waits for the person**, or `--timeout` seconds pass.
@@ -118,13 +118,18 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
 - `--attach`: files dropped on Chat first (15 Nov 2026, `chat/attachments.rs`), as a
   person drops them: each read by the test Yap and waiting as a chip in the box, sent
   with the question. Paths on this PC: made-up files of your own, or the scratch
-  workspace's.
+  workspace's. With `--spoken` too (16 Nov 2026): dropped first, then asked out loud
+  with Chat in view, which takes them as a typed question does (as do `pictures` in a
+  feature script's spoken `ask`).
 - `--style <name>` (15 Nov 2026): the chat's style picked from Style under the message
   box first, by its name in the menu (`Concise`, one of the person's own…; `chat/styles.rs`);
   `--incognito`: the new chat's ghost turned on first (`chat/incognito.rs`); `--project
   <name>`: a new chat started from that project's page, the project made first if there's
-  none (`--project-instructions` sets its instructions; `chat/projects.rs`). A feature
-  script's `ask` step takes `style`, `incognito`, `project` and `projectInstructions` too.
+  none (`--project-instructions` sets its instructions; `chat/projects.rs`);
+  `--project-page` (16 Nov 2026) leaves the project's page in view instead of pressing
+  its New chat — with `--spoken`, the Voice Assistant's new chat starts in it. A feature
+  script's `ask` step takes `style`, `incognito`, `project`, `projectInstructions` and
+  `projectPage` too.
 - `--while`: typed and sent in the chat shown **while a turn still goes**, as the person
   would mid-answer (14 Nov 2026, the message box's queue), with no turn of the lab's
   own: returns at once; the queued bubble, its ✓✓ and the answers show in the thread

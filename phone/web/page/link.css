@@ -923,6 +923,44 @@ main {
   fill: currentColor;
   fill-opacity: 0.22;
 }
+/* Asleep: ‹ at the first version, › at the last, or ‹ › and ↻ while an answer is under way. */
+.footbtn:disabled {
+  opacity: 0.38;
+  cursor: default;
+  background: transparent;
+  color: var(--yap-muted);
+}
+@media (hover: hover) {
+  .footbtn:disabled:hover {
+    background: transparent;
+    color: var(--yap-muted);
+  }
+}
+
+/* A message's versions (Retry's, Edit's: the PC's ‹ 2/3 ›): the steps a thumb's size, the count between. */
+.versions {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.versions .vstep {
+  width: 2.5rem;
+}
+.vcount {
+  min-width: 2.25rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--yap-muted);
+  user-select: none;
+}
+/* Under an edited question's bubble, at its right edge. */
+.qfoot {
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  margin: -6px -8px 0 0;
+}
 .speaking {
   display: inline-flex;
   align-items: center;

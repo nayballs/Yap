@@ -27,7 +27,7 @@
 //!   Claude Code's problems (signed out, at the plan's limit, paying
 //!   another way: that one is stopped at once) and the result — each sent
 //!   as the app event **`yap-agent`** (`{id, status, folder, conversation?,
-//!   step?, file?, command?, about?, said?, thought?, todos?, now?, diff?, text?,
+//!   step?, file?, command?, about?, said?, thought?, thoughtMs?, todos?, now?, diff?, text?,
 //!   cost?, problem?, ts}`) and kept in the agent's `log.jsonl` for its tab.
 //! - **Asking**: a permission card waiting for the person (the endpoint's
 //!   `pending()`): the agent is `asking` until it's answered.
@@ -210,6 +210,15 @@ pub struct AgentEvent {
     /// phone, never in Yap's log.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thought: Option<String>,
+    /// **How long it thought** (16 Nov 2026), in ms: a thinking block of its
+    /// own message, from its stream's start to the block whole. Alone (no
+    /// `thought`) when Claude Code sent the block's words empty — Opus 5.5
+    /// and Sonnet 5.5 in a `-p` run: the API leaves them out by default and
+    /// no flag, setting or variable of Claude Code's asks for them there
+    /// (docs/architecture/yap-code.md, "The transcript view"). Not content:
+    /// it goes to a phone as it is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought_ms: Option<u64>,
     /// Its to-do list, as its latest `TodoWrite` left it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub todos: Option<Vec<steps::Todo>>,
@@ -1580,6 +1589,10 @@ struct Follow {
     /// told ([`SAYING_EVENT`]).
     saying: String,
     saying_told: Option<Instant>,
+    /// **When the thinking block it's in began** (its stream's
+    /// `content_block_start`, its own message's): the block's time, once
+    /// it's whole ([`AgentEvent::thought_ms`]).
+    thinking_since: Option<Instant>,
     /// The commands' calls not back yet, by id (their output is said).
     commands: HashSet<String>,
     /// **When each `Bash` / `PowerShell` call began**, not back yet (and
@@ -1701,6 +1714,7 @@ impl Follow {
             pictures: 0,
             saying: String::new(),
             saying_told: None,
+            thinking_since: None,
             commands: HashSet::new(),
             command_started: HashMap::new(),
             command_runs: Vec::new(),
@@ -2036,10 +2050,16 @@ impl Follow {
             StreamKind::MessageStart { .. } => {
                 self.saying.clear();
                 self.saying_told = None;
+                self.thinking_since = None;
                 false
             }
             StreamKind::BlockStart { block: crate::ai::claude_code::events::BlockStart::ToolUse { name, .. }, .. } => {
                 self.began(name);
+                false
+            }
+            // It's thinking: how long, once the block is whole (its words may not come with it).
+            StreamKind::BlockStart { block: crate::ai::claude_code::events::BlockStart::Thinking, .. } => {
+                self.thinking_since = Some(Instant::now());
                 false
             }
             StreamKind::Text { text, .. } => self.on_saying(text),
@@ -2083,10 +2103,14 @@ impl Follow {
                 for block in &a.blocks {
                     match block {
                         Block::ToolUse { id, name, input } => self.on_tool(id, name, input),
-                        // Its thinking (a helper's isn't its own): a line the thread's Thinking view shows.
-                        Block::Thinking(t) if a.parent_tool_use_id.is_none() && !t.trim().is_empty() => {
-                            if let Some(agent) = store::get(&self.id) {
-                                emit(&AgentEvent { thought: Some(thought_of(t)), ..self.event(&agent) });
+                        // Its thinking (a helper's isn't its own): a line the thread's Thinking view shows —
+                        // its words when Claude Code sends them, and how long it took.
+                        Block::Thinking(t) if a.parent_tool_use_id.is_none() => {
+                            let since = self.thinking_since.take();
+                            if let Some((thought, thought_ms)) = thought_line(t, since, Instant::now()) {
+                                if let Some(agent) = store::get(&self.id) {
+                                    emit(&AgentEvent { thought, thought_ms, ..self.event(&agent) });
+                                }
                             }
                         }
                         // What it says between its calls: a line of its own
@@ -2469,6 +2493,16 @@ fn turn_words(said: &[String], split_at: Option<usize>) -> String {
 /// characters (cut at a character's edge, with "…"). Pure.
 fn thought_of(text: &str) -> String {
     clipped(text, THOUGHT_CHARS)
+}
+
+/// **A thinking block's line in its log** (16 Nov 2026): its words
+/// ([`thought_of`]) when it has any, and its time when its start was seen
+/// (`since`, its stream's `content_block_start`) — `(thought, thought_ms)`.
+/// A block with neither (empty, its start never seen) is no line. Pure.
+fn thought_line(text: &str, since: Option<Instant>, now: Instant) -> Option<(Option<String>, Option<u64>)> {
+    let words = (!text.trim().is_empty()).then(|| thought_of(text));
+    let ms = since.map(|s| u64::try_from(now.saturating_duration_since(s).as_millis()).unwrap_or(u64::MAX));
+    (words.is_some() || ms.is_some()).then_some((words, ms))
 }
 
 /// `text` trimmed, at most `max` characters (cut at a character's edge, with
@@ -3218,6 +3252,28 @@ mod tests {
         let v = serde_json::to_value(&ev).unwrap();
         assert_eq!(v["thought"], "Check the notes first.");
         assert!(v.get("said").is_none() && v.get("step").is_none() && v.get("text").is_none());
+    }
+
+    #[test]
+    fn a_thinking_block_is_its_words_and_its_time_and_an_empty_one_its_time_alone() {
+        let start = Instant::now();
+        let end = start + Duration::from_millis(3_400);
+        // Words and time (a model whose thinking Claude Code sends).
+        assert_eq!(thought_line(" Plan first. ", Some(start), end), Some((Some("Plan first.".into()), Some(3_400))));
+        // Opus 5.5 / Sonnet 5.5 in a `-p` run: the block's words empty — its time alone.
+        assert_eq!(thought_line("", Some(start), end), Some((None, Some(3_400))));
+        assert_eq!(thought_line(" \n", Some(start), end), Some((None, Some(3_400))));
+        // Words without its start seen (no partial messages): the words.
+        assert_eq!(thought_line("Plan first.", None, end), Some((Some("Plan first.".into()), None)));
+        // Neither: no line at all.
+        assert_eq!(thought_line("", None, end), None);
+        // (A clock that went back is no time, never a panic.)
+        assert_eq!(thought_line("", Some(end), start), Some((None, Some(0))));
+        // Its event: `thoughtMs`, no words, nothing said.
+        let ev = AgentEvent { id: "ab12".into(), thought_ms: Some(3_400), ..Default::default() };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["thoughtMs"], 3_400);
+        assert!(v.get("thought").is_none() && v.get("said").is_none() && v.get("step").is_none());
     }
 
     #[test]

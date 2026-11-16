@@ -33,6 +33,14 @@
 //! reads the field as nothing and answers on screen, and a page from before
 //! never sends it). And a **hello with both** `device` and `pair`: the
 //! device is judged first (`pairing::judge`).
+//!
+//! **Retry and its versions** (16 Nov 2026, `"versions"` and `"retry"` in
+//! [`CAN`]): a thread's message carries its ‹ k/n › ([`Version`]) and an
+//! answer ↻ may ask again (`retry`); `show_version` switches one (on the PC
+//! too: one version shown a conversation), `retry` asks an answer's question
+//! again; [`Out::Versions`] tells every phone a conversation's version
+//! changed elsewhere. A page from before ignores the fields; a PC from
+//! before says neither, so the page offers neither.
 
 use serde::{Deserialize, Serialize};
 
@@ -194,6 +202,18 @@ pub enum In {
     /// Picture `n` (from 0) of the next question: `size` bytes, in
     /// [`PICTURE`] frames that follow.
     Picture { n: u32, size: u64 },
+    /// **‹ ›** (16 Nov 2026, `"versions"` in [`CAN`]): conversation `chat`'s
+    /// message at `at` shows its version in place `place` (1…, as ‹ k/n ›
+    /// counts) — on the PC too: one version shown a conversation, the last
+    /// switch wins (`link/chats.rs`). Answered with its `thread`.
+    ShowVersion { chat: u64, at: usize, place: u32 },
+    /// **↻ Retry** (`"retry"` in [`CAN`]): answer `id` (one this phone was
+    /// given, `chat:<conversation>:<index>`, with `retry` on it) asked again,
+    /// the old answer kept as a version; not in a Code chat.
+    Retry {
+        #[serde(default)]
+        id: String,
+    },
     Ping,
     // ---- Remote Control (2026-11-08, `link/code.rs`): each checked by the
     // PC's gates on arrival (`code/gates.rs`), never trusted from the page.
@@ -305,8 +325,11 @@ impl Talk {
 /// `"code"`, `"code_act"`, `"approve"` (Remote Control, 2026-11-08): the PC
 /// answers the Code side's messages — read, act, answer cards — and says
 /// in `ready.code` whether this phone may use them now ([`CodeReady`]).
-/// `"rate"` (16 Nov 2026): 👍 / 👎 on an answer ([`In::Rate`]).
-pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak", "code", "code_act", "approve", "rate"];
+/// `"versions"` (16 Nov 2026): a thread's messages carry their ‹ k/n ›
+/// ([`Version`]) and `show_version` switches it; `"retry"`: ↻ under an
+/// answer that says `retry` ([`In::Retry`]). `"rate"` (16 Nov 2026): 👍 / 👎 on an
+/// answer ([`In::Rate`]).
+pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak", "code", "code_act", "approve", "versions", "retry", "rate"];
 
 /// The longest "Tell the agent…" (characters), as a typed question.
 pub const MAX_CODE_TEXT: usize = 4_000;
@@ -478,6 +501,24 @@ pub struct ThreadMessage {
     /// the files and pictures stay on the PC. The page lists them under it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
+    /// **Its versions** (Retry's and Edit's, `chat/chats/branches.rs`): ‹
+    /// shown / count › on it, switched with `show_version` at its `at`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<Version>,
+    /// An answer ↻ may ask again from the phone (just after the person's own
+    /// question, not in a Code chat: `link/chats.rs` `retryable`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub retry: bool,
+}
+
+/// **A message's versions** as the phone shows them (‹ 2/3 ›): its place in
+/// the conversation (`at`, what `show_version` names), the one shown among
+/// them and how many.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Version {
+    pub at: usize,
+    pub shown: u32,
+    pub count: u32,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -542,6 +583,10 @@ pub enum Out {
         done: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<String>,
+        /// The checked answer may be asked again from the phone (↻, as a
+        /// thread's message says: [`ThreadMessage::retry`]).
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        retry: bool,
     },
     /// Yap's voice starts: down frames at `rate`, then `speak_end`.
     SpeakStart { rate: u32 },
@@ -571,6 +616,11 @@ pub enum Out {
     Chat { id: u64, title: String },
     /// Conversation `id` was renamed (in Chat on the PC).
     Title { id: u64, title: String },
+    /// **Conversation `chat`'s version shown changed** (16 Nov 2026: a ‹ ›,
+    /// a Retry or an Edit, on the PC or another phone; every phone hears): a
+    /// phone that shows it asks for it again (`open_chat`) once nothing of
+    /// its own is under way there.
+    Versions { chat: u64 },
     /// Chat's model can't read the question's pictures (or its server just
     /// turned them down): the page offers Chat's own ways on — another
     /// model, their text instead.
@@ -687,6 +737,8 @@ const KNOWN: &[&str] = &[
     "open_chat",
     "new_chat",
     "picture",
+    "show_version",
+    "retry",
     "ping",
     "code_list",
     "code_new",
@@ -938,9 +990,9 @@ mod tests {
         assert_eq!(j(Out::State { phase: Phase::Transcribing }), serde_json::json!({"type":"state","phase":"transcribing"}));
         assert_eq!(j(Out::Heard { text: "hi".into() }), serde_json::json!({"type":"heard","text":"hi"}));
         assert_eq!(j(Out::Step { label: "Thinking".into() }), serde_json::json!({"type":"step","label":"Thinking"}));
-        assert_eq!(j(Out::Answer { text: "Yes.".into(), done: false, id: None }), serde_json::json!({"type":"answer","text":"Yes.","final":false}));
+        assert_eq!(j(Out::Answer { text: "Yes.".into(), done: false, id: None, retry: false }), serde_json::json!({"type":"answer","text":"Yes.","final":false}));
         assert_eq!(
-            j(Out::Answer { text: "Yes.".into(), done: true, id: Some("chat:3:5".into()) }),
+            j(Out::Answer { text: "Yes.".into(), done: true, id: Some("chat:3:5".into()), retry: false }),
             serde_json::json!({"type":"answer","text":"Yes.","final":true,"id":"chat:3:5"})
         );
         assert_eq!(j(Out::SpeakStart { rate: DOWN_RATE }), serde_json::json!({"type":"speak_start","rate":24000}));
@@ -1098,7 +1150,7 @@ mod tests {
         assert_eq!(shared_list("CODE_CAN"), ["code", "code_act", "approve"]);
         assert_eq!(&CAN[8..11], &["code", "code_act", "approve"], "after what was there before");
         // (Then 👍 / 👎, 16 Nov 2026: `rate`, after them.)
-        assert_eq!(&CAN[11..], &["rate"]);
+        assert_eq!(&CAN[13..], &["rate"]);
         for t in CODE_IN {
             assert!(KNOWN.contains(t), "{t}");
         }
@@ -1247,5 +1299,49 @@ mod tests {
         assert!(v.get("agents").is_none(), "none: left out");
         // A drawer item names a Code chat's workspace.
         assert_eq!(j(Out::Chats { items: vec![ChatItem { id: 12, title: "x".into(), ts: 1, code: Some("garden-planner".into()) }] })["items"][0]["code"], "garden-planner");
+    }
+
+    #[test]
+    fn retry_and_its_versions_on_the_phone_are_v1_additions() {
+        // ‹ › on a message: the conversation, the message's place, the version wanted.
+        assert_eq!(parse(r#"{"type":"show_version","chat":41,"at":3,"place":1}"#).unwrap(), In::ShowVersion { chat: 41, at: 3, place: 1 });
+        assert_eq!(parse(r#"{"type":"show_version","chat":41,"at":3}"#).unwrap_err(), "Yap didn't understand that message", "no place");
+        assert_eq!(parse(r#"{"type":"show_version","chat":41,"at":-1,"place":1}"#).unwrap_err(), "Yap didn't understand that message");
+        // ↻ under an answer: its id, as ▶ names it.
+        assert_eq!(parse(r#"{"type":"retry","id":"chat:41:3"}"#).unwrap(), In::Retry { id: "chat:41:3".into() });
+        assert_eq!(parse(r#"{"type":"retry"}"#).unwrap(), In::Retry { id: String::new() }, "no id: refused by the PC as not given");
+        for t in ["show_version", "retry"] {
+            assert!(KNOWN.contains(&t), "{t}");
+        }
+        // Said in `ready.can`, after everything that was there before.
+        assert_eq!(&CAN[11..13], &["versions", "retry"]);
+        assert_eq!(&CAN[..11], &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak", "code", "code_act", "approve"]);
+        // A thread's message with its ‹ k/n › and ↻; one without says neither.
+        let j = |o: Out| serde_json::from_str::<serde_json::Value>(&o.json()).unwrap();
+        let thread = Out::Thread {
+            id: Some(41),
+            title: "Trip packing list".into(),
+            messages: vec![
+                ThreadMessage { role: "user", text: "What to pack?".into(), version: Some(Version { at: 0, shown: 2, count: 2 }), ..Default::default() },
+                ThreadMessage { role: "assistant", text: "A coat.".into(), id: Some("chat:41:1".into()), version: Some(Version { at: 1, shown: 1, count: 3 }), retry: true, ..Default::default() },
+                ThreadMessage { role: "assistant", text: "And boots.".into(), id: Some("chat:41:2".into()), ..Default::default() },
+            ],
+            more: false,
+            code: None,
+            agents: vec![],
+            cards: vec![],
+        };
+        let v = j(thread);
+        assert_eq!(v["messages"][0]["version"], serde_json::json!({"at":0,"shown":2,"count":2}));
+        assert!(v["messages"][0].get("retry").is_none());
+        assert_eq!(v["messages"][1]["version"], serde_json::json!({"at":1,"shown":1,"count":3}));
+        assert_eq!(v["messages"][1]["retry"], true);
+        assert!(v["messages"][2].get("version").is_none() && v["messages"][2].get("retry").is_none(), "neither: left out");
+        // Another screen switched a version (or retried, or edited): every phone hears.
+        assert_eq!(j(Out::Versions { chat: 41 }), serde_json::json!({"type":"versions","chat":41}));
+        assert_eq!(
+            j(Out::Answer { text: "Yes.".into(), done: true, id: Some("chat:3:5".into()), retry: true }),
+            serde_json::json!({"type":"answer","text":"Yes.","final":true,"id":"chat:3:5","retry":true})
+        );
     }
 }

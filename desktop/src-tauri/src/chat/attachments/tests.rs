@@ -243,6 +243,25 @@ fn a_file_is_kept_read_back_and_deleted() {
     assert!(taken(&["file_0000000000000000".into()]).is_err());
 }
 
+#[test]
+fn the_boxs_files_are_ids_in_order_and_ones_given_back_go_first() {
+    let (a, b, c) = ("file_00000000000000aa".to_string(), "file_00000000000000bb".to_string(), "file_00000000000000cc".to_string());
+    // Each a file's id, once, in the box's order; anything else left out.
+    assert_eq!(box_ids(vec![a.clone(), "C:\\Users\\x\\notes.txt".into(), b.clone(), a.clone()]), vec![a.clone(), b.clone()]);
+    assert_eq!(box_ids((0..30).map(|i| format!("file_{i:016x}")).collect()).len(), MAX_FILES);
+    // Given back (a spoken question got no answer): first, then what's there now less them.
+    assert_eq!(box_with(&[a.clone(), b.clone()], vec![c.clone(), a.clone()]), vec![a.clone(), b.clone(), c.clone()]);
+    assert_eq!(box_with(&[], vec![c.clone()]), vec![c.clone()]);
+
+    // The page says what waits; a typed question that sends some takes them out at once; Chat closed, none.
+    chat_files_waiting(vec![a.clone(), b.clone(), c.clone()]);
+    assert_eq!(waiting_count(), 3);
+    sent_from_box(std::slice::from_ref(&b));
+    assert_eq!(*waiting(), vec![a.clone(), c.clone()]);
+    box_closed();
+    assert_eq!(waiting_count(), 0);
+}
+
 fn att(id: &str, name: &str, kind: &str) -> Attachment {
     Attachment { id: id.into(), name: name.into(), kind: kind.into(), bytes: 10, tokens: 3, pages: (kind == "pdf").then_some(2), ..Default::default() }
 }

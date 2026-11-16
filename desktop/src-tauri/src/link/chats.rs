@@ -5,10 +5,14 @@
 //! newest first — and a thread is its messages' words only, bounded: the
 //! last [`KEEP_MESSAGES`], each cut at [`MAX_CHARS`]. A question's
 //! screenshot text sent in its picture's place (`snip::ocr`) is left out,
-//! as Chat folds it. Pure.
+//! as Chat folds it. Since 16 Nov 2026 a message carries its versions'
+//! ‹ k/n › ([`version_of`]) and an answer whether ↻ may ask it again from
+//! the phone ([`retryable`]). **One version shown a conversation**: the
+//! PC's (its `messages`), on every screen — a phone's ‹ › switches it there
+//! too, and every screen follows (`link.md`, Retry and versions). Pure.
 
 use crate::chat::chats::Conversation;
-use crate::link::wire::{ChatItem, ThreadMessage};
+use crate::link::wire::{ChatItem, ThreadMessage, Version};
 
 /// The most conversations the drawer lists.
 pub const MAX_RECENTS: usize = 200;
@@ -66,9 +70,11 @@ fn shared_names(m: &crate::chat::chats::ChatMessage) -> Vec<String> {
 /// (an agent's report marker keeps its `kind`, so it's never shown as the
 /// person's bubble: 2026-11-08), an answer's with its id in Chat for ▶ and
 /// its 👍 / 👎; the names of the files either shared (the files stay on the
-/// PC). Pure.
+/// PC); its versions' ‹ k/n › (16 Nov 2026: Retry's and Edit's, the version
+/// shown being the PC's — one a conversation, [`version_of`]). Pure.
 pub fn message(c: &Conversation, index: usize) -> Option<ThreadMessage> {
     let m = c.messages.get(index)?;
+    let version = version_of(c, index);
     match m.role.as_str() {
         "user" => Some(ThreadMessage {
             role: "user",
@@ -79,6 +85,8 @@ pub fn message(c: &Conversation, index: usize) -> Option<ThreadMessage> {
             kind: m.kind.clone(),
             files: shared_names(m),
             rating: None,
+            version,
+            retry: false,
         }),
         "assistant" => Some(ThreadMessage {
             role: "assistant",
@@ -87,17 +95,39 @@ pub fn message(c: &Conversation, index: usize) -> Option<ThreadMessage> {
             files: shared_names(m),
             // Its 👍 / 👎 (chat/feedback.rs), as the desktop's thumbs show it.
             rating: m.feedback.as_ref().map(|f| f.rating.clone()),
+            version,
             ..Default::default()
         }),
         _ => None,
     }
 }
 
+/// **Message `index`'s versions** (`chat/chats/branches.rs`), as ‹ shown /
+/// count › says them: the conversation's own `messages` are the version
+/// shown, on the PC and every phone alike. Pure.
+pub fn version_of(c: &Conversation, index: usize) -> Option<Version> {
+    crate::chat::chats::branches::views(c).into_iter().find(|f| f.at == index).map(|f| Version { at: f.at, shown: f.shown, count: f.count })
+}
+
+/// **Can ↻ ask answer `index` again from a phone**: an answer just after the
+/// person's own question (what `chats::begin_retry` takes), in a chat that
+/// isn't a Code chat (`code`: there Retry is Claude Code's Rewind, the PC's
+/// only). Pure.
+pub fn retryable(c: &Conversation, index: usize, code: bool) -> bool {
+    let answer = c.messages.get(index).is_some_and(|m| m.role == "assistant" && m.kind.is_empty());
+    let question = index.checked_sub(1).and_then(|i| c.messages.get(i)).is_some_and(|q| q.role == "user" && q.kind.is_empty());
+    !code && answer && question
+}
+
 /// **A conversation as the phone shows it**: its title, its latest
-/// messages' words ([`message`]) and whether older ones were left out. Pure.
-pub fn thread(c: &Conversation) -> (String, Vec<ThreadMessage>, bool) {
+/// messages' words ([`message`]), each answer ↻ may ask again
+/// ([`retryable`]; `code`: a Code chat, none) and whether older ones were
+/// left out. Pure.
+pub fn thread(c: &Conversation, code: bool) -> (String, Vec<ThreadMessage>, bool) {
     let start = c.messages.len().saturating_sub(KEEP_MESSAGES);
-    let messages = (start..c.messages.len()).filter_map(|i| message(c, i)).collect();
+    let messages = (start..c.messages.len())
+        .filter_map(|i| message(c, i).map(|m| ThreadMessage { retry: m.role == "assistant" && retryable(c, i, code), ..m }))
+        .collect();
     (title(c), messages, start > 0)
 }
 
@@ -152,23 +182,23 @@ mod tests {
         q.voice = true;
         q.images = vec![ChatImage { id: "a".into(), ..Default::default() }, ChatImage { id: "b".into(), ..Default::default() }];
         c.messages = vec![q, said("assistant", "Ferns and hostas."), said("system", "ignored"), said("user", "And sun?"), said("assistant", "Lavender.")];
-        let (title, messages, more) = thread(&c);
+        let (title, messages, more) = thread(&c, false);
         assert_eq!(title, "Garden plan");
         assert!(!more);
         assert_eq!(messages.len(), 4, "only questions and answers");
-        assert_eq!(messages[0], ThreadMessage { role: "user", text: "What grows in shade?".into(), id: None, voice: true, pictures: 2, kind: String::new(), files: Vec::new(), rating: None });
+        assert_eq!(messages[0], ThreadMessage { role: "user", text: "What grows in shade?".into(), id: None, voice: true, pictures: 2, kind: String::new(), files: Vec::new(), rating: None, version: None, retry: false });
         assert_eq!(messages[1].id.as_deref(), Some("chat:7:1"), "its place in Chat");
         assert_eq!(messages[3].id.as_deref(), Some("chat:7:4"));
         // An answer's 👍 / 👎 goes with it (chat/feedback.rs); none, nothing.
         c.messages[4].feedback = Some(crate::chat::feedback::Feedback { rating: "bad".into(), reasons: vec!["long".into()], note: String::new(), ts: 1 });
-        let (_, rated, _) = thread(&c);
+        let (_, rated, _) = thread(&c, false);
         assert_eq!((rated[1].rating.as_deref(), rated[3].rating.as_deref()), (None, Some("bad")));
         assert_eq!(serde_json::to_value(&rated[3]).unwrap()["rating"], "bad");
         assert!(serde_json::to_value(&rated[1]).unwrap().get("rating").is_none());
         // The latest only, each message capped.
         c.messages = (0..KEEP_MESSAGES + 6).map(|i| said(if i % 2 == 0 { "user" } else { "assistant" }, &format!("m{i}"))).collect();
         c.messages.push(said("assistant", &"x".repeat(MAX_CHARS + 50)));
-        let (_, messages, more) = thread(&c);
+        let (_, messages, more) = thread(&c, false);
         assert!(more);
         assert_eq!(messages.len(), KEEP_MESSAGES);
         assert_eq!(messages[0].text, "m7");
@@ -183,7 +213,7 @@ mod tests {
         let mut c = conv(12, "Watering schedule", 100);
         let marker = ChatMessage { role: "user".into(), text: "The agent in garden-planner: it's done.".into(), kind: crate::chat::turn::AGENT_REPORT.into(), ..Default::default() };
         c.messages = vec![said("user", "Add a watering schedule"), said("assistant", "On it."), marker, said("assistant", "Done: I added it.")];
-        let (_, messages, _) = thread(&c);
+        let (_, messages, _) = thread(&c, false);
         assert_eq!(messages.iter().map(|m| (m.role, m.kind.as_str())).collect::<Vec<_>>(), [("user", ""), ("assistant", ""), ("user", "agentReport"), ("assistant", "")]);
         let v = serde_json::to_value(&messages[2]).unwrap();
         assert_eq!(v["kind"], "agentReport");
@@ -192,6 +222,49 @@ mod tests {
         assert_eq!(message(&c, 2), Some(messages[2].clone()));
         assert_eq!(message(&c, 3).and_then(|m| m.id).as_deref(), Some("chat:12:3"));
         assert_eq!(message(&c, 9), None);
+    }
+
+    #[test]
+    fn a_threads_messages_carry_their_versions_and_which_answers_retry() {
+        let mut c = conv(41, "Trip packing list", 100);
+        let msg = |role: &str, text: &str, ts: u64| ChatMessage { role: role.into(), text: text.into(), ts, ..Default::default() };
+        c.messages = vec![msg("user", "What to pack?", 1), msg("assistant", "A coat.", 2), msg("user", "And shoes?", 3), msg("assistant", "Boots.", 4)];
+        // Nothing retried yet: no ‹ ›, and ↻ under each answer after the person's question.
+        let (_, messages, _) = thread(&c, false);
+        assert!(messages.iter().all(|m| m.version.is_none()));
+        assert_eq!(messages.iter().map(|m| m.retry).collect::<Vec<_>>(), [false, true, false, true]);
+        // The first answer retried twice (Retry: chats::begin_retry), the new ones shown.
+        for (text, ts) in [("A rain jacket.", 5), ("Layers.", 6)] {
+            crate::chat::chats::branches::branch_off(&mut c, 1).unwrap();
+            c.messages.push(msg("assistant", text, ts));
+            crate::chat::chats::branches::settle(&mut c, 1);
+        }
+        let (_, messages, _) = thread(&c, false);
+        assert_eq!(messages.len(), 2, "the version shown only: what followed the first answer went with it");
+        assert_eq!(messages[1].text, "Layers.");
+        assert_eq!(messages[1].version, Some(Version { at: 1, shown: 3, count: 3 }));
+        assert_eq!(version_of(&c, 0), None);
+        // An Edit of the question: ‹ › on the person's own message.
+        crate::chat::chats::branches::branch_off(&mut c, 0).unwrap();
+        c.messages.push(msg("user", "What to pack for snow?", 7));
+        c.messages.push(msg("assistant", "Crampons.", 8));
+        let (_, messages, _) = thread(&c, false);
+        assert_eq!(messages[0].version, Some(Version { at: 0, shown: 2, count: 2 }));
+        assert_eq!(messages[1].version, None, "the new branch's answer has none of its own");
+        // Switched back (‹): the first question, its answer at version 3 of 3, as before.
+        crate::chat::chats::branches::switch(&mut c, 0, 1).unwrap();
+        let (_, messages, _) = thread(&c, false);
+        assert_eq!(messages[0].version, Some(Version { at: 0, shown: 1, count: 2 }));
+        assert_eq!(messages[1].version, Some(Version { at: 1, shown: 3, count: 3 }));
+        // In a Code chat no answer retries from the phone (Retry there is Claude Code's Rewind).
+        let (_, messages, _) = thread(&c, true);
+        assert!(messages.iter().all(|m| !m.retry));
+        // Nor an answer after an agent's report, nor one after another answer.
+        let mut r = conv(12, "Watering schedule", 100);
+        let marker = ChatMessage { role: "user".into(), text: "The agent: done.".into(), kind: crate::chat::turn::AGENT_REPORT.into(), ..Default::default() };
+        r.messages = vec![said("user", "Add a schedule"), said("assistant", "On it."), said("assistant", "Still on it."), marker, said("assistant", "Done.")];
+        assert_eq!((0..5).map(|i| retryable(&r, i, false)).collect::<Vec<_>>(), [false, true, false, false, false]);
+        assert!(!retryable(&r, 9, false));
     }
 
     #[test]
