@@ -292,6 +292,46 @@ followed back as they were. ‹ › and ↻ sleep while something's under way
 `"versions"` / `"retry"` in `ready.can`): neither shown, whatever a thread
 carries. Kept with the thread in `sessionStorage` (`qv`, `av`, `retry`).
 
+## Edit (16 Nov 2026)
+
+**✎** under your own question (the Claude app's pencil; Chat's Edit on the
+PC, #106) where the PC says it may be edited from here — a thread
+message's `edit`, or the checked `answer`'s for the question just asked:
+that question's time in Chat, which the edit names it by with its place
+(`qAt`). Plain chats only: never in a Code chat (there Edit is Claude
+Code's Rewind, the PC's), and the PC leaves it off a question asked about
+a passage or with files from Chat's box (the phone can't send those
+again). Beside the question's ‹ k/n › in `.qfoot`, after it (the PC's
+order); asleep while something's under way, as ‹ › and ↻.
+
+A tap puts the question's words **in the composer's box** — the phone's
+way, as the ChatGPT app's edit is: an **"Editing your message"** strip over
+the box with ✕, the bubble outlined (`.q.being-edited`), ✎ pressed, the box
+focused, the caret at the end; + and hands-free talk step aside (the
+question's own pictures go again from the PC; any waiting in the card stay
+there, hidden, for the next question), and Send says "Send the edited
+message". Whatever the box had before is kept and comes back when the edit
+is sent or left — ✕, ✎ again, Escape on a keyboard, another chat, ‹ › or ↻,
+hands-free talk or an agent's live view. Talk works as ever: its words go
+in at the caret, and an edit with any of them is sent as said (`speak`).
+
+**Send** sends `edit {chat, at, ts, text, speak?}`: here the question and
+everything after it leave the thread (they're the old version now) and the
+new words take their place with Chat's activity line, the answer comes as
+a typed question's (or said, with `speak`), and the PC's `versions` brings
+the thread again with ‹ 2/2 › on the question. The PC saying no (`error`,
+then `state idle`: that chat answering, the question changed there), the
+answer failing, or its model unable to read the question's pictures
+(`cant_read`, said as an error here): the question and what followed come
+back, the new words are in the box again with the edit open, and the
+thread is asked for again (`open_chat`) to show the PC's truth. A version
+of that question switched on another screen while the person writes (the
+thread back without it, by place and time): the edit closes, its words stay
+in the box — with whatever the box had before after them — and a note says
+it's a new message now; nothing is sent until Send. A PC from before (no
+`"edit"` in `ready.can`): no ✎. Kept with the thread in `sessionStorage`
+(`edit`).
+
 ## Pictures (2026-11-03)
 
 **+** in the composer card opens a small menu: **Take photo** (`<input
@@ -812,10 +852,21 @@ npm run test:link
   the activity line, ‹ › asleep, the new answer on screen, nothing said,
   then `versions` and the new ‹ k/n ›); ↻ refused (the answer and what
   followed back, why said, awake again); ‹ › while ▶ is said (`interrupt`
-  first); a PC from before showing neither. `versions-screens.spec.js` —
-  screenshots light and dark at 360 × 780 and 390 × 844
-  (`versions-thread-*`, `versions-retrying-*`, `versions-retried-*`), 44 px
-  targets, nothing sideways.
+  first); a PC from before showing neither. ✎ Edit: the question in the box
+  with "Editing your message" (its bubble marked, + and hands-free talk
+  aside), sent as `edit {chat, at, ts, text}`, the question and what
+  followed replaced by the new words, its answer on screen and ✎ on the new
+  words from the answer's `edit`, then `versions`, ‹ 2/2 › and ‹ › between
+  the versions; ✕, ✎ again, Escape and another question's ✎ (the box's
+  draft back each time, nothing sent); the PC's refusal (the thread and the
+  words back, the edit open again, the thread asked for); a version
+  switched elsewhere meanwhile (the words stay, a new message now, sent as
+  `ask`); Talk's words added to an edit (`speak`); ✎ on a question just
+  asked; none from a PC from before, none in a Code chat.
+  `versions-screens.spec.js` — screenshots light and dark at 360 × 780 and
+  390 × 844 (`versions-thread-*`, `versions-retrying-*`, `versions-retried-*`,
+  `edit-open-*`, `edit-answering-*`, `edit-versions-*`), 44 px targets,
+  nothing sideways.
   **The Code side** (Remote Control), against a PC mocked from
   `core/codeWire.js`'s own examples (`support/code-pc.js`: every message the
   PC sends is the wire's example of its type with the test's changes, and

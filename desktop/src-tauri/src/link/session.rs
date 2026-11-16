@@ -49,6 +49,13 @@
 //! most at Auto, its report is said here — [`Cmd::Say`]); `code_new` makes
 //! the next new chat a Code chat in that workspace.
 //!
+//! **Retry, Edit and their versions** (16 Nov 2026): ‹ › on a message
+//! (`show_version`) switches the version shown on the PC too, ↻ (`retry`)
+//! asks a plain chat's answer again, ✎ (`edit`) sends a plain chat's
+//! question again in new words — each kept as a version (‹ 1/2 ›), one
+//! version shown a conversation, the last switch winning wherever it was
+//! made ([`show_version`], [`retry`], [`edit`]).
+//!
 //! **The hello** carries the phone's device, the QR's token, or both (a tab
 //! restored with an old `#pair=`, the code scanned again): the device counts
 //! first (`pairing::judge`). Only a hello that's refused waits out its
@@ -86,8 +93,9 @@ const NO_WORDS: &str = "Yap didn't hear anything. Try again, or type it.";
 const MEETING: &str = "The Voice Assistant is off during meetings. While a meeting records or a call is on, Yap doesn't listen or talk.";
 const NO_SPEECH: &str = "Yap's speech model isn't ready on the PC.";
 
-/// The longest typed question (characters).
-const MAX_TYPED: usize = 4_000;
+/// The longest typed question (characters): an edited one's too, and so the
+/// longest question ✎ offers to edit (`chats::editable`).
+pub(crate) const MAX_TYPED: usize = 4_000;
 const TOO_LONG: &str = "That question is too long for Yap to take from the phone. Shorten it, then send it again.";
 /// ▶ on an answer this phone wasn't given, or one gone from Chat.
 const NOT_HERE: &str = "That answer isn't in Chat on your PC any more, so Yap can't read it out.";
@@ -131,6 +139,9 @@ pub struct Turn {
     answered: Arc<AtomicBool>,
     /// A voice was started for it (its end says idle).
     voiced: AtomicBool,
+    /// It ended in an error (or pictures its model can't read): an edit's
+    /// new words then go, the question back as it was (`edit`).
+    failed: AtomicBool,
     /// A new Code chat's workspace (`code_new`), taken by its first question.
     new_code: Arc<Mutex<Option<String>>>,
 }
@@ -155,6 +166,7 @@ impl Turn {
             speaking: Arc::new(AtomicBool::new(false)),
             answered: Arc::new(AtomicBool::new(false)),
             voiced: AtomicBool::new(false),
+            failed: AtomicBool::new(false),
             new_code: Arc::clone(&asking.code.new_code),
         })
     }
@@ -198,7 +210,7 @@ impl crate::chat::assistant::Phone for Turn {
         if done {
             self.answered.store(true, Ordering::SeqCst);
         }
-        self.tell(Out::Answer { text: text.to_string(), done, id: None, retry: false });
+        self.tell(Out::Answer { text: text.to_string(), done, id: None, retry: false, edit: 0 });
     }
 
     fn checked(&self, text: &str, message_id: &str) {
@@ -207,8 +219,8 @@ impl crate::chat::assistant::Phone for Turn {
             // ▶ on the phone may read it from now on (and ↻ ask it again).
             self.hub.gave(&self.device, message_id);
         }
-        let retry = retryable_here(message_id);
-        self.tell(Out::Answer { text: text.to_string(), done: true, id: Some(message_id.to_string()), retry });
+        let (retry, edit) = foot_here(message_id);
+        self.tell(Out::Answer { text: text.to_string(), done: true, id: Some(message_id.to_string()), retry, edit });
     }
 
     fn by_voice(&self) -> bool {
@@ -231,6 +243,7 @@ impl crate::chat::assistant::Phone for Turn {
     }
 
     fn failed(&self, message: &str) {
+        self.failed.store(true, Ordering::SeqCst);
         self.tell(Out::Error { message: message.to_string() });
     }
 
@@ -270,6 +283,7 @@ impl crate::chat::assistant::Phone for Turn {
     }
 
     fn cant_read(&self, message: &str) {
+        self.failed.store(true, Ordering::SeqCst);
         self.tell(Out::CantRead { message: message.to_string() });
     }
 }
@@ -761,6 +775,7 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
         In::Rate { id, rating } => rate(hub, tx, asking, &id, rating),
         In::ShowVersion { chat, at, place } => show_version(hub, tx, session, latest, asking, chat, at, place),
         In::Retry { id } => retry(hub, tx, session, latest, asking, &id),
+        In::Edit { chat, at, ts, text, speak } => edit(hub, tx, session, latest, asking, Editing { chat, at, ts, text, speak }),
         In::SetModel { id, provider, model, base_url, file } => {
             // A row of Chat's picker (`ready.picker`), as the desktop picker
             // picks it; else one of `ready.models` by its id (a first page).
@@ -826,12 +841,17 @@ fn thread_out(hub: &Arc<Hub>, device: &str, conv: &crate::chat::chats::Conversat
     Out::Thread { id: Some(conv.id), title, messages, more, code, agents, cards }
 }
 
-/// Can ↻ ask answer `message_id` (`chat:<conversation>:<index>`) again from
-/// a phone: as a thread's message says ([`crate::link::chats::retryable`]).
-fn retryable_here(message_id: &str) -> bool {
-    let Some((conversation, index)) = parse_message_id(message_id) else { return false };
+/// Under checked answer `message_id` (`chat:<conversation>:<index>`): can ↻
+/// ask it again from a phone, and can ✎ edit the question just before it
+/// (that question's time in Chat; 0: no) — as a thread's messages say
+/// ([`crate::link::chats::retryable`], [`crate::link::chats::editable`]).
+fn foot_here(message_id: &str) -> (bool, u64) {
+    let Some((conversation, index)) = parse_message_id(message_id) else { return (false, 0) };
     let code_chat = crate::agents::code_chat::folder_of(Some(conversation)).is_some();
-    crate::chat::chats::get(conversation).is_some_and(|c| crate::link::chats::retryable(&c, index, code_chat))
+    crate::chat::chats::get(conversation).map_or((false, 0), |c| {
+        let edit = index.checked_sub(1).filter(|q| crate::link::chats::editable(&c, *q, code_chat)).map_or(0, |q| c.messages[q].ts);
+        (crate::link::chats::retryable(&c, index, code_chat), edit)
+    })
 }
 
 /// Said while that chat is answering: ‹ › and ↻ wait for it (as on the PC).
@@ -840,6 +860,12 @@ const WAIT_FOR_ANSWER: &str = "Wait for the answer being written, or stop it fir
 const NOT_RETRYABLE: &str = "That answer isn't in Chat on your PC any more, so Yap can't try it again.";
 /// ↻ in a Code chat: there it's Claude Code's Rewind, the PC's only.
 const CODE_RETRY: &str = "In a Code chat, Retry is on your PC: there it rewinds Claude's session first.";
+/// ✎ in a Code chat: there too it's a Rewind.
+const CODE_EDIT: &str = "In a Code chat, Edit is on your PC: there it rewinds Claude's session first.";
+/// ✎ on a question that isn't the one the phone showed any more (another
+/// screen switched its version, or edited it), or one the phone can't send
+/// again (a passage or files of the PC's with it).
+const EDIT_GONE: &str = "That message changed on your PC, so Yap didn't edit it. What you wrote is still in the box.";
 
 /// **‹ › on the phone** (`show_version`, 16 Nov 2026): conversation `chat`'s
 /// message at `at` shows its version `place` — on the PC too, as ‹ › there
@@ -942,6 +968,109 @@ fn retry(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking:
         }
         tracing::info!(kept, "Yap Link: the phone's retry is over");
         hub.phone_changed_versions(conversation, None);
+    });
+}
+
+/// **✎ Edit from the phone** as it came ([`In::Edit`]): the conversation,
+/// the question's place and its time in Chat, the new words, and whether
+/// some of them came from Talk.
+struct Editing {
+    chat: u64,
+    at: usize,
+    ts: u64,
+    text: String,
+    speak: bool,
+}
+
+/// ✎ with nothing in the box (the page never sends it).
+const EMPTY_EDIT: &str = "Nothing to send: write the message first.";
+
+/// **Why ✎ can't edit** conversation `conv`'s question at `at` now (its
+/// time in Chat `ts`, as the phone's thread said), or none: a chat the phone
+/// may use, not a Code chat (`code`: there Edit is Claude Code's Rewind,
+/// the PC's only), not while it's answering (`answering`, as ‹ › and ↻
+/// wait), and still the very question the phone showed — the same time in
+/// Chat, one the phone may send again ([`crate::link::chats::editable`]).
+/// Pure.
+fn edit_refused(conv: Option<&crate::chat::chats::Conversation>, code: bool, answering: bool, at: usize, ts: u64) -> Option<&'static str> {
+    let Some(c) = conv.filter(|c| crate::link::chats::usable(c)) else { return Some(CHAT_GONE) };
+    if code {
+        return Some(CODE_EDIT);
+    }
+    if answering {
+        return Some(WAIT_FOR_ANSWER);
+    }
+    let same = c.messages.get(at).is_some_and(|m| m.ts == ts);
+    if !same || !crate::link::chats::editable(c, at, false) {
+        return Some(EDIT_GONE);
+    }
+    None
+}
+
+/// **✎ Edit on the phone** (`edit`, 16 Nov 2026, the Claude app's pencil on
+/// the person's own message): conversation `chat`'s question at `at` — the
+/// one the phone showed ([`edit_refused`]) — set aside as a version with
+/// everything after it (`chats::begin_edit`, as `chat_send`'s `edit` does),
+/// and the new words asked in its place the way the phone's questions go
+/// (the Voice Assistant's path: `heard`, thinking, the answer as a typed
+/// question's, or with `speak` said on the phone), its pictures still on the
+/// PC going again (their text read again when they went as text). Kept as
+/// any question is — answered, stopped part-way or before it began — unless
+/// it ended in an error (or pictures its model can't read): then the
+/// question as it was, as on the PC. Not in a Code chat (there Edit is
+/// Claude Code's Rewind, asked first on the PC), nor while that chat is
+/// answering. Whatever was under way on the phone stops first. At its end
+/// every phone hears `versions` (this one asks for the thread with its
+/// ‹ 2/2 ›) and the PC's Chat view reads it again. One version shown a
+/// conversation, the PC's: an edit is a switch too, and the last one wins.
+fn edit(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, e: Editing) {
+    if abandon(latest, asking) {
+        say(tx, Out::State { phase: Phase::Idle });
+    }
+    // Why not, then idle (the page shows it working from its tap).
+    let refuse = |message: String| {
+        say(tx, Out::Error { message });
+        say(tx, Out::State { phase: Phase::Idle });
+    };
+    let words = e.text.trim().to_string();
+    if words.is_empty() {
+        return refuse(EMPTY_EDIT.into());
+    }
+    if words.chars().count() > MAX_TYPED {
+        return refuse(TOO_LONG.into());
+    }
+    if crate::chat::assistant::is_off() {
+        return refuse(MEETING.into());
+    }
+    let conv = crate::chat::chats::get(e.chat);
+    let code_chat = crate::agents::code_chat::folder_of(Some(e.chat)).is_some();
+    if let Some(why) = edit_refused(conv.as_ref(), code_chat, crate::chat::stream::is_answering(e.chat), e.at, e.ts) {
+        return refuse(why.into());
+    }
+    let begun = match crate::chat::chats::begin_edit(e.chat, e.at) {
+        Ok(b) => b,
+        Err(why) => return refuse(why),
+    };
+    asking.set_chat(ChatRef::Id(e.chat));
+    // Its screenshots still on this PC go again (their text read again when they went as text).
+    let (pictures, as_text) = crate::chat::commands::images_again(&begun.question);
+    tracing::info!(chars = words.chars().count(), pictures = pictures.len(), said = e.speak, "Yap Link: the phone edited a question (the old one kept as a version)");
+    let turn_id = latest.fetch_add(1, Ordering::SeqCst) + 1;
+    let turn = Turn::new(turn_id, session, Arc::clone(latest), asking, e.speak, Carries { pictures: Vec::new(), as_text, said: e.speak });
+    *turn.pictures.lock().unwrap_or_else(|p| p.into_inner()) = pictures;
+    asking.turn = Some(Arc::clone(&turn));
+    let app = hub.app.clone();
+    let hub = Arc::clone(hub);
+    let chat = e.chat;
+    tauri::async_runtime::spawn(async move {
+        answer(app, Arc::clone(&turn), words).await;
+        let kept = !turn.failed.load(Ordering::SeqCst);
+        let kept = crate::chat::chats::end_branch(chat, begun.at, begun.back_to, kept);
+        if kept {
+            crate::memory::read_again_from(chat, begun.at);
+        }
+        tracing::info!(kept, "Yap Link: the phone's edit is over");
+        hub.phone_changed_versions(chat, None);
     });
 }
 
@@ -1255,6 +1384,45 @@ mod tests {
         assert_eq!(parse_message_id("chat:x:5"), None);
         assert_eq!(parse_message_id("chat:12:-1"), None);
         assert_eq!(parse_message_id(""), None);
+    }
+
+    #[test]
+    fn an_edit_from_the_phone_is_refused_unless_its_the_question_the_phone_showed() {
+        use crate::chat::chats::{ChatMessage, Conversation};
+        let msg = |role: &str, text: &str, ts: u64| ChatMessage { role: role.into(), text: text.into(), ts, ..Default::default() };
+        let c = Conversation {
+            id: 41,
+            title: "Trip packing list".into(),
+            created_ts: 1,
+            updated_ts: 4,
+            messages: vec![msg("user", "What to pack?", 1), msg("assistant", "A coat.", 2), msg("user", "And shoes?", 3), msg("assistant", "Boots.", 4)],
+            scope: String::new(),
+            note: None,
+            archived_ts: 0,
+            summary: None,
+            closed_tabs: Vec::new(),
+            branches: Vec::new(),
+            forks: Vec::new(),
+            incognito: false,
+        };
+        // The question the phone showed, by its place and its time in Chat.
+        assert_eq!(edit_refused(Some(&c), false, false, 2, 3), None);
+        assert_eq!(edit_refused(Some(&c), false, false, 0, 1), None);
+        // Another screen switched it (the same place, another time), or it isn't a question of the person's.
+        assert_eq!(edit_refused(Some(&c), false, false, 2, 9), Some(EDIT_GONE));
+        assert_eq!(edit_refused(Some(&c), false, false, 1, 2), Some(EDIT_GONE));
+        assert_eq!(edit_refused(Some(&c), false, false, 7, 3), Some(EDIT_GONE));
+        // A Code chat (Edit there is a Rewind), the chat answering, the chat gone or archived.
+        assert_eq!(edit_refused(Some(&c), true, false, 2, 3), Some(CODE_EDIT));
+        assert_eq!(edit_refused(Some(&c), false, true, 2, 3), Some(WAIT_FOR_ANSWER));
+        assert_eq!(edit_refused(None, false, false, 2, 3), Some(CHAT_GONE));
+        let mut archived = c.clone();
+        archived.archived_ts = 9;
+        assert_eq!(edit_refused(Some(&archived), false, false, 2, 3), Some(CHAT_GONE));
+        // One asked about a passage: the phone can't send it again as it was.
+        let mut quoted = c.clone();
+        quoted.messages[2].quote = Some(crate::chat::documents::Quote { note_id: 3, text: "Day two".into(), app: String::new() });
+        assert_eq!(edit_refused(Some(&quoted), false, false, 2, 3), Some(EDIT_GONE));
     }
 
     #[test]
