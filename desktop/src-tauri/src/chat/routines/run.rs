@@ -435,6 +435,8 @@ fn notice(app: &AppHandle, r: &Routine, out: Result<&Outcome, &String>) {
             icon: if failed { "error" } else { "routine" },
             title,
             body,
+            // The answer's words (its maths drawn as Chat draws them); a failure's, text.
+            markdown: !failed,
             primary: Some(crate::bar::CardAction::new(open, if failed { "Settings" } else { "Open" })),
             timeout_ms: Some(12_000),
             ..Default::default()
