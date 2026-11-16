@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import utilsBundle from 'playwright-core/lib/utilsBundle';
-import { test as base, expect, expectStore, openView, setConfig } from './support/fixtures.js';
+import { test as base, expect, expectStore, openView, setConfig, jsonLines } from './support/fixtures.js';
 import { fakeClaude, planConfig, SCRIPTS as PLAN_SCRIPTS } from './support/claude-plan.js';
 import { startFakeWeb, FORT_JOY_URL } from './support/fake-web.js';
 import { RUNS } from './support/yap.js';
@@ -123,7 +123,7 @@ function fresh(name) {
   fs.rmSync(file, { force: true });
   return file;
 }
-const linesOf = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const linesOf = (file) => jsonLines(file);
 const imagesIn = (call) => call.content.filter((b) => b.type === 'image');
 const resultOf = (call) => JSON.parse(call.content[0].text);
 

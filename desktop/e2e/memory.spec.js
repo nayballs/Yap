@@ -304,6 +304,11 @@ test("You: About you's name, region and note, each a way to About you, and not k
   await row('name').click();
   const aboutYou = dialog.locator('#settings-about-you');
   await expect(aboutYou).toBeVisible();
+  // The jump lands with the keyboard on the name. Wait for that before typing: it
+  // looks for its row every 100 ms until the page has it (Settings.svelte `goto`),
+  // and a late landing can take the focus between the fills, so the note goes into
+  // the name (now and then on a busy PC and on CI: "config.json to be updated", 16 Nov 2026).
+  await expect(aboutYou.getByRole('textbox', { name: 'What should Yap call you?' })).toBeFocused();
   await aboutYou.getByRole('textbox', { name: 'What should Yap call you?' }).fill('Declan');
   await aboutYou.getByRole('textbox', { name: 'Anything the AI should know about you' }).fill('I work weekends at a bakery in Norwich.');
   await expectStore(yap, 'config.json', (c) => c.aboutName === 'Declan' && c.aboutMe?.startsWith('I work weekends'));

@@ -155,6 +155,58 @@ console; `npm run mock:provider` stands in for a social provider). See
 > and restarting that `.exe` changes nothing. For live frontend changes use dev
 > (Vite on :51437). If :51437 isn't listening, you're looking at a release build.
 
+## The shared compile cache (sccache, 2026-11-16)
+Agents and sessions each build Yap in a target dir of their own
+(`E:\Builds\yap\<task>\`), often several at once, each from scratch. On the
+maintainer's PC every `cargo` goes through **sccache**, one cache of compiled
+crates they all share:
+
+- **What's installed**: sccache 0.19.0, Mozilla's release zip from GitHub
+  (`sccache-v0.19.0-x86_64-pc-windows-msvc.zip`, its SHA-256 checked), as
+  `%USERPROFILE%\.cargo\bin\sccache.exe`, on the PATH beside cargo. (`cargo
+  install sccache --locked` gives the same.)
+- **Every cargo uses it**: `%USERPROFILE%\.cargo\config.toml` has `[build]
+  rustc-wrapper = '<that sccache.exe>'`, so dev.bat's `tauri dev`, the e2e,
+  robot and eval builds and a plain `cargo test` / `cargo clippy` all go through
+  it, whatever their folder. `RUSTC_WRAPPER=` (empty) turns it off for one
+  command. A PC without it: delete those two lines, nothing else changes.
+- **Its cache** is `E:\Builds\sccache`, at most 30 GiB (the least recently used
+  goes first), from sccache's own settings file
+  `%APPDATA%\Mozilla\sccache\config\config`. `sccache --show-stats` says what
+  hit; its server starts with the first build and stops after 10 idle minutes
+  (`sccache --stop-server` now).
+- **Give cargo the target dir as `--target-dir`, never `CARGO_TARGET_DIR`.**
+  sccache keys each crate on every `CARGO_*` variable rustc sees, so a target dir
+  of the task's own in the environment made every crate a miss in every other
+  task's build (0 hits in 946, measured). The e2e, robot-engines and eval builds
+  do it themselves (`cargoEnv` in `desktop/e2e/support/yap.js`, `scripts/eval.mjs`);
+  by hand: `cargo test --target-dir E:\Builds\yap\<task>`. dev.bat still sets
+  `CARGO_TARGET_DIR` (the Tauri CLI finds the exe by it), so its entries are its
+  own; its incremental target dir is what keeps it quick anyway.
+- **What it can't cache**: crates compiled incrementally, i.e. Yap's own `yap`
+  crate (and the vendored transcribe-rs) in a debug build — sccache hands those
+  to rustc as they are, so incremental rebuilds work as before; bins, proc
+  macros and DLLs (they link); C and C++ (whisper.cpp's CMake build); and a
+  crate whose code includes a file its build script wrote (in the target dir's
+  `OUT_DIR`), with the crates built on it. Clippy is safe with it: a `cargo
+  check` never answers for `cargo clippy`, and `-D warnings` still fails
+  (checked on a crate with a lint, 16 Nov 2026).
+- **What it saves** (the stub e2e build in a new folder, `CARGO_BUILD_JOBS=4`,
+  the PC otherwise quiet, 16 Nov 2026):
+
+  | | cargo's part | the whole `npm run test:app:build` |
+  |---|---|---|
+  | no cache (before) | 209 s | 234 s |
+  | sccache, its cache empty (it fills it) | 223 s | 248 s |
+  | sccache warm, `CARGO_TARGET_DIR` in the environment | 208 s: 0 of 473 crates hit | 233 s |
+  | sccache warm, `--target-dir` (now) | 168–184 s: 335 of 473 hit | 210 s |
+  | an incremental rebuild of Yap's crate | 29.4 s without, 30.6 s with | |
+
+  The rest is Yap's own crate (106 of the 171 s in `cargo build --timings`), which
+  no cache shares between tasks (its source differs, and it's incremental), and
+  the crates that use a build script's output with the ones built on them (the
+  138 misses).
+
 ## CI on every push
 `.github/workflows/ci.yml` runs on every push/PR to `main`: `npm run build` (frontend,
 also produces the `desktop/dist/` that `generate_context!` needs) + `cargo clippy --locked
@@ -312,15 +364,21 @@ the update toast / meetings and the meeting notepad (its own
 page, `yap.notepad`), and save **named screenshots** to
 `test-results/app/screenshots/<spec>/` (git-ignored; HTML report in
 `test-results/app/report/`, each instance's logs + data in `test-results/app/runs/`).
-Any uncaught JS error in any webview fails the test. ~20 s plus the build
+Any uncaught JS error in any webview fails the test. ~25 min for all of it plus the build
 (`npm run test:app:build`, own target dir `desktop/src-tauri/target/e2e` or
 `YAP_E2E_TARGET_DIR`). Safe beside the installed app and a dev build: portable
 data dir, own WebView2 profile + CDP port, F24 hotkey, test mode (`shell/e2e.rs`),
 unreachable account service. (Runners are elevated, so WebView2 ignores the suite's
 `WEBVIEW2_*` variables there; e2e.yml sets the DevTools flag as an HKLM WebView2
-policy for `yap.exe` instead.) CI runs it in three shards side by side (by spec file; one runner outgrew the job's
-30-minute limit on 24 Oct 2026, one of two the 40-minute one on 2 Nov) and uploads each shard's `test-results/app` as
-**`e2e-results-1`** … **`e2e-results-3`** on every run — review one with
+policy for `yap.exe` instead.) Locally it runs **four test Yaps at once** (2026-11-16;
+`--workers=N` to change; what keeps them apart, and the `solo` specs that need the
+connectors' fixed port: [`docs/e2e-tests.md`](../e2e-tests.md#several-at-once-2026-11-16)).
+CI builds the test app once and runs the suite in **nine shards** side by side, split
+by time (`desktop/e2e/shards.mjs` over `desktop/e2e/timings.json`, about 12 minutes of
+tests each; Playwright's own `--shard` put the long `agents-*` specs together, and three
+shards of it ran 31–37 minutes each by 16 Nov, most runs hitting the 40-minute limit).
+A newer push cancels a branch's run, never main's. Each shard uploads its `test-results/app` as
+**`e2e-results-1`** … **`e2e-results-9`** on every run — review one with
 `gh run download <run-id> --repo nayballs/Yap --name e2e-results-1 --dir e2e-<run-id>`
 and read the PNGs under `screenshots/`. Full guide (incl. adding a test):
 [`docs/e2e-tests.md`](../e2e-tests.md).

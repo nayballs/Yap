@@ -1,15 +1,20 @@
 # End-to-end UI tests (desktop/e2e/, docs/e2e-tests.md). Builds the STUB debug app
-# with the frontend embedded, launches it isolated (portable data dir, its own
-# WebView2 profile, test mode), and drives every window with Playwright over
-# CDP. Screenshots, the HTML report and the app's logs are uploaded as the
+# with the frontend embedded once, then runs the suite in nine shards side by
+# side, each launching the app isolated (portable data dir, its own WebView2
+# profile, test mode) and driving every window with Playwright over CDP.
+# Screenshots, the HTML report and the app's logs are uploaded as the
 # `e2e-results-<shard>` artifacts on every run, pass or fail:
 #   gh run download <run-id> --repo nayballs/Yap --name e2e-results-1
 # Separate from ci.yml so that quick lint gate stays quick. The runner has no
 # audio devices, so this also proves Yap starts and works without a mic.
-# Three shards side by side (by spec file: each file's worker-scoped Yap stays
-# whole): the whole suite on one runner outgrew the 30-minute limit and was
-# cancelled mid-run (24 Oct 2026, ~26 min of tests after a 4-minute build),
-# and one of two outgrew the 40-minute one (2 Nov 2026, 34.5 min of tests).
+#
+# How it got here: the whole suite on one runner outgrew the 30-minute limit
+# (24 Oct 2026), one of two shards the 40-minute one (2 Nov), and by 16 Nov
+# three shards of Playwright's own --shard ran 31–37 minutes of tests each,
+# after a 4-minute build each: most runs hit the 40-minute limit, and main had
+# no finished run for two days. Now one build, handed to nine shards split by
+# time (desktop/e2e/shards.mjs: about 12 minutes of tests each; eight came to
+# 13.5–16 on their first run, too near 15).
 name: "E2E"
 
 on:
@@ -18,25 +23,28 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      workers:
+        description: "Test Yaps at once on each runner (Playwright workers)"
+        required: false
+        default: "1"
 
 # Read-only token: no job here writes to the repo (CodeQL's actions/missing-workflow-permissions).
 permissions:
   contents: read
 
-# A newer push supersedes an in-flight run of the same branch.
+# A newer push supersedes a branch's run in progress. Not main's: a run there
+# always finishes, so every batch of merges gets a result (the newest push
+# waits for it; one waiting is replaced by the next).
 concurrency:
   group: e2e-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  e2e:
-    name: e2e (${{ matrix.shard }}/3)
+  build:
+    name: build the test app
     runs-on: windows-latest
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -56,8 +64,8 @@ jobs:
         shell: pwsh
         run: echo "YAP_E2E_TARGET_DIR=$((Resolve-Path "$env:GITHUB_WORKSPACE\..").Path)\t" >> $env:GITHUB_ENV
 
-      # Saved even when the suite fails: a red run is usually a test, not the
-      # build, and the next run shouldn't pay for a cold build again.
+      # Saved even when the build fails, so the next run doesn't pay for a
+      # cold build again.
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
@@ -69,6 +77,43 @@ jobs:
 
       - name: Build the test app (stub engine, debug, frontend embedded)
         run: npm run test:app:build
+
+      # Only the exe: a test run copies it into its own folder and never
+      # needs anything else from the build (its symbols aren't beside the copy).
+      - name: Hand the build to the shards
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-app
+          path: ${{ env.YAP_E2E_TARGET_DIR }}\debug\yap.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  e2e:
+    name: e2e (${{ matrix.shard }}/9)
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Get the test app
+        uses: actions/download-artifact@v8
+        with:
+          name: e2e-app
+          path: ${{ runner.temp }}\e2e-app
 
       # Everything on a hosted runner runs elevated, and WebView2 ignores the
       # WEBVIEW2_* variables of an elevated app (the suite asks for its
@@ -82,8 +127,16 @@ jobs:
           New-Item -Path $key -Force | Out-Null
           Set-ItemProperty -Path $key -Name 'yap.exe' -Value '--remote-debugging-port=0'
 
+      # This shard's spec files, by the time each took (desktop/e2e/timings.json).
+      - name: Pick this shard's specs
+        shell: bash
+        run: node desktop/e2e/shards.mjs ${{ matrix.shard }}/${{ strategy.job-total }} > "$RUNNER_TEMP/e2e-shard.txt"
+
       - name: Run the e2e suite (this shard)
-        run: npx playwright test -c desktop/e2e --shard=${{ matrix.shard }}/3
+        env:
+          YAP_E2E_EXE: ${{ runner.temp }}\e2e-app\yap.exe
+          YAP_E2E_WORKERS: ${{ inputs.workers || '1' }}
+        run: npx playwright test -c desktop/e2e --test-list "${{ runner.temp }}\e2e-shard.txt"
 
       - name: Upload screenshots, report and app logs
         if: always()

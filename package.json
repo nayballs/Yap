@@ -13,6 +13,7 @@
     "tauri": "npm run tauri -w desktop --",
     "test:app": "npm run test:app -w desktop --",
     "test:app:build": "npm run test:app:build -w desktop",
+    "test:shards": "node --test desktop/e2e/shards.test.mjs",
     "test:real": "npm run test:real -w desktop --",
     "test:real:build": "npm run test:real:build -w desktop --",
     "test:link": "node --test phone/web/tests/dsp.test.mjs && playwright test -c phone/web/tests",

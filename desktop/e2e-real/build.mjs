@@ -11,7 +11,7 @@
 //   the same reason scripts/dev.bat builds into `<drive>:\t`).
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { APP, packageFile } from '../e2e/support/yap.js';
+import { APP, cargoEnv, packageFile } from '../e2e/support/yap.js';
 import { ENGINES_TARGET_DIR } from './support/engines.js';
 
 function run(cmd, args, opts = {}) {
@@ -28,13 +28,10 @@ if (!process.argv.includes('--engines')) {
     process.exit(1);
   }
   run(process.execPath, [packageFile('vite', 'bin/vite.js'), 'build']);
-  run('cargo', ['build', '--locked', '--features', 'custom-protocol,engines'], {
+  // --target-dir, not CARGO_TARGET_DIR: the shared compile cache (cargoEnv).
+  run('cargo', ['build', '--locked', '--features', 'custom-protocol,engines', '--target-dir', ENGINES_TARGET_DIR], {
     cwd: path.join(APP, 'src-tauri'),
-    env: {
-      CARGO_PROFILE_DEV_DEBUG: 'line-tables-only',
-      ...process.env,
-      CARGO_TARGET_DIR: ENGINES_TARGET_DIR,
-    },
+    env: cargoEnv({ CARGO_PROFILE_DEV_DEBUG: 'line-tables-only' }),
   });
   console.log(`\nrobot engines build: ${path.join(ENGINES_TARGET_DIR, 'debug', 'yap.exe')}`);
 }

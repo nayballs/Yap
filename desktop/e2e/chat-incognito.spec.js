@@ -15,7 +15,7 @@
 // Every person and detail is fictional.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, setConfig } from './support/fixtures.js';
+import { test as base, expect, openView, setConfig, jsonLines } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { fakeClaude, SCRIPTS as PLAN_SCRIPTS } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
@@ -66,7 +66,7 @@ const box = (main) => main.getByRole('textbox', { name: 'Message' });
 const ghost = (main) => main.getByTestId('chat-incognito');
 const askedWith = (fakeLlm, text) => fakeLlm.requests.filter((r) => Array.isArray(r.tools) && JSON.stringify(r.messages ?? []).includes(text)).at(-1);
 const memoryPasses = (fakeLlm) => fakeLlm.requests.filter((r) => r.kind === 'memory').length;
-const launches = () => (fs.existsSync(ARGS) ? fs.readFileSync(ARGS, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const launches = () => jsonLines(ARGS);
 const chatsFile = (yap) => JSON.stringify(yap.readJson('chats.json') ?? {});
 
 // The Claude plan's stand-in (ai/claude_code/fake.rs): says what it was launched with (to ARGS), answers once.

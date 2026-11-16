@@ -21,7 +21,7 @@
 //   starts).
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, setConfig } from './support/fixtures.js';
+import { test as base, expect, openView, setConfig, jsonLines } from './support/fixtures.js';
 import { fakeClaude, planConfig, SCRIPTS as PLAN_SCRIPTS } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 import { toSide, newCodeChat } from './support/code-chats.js';
@@ -161,7 +161,7 @@ const test = base.extend({
 
 /** The agent with each turn's Claude Code arguments written to `file` (the stand-in's `_dump_args`). */
 const agentDumping = (file) => [AGENT[0], AGENT[1], { _dump_args: file }, ...AGENT.slice(2)];
-const argsIn = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).args) : []);
+const argsIn = (file) => jsonLines(file).map((l) => l.args);
 const flagValue = (args, flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined);
 
 const thread = (main) => main.locator('.msgs');
@@ -238,8 +238,10 @@ test('typed on the plan: asked first in the thread, the agent runs in the named 
   await shot(main, '01-plan-chat-asks-before-a-agent');
   await card.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(card).toHaveAttribute('data-state', 'allowed');
-  await expect(lastAnswer(main)).toHaveText(STARTED, { timeout: 20_000 });
-  await expect(chipsOfLast(main)).toHaveText(['Sent an agent to garden-planner']);
+  // The chat's first answer (by the time it's looked at, the agent may have
+  // reported already, its answer the last: a busy PC, 16 Nov 2026).
+  await expect(thread(main).locator('.cbubble.assistant').first()).toHaveText(STARTED, { timeout: 20_000 });
+  await expect(thread(main).locator('.toolchips').first().locator('.toolchip')).toHaveText(['Sent an agent to garden-planner']);
   // Its tab opened from the plan turn's stream (`Event::Agent`), as the tool loop's does.
   await expect(main.getByTestId('chat-agent')).toBeVisible();
 

@@ -40,7 +40,7 @@
 // way); the workspace and the folder "outside" it are in this run's own folder.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, setConfig, openSettings, closeSettings, closeToasts } from './support/fixtures.js';
+import { test as base, expect, openView, setConfig, openSettings, closeSettings, closeToasts, jsonLines } from './support/fixtures.js';
 import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat, toSide, moreClearOf } from './support/code-chats.js';
@@ -233,7 +233,7 @@ function writeGh(name, body) {
   fs.writeFileSync(file, JSON.stringify(body));
   return file;
 }
-const dumped = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const dumped = (file) => jsonLines(file);
 async function theme(yap, main, which) {
   await setConfig(yap, main, { theme: which });
   await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe(which);

@@ -388,6 +388,12 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 GPU policy: **universal, no CUDA** (Whisper → Vulkan, ONNX → DirectML); building
 `engines` needs the **Vulkan SDK**. Details: [build-and-test.md](./docs/architecture/build-and-test.md).
 
+**Shared compile cache:** on the maintainer's PC every `cargo` (dev.bat's included) goes
+through **sccache** (`~/.cargo/config.toml`'s `rustc-wrapper`; cache `E:\Builds\sccache`,
+30 GiB). Give cargo a task's own target dir as **`--target-dir`, never `CARGO_TARGET_DIR`**:
+sccache keys crates on every `CARGO_*` variable, so a per-task one shares nothing
+(the e2e/robot/eval builds do it themselves) — [build-and-test.md](./docs/architecture/build-and-test.md#the-shared-compile-cache-sccache-2026-11-16).
+
 **Dev:** `scripts/dev.bat` (= `npm run tauri dev -- --features engines`, Vite on
 **:51437**, hot-reloads `desktop/src/`) behind the **"Yap - Dev"** desktop shortcut; the plain
 **"Yap"** shortcut is the *installed* app (nightly channel). It runs behind an animated
@@ -415,14 +421,16 @@ Accounts in debug builds: `cd cloud && npm run dev` (wrangler dev on :8787; see 
 then `cargo clippy --locked --release -- -D warnings` (debug-only code is dead in release:
 gate it with `#[cfg(debug_assertions)]`), and the phone app's tests (`npm run test:link`, Chromium and Firefox).
 ⚠ Zero-warnings ratchet on the **latest stable** toolchain — keep local Rust current
-(`rustup update`). `e2e.yml` runs the e2e suite on the same triggers. Dependabot opens
+(`rustup update`). `e2e.yml` runs the e2e suite on the same triggers (one build, nine
+shards split by time: `desktop/e2e/shards.mjs`); a newer push cancels a branch's runs, never
+main's, so every batch of merges gets a result. Dependabot opens
 weekly update PRs; `pins.yml` keeps an issue open while a pinned download is behind
 upstream (`npm run pins:check`); `issue-labels.yml` labels bug reports by area
 (`npm run test:issue-labels`); both in build-and-test.md.
 
 **Tests:**
 - **Say in bold whether the maintainer can use the PC** whenever a big run starts or ends: **Hands off the keyboard (about N min)** for robot tests, which take the keyboard and focus; **You can use the PC** for the UI suite, builds and agent batches, adding that it may feel slower. Repeat it when it changes, and say plainly when it's all clear.
-- `npm run test:app` — the end-to-end UI suite: Playwright drives a real stub debug build over CDP (~35 min for all 530+; one spec in seconds), named screenshots in `test-results/app/screenshots/`; its windows sit behind yours. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md).
+- `npm run test:app` — the end-to-end UI suite: Playwright drives a real stub debug build over CDP (~25 min for all 1,280+ with four test Yaps at once, ~90 one at a time; one spec in seconds), named screenshots in `test-results/app/screenshots/`; its windows sit behind yours. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md).
 - `npm run test:real` — real-app robot tests: a robot-mode Yap pastes into real windows (`--engines` build: real STT). ⚠ **It takes the keyboard focus for ~2 min** (local only): it starts only after 10 idle minutes (`YAP_ROBOT_FORCE=1` when the person says so) and stops on any real input. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md) "Real-app robot tests".
 - `npm run test:link` — Yap Link's phone page (`phone/web/page/`): its sound maths in Node, then the page in headless Chromium (or Edge) and Firefox when installed, against a mocked PC and a faked mic (~1–2 min, nothing on screen). Guide: [its README](./phone/web/README.md).
 - `npm run privacy:scan` / `npm run test:privacy` — the privacy guard over the whole tree, and its own tests ([build-and-test.md](./docs/architecture/build-and-test.md#the-privacy-guard-scriptsprivacy-guardmjs)).

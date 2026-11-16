@@ -21,7 +21,7 @@
 //   with the chat (an agent's session there stays). A plain plan chat as lean as before.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, setConfig } from './support/fixtures.js';
+import { test as base, expect, setConfig, jsonLines } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { fakeClaude, SCRIPTS as PLAN_SCRIPTS } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
@@ -133,7 +133,7 @@ const FAKE_CHAT = (fakeLlm) => ({ chat: { enabled: true, provider: 'custom', bas
 const askedWith = (fakeLlm, text) => fakeLlm.requests.filter((r) => Array.isArray(r.tools) && JSON.stringify(r.messages ?? []).includes(text)).at(-1);
 const memoryPasses = (fakeLlm) => fakeLlm.requests.filter((r) => r.kind === 'memory').length;
 /** Every launch the stand-in wrote, oldest first. */
-const launches = () => (fs.existsSync(ARGS) ? fs.readFileSync(ARGS, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const launches = () => jsonLines(ARGS);
 const after = (args, flag) => {
   const i = args.indexOf(flag);
   return i < 0 ? undefined : args[i + 1];

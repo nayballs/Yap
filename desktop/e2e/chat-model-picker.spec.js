@@ -515,7 +515,10 @@ test('On this PC: the recommended model downloads in its row, then Chat uses it'
   await big.getByRole('button', { name: /^Download Qwen3\.5 4B \(2\.\d GB\)$/ }).click();
   const bar = big.getByRole('progressbar', { name: 'Downloading Qwen3.5 4B' });
   await expect(bar).toBeVisible();
-  await expect.poll(async () => Number(await bar.getAttribute('aria-valuenow')), { timeout: 15_000 }).toBeGreaterThanOrEqual(40);
+  // (Held at half the bytes; Yap reports progress at most every 250 ms, as data comes —
+  // shell/download.rs REPORT_EVERY — so the bar stops up to 250 ms of data short of
+  // that: 37 % on a busy PC, 16 Nov 2026.)
+  await expect.poll(async () => Number(await bar.getAttribute('aria-valuenow')), { timeout: 15_000 }).toBeGreaterThanOrEqual(25);
   await expect(big.locator('.pline')).toContainText(/Downloading… \d+% · \d+ MB of 4 MB/);
   // Mid-download it offers Cancel (never Uninstall: it isn't installed yet).
   await expect(big.getByRole('button', { name: 'Cancel the download of Qwen3.5 4B' })).toBeVisible();
