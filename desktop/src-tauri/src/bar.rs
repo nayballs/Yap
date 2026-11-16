@@ -130,6 +130,12 @@ pub struct Card {
     pub app: Option<&'static str>,
     pub title: String,
     pub body: String,
+    /// The body is markdown — a model's words (an agent's reply, a
+    /// routine's answer) — rendered as Chat renders it, its maths, diagrams
+    /// and pictures drawn (`BarCard.svelte`). Otherwise it's text, as
+    /// written. (An "answer" card's body is always markdown.)
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub markdown: bool,
     /// The line under a call card's title ("Now")…
     pub status: Option<String>,
     /// …after a dot: "live" (green: happening now), "recording" (red),
@@ -1642,7 +1648,9 @@ pub async fn bar_card_action(app: AppHandle, id: String, action: String) -> Resu
 /// Debug builds only (the e2e suite): pretend the cursor is on a region
 /// (`pointer`: a region id, or "away"), that an app is fullscreen
 /// (`fullscreen`: "none" | "borderless" | "exclusive"), that Esc was
-/// pressed, or put up a demo card (`card`: "call" | "update" | "info").
+/// pressed, or put up a demo card (`card`: "call" | "update" | "info" |
+/// "answer" — the Voice Assistant's, with maths, a diagram and a picture —
+/// | "markdown" — a notice whose body is a model's words, with maths).
 /// Registered in debug builds only (lib.rs).
 #[cfg_attr(not(debug_assertions), allow(dead_code))]
 #[tauri::command]
@@ -1728,6 +1736,41 @@ fn demo_card(kind: &str) -> Card {
             body: "Restart Yap to finish updating. It only takes a few seconds.".into(),
             primary: Some(CardAction::new("install", "Restart to update")),
             secondary: Some(CardAction::new("", "Later")),
+            ..Card::default()
+        },
+        "answer" => Card {
+            id: "demo".into(),
+            style: "answer",
+            icon: "assistant",
+            title: "What's the area of a circle, and how does a dictation flow?".into(),
+            body: [
+                "The area is $A = \\pi r^2$, so a circle of radius $r = 2$ has an area of about 12.6 (a $5 ruler is plenty to measure it).",
+                "",
+                "$$",
+                "A = \\int_0^{2\\pi}\\!\\int_0^r \\rho\\,d\\rho\\,d\\theta",
+                "$$",
+                "",
+                "```mermaid",
+                "flowchart LR",
+                "  A[Hotkey] --> B[Record] --> C[Paste]",
+                "```",
+                "",
+                // (The e2e suite's stand-in web has this picture: desktop/e2e/support/fake-web.js.)
+                "![Fort Joy map](https://wiki.example.com/images/fort_joy_map.png)",
+            ]
+            .join("\n"),
+            primary: Some(CardAction::new("open", "Open in Chat")),
+            close_action: Some("close".into()),
+            ..Card::default()
+        },
+        "markdown" => Card {
+            id: "demo".into(),
+            icon: "agent",
+            title: "Claude replied: maths-notes".into(),
+            body: "Done. The formula is now $E = mc^2$ in **notes.md**, and the sum $\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}$ checks out."
+                .into(),
+            markdown: true,
+            primary: Some(CardAction::new("open", "Open")),
             ..Card::default()
         },
         _ => Card {

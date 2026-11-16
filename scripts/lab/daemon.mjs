@@ -99,6 +99,8 @@ const SESSION_GRACE_MS = 20_000;
 
 /** The turn going now, or the last one. */
 let turn = null;
+/** The test Yap told the person is in another app (`ask --spoken --away`). */
+let awayNow = false;
 let turns = 0;
 
 class Turn {
@@ -577,9 +579,16 @@ async function clearSend() {
   }
 }
 
-async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null }) {
+async function startTurn({ text, spoken = false, away = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null }) {
   if (!text?.trim()) throw new Error('Nothing to ask');
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
+  // `--away` (a spoken question asked from another app, 16 Nov 2026): the test Yap told its window isn't in front
+  // (e2e_focus, as the e2e suite's `inAnotherApp`), so the answer comes on the Yap bar's card. Left so until the next
+  // question asked without it, so `shot --window bar` still finds the card.
+  if (away !== awayNow) {
+    await invoke('e2e_focus', { focused: !away });
+    awayNow = away;
+  }
   readRecord();
   const since = lastSeq();
   const opened = await (chat === 'same' ? sameChat() : openChat(chat)).catch((e) => {
@@ -1763,7 +1772,7 @@ const COMMANDS = {
     const attach = Array.isArray(a.attach) ? a.attach : a.attach ? String(a.attach).split(',').filter(Boolean) : null;
     const how = a.retry ? 'retry' : a.edit ? 'edit' : 'ask';
     const text = how === 'retry' ? String(a.text ?? '').trim() || 'Retry' : a.text;
-    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null, page: !!a['project-page'] } : null, ...shotsFor(a) });
+    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', away: !!a.away && !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null, page: !!a['project-page'] } : null, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
   wait: async (a) => {

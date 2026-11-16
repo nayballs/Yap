@@ -125,7 +125,7 @@ It reads the model file and writes nothing of Yap's. Stop the server when you're
 `start` on the plan, then `stop`: is Claude Code on this PC and signed in, as Yap sees
 it? Asks the model nothing.
 
-### `ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry] [--edit] [--style <name>] [--incognito] [--project <name> [--project-instructions <text>] [--project-page]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
+### `ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry] [--edit] [--style <name>] [--incognito] [--project <name> [--project-instructions <text>] [--project-page]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
 
 Puts a question to Chat and waits until the turn ends (answered, stopped or failed),
 **or a card waits for the person**, or `--timeout` seconds pass.
@@ -133,7 +133,11 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
 - Typed: in Chat's own box and Send, as a person would (Playwright over CDP: the
   same `chat_send` and stream the Chat view uses). `--spoken`: through the Voice
   Assistant's path (`e2e_assistant_ask`: its shortcut's steps with the words in place
-  of the microphone).
+  of the microphone). The test Yap's window counts as in front, so a spoken answer
+  shows in Chat; `--spoken --away` (16 Nov 2026) asks it from another app instead
+  (`e2e_focus`, as the e2e suite's `inAnotherApp`): the answer is the Voice
+  Assistant's card on the Yap bar, for `shot --window bar` (or `probe --window bar`).
+  It stays so until a question is asked without `--away`.
 - `--chat new` (default) a new chat; `same` the last turn's conversation (left as it
   is when Chat still shows it: a follow-up in a Code chat too); `<id>` that
   conversation (Chat opens on it); `code:<workspace>` a new Code chat there
