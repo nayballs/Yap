@@ -6,8 +6,9 @@
 //! last [`KEEP_MESSAGES`], each cut at [`MAX_CHARS`]. A question's
 //! screenshot text sent in its picture's place (`snip::ocr`) is left out,
 //! as Chat folds it. Since 16 Nov 2026 a message carries its versions'
-//! ‹ k/n › ([`version_of`]) and an answer whether ↻ may ask it again from
-//! the phone ([`retryable`]). **One version shown a conversation**: the
+//! ‹ k/n › ([`version_of`]), an answer whether ↻ may ask it again from
+//! the phone ([`retryable`]) and a question whether ✎ may edit it there,
+//! by its time in Chat ([`editable`]). **One version shown a conversation**: the
 //! PC's (its `messages`), on every screen — a phone's ‹ › switches it there
 //! too, and every screen follows (`link.md`, Retry and versions). Pure.
 
@@ -87,6 +88,8 @@ pub fn message(c: &Conversation, index: usize) -> Option<ThreadMessage> {
             rating: None,
             version,
             retry: false,
+            // (✎ and its time: `thread`, which knows whether it's a Code chat.)
+            edit: 0,
         }),
         "assistant" => Some(ThreadMessage {
             role: "assistant",
@@ -119,14 +122,40 @@ pub fn retryable(c: &Conversation, index: usize, code: bool) -> bool {
     !code && answer && question
 }
 
+/// **Can ✎ edit question `index` from a phone** (16 Nov 2026): the person's
+/// own (what `chats::begin_edit` takes), in a chat that isn't a Code chat
+/// (`code`: there Edit is Claude Code's Rewind, the PC's only), with
+/// nothing the phone can't send again — no passage it was asked about, no
+/// files from Chat's box (the phone's question carries neither) — and its
+/// words whole on the phone: no longer than a typed question from it
+/// (`session::MAX_TYPED`). Its pictures still on the PC go again. Pure.
+pub fn editable(c: &Conversation, index: usize, code: bool) -> bool {
+    let Some(m) = c.messages.get(index) else { return false };
+    let words = crate::snip::ocr::question_of(&m.text);
+    !code
+        && m.role == "user"
+        && m.kind.is_empty()
+        && m.quote.is_none()
+        && m.attachments.is_empty()
+        && !words.trim().is_empty()
+        && words.trim().chars().count() <= crate::link::session::MAX_TYPED
+}
+
 /// **A conversation as the phone shows it**: its title, its latest
 /// messages' words ([`message`]), each answer ↻ may ask again
-/// ([`retryable`]; `code`: a Code chat, none) and whether older ones were
-/// left out. Pure.
+/// ([`retryable`]) and each question ✎ may edit, with its time in Chat
+/// ([`editable`]; `code`: a Code chat, neither), and whether older ones
+/// were left out. Pure.
 pub fn thread(c: &Conversation, code: bool) -> (String, Vec<ThreadMessage>, bool) {
     let start = c.messages.len().saturating_sub(KEEP_MESSAGES);
     let messages = (start..c.messages.len())
-        .filter_map(|i| message(c, i).map(|m| ThreadMessage { retry: m.role == "assistant" && retryable(c, i, code), ..m }))
+        .filter_map(|i| {
+            message(c, i).map(|m| {
+                // (✎ names a question by its time in Chat: none, no ✎.)
+                let edit = if m.role == "user" && editable(c, i, code) { c.messages[i].ts } else { 0 };
+                ThreadMessage { retry: m.role == "assistant" && retryable(c, i, code), edit, ..m }
+            })
+        })
         .collect();
     (title(c), messages, start > 0)
 }
@@ -186,7 +215,10 @@ mod tests {
         assert_eq!(title, "Garden plan");
         assert!(!more);
         assert_eq!(messages.len(), 4, "only questions and answers");
-        assert_eq!(messages[0], ThreadMessage { role: "user", text: "What grows in shade?".into(), id: None, voice: true, pictures: 2, kind: String::new(), files: Vec::new(), rating: None, version: None, retry: false });
+        assert_eq!(
+            messages[0],
+            ThreadMessage { role: "user", text: "What grows in shade?".into(), id: None, voice: true, pictures: 2, kind: String::new(), files: Vec::new(), rating: None, version: None, retry: false, edit: 0 }
+        );
         assert_eq!(messages[1].id.as_deref(), Some("chat:7:1"), "its place in Chat");
         assert_eq!(messages[3].id.as_deref(), Some("chat:7:4"));
         // An answer's 👍 / 👎 goes with it (chat/feedback.rs); none, nothing.
@@ -265,6 +297,35 @@ mod tests {
         r.messages = vec![said("user", "Add a schedule"), said("assistant", "On it."), said("assistant", "Still on it."), marker, said("assistant", "Done.")];
         assert_eq!((0..5).map(|i| retryable(&r, i, false)).collect::<Vec<_>>(), [false, true, false, false, false]);
         assert!(!retryable(&r, 9, false));
+    }
+
+    #[test]
+    fn a_threads_questions_say_which_the_phone_may_edit_and_their_time() {
+        let mut c = conv(41, "Trip packing list", 100);
+        let msg = |role: &str, text: &str, ts: u64| ChatMessage { role: role.into(), text: text.into(), ts, ..Default::default() };
+        let marker = ChatMessage { role: "user".into(), text: "The agent: done.".into(), kind: crate::chat::turn::AGENT_REPORT.into(), ts: 5, ..Default::default() };
+        c.messages = vec![msg("user", "What to pack?", 1), msg("assistant", "A coat.", 2), msg("user", "And shoes?", 3), msg("assistant", "Boots.", 4), marker, msg("assistant", "Done.", 6)];
+        // The person's own questions, each with its time in Chat; never an answer or an agent's report.
+        let (_, messages, _) = thread(&c, false);
+        assert_eq!(messages.iter().map(|m| m.edit).collect::<Vec<_>>(), [1, 0, 3, 0, 0, 0]);
+        // In a Code chat none (Edit there is Claude Code's Rewind).
+        let (_, messages, _) = thread(&c, true);
+        assert!(messages.iter().all(|m| m.edit == 0));
+        // Not one asked about a passage, nor one with files from Chat's box: the phone can't send those again.
+        c.messages[0].quote = Some(crate::chat::documents::Quote { note_id: 3, text: "Day two: the ridge walk".into(), app: String::new() });
+        c.messages[2].attachments = vec![crate::chat::attachments::Attachment::default()];
+        assert!(!editable(&c, 0, false) && !editable(&c, 2, false));
+        // Nor one longer than the phone may send (its words, the screenshot's text left out).
+        let long = "w".repeat(crate::link::session::MAX_TYPED + 1);
+        c.messages[0] = msg("user", &long, 1);
+        assert!(!editable(&c, 0, false));
+        let fits = format!("{}\n\n[Text read from the screenshot on this PC, sent instead of the picture]\n{}", "w".repeat(crate::link::session::MAX_TYPED), "x".repeat(900));
+        c.messages[0] = msg("user", &fits, 1);
+        assert!(editable(&c, 0, false), "the screenshot's text isn't the person's words");
+        // Nothing there, or an empty question: no.
+        assert!(!editable(&c, 99, false));
+        c.messages[0] = msg("user", "  ", 1);
+        assert!(!editable(&c, 0, false));
     }
 
     #[test]

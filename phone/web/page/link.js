@@ -234,6 +234,8 @@ function loadThread() {
         qv: versionOf(t.qv),
         av: versionOf(t.av),
         retry: !!t.retry,
+        // ✎: its question's time in Chat, where the PC says it may be edited from here.
+        edit: chatTime(t.edit),
       }))
       .filter((t) => t.q || t.a || t.pictures);
     return { turns: turns.slice(-KEEP_TURNS), id: Math.max(0, ...turns.map((t) => t.id)), more: !!v.more };
@@ -390,6 +392,12 @@ const S = {
   threadAgain: false,
   switching: 0,
   retrying: null,
+  // ✎ Edit (16 Nov 2026): the question in the box to change — {chat, at,
+  // ts, draft} (its place and time in Chat, what the box had before, back
+  // once it's sent or left) — and an edit sent, with what it took off the
+  // thread here (put back, its words in the box again, if the PC says no).
+  editing: null,
+  edited: null,
 };
 
 const FRAME_MS = (FRAME_SAMPLES / LINK_RATE) * 1000;
@@ -441,6 +449,8 @@ const el = {
   note: $('note'),
   error: $('error'),
   composer: $('composer'),
+  editing: $('editing'),
+  editCancel: $('edit-cancel'),
   input: $('input'),
   sendBtn: $('send-btn'),
   liveLabel: $('live-label'),
@@ -1025,8 +1035,11 @@ function onText(text) {
         // Its id in Chat: ▶ under it asks the PC to read it (and ↻, where the PC says, to ask it again).
         if (typeof m.id === 'string') t.answerId = m.id;
         t.retry = m.retry === true;
-        // A retry's new answer is in: nothing to put back now (its ‹ 2/2 › comes with `versions`).
+        // ✎ on its question (the one just asked), where the PC says: by its time in Chat.
+        t.edit = chatTime(m.edit);
+        // A retry's or an edit's new answer is in: nothing to put back now (its ‹ 2/2 › comes with `versions`).
         if (S.retrying?.t === t) S.retrying = null;
+        if (S.edited?.t === t) S.edited = null;
         // Where it sits in the chat (a Code chat's pills go under it).
         const at = messageAt(t.answerId);
         if (at >= 0) {
@@ -1062,9 +1075,11 @@ function onText(text) {
       S.error = String(m.message || 'Something went wrong on the PC.');
       S.step = '';
       // ‹ › refused: the version shown stays. ↻ refused (or no answer came):
-      // the answer it took off the thread here goes back as it was.
+      // the answer it took off the thread here goes back as it was. ✎ the
+      // same, its words back in the box to send again or leave.
       S.switching = 0;
       undoRetry();
+      undoEdit();
       const wasListening = S.local !== 'idle';
       if (S.local !== 'idle') endLocalQuestion();
       // Hands-free talk: a question the PC didn't catch (nothing heard, or
@@ -1167,7 +1182,7 @@ function clearFragment() {
 function currentTurn(create, typed = false) {
   let t = S.turns[S.turns.length - 1];
   if ((!t || t.final) && create) {
-    t = { id: ++S.turnId, q: '', a: '', final: false, cancelled: false, typed, answerId: '', pictures: 0, pics: [], qAt: -1, aAt: -1, qv: null, av: null, retry: false };
+    t = { id: ++S.turnId, q: '', a: '', final: false, cancelled: false, typed, answerId: '', pictures: 0, pics: [], qAt: -1, aAt: -1, qv: null, av: null, retry: false, edit: 0 };
     S.turns.push(t);
     if (S.turns.length > KEEP_TURNS) S.turns.shift();
   }
@@ -1202,6 +1217,14 @@ function versionOf(v) {
 }
 
 /**
+ * **A question's time in Chat** where the PC says ✎ may edit it from here
+ * (a thread message's or a checked answer's `edit`), or 0: no ✎. Pure.
+ */
+function chatTime(v) {
+  return Number.isSafeInteger(v) && v > 0 ? v : 0;
+}
+
+/**
  * The PC's messages of a conversation (`thread`) as the page's turns, each
  * with where its question and answer sit in the chat (`qAt`, `aAt`: a Code
  * chat's pills and reports go by them). Pure.
@@ -1212,15 +1235,15 @@ function turnsOf(messages, more = false) {
   const turns = [];
   list.forEach((m, i) => {
     if (!m || typeof m.text !== 'string') return;
-    const blank = { id: ++S.turnId, q: '', a: '', final: true, cancelled: false, typed: true, answerId: '', pictures: 0, pics: [], files: [], qAt: -1, aAt: -1, qv: null, av: null, retry: false };
+    const blank = { id: ++S.turnId, q: '', a: '', final: true, cancelled: false, typed: true, answerId: '', pictures: 0, pics: [], files: [], qAt: -1, aAt: -1, qv: null, av: null, retry: false, edit: 0 };
     if (m.role === 'user' && m.kind === 'agentReport') {
       // An agent's report (Yap Code): never the person's own bubble; its
       // first line as a quiet note above the answer that follows it (a
       // report card in a Code chat, Remote Control on).
       turns.push({ ...blank, q: String(m.text).split('\n')[0], report: true, marker: m.text, files: sharedNames(m.files), qAt: at[i] });
     } else if (m.role === 'user') {
-      // (An edited question's versions: ‹ k/n › under its bubble.)
-      turns.push({ ...blank, q: m.text, typed: !m.voice, pictures: Math.max(0, Number(m.pictures) || 0), qAt: at[i], qv: versionOf(m.version) });
+      // (An edited question's versions: ‹ k/n › under its bubble; ✎ where the PC says it may be edited from here.)
+      turns.push({ ...blank, q: m.text, typed: !m.voice, pictures: Math.max(0, Number(m.pictures) || 0), qAt: at[i], qv: versionOf(m.version), edit: chatTime(m.edit) });
     } else if (m.role === 'assistant') {
       let t = turns[turns.length - 1];
       if (!t || t.a) turns.push((t = blank));
@@ -1245,10 +1268,12 @@ function turnsOf(messages, more = false) {
  */
 function onThread(m) {
   const id = typeof m.id === 'number' && m.id > 0 ? m.id : null;
-  // (Its version shown is the PC's: a ‹ › or ↻ on its way is answered by it.)
+  // (Its version shown is the PC's: a ‹ ›, ↻ or ✎ on its way is answered by it.)
   S.switching = 0;
   S.retrying = null;
+  S.edited = null;
   S.threadAgain = false;
+  const sameChat = id != null && id === S.chat;
   S.chat = id ?? 'new';
   save(KEY.chat, S.chat);
   S.title = id ? String(m.title || '') : '';
@@ -1258,6 +1283,13 @@ function onThread(m) {
   for (const t of S.turns) t.pics = kept.get(`${t.q}|${t.answerId}`) || [];
   S.more = !!m.more;
   S.pending = null;
+  // ✎: the question in the box still the one the PC shows? Another chat's
+  // thread ends the edit; one switched away on another screen leaves its
+  // words in the box, as a new message now (`staleEdit`).
+  if (S.editing) {
+    if (!sameChat || S.editing.chat !== id) cancelEdit();
+    else if (!editTarget(S.editing)) staleEdit();
+  }
   // Remote Control: a Code chat's workspace and Mode, its agents, its cards waiting.
   S.code = code.on && m.code && typeof m.code === 'object' ? m.code : null;
   S.codeAgents = S.code && Array.isArray(m.agents) ? m.agents.filter((a) => a && a.id) : [];
@@ -1294,6 +1326,14 @@ function onCantRead(message) {
     S.error = `${message || "This model can't read images"}. Choose another model, then try again.`.replace('.. ', '. ');
     S.step = '';
     undoRetry();
+    return;
+  }
+  // ✎ on a question whose pictures it can't read: the same, its new words
+  // back in the box to send once another model is chosen.
+  if (S.edited) {
+    S.error = `${message || "This model can't read images"}. Choose another model, then send it again.`.replace('.. ', '. ');
+    S.step = '';
+    undoEdit();
     return;
   }
   S.cantRead = message || "This model can't read images";
@@ -1408,6 +1448,7 @@ function letGo() {
 function openChat(id, title) {
   endCall();
   letGo();
+  cancelEdit();
   if (agentView.id && agentView.agent?.conversation !== id) agentView.close();
   S.chat = id;
   save(KEY.chat, id);
@@ -1430,6 +1471,7 @@ function openChat(id, title) {
 function newChat() {
   endCall();
   letGo();
+  cancelEdit();
   if (agentView.id) agentView.close();
   S.chat = 'new';
   save(KEY.chat, 'new');
@@ -1496,6 +1538,8 @@ function showVersion(v, place) {
   if (!can('versions') || typeof S.chat !== 'number' || !versionsFree()) return;
   if (!(place >= 1 && place <= v.count) || place === v.shown) return;
   endCall();
+  // (An edit open: left, the question as it was — another version's coming.)
+  cancelEdit();
   S.error = '';
   S.note = '';
   // ▶ being said: it stops (its words may be in the version set aside).
@@ -1516,6 +1560,7 @@ function showVersion(v, place) {
 function retryAnswer(t) {
   if (!can('retry') || !t.retry || !t.answerId || !versionsFree()) return;
   endCall();
+  cancelEdit();
   keepAwake();
   S.error = '';
   S.note = '';
@@ -1577,6 +1622,192 @@ function versionSwitch(v, testid) {
     h('span', { class: 'vcount', testid: 'version-count', 'aria-hidden': 'true', text: `${v.shown}/${v.count}` }),
     step(1),
   );
+}
+
+// ------------------------------------------------------- ✎ Edit (16 Nov 2026)
+//
+// The Claude app's pencil on your own message: the question goes in the
+// box to change (an "Editing your message" strip over it, ✕ to leave it as
+// it was), and Send makes a new version of it on the PC — the old one and
+// its answer kept, ‹ 2/2 › on it, here and on the PC (one version shown a
+// conversation, the last switch winning). Plain chats only: in a Code chat
+// Edit is Claude Code's Rewind, the PC's. What the box had before comes
+// back once the edit's sent or left.
+
+const PENCIL = ['M12 20h9', 'M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z'];
+/** The PC's words when it can't edit from here (a PC from before ✎ never shows one). */
+const EDIT_CHANGED = 'That message changed on your PC (another version of it is shown), so this is a new message now. Nothing goes until you send it.';
+
+/** The question being edited (`e`), in the thread as the PC shows it now: by its place and its time in Chat. */
+const editTarget = (e) => S.turns.find((t) => !t.report && t.qAt === e.at && t.edit === e.ts) || null;
+
+/**
+ * **✎** under your question `t`: its words in the box to change. Again on
+ * the same question, the edit's left (as ✕).
+ */
+function startEdit(t) {
+  if (!can('edit') || !t.edit || !(t.qAt >= 0) || typeof S.chat !== 'number' || (code.on && S.code) || agentView.id) return;
+  if (S.editing && S.editing.at === t.qAt && S.editing.ts === t.edit) {
+    cancelEdit();
+    return;
+  }
+  if (!versionsFree() || S.local !== 'idle' || S.transcribing) return;
+  endCall();
+  S.error = '';
+  S.note = '';
+  S.cantRead = '';
+  // What the box had (another edit's draft, if one was open): back once this one's sent or left.
+  const draft = S.editing ? S.editing.draft : { text: el.input.value, said: S.said };
+  S.editing = { chat: S.chat, at: t.qAt, ts: t.edit, draft };
+  el.input.value = t.q;
+  // Its words are the box's now: typed, until Talk adds to them.
+  S.said = false;
+  S.typed = el.input.value.trim() !== '';
+  fitInput();
+  renderShots();
+  renderConvo();
+  render();
+  el.input.focus({ preventScroll: true });
+  try {
+    el.input.setSelectionRange(el.input.value.length, el.input.value.length);
+  } catch {
+    /* the words are in all the same */
+  }
+}
+
+/** **✕** (or ✎ again, Escape, another chat): the question as it was, the box as it was before. */
+function cancelEdit() {
+  const e = S.editing;
+  if (!e) return false;
+  S.editing = null;
+  el.input.value = e.draft.text;
+  S.said = e.draft.said;
+  S.typed = el.input.value.trim() !== '';
+  fitInput();
+  renderShots();
+  renderConvo();
+  render();
+  return true;
+}
+
+/**
+ * The question being edited isn't the one the PC shows any more (another
+ * screen switched its version, or edited it): its new words stay in the
+ * box, as a new message now — said, and nothing sent until Send.
+ */
+function staleEdit() {
+  const e = S.editing;
+  if (!e) return;
+  S.editing = null;
+  // (What the box had before goes after them: nothing's lost.)
+  const draft = e.draft.text.trim();
+  if (draft && !el.input.value.includes(draft)) el.input.value = `${el.input.value.trimEnd()}\n\n${draft}`;
+  S.typed = el.input.value.trim() !== '';
+  S.note = EDIT_CHANGED;
+  fitInput();
+  renderShots();
+}
+
+/**
+ * **Send with an edit open** (`edit`): the new words go as a new version of
+ * the question on the PC, answered as a typed question is — or, with Talk's
+ * words in them, as a spoken one (`speak`). Here the question and what
+ * followed it leave the thread (they went with the old version) and the new
+ * words take their place; the PC saying no puts them back, the words in the
+ * box again.
+ */
+function sendEdit(text) {
+  const e = S.editing;
+  S.note = '';
+  if (!S.ready) {
+    S.error = `Not connected to ${pcName()} yet.`;
+    render();
+    return;
+  }
+  if (text.length > MAX_TYPED) {
+    S.error = 'That message is too long to send from the phone. Shorten it, then send it again.';
+    render();
+    return;
+  }
+  if (S.local !== 'idle' || S.transcribing) return;
+  const target = editTarget(e);
+  if (!target) {
+    staleEdit();
+    render();
+    return;
+  }
+  // An answer under way: the PC waits for it (as ‹ › and ↻ do). ▶ being said stops.
+  if (!versionsFree()) {
+    S.error = 'Wait for the answer being written, or stop it first.';
+    render();
+    return;
+  }
+  S.error = '';
+  keepAwake();
+  if (phaseNow() === 'speaking') interrupt();
+  const said = S.said;
+  const aloud = said && can('speak');
+  if (!send({ type: 'edit', chat: e.chat, at: e.at, ts: e.ts, text, ...(said ? { speak: true } : {}) })) {
+    S.error = `Lost the connection to ${pcName()}. Send it again once it's back.`;
+    render();
+    return;
+  }
+  const i = S.turns.indexOf(target);
+  const after = S.turns.splice(i);
+  // The new words in its place, its pictures (still on the PC) going again.
+  const t = currentTurn(true, !aloud);
+  Object.assign(t, { q: text, pictures: target.pictures, pics: target.pics, qAt: e.at });
+  S.edited = { t, e, text, said, after };
+  S.editing = null;
+  // The box as it was before the edit.
+  el.input.value = e.draft.text;
+  S.said = e.draft.said;
+  S.typed = el.input.value.trim() !== '';
+  fitInput();
+  renderShots();
+  S.pending = null;
+  if (aloud) {
+    // Answered out loud here: the sound starts within this tap, as for a spoken question.
+    const ctx = audioContext();
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    mediaVoice.unlock();
+    player.prepare();
+    afterQuestionSent();
+  }
+  S.phase = 'thinking';
+  S.step = '';
+  S.workSince = performance.now();
+  threadPinned = true;
+  renderConvo();
+  syncTicker();
+  render();
+}
+
+/**
+ * ✎ came to nothing here (the PC said no, the answer failed, or its model
+ * can't read the question's pictures: the PC kept the question as it was):
+ * the question and what followed it back, and the new words in the box,
+ * the edit open again, to send again or leave.
+ */
+function undoEdit() {
+  const d = S.edited;
+  S.edited = null;
+  if (!d) return;
+  const k = S.turns.indexOf(d.t);
+  if (k >= 0) S.turns.splice(k, 1);
+  S.turns.push(...d.after);
+  // (What the box has now is the draft again, once more set aside.)
+  S.editing = { ...d.e, draft: { text: el.input.value, said: S.said } };
+  el.input.value = d.text;
+  S.said = d.said;
+  S.typed = true;
+  fitInput();
+  renderShots();
+  saveThread();
+  renderConvo();
+  // The thread as the PC has it (a question switched there meanwhile: the
+  // edit's words then stay as a new message, `staleEdit`).
+  if (S.ready) askThread();
 }
 
 // ------------------------------------------------- Remote Control: the Code side
@@ -1771,6 +2002,8 @@ function showCard(card) {
 /** **An agent's live view** (a pill, a report's Open, the running list), over its chat. */
 function openAgent(a, opts = {}) {
   if (!code.on || !a?.id) return;
+  // (Its box is "Tell the agent…": an edit open is left.)
+  cancelEdit();
   drawer.close();
   for (const d of [el.modeSheet, el.envSheet, el.wsSheet]) closeSheet(d);
   endCall();
@@ -2102,9 +2335,31 @@ function renderConvo() {
         q.appendChild(mic);
       }
       q.appendChild(document.createTextNode(t.q || '…'));
+      // ✎: the one whose words are in the box now, marked.
+      const editingThis = !!S.editing && t.final && S.editing.at === t.qAt && S.editing.ts === t.edit;
+      if (editingThis) q.classList.add('being-edited');
       li.appendChild(q);
-      // An edited question's versions: ‹ k/n › under its bubble (the PC's, switched there too).
-      if (t.qv && can('versions')) li.appendChild(h('div', { class: 'qfoot' }, versionSwitch(t.qv, 'question-versions')));
+      // Under its bubble: an edited question's versions (‹ k/n ›, the PC's, switched there too), then ✎ where the PC
+      // says it may be edited from here (not in a Code chat: there Edit is Claude Code's Rewind, the PC's).
+      const qfoot = [];
+      if (t.qv && can('versions')) qfoot.push(versionSwitch(t.qv, 'question-versions'));
+      if (t.final && t.edit && t.qAt >= 0 && can('edit') && !coding && conv) {
+        const b = h('button', {
+          type: 'button',
+          class: 'footbtn' + (editingThis ? ' on' : ''),
+          testid: 'edit',
+          'aria-label': editingThis ? 'Stop editing' : 'Edit',
+          'aria-pressed': editingThis ? 'true' : 'false',
+          title: editingThis ? 'Stop editing: leave it as it was' : 'Edit: change it and send again (this version is kept)',
+          disabled: !editingThis && !versionsFree(),
+          // (Woken by render() once nothing's under way, as ‹ › and ↻; the one being edited stays awake: a tap leaves it.)
+          data: editingThis ? {} : { busyOff: '1' },
+          on: { click: () => startEdit(t) },
+        });
+        b.append(icon('', PENCIL));
+        qfoot.push(b);
+      }
+      if (qfoot.length) li.appendChild(h('div', { class: 'qfoot' }, ...qfoot));
     }
     if (t.a || t.cancelled) {
       const a = document.createElement('div');
@@ -3014,6 +3269,8 @@ function startCall() {
   const ctx = audioContext();
   if (ctx.state !== 'running') ctx.resume().catch(() => {});
   mediaVoice.unlock();
+  // (Hands-free talk asks new questions: an edit open is left.)
+  cancelEdit();
   S.call = true;
   S.callMisses = 0;
   threadPinned = true;
@@ -3176,6 +3433,8 @@ function markCancelled() {
     t.cancelled = true;
     saveThread();
   }
+  // An edit stopped: the PC keeps its new words as asked (its `versions` brings the thread).
+  if (S.edited?.t === t) S.edited = null;
   renderConvo();
 }
 
@@ -3912,8 +4171,11 @@ function render() {
   const coding = code.on && !!S.code;
   el.composer.dataset.code = String(coding || inAgent);
   el.composer.dataset.agent = String(inAgent);
-  el.input.placeholder = inAgent ? 'Tell the agent…' : coding ? 'Ask for a change, or hold to talk' : 'Ask Yap, or hold to talk';
-  el.input.setAttribute('aria-label', inAgent ? 'Tell the agent' : 'Ask Yap');
+  // ✎: your question in the box to change.
+  const editing = !!S.editing && !inAgent;
+  el.composer.dataset.editing = String(editing);
+  el.input.placeholder = inAgent ? 'Tell the agent…' : editing ? 'Edit your message' : coding ? 'Ask for a change, or hold to talk' : 'Ask Yap, or hold to talk';
+  el.input.setAttribute('aria-label', inAgent ? 'Tell the agent' : editing ? 'Edit your message' : 'Ask Yap');
   if (coding) {
     el.wsChipLabel.textContent = S.code.workspace;
     el.wsChip.setAttribute('aria-label', `Workspace: ${S.code.workspace}. Its environment`);
@@ -3997,9 +4259,12 @@ function render() {
   // voice too while it speaks.
   el.meter.dataset.on = String(listening || (call && now === 'speaking'));
   syncVoiceMeter(call && now === 'speaking');
-  // + for a picture, where the PC takes them.
-  el.plusWrap.hidden = capsule || call || !S.ready || !can('pictures') || inAgent;
+  // + for a picture, where the PC takes them (not with an edit open: the
+  // question's own pictures go again, and those in the card wait for the next).
+  el.plusWrap.hidden = capsule || call || !S.ready || !can('pictures') || inAgent || editing;
   if (el.plusWrap.hidden) closePlusMenu();
+  // The "Editing your message" strip over the box, ✕ to leave it as it was.
+  el.editing.hidden = !editing || capsule || call;
   el.coderow.hidden = !coding || inAgent || capsule || call;
   // One button where Send is: ↑ to send; ■ while Yap works the question out
   // (cancel) or says an answer (Stop) — unless there are words to send
@@ -4013,16 +4278,17 @@ function render() {
   el.stopBtn.hidden = call ? !(now === 'working' || now === 'speaking') : capsule || !stopSpeaking;
   el.stopBtn.setAttribute('aria-label', call && now === 'working' ? 'Stop the answer' : 'Stop');
   el.sendBtn.hidden = call || capsule || stopSpeaking || stopWorking || !S.typed;
-  el.sendBtn.disabled = !S.typed || S.preparing > 0;
-  el.callBtn.hidden = !call && (capsule || stopSpeaking || stopWorking || S.typed || inAgent);
+  el.sendBtn.disabled = !S.typed || (S.preparing > 0 && !editing);
+  el.sendBtn.setAttribute('aria-label', editing ? 'Send the edited message' : 'Send');
+  el.callBtn.hidden = !call && (capsule || stopSpeaking || stopWorking || S.typed || inAgent || editing);
   el.callBtn.disabled = !call && !S.ready;
   el.callBtn.setAttribute('aria-pressed', String(call));
   // ✕ while it listens (on the left, as the bar's capsule has it); ■ while
   // it works the question out.
   el.cancelBtn.hidden = call || !(capsule || stopWorking);
   el.cancelBtn.setAttribute('aria-label', capsule ? 'Cancel' : 'Stop the answer');
-  // Chat's line for pictures its model can't read.
-  const line = capsule || call ? '' : visionLine();
+  // Chat's line for pictures its model can't read (the card's: they wait while an edit's open).
+  const line = capsule || call || editing ? '' : visionLine();
   el.vision.hidden = !line;
   if (line) {
     const name = el.modelLabel.textContent || 'This model';
@@ -4174,6 +4440,11 @@ function sendTyped(how = {}) {
       fitInput();
     }
     render();
+    return;
+  }
+  // ✎ open: the words go as a new version of that question (the card's pictures wait for the next).
+  if (S.editing) {
+    sendEdit(text);
     return;
   }
   const pics = how.without ? [] : S.attached.slice();
@@ -4363,7 +4634,8 @@ function renderShots() {
     frag.appendChild(li);
   }
   el.shots.replaceChildren(frag);
-  el.shots.hidden = !S.attached.length && !S.preparing;
+  // (With an edit open they wait, out of the way: the question's own pictures go again.)
+  el.shots.hidden = (!S.attached.length && !S.preparing) || !!S.editing;
 }
 
 /**
@@ -4619,8 +4891,14 @@ el.input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
     e.preventDefault();
     sendTyped();
+  } else if (e.key === 'Escape' && S.editing) {
+    // (A keyboard's Escape leaves an edit, as ✕ does.)
+    e.preventDefault();
+    cancelEdit();
   }
 });
+// ✎'s ✕: the question as it was, the box as it was before.
+el.editCancel.addEventListener('click', () => cancelEdit());
 el.composer.addEventListener('submit', (e) => {
   e.preventDefault();
   sendTyped();
@@ -4730,8 +5008,13 @@ window.__yapLink = {
         ...(t.qv ? { qv: t.qv } : {}),
         ...(t.av ? { av: t.av } : {}),
         ...(t.retry ? { retry: true } : {}),
+        // ✎: its question's time in Chat, where it may be edited from here.
+        ...(t.edit ? { edit: t.edit } : {}),
       })),
       threadAgain: S.threadAgain,
+      // ✎ open: the question's place and time in Chat (its words are the box's).
+      editing: S.editing ? { at: S.editing.at, ts: S.editing.ts } : null,
+      input: el.input.value,
       reading: S.reading,
       speakingTurn: S.speakingTurn,
       frames: S.frames,
