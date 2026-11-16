@@ -366,7 +366,7 @@ test('a long scan shows "Reading…" while its pages are read; past 20 pages, th
   }
 });
 
-test("Retry sends a question's files again, once, and the question keeps them", async ({ yap, main, fakeLlm }) => {
+test("Edit sends a question's files again, once, and the question keeps them", async ({ yap, main, fakeLlm }) => {
   await freshChat(main);
   await drop(yap, [SEEDS]);
   await expect(boxFiles(main)).toHaveCount(1);
@@ -376,14 +376,16 @@ test("Retry sends a question's files again, once, and the question keeps them", 
   const answers = thread(main).locator('.cbubble.assistant');
   await expect(answers).toHaveText(['Three crops are on it.']);
   fakeLlm.scriptChat([{ content: 'Runner beans, sweet peas and courgettes: three.' }]);
-  await answers.first().hover();
-  await thread(main).getByTestId('chat-retry').click();
+  await thread(main).locator('.cbubble.user').first().hover();
+  await thread(main).getByTestId('chat-edit-message').first().click();
+  await thread(main).getByTestId('chat-edit-input').fill('Which crops are on my list?');
+  await thread(main).getByTestId('chat-edit-save').click();
   await expect(answers).toHaveText(['Runner beans, sweet peas and courgettes: three.']);
   // The files went again with the question, once, before its words.
   const asked = lastAsked(fakeLlm);
   expect(asked.startsWith('<documents>')).toBe(true);
   expect(asked.split('Courgettes').length - 1).toBe(1);
-  expect(asked.trimEnd().endsWith('How many crops are on my list?')).toBe(true);
+  expect(asked.trimEnd().endsWith('Which crops are on my list?')).toBe(true);
   await expect(thread(main).getByTestId('chat-files-sent').getByTestId('chat-file-chip')).toHaveCount(1);
 });
 

@@ -367,8 +367,7 @@ export async function runScript(script, { send, state, options = {} }) {
             ...(step.style ? { style: step.style } : {}),
             ...(step.incognito ? { incognito: true } : {}),
             ...(step.research ? { research: true } : {}),
-            // ↻ Retry the last answer, or Edit the last message to these words (chat/chats/branches.rs; a Code chat's Rewind).
-            ...(step.retry ? { retry: true } : {}),
+            // Edit the last message to these words (chat/chats/branches.rs; a Code chat's Rewind).
             ...(step.edit ? { edit: true } : {}),
             // A new chat in a project (chat/projects.rs), made first if need be, its files added once.
             ...(step.project

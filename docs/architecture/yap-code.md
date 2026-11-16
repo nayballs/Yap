@@ -421,8 +421,17 @@ workspace, word for word, and no model of Chat's is asked.
     written, Ctrl+Enter queues too: [Chat's own](chat-and-assistant.md#ctrlenter-queues-a-message-for-after-the-answer-2026-11-15).
 - **Rewind and Fork from here** (2026-11-14, `agents/rewind.rs`), the
   rest of the Claude Code app's message actions: under the person's
-  message in a Code chat (on hover, or its right-click menu) are Copy,
-  **Rewind** and **Fork from here**. Built from Anthropic's public docs (the
+  message in a Code chat (on hover, or its right-click menu) are **✓✓ and
+  its time** ("✓✓ 12 minutes ago ·"), Copy, **Rewind to here** and **Fork
+  from here**, with the app's tooltips (16 Nov 2026: Rewind to here "Takes
+  this message and everything after it out of the conversation", Fork from
+  here "Starts a new session from this point. This one stays as it is."; no
+  Edit there any more: Rewind puts the words back in the box). Under
+  Claude's answer, as the app's: Copy, **Fork from here** (from the message
+  it answers, the same fork), **Pin as chapter**, Read aloud and its time —
+  no 👍 / 👎 and no ↻ Retry (taken out 16 Nov 2026, with a Code chat's Retry
+  and Edit through Rewind): [the rows under a message](chat-and-assistant.md#the-rows-under-a-message-2026-11-16-the-claude-apps).
+  Built from Anthropic's public docs (the
   Agent SDK's `resumeSessionAt` and `forkSession`, the CLI's
   `--fork-session`; Claude Code 2.1.296 takes `--resume-session-at`) and the
   app's behaviour as seen, never from the app's files.
@@ -445,8 +454,8 @@ workspace, word for word, and no model of Chat's is asked.
     (`--resume <session> --fork-session --resume-session-at <its end_uuid>`,
     `session::Conversation::Branch`), or a new session when the message was
     the chat's first; the branch is let go once that run's init says its
-    own id. **Unavailable while the chat's Claude works** ("Rewind
-    (unavailable while Claude is working)", as the app), and past a turn
+    own id. **Unavailable while the chat's Claude works** ("Rewind to
+    here": "Unavailable while Claude is working", as the app), and past a turn
     from before Yap kept `end_uuid` (said, never guessed).
   - **Fork from here** opens a new Code chat ("<title> (fork)") in the same
     workspace and Mode, with the conversation up to and including that

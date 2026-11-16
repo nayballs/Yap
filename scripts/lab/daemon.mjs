@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { APP, feedbackOf, labConfig, localServer, minutesFrom, onOff, parseModel } from './options.mjs';
+import { APP, labConfig, localServer, minutesFrom, onOff, parseModel } from './options.mjs';
 import { drawPng, pngSize } from './png.mjs';
 import { templated } from './fake.mjs';
 import { captureElement, captureLivePage, capturePanel, captureThread, captureWindow, livePage, pinTheme, shotNames, slug, themeNow, themesOf } from './shots.mjs';
@@ -224,7 +224,7 @@ async function snapshot(t) {
 
 /** A turn's result with its shots (and what couldn't be shot). */
 function withShots(t, out) {
-  // (A Retry or Edit says so; a routine's turn has its run: when, why, where its answer went.)
+  // (An Edit says so; a routine's turn has its run: when, why, where its answer went.)
   if (t.branch) out.branch = t.branch;
   if (t.routine) {
     out.run = runOf(t.run);
@@ -563,7 +563,7 @@ async function dropFiles(files) {
   await chips.nth(before + paths.length - 1).waitFor({ state: 'visible', timeout: 60_000 });
 }
 
-async function startTurn({ text, spoken = false, away = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null, research = false, feedback = null }) {
+async function startTurn({ text, spoken = false, away = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null, attach = null, how = 'ask', style = null, incognito = false, project = null, research = false }) {
   if (!text?.trim()) throw new Error('Nothing to ask');
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
   // `--away` (a spoken question asked from another app, 16 Nov 2026): the test Yap told its window isn't in front
@@ -579,16 +579,13 @@ async function startTurn({ text, spoken = false, away = false, chat = 'new', aut
     throw new Error(`Couldn't open Chat on ${chat || 'a new chat'}: ${e.message.split('\n')[0]}`);
   });
   let { askedAt } = opened;
-  let question = text;
-  // A new version starts at the person's message it answers again (branchFrom): a Code chat's Retry rewinds the
-  // thread there and asks again, so the conversation's length when asked found no answer (16 Nov 2026: `answer`
-  // came back empty though the thread had it). A Retry's question is that message.
-  if (how === 'retry' || how === 'edit') {
+  const question = text;
+  // A new version starts at the person's message it replaces (branchFrom): a Code chat's Edit rewinds the thread
+  // there and asks again, so the conversation's length when asked found no answer (16 Nov 2026: `answer` came back
+  // empty though the thread had it).
+  if (how === 'edit') {
     const from = branchFrom(opened.conv);
-    if (from) {
-      askedAt = from.index;
-      if (how === 'retry' && from.text.trim()) question = from.text;
-    }
+    if (from) askedAt = from.index;
   }
   const t = new Turn({ question, spoken, since, askedAt, autoCards, report, shots, themes });
   if (how !== 'ask') t.branch = how;
@@ -616,8 +613,8 @@ async function startTurn({ text, spoken = false, away = false, chat = 'new', aut
       const ghost = main().getByTestId('chat-incognito');
       if ((await ghost.getAttribute('aria-pressed', { timeout: 10_000 })) !== 'true') await ghost.click({ timeout: 10_000 });
     }
-    if (how === 'retry' || how === 'edit') {
-      await branchTurn(how, text, feedback);
+    if (how === 'edit') {
+      await editTurn(text);
     } else if (spoken) {
       // (Pictures and files in the box first, as a person drops them before asking out loud: the question takes
       // them with Chat in view, 16 Nov 2026.)
@@ -643,56 +640,16 @@ async function startTurn({ text, spoken = false, away = false, chat = 'new', aut
 }
 
 /**
- * **Retry** the chat's last answer, or **Edit** the person's last message to `text` (15 Nov 2026, the Claude app's
- * message actions: chat/chats/branches.rs), as the person does — by its buttons: ↻ under the answer; the pencil,
- * the words in place, Save and send. A new version of the conversation from there (‹ 2/2 ›).
+ * **Edit** the person's last message to `text` (15 Nov 2026, the Claude app's message actions:
+ * chat/chats/branches.rs), as the person does — by its buttons: the pencil, the words in place, Save and send. A new
+ * version of the conversation from there (‹ 2/2 ›). Chat's only: a Code chat has no Edit (16 Nov 2026).
  */
-async function branchTurn(how, text, feedback = null) {
+async function editTurn(text) {
   const col = main().locator('[data-testid="chat-column"]');
-  if (how === 'retry' && feedback) {
-    // **👎 with what was wrong, then Retry with this note** (16 Nov 2026, chat/feedback.rs): as the person does —
-    // 👎 under the last answer, its card's reasons and line, then the card's Retry.
-    await col.locator('.cbubble.assistant').last().hover({ timeout: 10_000 });
-    const down = col.getByTestId('chat-thumbs-down').last();
-    if ((await down.getAttribute('aria-pressed', { timeout: 10_000 })) === 'true') await down.click({ timeout: 10_000 });
-    await down.click({ timeout: 10_000 });
-    const card = col.getByTestId('chat-feedback-card');
-    await card.waitFor({ state: 'visible', timeout: 10_000 });
-    for (const r of feedback.reasons) await card.getByTestId(`chat-feedback-reason-${r}`).click({ timeout: 10_000 });
-    if (feedback.note) {
-      if (!feedback.reasons.includes('other')) await card.getByTestId('chat-feedback-reason-other').click({ timeout: 10_000 });
-      await card.getByTestId('chat-feedback-note').fill(feedback.note, { timeout: 10_000 });
-    }
-    await card.getByTestId('chat-feedback-retry').click({ timeout: 10_000 });
-    await confirmIfAsked();
-    return;
-  }
-  if (how === 'retry') {
-    await col.locator('.cbubble.assistant').last().hover({ timeout: 10_000 });
-    await col.getByTestId('chat-retry').last().click({ timeout: 10_000 });
-    await confirmIfAsked();
-    return;
-  }
   await col.locator('.cbubble.user').last().hover({ timeout: 10_000 });
   await col.getByTestId('chat-edit-message').last().click({ timeout: 10_000 });
   await col.getByTestId('chat-edit-input').fill(text, { timeout: 10_000 });
   await col.getByTestId('chat-edit-save').click({ timeout: 10_000 });
-  await confirmIfAsked();
-}
-
-/**
- * A Code chat asks first: its Retry and Edit go through Rewind ("Retry from this message?", "Send the edited
- * message?", ChatThread.svelte). Its confirm pressed, as the person would (Lab, 15 Nov 2026: `--retry` waited on the
- * question for good). A plain chat asks nothing: back at once.
- */
-async function confirmIfAsked() {
-  const confirm = main().locator('[role="alertdialog"] .btns button:not([data-cancel])').first();
-  try {
-    await confirm.waitFor({ state: 'visible', timeout: 2_500 });
-  } catch {
-    return;
-  }
-  await confirm.click({ timeout: 5_000 });
 }
 
 /**
@@ -1022,6 +979,33 @@ async function spokenCmd({ clear = false }) {
       }
     : null;
   return { spoken: said.map((s) => ({ messageId: s.messageId ?? null, engine: s.engine, streamed: !!s.streamed, sentences: s.sentences })), reading };
+}
+
+/**
+ * **What the test Yap copied** (16 Nov 2026, the rows under Chat's messages: Copy): its page's clipboard writes are
+ * held in the page from the start (`holdClipboard`), never put on this PC's clipboard — the person's own, in use
+ * meanwhile. `--clear`: forgotten after reading them.
+ */
+async function copiedCmd({ clear = false }) {
+  const copied = await main().evaluate((clear) => {
+    const all = [...(window.__labCopied ?? [])];
+    if (clear && window.__labCopied) window.__labCopied.length = 0;
+    return all;
+  }, clear);
+  return { copied };
+}
+
+/** The page's clipboard writes kept in it (`copied`), now and after any reload: this PC's clipboard never touched. */
+async function holdClipboard() {
+  const hold = () => {
+    if (window.__labCopied) return;
+    window.__labCopied = [];
+    navigator.clipboard.writeText = async (t) => {
+      window.__labCopied.push(String(t));
+    };
+  };
+  await main().addInitScript(hold).catch(() => {});
+  await main().evaluate(hold).catch(() => {});
 }
 
 /** Where `click --at` and `probe --at` aim: a link's last line's end, or its first line's start (2 px in). */
@@ -1895,13 +1879,11 @@ const COMMANDS = {
       const card = await waitingQuestion();
       if (card) return COMMANDS.answer({ ...a, _: [card.id, 'said', String(a.text ?? '')] });
     }
-    // (Retry the last answer, or Edit the last message to these words: in the chat shown.)
+    // (Edit the last message to these words: in the chat shown.)
     const attach = Array.isArray(a.attach) ? a.attach : a.attach ? String(a.attach).split(',').filter(Boolean) : null;
-    const how = a.retry ? 'retry' : a.edit ? 'edit' : 'ask';
-    const text = how === 'retry' ? String(a.text ?? '').trim() || 'Retry' : a.text;
-    // `--retry --feedback long,untrue [--note "…"]`: 👎 with those reasons (and a line), then its card's Retry with this note.
-    const feedback = how === 'retry' && (a.feedback || a.note) ? feedbackOf(a.feedback, a.note) : null;
-    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', away: !!a.away && !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, research: !!a.research && how === 'ask', project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null, files: projectFiles(a['project-files']), page: !!a['project-page'] } : null, feedback, ...shotsFor(a) });
+    const how = a.edit ? 'edit' : 'ask';
+    const text = a.text;
+    const t = await startTurn({ text, spoken: !!a.spoken && how === 'ask', away: !!a.away && !!a.spoken && how === 'ask', chat: how === 'ask' ? (a.chat ?? 'new') : 'same', how, autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: how === 'ask' && Array.isArray(a.pictures) ? a.pictures : null, attach: how === 'ask' ? attach : null, style: typeof a.style === 'string' ? a.style : null, incognito: !!a.incognito, research: !!a.research && how === 'ask', project: typeof a.project === 'string' && how === 'ask' ? { name: a.project, instructions: typeof a['project-instructions'] === 'string' ? a['project-instructions'] : null, files: projectFiles(a['project-files']), page: !!a['project-page'] } : null, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
   wait: async (a) => {
@@ -1919,6 +1901,7 @@ const COMMANDS = {
   probe: async (a) => probe(a),
   click: async (a) => click(a),
   spoken: async (a) => spokenCmd(a),
+  copied: async (a) => copiedCmd(a),
   type: async (a) => typeKeys(a),
   side: async (a) => side(a),
   pick: async (a) => pick(a),
@@ -2099,6 +2082,8 @@ async function start() {
     }
   });
   await tryInvoke('e2e_main_on_screen', {});
+  // Copy in the test Yap never reaches this PC's clipboard (`copied` reads what it copied).
+  await holdClipboard();
   // The main window at its size (set at the end of setup): its CSS pixels and scale.
   const [wantW, wantH] = String(START.size ?? '1280x860').split(/[x×]/i).map(Number);
   const size = () => main().evaluate(() => ({ width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1 }));

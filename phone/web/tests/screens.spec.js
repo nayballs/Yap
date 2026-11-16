@@ -29,7 +29,6 @@ import {
   pickerData,
   photo,
   choosePhotos,
-  CAN,
   CAN_BEFORE_WORDS,
 } from './support/harness.js';
 
@@ -37,8 +36,6 @@ import {
 const OPUS = {
   picker: pickerData({ model: 'opus', effort: { levels: ['low', 'medium', 'high', 'xhigh', 'max'], default: 'medium', chosen: 'xhigh', fast: false } }),
   model: { id: 'anthropic|claude-opus-5-5', label: 'Claude Opus 5.5 · Anthropic', onThisPc: false },
-  // (A PC that keeps 👍 / 👎: each answer's row has them, a thumb's size.)
-  can: [...CAN, 'rate'],
 };
 
 const DIR = 'test-results/link/screenshots';

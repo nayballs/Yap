@@ -86,14 +86,14 @@
     {#if shown}
       <div class="clist" role="menu" aria-label="Chapters">
         <button type="button" role="menuitem" class="citem" class:on={now < 0} onclick={() => go(-1)}>Start</button>
-        {#each chapters as c, i (c.at)}
+        {#each chapters as c, i (`${c.at}:${c.below ? 1 : 0}`)}
           <button type="button" role="menuitem" class="citem" class:on={now === i} title={c.summary || undefined} onclick={() => go(i)} data-testid="chat-chapters-item">{c.title}</button>
         {/each}
       </div>
     {/if}
     <button type="button" class="crail" aria-expanded={shown} aria-haspopup="true" aria-label={`Chapters: ${label}`} title={`Chapters: ${label}`} onclick={() => (open = !open)}>
       <span class="tick" class:on={now < 0}></span>
-      {#each chapters as c, i (c.at)}
+      {#each chapters as c, i (`${c.at}:${c.below ? 1 : 0}`)}
         <span class="tick" class:on={now === i}></span>
       {/each}
     </button>

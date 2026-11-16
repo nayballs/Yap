@@ -792,8 +792,8 @@ pub fn chat_answering() -> Value {
     json!({ "conversations": ids, "seq": seq })
 }
 
-/// **Is a turn answering conversation `conversation` now?** (Retry, Edit and
-/// ‹ › wait for it: `chat/commands.rs`.)
+/// **Is a turn answering conversation `conversation` now?** (Edit, ‹ › and
+/// Fork from the answer being written wait for it: `chat/commands.rs`.)
 pub fn is_answering(conversation: u64) -> bool {
     ANSWERING.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|m| m.contains_key(&conversation))
 }

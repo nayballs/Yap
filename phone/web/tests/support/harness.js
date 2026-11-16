@@ -76,8 +76,7 @@ export const THREADS = {
         id: 'chat:41:1',
       },
       { role: 'user', text: 'Is this rucksack big enough?', voice: true, pictures: 1 },
-      // (Marked 👍 in Chat: shown on a PC that keeps them, `rate` in `can`.)
-      { role: 'assistant', text: 'A 35-litre pack is plenty for three days if you hut-hop.', id: 'chat:41:3', rating: 'good' },
+      { role: 'assistant', text: 'A 35-litre pack is plenty for three days if you hut-hop.', id: 'chat:41:3' },
     ],
   },
   38: {

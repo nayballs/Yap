@@ -38,15 +38,19 @@
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { chatStatus } from '../../stores/chatStatus.svelte.js';
   import QueuedMessage from './QueuedMessage.svelte';
-  // A long chat's chapters (chat/cards/chapters.rs): a divider above the question each starts at, and the
-  // floating contents (ChatChapters, its own chunk) to jump between them.
+  // A long chat's chapters (chat/cards/chapters.rs): a divider above the question each starts at (one pinned under
+  // an answer: under its question, above the answer's turn), and the floating contents (ChatChapters, its own chunk)
+  // to jump between them.
   import { chaptersOf } from './chapters.js';
   // What the chat made (chat/made.rs): its visuals and its kept pages' cards, each in the answer to its question.
   import { made, followMade, onMade, placeMade, promptFromVisual } from './made.svelte.js';
+  // The rows' times ("12 minutes ago") move on while the thread is shown.
+  import { followClock } from './clock.svelte.js';
 
+  $effect(() => followClock());
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
   const chapters = $derived(chaptersOf(chat.messages));
-  const chapterAt = $derived(new Map(chapters.map((c) => [c.at, c])));
+  const chapterAt = $derived(new Map(chapters.map((c) => [`${c.at}:${c.below ? 'below' : 'above'}`, c])));
   // **Visuals** (chat/made.rs, 15 Nov 2026): read with the chat, heard as they're made; each shows in the
   // answer to its question (above its words), or under the question's work while there's no answer yet.
   followMade();
@@ -221,93 +225,71 @@
   function messageMenu(e, m) {
     const reading = !!m.id && chat.speakingId === m.id;
     const items = messageItems(m, { read: m.role === 'assistant' && m.id ? () => chat.readAloud(m) : null, reading });
-    // The person's message: Edit, and in a Code chat Rewind and Fork from here too (as under it); an answer: Retry.
-    const a = actionsFor(m);
-    const r = m.role === 'assistant' ? retryOf(m, chat.messages.indexOf(m)) : null;
-    if (a?.onedit || a?.onrewind || r) items.push({ separator: true });
+    // The person's message: Edit, or in a Code chat Rewind to here and Fork from here (as under it); an answer: Fork
+    // from here and Pin as chapter (as under it).
+    const a = m.role === 'assistant' ? null : actionsFor(m);
+    const r = m.role === 'assistant' ? answerFor(m, chat.messages.indexOf(m)) : null;
+    if (a?.onedit || a?.onrewind || r?.onfork || r?.onpin) items.push({ separator: true });
     if (a?.onedit) items.push({ label: a.edit ? `Edit (${a.edit.toLowerCase()})` : 'Edit', icon: 'pencil', disabled: !!a.edit, onselect: a.onedit });
-    if (r) {
-      const label = r.noted ? 'Retry with your note' : 'Retry';
-      items.push({ label: r.why ? `${label} (${r.why.toLowerCase()})` : label, icon: 'sync', disabled: !!r.why, onselect: r.onretry });
-    }
-    if (a?.onrewind) {
-      items.push({ label: a.rewind ? `Rewind (${a.rewind.toLowerCase()})` : 'Rewind', icon: 'undo', disabled: !!a.rewind, onselect: a.onrewind });
-      items.push({ label: a.fork ? `Fork from here (${a.fork.toLowerCase()})` : 'Fork from here', icon: 'split', disabled: !!a.fork, onselect: a.onfork });
-    }
+    if (a?.onrewind) items.push({ label: a.rewind ? `Rewind to here (${a.rewind.toLowerCase()})` : 'Rewind to here', icon: 'undo', disabled: !!a.rewind, onselect: a.onrewind });
+    const fork = a?.onfork ? a : r?.onfork ? r : null;
+    if (fork) items.push({ label: fork.fork ? `Fork from here (${fork.fork.toLowerCase()})` : 'Fork from here', icon: 'split', disabled: !!fork.fork, onselect: fork.onfork });
+    if (r?.onpin) items.push({ label: r.pinned ? 'Unpin chapter' : 'Pin as chapter', icon: 'pin', disabled: !!r.pinning, onselect: r.onpin });
     openContextMenu(e, items, { label: m.role === 'assistant' ? 'Answer' : 'Question', row: e.currentTarget });
   }
 
-  // **Rewind and Fork from here** (14 Nov 2026, agents/rewind.rs; the Claude Code app's message actions): under the
-  // person's own message in a Code chat — one that started a turn of Claude's —, Copy, Rewind (back to before it:
-  // asked first, the files Claude changed since put back as they were unless unticked) and Fork from here (a new chat
-  // with the conversation up to its answer).
+  // **Under the person's message** (the Claude app's rows, 16 Nov 2026): in Chat, Copy and Edit (a new version from
+  // there, ‹ 1/2 › on it); in a Code chat — one that started a turn of Claude's: agents/rewind.rs —, ✓✓ and its time,
+  // Copy, Rewind to here (back to before it: asked first, the files Claude changed since put back as they were unless
+  // unticked; its words back in the box) and Fork from here (a new chat with the conversation up to its answer).
   function actionsFor(m) {
     if (m?.role !== 'user' || m.kind || chat.activeId == null) return null;
     // Still being sent (no id until its answer is in): the row is there already, Copy in it and the rest waiting —
     // drawn only once the answer was in, it pushed the thread 36 px down at every answer's end (15 Nov 2026,
     // chat-scroll.spec.js; the browser's scroll anchoring hid it but moved the scrollbar).
-    if (!m.id) return code?.current ? {} : { edit: busyWhy || 'Not saved yet', onedit: () => {} };
-    // Chat: Copy and Edit (a new version from there, ‹ 1/2 › on it).
+    if (!m.id) return code?.current ? { code: true } : { edit: busyWhy || 'Not saved yet', onedit: () => {} };
     if (!code?.current) return { edit: busyWhy, onedit: () => chat.startEdit(m) };
     const t = messageTurn(agents.list, chat.activeId, m.id);
     // A message no turn of Claude's started (yet): Copy, Rewind and Fork once its turn is known — the same row.
-    if (!t) return {};
-    // A Code chat's Edit is a Rewind with new words (agents/rewind.rs): when it can rewind.
-    return { rewind: t.rewind, fork: t.fork, onrewind: () => askRewind(m, t.files), onfork: () => chat.forkAt(m), edit: t.rewind || busyWhy, onedit: () => chat.startEdit(m) };
+    if (!t) return { code: true };
+    return { code: true, rewind: t.rewind, fork: t.fork, onrewind: () => askRewind(m, t.files), onfork: () => chat.forkAt(m) };
   }
 
-  // **Retry, Edit and ‹ ›** (15 Nov 2026, the Claude app's message actions; chat/chats/branches.rs): ↻ under an
-  // answer asks its question again, the pencil under the person's message opens it in place to change; either keeps
-  // what was there as a version, ‹ 1/2 › to switch. Not while an answer is being written. In a Code chat both are
-  // Claude Code's own Rewind (asked first, as Rewind is), then the message sent again: no versions kept there.
-  const busyWhy = $derived(chat.sending || chat.answeringHere ? 'Unavailable while an answer is being written' : '');
-  /**
-   * ↻ under answer `m` (index `i`), or null where there's none. An answer marked 👎 is retried with its note (what was
-   * wrong, given to the model: chat/feedback.rs) — ↻ and 👎's card's Retry alike.
-   */
-  function retryOf(m, i) {
-    if (m?.role !== 'assistant' || !m.id || m.kind || m.streaming || i < 1) return null;
-    const noted = m.feedback?.rating === 'bad';
-    if (code?.current) {
-      const qi = chat.messages.findLastIndex((x, k) => k < i && x.role === 'user' && !x.kind);
-      const q = chat.messages[qi];
-      const t = q?.id ? messageTurn(agents.list, chat.activeId, q.id) : null;
-      if (!t) return null;
-      return { why: t.rewind || busyWhy, noted, onretry: () => askCodeSend(q, null, t.files, noted ? i : null) };
+  // **Under an answer** (16 Nov 2026, the Claude app's row; 👍 / 👎 and ↻ Retry taken out): Fork from here — a new
+  // chat up to and including it (in a Code chat Claude's own fork of its session, from the message it answers) — and
+  // Pin as chapter (its title made as the model's chapters are: chat/cards/chapters.rs `pin_title`). Copy and Read
+  // aloud are the message's own. Never an agent's report, nor an answer still being written.
+  const pins = $state({});
+  /** The row's actions under answer `m` (index `i`), or null. */
+  function answerFor(m, i) {
+    if (m?.role !== 'assistant' || m.kind || m.streaming || chat.activeId == null) return null;
+    const pinned = !!m.chapter?.title;
+    const pin = m.id ? { pinned, pinning: !!pins[m.id], onpin: () => pinAnswer(m) } : {};
+    if (!code?.current) return { ...pin, fork: m.id ? '' : 'Not saved yet', onfork: () => chat.forkAnswer(m) };
+    // A Code chat: Fork from the message this answer answers (its turn), as Fork from here under that message.
+    const qi = chat.messages.findLastIndex((x, k) => k < i && x.role === 'user' && !x.kind);
+    const q = chat.messages[qi];
+    const t = q?.id ? messageTurn(agents.list, chat.activeId, q.id) : null;
+    return { ...pin, code: true, ...(t ? { fork: t.fork, onfork: () => chat.forkAt(q) } : {}) };
+  }
+  async function pinAnswer(m) {
+    if (!m?.id || pins[m.id]) return;
+    pins[m.id] = true;
+    try {
+      await chat.pinChapter(m, !m.chapter?.title);
+    } finally {
+      delete pins[m.id];
     }
-    const q = chat.messages[i - 1];
-    if (q?.role !== 'user' || q.kind || !q.id) return null;
-    return { why: busyWhy, noted, onretry: () => chat.retryAt(m, { feedback: noted }) };
   }
 
-  // **👍 / 👎** (16 Nov 2026, chat/feedback.rs; the Claude app's thumbs, beside Copy and ↻): kept with the answer on
-  // this PC, sent nowhere. 👎 opens a small card — what was wrong, Retry with that note given to the model (a new
-  // version, both kept; in a Code chat through Rewind), and in a plain chat "Learn from this" (memory's Preferences or
-  // the chat's style, only on the person's click). Never an agent's report, nor an answer still being written.
-  /** The thumbs under answer `m` (index `i`), or null. */
-  function ratingOf(m, i) {
-    if (m?.role !== 'assistant' || !m.id || m.kind || m.streaming) return null;
-    return {
-      value: m.feedback ?? null,
-      onrate: (fb) => chat.rate(m, fb),
-      // Learn from this: Chat's side only (a Code chat keeps Yap's memory out; an incognito chat never updates it).
-      learn: !code?.current && !chat.incognito ? { conversation: chat.activeId, onremember: (fact) => chat.rememberFrom(m, fact) } : null,
-    };
-  }
+  // **Edit and ‹ ›** (15 Nov 2026, the Claude app's message actions; chat/chats/branches.rs): the pencil under the
+  // person's message opens it in place to change; what was there is kept as a version, ‹ 1/2 › to switch (an older
+  // Retry's on its answer too). Not while an answer is being written.
+  const busyWhy = $derived(chat.sending || chat.answeringHere ? 'Unavailable while an answer is being written' : '');
   /** The ‹ k/n › of the message at `i`, or null. */
   function branchOf(i) {
     const fork = chat.forkOf(i);
     return fork ? { fork, why: busyWhy, onbranch: (place) => chat.switchBranch(i, place) } : null;
-  }
-  /** Save and send an edited message: in a Code chat, asked first as a Rewind is. */
-  function saveEdited(m, words) {
-    if (!code?.current) {
-      chat.saveEdit(m, words);
-      return;
-    }
-    const t = messageTurn(agents.list, chat.activeId, m.id);
-    if (!t || t.rewind) return;
-    askCodeSend(m, words, t.files);
   }
 
   let rewindOpen = $state(false);
@@ -315,43 +297,19 @@
   let rewindFiles = $state(true);
   let rewindBusy = $state(false);
   function askRewind(m, files) {
-    rewindAsk = { m, files, mode: 'rewind' };
-    rewindFiles = true;
-    rewindOpen = true;
-  }
-  /**
-   * A Code chat's Retry (`words` null: the message as it was) or Edit: back to before `m`, then sent — asked first.
-   * `noteFrom`: a Retry with the note on 👎's card — the index of the answer whose 👎 goes to Claude with it.
-   */
-  function askCodeSend(m, words, files, noteFrom = null) {
-    rewindAsk = { m, files, mode: words == null ? 'retry' : 'edit', words, noteFrom };
+    rewindAsk = { m, files };
     rewindFiles = true;
     rewindOpen = true;
   }
   async function doRewind() {
     if (!rewindAsk) return;
-    const { m, files, mode, words, noteFrom } = rewindAsk;
-    if (mode !== 'rewind') {
-      rewindOpen = false;
-      chat.saveEdit(m, words ?? chat.wordsOf(m), { files: files > 0 && rewindFiles, code: true, feedbackFrom: noteFrom });
-      return;
-    }
+    const { m, files } = rewindAsk;
     rewindBusy = true;
     const ok = await chat.rewindAt(m, files > 0 && rewindFiles);
     rewindBusy = false;
     rewindOpen = false;
     if (ok) chat.inputEl?.focus({ preventScroll: true });
   }
-  // (Its words: what the dialog says for each.)
-  const rewindText = $derived(
-    rewindAsk?.mode === 'retry' && rewindAsk.noteFrom != null
-      ? { title: 'Retry with your note?', body: "Everything after this message goes, as with Rewind, and Claude won't see it again. Then the message is sent again, with what you said was wrong with the answer.", confirm: 'Retry', busy: 'Retrying…' }
-      : rewindAsk?.mode === 'retry'
-      ? { title: 'Retry from this message?', body: "Everything after it goes, as with Rewind, and Claude won't see it again. Then the message is sent again.", confirm: 'Retry', busy: 'Retrying…' }
-      : rewindAsk?.mode === 'edit'
-        ? { title: 'Send the edited message?', body: "This message and everything after it go, as with Rewind, and Claude won't see them again. Your new words are sent in its place.", confirm: 'Send', busy: 'Sending…' }
-        : { title: 'Rewind to before this message?', body: "This message and everything after it go, and Claude won't see them again. Its words go back in the message box.", confirm: 'Rewind', busy: 'Rewinding…' }
-  );
 </script>
 
 {#if !code?.onCode && (chat.projectHere || (chat.activeId == null && chat.newProject))}
@@ -444,14 +402,10 @@
               <span class="rule"></span>
             </div>
           {/if}
-          {#if chapterAt.has(i)}
-            <!-- A new chapter starts at this question (mark_chapter): its title, as a divider. -->
-            {@const c = chapterAt.get(i)}
-            <div class="chapterdiv" role="separator" aria-label={`Chapter: ${c.title}`} title={c.summary || undefined} data-testid="chat-chapter">
-              <span class="rule"></span>
-              <span class="ctitle">{c.title}</span>
-              <span class="rule"></span>
-            </div>
+          {#if chapterAt.has(`${i}:above`)}
+            <!-- A new chapter starts at this question (mark_chapter), or at this answer pinned with no question of the
+                 person's before it: its title, as a divider. -->
+            {@render chapterDivider(chapterAt.get(`${i}:above`))}
           {/if}
           {#if m.kind === 'agentReport'}
             {#if !quietReport(m)}
@@ -486,12 +440,16 @@
               onvisualprompt={(text, v) => sendFromVisual(text, v, chat.activeId)}
               onkept={openKept}
               branch={m.id && !m.streaming ? branchOf(i) : null}
-              retry={m.role === 'assistant' ? retryOf(m, i) : null}
-              rating={m.role === 'assistant' ? ratingOf(m, i) : null}
+              answer={m.role === 'assistant' ? answerFor(m, i) : null}
               editing={m.role === 'user' && chat.editing?.id === m.id ? chat.editing : null}
-              onedited={(words) => saveEdited(m, words)}
+              onedited={(words) => chat.saveEdit(m, words)}
               oneditcancel={() => chat.cancelEdit()}
             />
+          {/if}
+          {#if chapterAt.has(`${i}:below`)}
+            <!-- An answer to this question pinned as a chapter (Pin as chapter): its title above the answer's turn, as
+                 the Claude app draws it — under the question, before the work and the answer. -->
+            {@render chapterDivider(chapterAt.get(`${i}:below`))}
           {/if}
           {#if directPills.get(i)?.length}
             <!-- A Code chat that works directly: what its session says and does, under the message that asked
@@ -652,12 +610,24 @@
   {/await}
 {/if}
 
+{#snippet chapterDivider(c)}
+  <!-- A chapter's title between two rules; one the person pinned (Pin as chapter) has the pin before it. -->
+  <div class="chapterdiv" class:pinned={c.pinned} role="separator" aria-label={`Chapter: ${c.title}`} title={c.summary || undefined} data-testid="chat-chapter">
+    <span class="rule"></span>
+    {#if c.pinned}
+      <svg class="cpin" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g transform="rotate(45 12 12)"><path d="M8.6 2.6h6.8l-1 6.4 3.6 3.4v2.4H6.6v-2.4L10.2 9z" /><path d="M12 14.8v6.8" fill="none" /></g></svg>
+    {/if}
+    <span class="ctitle">{c.title}</span>
+    <span class="rule"></span>
+  </div>
+{/snippet}
+
 <ConfirmDialog
   bind:open={rewindOpen}
-  title={rewindText.title}
-  body={rewindText.body}
-  confirmLabel={rewindText.confirm}
-  busyLabel={rewindText.busy}
+  title="Rewind to before this message?"
+  body="This message and everything after it go, and Claude won't see them again. Its words go back in the message box."
+  confirmLabel="Rewind"
+  busyLabel="Rewinding…"
   busy={rewindBusy}
   onconfirm={doRewind}
 >
@@ -699,6 +669,20 @@
     flex: 1 1 16px;
     height: 1px;
     background: var(--yap-border-subtle);
+  }
+  /* (Pinned by the person: the pin, then its title.) */
+  .chapterdiv.pinned {
+    gap: 6px;
+  }
+  .chapterdiv .cpin {
+    flex: 0 0 auto;
+    width: 12px;
+    height: 12px;
+    margin-left: 4px;
+    color: var(--yap-muted);
+  }
+  .chapterdiv.pinned .ctitle {
+    margin-right: 4px;
   }
   .chapterdiv .ctitle {
     flex: 0 1 auto;

@@ -599,10 +599,6 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     if spoken && !(g.tools && g.web_on) && t.skill.is_none() {
         prompt.add(crate::chat::assistant::SPOKEN_ANSWER_NOTE.to_string());
     }
-    // **Retry with the note** (👎's card, chat/feedback.rs): what was wrong with the earlier answer, this turn only.
-    if let Some(note) = crate::chat::feedback::note() {
-        prompt.add(note);
-    }
     Built {
         prompt,
         first,
@@ -967,10 +963,6 @@ mod tests {
         let opened = Opened { conv, user_index: 0, selection: None, code: Some(garden.clone()) };
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let built = rt.block_on(build(&t, &Sizing::for_tests(128_000), &opened));
-        // A Retry with its 👎's note (chat/feedback.rs): in the question's context, that turn only.
-        let noted = rt.block_on(crate::chat::feedback::with_note(Some("Answering again: it was too long.".into()), build(&t, &Sizing::for_tests(128_000), &opened)));
-        assert_eq!(noted.prompt.context.last().map(String::as_str), Some("Answering again: it was too long."));
-        assert!(!built.prompt.context.iter().chain([&built.prompt.system]).any(|b| b.contains("Answering again")));
         let all = format!("{}\n{}", built.prompt.system, built.prompt.context.join("\n"));
         // None of memory: its passages, its "You", how they want answers.
         for never in ["Lives in Galway", "Cousin", "bullet points", "What Yap remembers"] {

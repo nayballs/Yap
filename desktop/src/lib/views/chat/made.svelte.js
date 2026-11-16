@@ -81,15 +81,19 @@ export function promptFromVisual(chat, text, v, conversation) {
 
 /**
  * **The question `after` names** in `messages`: the person's message at its place, while its time is
- * the same or not known yet (a question just sent has none here); else the person's message with that
- * time nearest its place; else none (-1: a Rewind took it). Pure.
+ * the same or not known yet (a question just sent has none here — but one sent after `after`'s was
+ * saved, an Edit's new words in its place, is another: `shownAt`); else the person's message with that
+ * time nearest its place; else none (-1: a Rewind took it, or an Edit set it aside). Pure.
  */
 export function questionIndex(messages, after) {
   if (!after || !messages?.length) return -1;
   const ts = Number(after.ts) || 0;
   const at = Number(after.index);
   const isQ = (m) => m?.role === 'user';
-  if (Number.isInteger(at) && isQ(messages[at]) && (!ts || !messages[at].ts || Number(messages[at].ts) === ts)) return at;
+  const m = messages[at];
+  // (Saved by its time; or not read back yet: the same one unless it was sent a second or more after `after`'s.)
+  const same = !ts || (m?.ts ? Number(m.ts) === ts : !(Number(m?.shownAt) > ts));
+  if (Number.isInteger(at) && isQ(m) && same) return at;
   if (!ts) return -1;
   let best = -1;
   messages.forEach((m, i) => {

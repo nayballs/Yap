@@ -323,9 +323,9 @@ test('made after outside content: its button puts the message in the box to read
   await box(main).fill('');
 });
 
-// Retry (15 Nov 2026, chat/chats/branches.rs): a visual hangs off its question, which a retry keeps — so the
-// answer shown shows only what its own turn made (the fork's `since`, made.svelte.js `placeVisuals`).
-test('a retried answer shows only the visuals its own turn made; ‹ back, the first answer’s are there again', async ({ main, fakeLlm }) => {
+// Edit (15 Nov 2026, chat/chats/branches.rs): a visual hangs off its question, by its place and time — so an edited
+// question's answer shows only what its own turn made (made.svelte.js `questionIndex`), the first's one ‹ away.
+test('an edited question’s answer shows only the visuals its own turn made; ‹ back, the first answer’s are there again', async ({ main, fakeLlm }) => {
   fakeLlm.scriptChat([
     { tools: [{ name: 'show_visual', args: { title: 'Steps', code: DIAGRAM } }] },
     { content: 'The steps, drawn.' },
@@ -333,11 +333,13 @@ test('a retried answer shows only the visuals its own turn made; ‹ back, the f
   await ask(main, 'Draw the steps of a dictation');
   await expect(visuals(main)).toHaveCount(1, { timeout: 20_000 });
   await expect(main.getByText('The steps, drawn.')).toBeVisible();
-  // (A second on: the retried answer's turn starts after the first answer was saved, as a person's click does.)
+  // (A second on: the edited question is saved after the first answer was, as a person's click is.)
   await main.waitForTimeout(1_100);
   fakeLlm.scriptChat([{ content: 'In words: press, speak, press again.' }]);
-  await main.locator('.cbubble.assistant').last().hover();
-  await main.getByTestId('chat-retry').last().click();
+  await main.locator('.cbubble.user').last().hover();
+  await main.getByTestId('chat-edit-message').last().click();
+  await main.getByTestId('chat-edit-input').fill('Say the steps of a dictation in words');
+  await main.getByTestId('chat-edit-save').click();
   await expect(main.getByText('In words: press, speak, press again.')).toBeVisible({ timeout: 20_000 });
   await expect(main.getByTestId('chat-branch-count')).toHaveText('2/2');
   await expect(visuals(main)).toHaveCount(0);

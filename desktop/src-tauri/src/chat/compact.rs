@@ -336,7 +336,7 @@ async fn summarise_claimed(app: Option<&AppHandle>, conversation: u64, range: Ra
     let max_chars = (reading as usize / 3) * 36 / 10;
     let named = models_switched(&conv.messages);
     let lines: Vec<String> = conv.messages[range.clone()].iter().map(|m| line(m, max_chars.max(400), named)).collect();
-    // What it read: kept only over the same messages (another branch shown meanwhile: Retry, Edit, ‹ ›).
+    // What it read: kept only over the same messages (another branch shown meanwhile: an Edit, ‹ ›).
     let read = crate::chat::chats::print_of(&conv.messages[..range.end]);
     let mut notes: Option<String> = conv.usable_summary().map(|s| s.text.clone());
     let turns = TURNS.load(Ordering::SeqCst);

@@ -34,13 +34,14 @@
 //! never sends it). And a **hello with both** `device` and `pair`: the
 //! device is judged first (`pairing::judge`).
 //!
-//! **Retry and its versions** (16 Nov 2026, `"versions"` and `"retry"` in
-//! [`CAN`]): a thread's message carries its ‹ k/n › ([`Version`]) and an
-//! answer ↻ may ask again (`retry`); `show_version` switches one (on the PC
-//! too: one version shown a conversation), `retry` asks an answer's question
-//! again; [`Out::Versions`] tells every phone a conversation's version
-//! changed elsewhere. A page from before ignores the fields; a PC from
-//! before says neither, so the page offers neither.
+//! **Versions** (16 Nov 2026, `"versions"` in [`CAN`]): a thread's message
+//! carries its ‹ k/n › ([`Version`]) — an Edit's, or an older Retry's —;
+//! `show_version` switches one (on the PC too: one version shown a
+//! conversation); [`Out::Versions`] tells every phone a conversation's
+//! version changed elsewhere. A page from before ignores the fields; a PC
+//! from before says nothing, so the page offers nothing. (↻ Retry and 👍 / 👎
+//! under an answer came and went the same day: an answer's row is Copy, ▶
+//! and its time — a thread message's `ts`.)
 //!
 //! **Edit** (16 Nov 2026, `"edit"` in [`CAN`]): a thread's question the
 //! phone may change carries `edit`, its time in Chat (and a checked answer
@@ -165,16 +166,6 @@ pub enum In {
         #[serde(default)]
         id: String,
     },
-    /// **👍 / 👎 on answer `id`** (one this phone was given, `answer.id`; 16
-    /// Nov 2026, `chat/feedback.rs`): `rating` "good" or "bad", none to take
-    /// it back — kept with the answer in Chat, as the desktop's thumbs keep
-    /// it. [`Out::Rated`] says what's kept (`"rate"` in [`CAN`]).
-    Rate {
-        #[serde(default)]
-        id: String,
-        #[serde(default)]
-        rating: Option<String>,
-    },
     /// Switch Chat's model: one of `ready.models` by its `id` (the first
     /// pages), or a row of the picker (`ready.picker`) as Chat's own picker
     /// picks it — `provider`, `model`, a server's `baseUrl`, an on-device
@@ -214,13 +205,6 @@ pub enum In {
     /// counts) — on the PC too: one version shown a conversation, the last
     /// switch wins (`link/chats.rs`). Answered with its `thread`.
     ShowVersion { chat: u64, at: usize, place: u32 },
-    /// **↻ Retry** (`"retry"` in [`CAN`]): answer `id` (one this phone was
-    /// given, `chat:<conversation>:<index>`, with `retry` on it) asked again,
-    /// the old answer kept as a version; not in a Code chat.
-    Retry {
-        #[serde(default)]
-        id: String,
-    },
     /// **✎ Edit** (`"edit"` in [`CAN`]): conversation `chat`'s question at
     /// `at` — the one whose time in Chat is `ts`, as its thread message
     /// said (so a question switched away meanwhile is never the one
@@ -350,11 +334,10 @@ impl Talk {
 /// answers the Code side's messages — read, act, answer cards — and says
 /// in `ready.code` whether this phone may use them now ([`CodeReady`]).
 /// `"versions"` (16 Nov 2026): a thread's messages carry their ‹ k/n ›
-/// ([`Version`]) and `show_version` switches it; `"retry"`: ↻ under an
-/// answer that says `retry` ([`In::Retry`]). `"rate"` (16 Nov 2026): 👍 / 👎 on an
-/// answer ([`In::Rate`]). `"edit"` (16 Nov 2026): ✎ on a question that
-/// says `edit` ([`In::Edit`]).
-pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak", "code", "code_act", "approve", "versions", "retry", "rate", "edit"];
+/// ([`Version`]) and `show_version` switches it. `"edit"` (16 Nov 2026): ✎
+/// on a question that says `edit` ([`In::Edit`]). (`"retry"` and `"rate"`,
+/// ↻ and 👍 / 👎 under an answer, were taken out the same day: never said.)
+pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak", "code", "code_act", "approve", "versions", "edit"];
 
 /// The longest "Tell the agent…" (characters), as a typed question.
 pub const MAX_CODE_TEXT: usize = 4_000;
@@ -517,23 +500,20 @@ pub struct ThreadMessage {
     /// it as a report, not their bubble).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub kind: String,
-    /// **An answer's 👍 / 👎** (`chat/feedback.rs`): "good" or "bad", as Chat
-    /// keeps it ([`In::Rate`]).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rating: Option<String>,
     /// **The files an answer shared into the conversation** (`share_files`,
     /// `chat/shares.rs`; an agent's report marker's too): their names only —
     /// the files and pictures stay on the PC. The page lists them under it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
-    /// **Its versions** (Retry's and Edit's, `chat/chats/branches.rs`): ‹
-    /// shown / count › on it, switched with `show_version` at its `at`.
+    /// **Its versions** (an Edit's, or an older Retry's:
+    /// `chat/chats/branches.rs`): ‹ shown / count › on it, switched with
+    /// `show_version` at its `at`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<Version>,
-    /// An answer ↻ may ask again from the phone (just after the person's own
-    /// question, not in a Code chat: `link/chats.rs` `retryable`).
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub retry: bool,
+    /// **Its time in Chat** (unix seconds; 0, left out: not known): an
+    /// answer's row says it ("12 minutes ago", 16 Nov 2026).
+    #[serde(skip_serializing_if = "is_zero_ts")]
+    pub ts: u64,
     /// **A question ✎ may edit from the phone** (the person's own, its words
     /// all here, no passage or files of the PC's with it, not in a Code
     /// chat: `link/chats.rs` `editable`): its time in Chat, which an `edit`
@@ -619,10 +599,6 @@ pub enum Out {
         done: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<String>,
-        /// The checked answer may be asked again from the phone (↻, as a
-        /// thread's message says: [`ThreadMessage::retry`]).
-        #[serde(skip_serializing_if = "std::ops::Not::not")]
-        retry: bool,
         /// ✎ on the question just before it (the one just asked): that
         /// question's time in Chat, as a thread's question says it
         /// ([`ThreadMessage::edit`]); 0 (left out): no ✎.
@@ -657,8 +633,8 @@ pub enum Out {
     Chat { id: u64, title: String },
     /// Conversation `id` was renamed (in Chat on the PC).
     Title { id: u64, title: String },
-    /// **Conversation `chat`'s version shown changed** (16 Nov 2026: a ‹ ›,
-    /// a Retry or an Edit, on the PC or another phone; every phone hears): a
+    /// **Conversation `chat`'s version shown changed** (16 Nov 2026: a ‹ ›
+    /// or an Edit, on the PC or another phone; every phone hears): a
     /// phone that shows it asks for it again (`open_chat`) once nothing of
     /// its own is under way there.
     Versions { chat: u64 },
@@ -669,13 +645,6 @@ pub enum Out {
     /// What the phone said, transcribed and corrected, for its text box (a
     /// `start {mode: "words"}`): nothing was asked.
     Words { text: String },
-    /// Answer `id`'s 👍 / 👎 as Chat keeps it now ([`In::Rate`]): "good",
-    /// "bad" or none.
-    Rated {
-        id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        rating: Option<String>,
-    },
     Pong,
     // ---- Remote Control (2026-11-08) ----
     /// The Code side: the workspaces that allow it (most recently used
@@ -770,7 +739,6 @@ const KNOWN: &[&str] = &[
     "interrupt",
     "ask",
     "read_aloud",
-    "rate",
     "set_model",
     "set_effort",
     "set_fast",
@@ -779,7 +747,6 @@ const KNOWN: &[&str] = &[
     "new_chat",
     "picture",
     "show_version",
-    "retry",
     "edit",
     "ping",
     "code_list",
@@ -976,12 +943,6 @@ mod tests {
             In::Ask { text: "When is the bin day?".into(), chat: None, pictures: 0, as_text: false, speak: false }
         );
         assert_eq!(parse(r#"{"type":"read_aloud","id":"chat:3:5"}"#).unwrap(), In::ReadAloud { id: "chat:3:5".into() });
-        // 👍 / 👎 on an answer (16 Nov 2026): a rating, or none to take it back; what's kept comes back.
-        assert_eq!(parse(r#"{"type":"rate","id":"chat:3:5","rating":"bad"}"#).unwrap(), In::Rate { id: "chat:3:5".into(), rating: Some("bad".into()) });
-        assert_eq!(parse(r#"{"type":"rate","id":"chat:3:5","rating":null}"#).unwrap(), In::Rate { id: "chat:3:5".into(), rating: None });
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&Out::Rated { id: "chat:3:5".into(), rating: Some("good".into()) }.json()).unwrap(), serde_json::json!({"type":"rated","id":"chat:3:5","rating":"good"}));
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&Out::Rated { id: "chat:3:5".into(), rating: None }.json()).unwrap(), serde_json::json!({"type":"rated","id":"chat:3:5"}));
-        assert!(CAN.contains(&"rate"));
         // A row of Chat's picker: its provider, model, server or file.
         assert_eq!(
             parse(r#"{"type":"set_model","provider":"local","model":"llama3","baseUrl":"http://localhost:11434/v1"}"#).unwrap(),
@@ -1032,9 +993,9 @@ mod tests {
         assert_eq!(j(Out::State { phase: Phase::Transcribing }), serde_json::json!({"type":"state","phase":"transcribing"}));
         assert_eq!(j(Out::Heard { text: "hi".into() }), serde_json::json!({"type":"heard","text":"hi"}));
         assert_eq!(j(Out::Step { label: "Thinking".into() }), serde_json::json!({"type":"step","label":"Thinking"}));
-        assert_eq!(j(Out::Answer { text: "Yes.".into(), done: false, id: None, retry: false, edit: 0 }), serde_json::json!({"type":"answer","text":"Yes.","final":false}));
+        assert_eq!(j(Out::Answer { text: "Yes.".into(), done: false, id: None, edit: 0 }), serde_json::json!({"type":"answer","text":"Yes.","final":false}));
         assert_eq!(
-            j(Out::Answer { text: "Yes.".into(), done: true, id: Some("chat:3:5".into()), retry: false, edit: 0 }),
+            j(Out::Answer { text: "Yes.".into(), done: true, id: Some("chat:3:5".into()), edit: 0 }),
             serde_json::json!({"type":"answer","text":"Yes.","final":true,"id":"chat:3:5"})
         );
         assert_eq!(j(Out::SpeakStart { rate: DOWN_RATE }), serde_json::json!({"type":"speak_start","rate":24000}));
@@ -1191,8 +1152,8 @@ mod tests {
         assert_eq!(shared_list("PC_TO_PHONE"), CODE_OUT);
         assert_eq!(shared_list("CODE_CAN"), ["code", "code_act", "approve"]);
         assert_eq!(&CAN[8..11], &["code", "code_act", "approve"], "after what was there before");
-        // (Then 👍 / 👎, 16 Nov 2026: `rate`, after them; then ✎ Edit.)
-        assert_eq!(&CAN[13..], &["rate", "edit"]);
+        // (Then ‹ › and ✎ Edit, 16 Nov 2026.)
+        assert_eq!(&CAN[11..], &["versions", "edit"]);
         for t in CODE_IN {
             assert!(KNOWN.contains(t), "{t}");
         }
@@ -1344,28 +1305,27 @@ mod tests {
     }
 
     #[test]
-    fn retry_and_its_versions_on_the_phone_are_v1_additions() {
+    fn versions_on_the_phone_are_a_v1_addition() {
         // ‹ › on a message: the conversation, the message's place, the version wanted.
         assert_eq!(parse(r#"{"type":"show_version","chat":41,"at":3,"place":1}"#).unwrap(), In::ShowVersion { chat: 41, at: 3, place: 1 });
         assert_eq!(parse(r#"{"type":"show_version","chat":41,"at":3}"#).unwrap_err(), "Yap didn't understand that message", "no place");
         assert_eq!(parse(r#"{"type":"show_version","chat":41,"at":-1,"place":1}"#).unwrap_err(), "Yap didn't understand that message");
-        // ↻ under an answer: its id, as ▶ names it.
-        assert_eq!(parse(r#"{"type":"retry","id":"chat:41:3"}"#).unwrap(), In::Retry { id: "chat:41:3".into() });
-        assert_eq!(parse(r#"{"type":"retry"}"#).unwrap(), In::Retry { id: String::new() }, "no id: refused by the PC as not given");
-        for t in ["show_version", "retry"] {
-            assert!(KNOWN.contains(&t), "{t}");
+        assert!(KNOWN.contains(&"show_version"));
+        // ↻ Retry and 👍 / 👎 came and went (16 Nov 2026): never asked for, never offered.
+        for t in ["retry", "rate"] {
+            assert!(!KNOWN.contains(&t) && !CAN.contains(&t), "{t}");
+            assert!(parse(&format!(r#"{{"type":"{t}","id":"chat:41:3"}}"#)).is_err(), "{t}");
         }
         // Said in `ready.can`, after everything that was there before.
-        assert_eq!(&CAN[11..13], &["versions", "retry"]);
-        assert_eq!(&CAN[..11], &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak", "code", "code_act", "approve"]);
-        // A thread's message with its ‹ k/n › and ↻; one without says neither.
+        assert_eq!(&CAN[..12], &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak", "code", "code_act", "approve", "versions"]);
+        // A thread's message with its ‹ k/n › and its time; one without says neither.
         let j = |o: Out| serde_json::from_str::<serde_json::Value>(&o.json()).unwrap();
         let thread = Out::Thread {
             id: Some(41),
             title: "Trip packing list".into(),
             messages: vec![
                 ThreadMessage { role: "user", text: "What to pack?".into(), version: Some(Version { at: 0, shown: 2, count: 2 }), ..Default::default() },
-                ThreadMessage { role: "assistant", text: "A coat.".into(), id: Some("chat:41:1".into()), version: Some(Version { at: 1, shown: 1, count: 3 }), retry: true, ..Default::default() },
+                ThreadMessage { role: "assistant", text: "A coat.".into(), id: Some("chat:41:1".into()), version: Some(Version { at: 1, shown: 1, count: 3 }), ts: 1_731_772_800, ..Default::default() },
                 ThreadMessage { role: "assistant", text: "And boots.".into(), id: Some("chat:41:2".into()), ..Default::default() },
             ],
             more: false,
@@ -1375,16 +1335,12 @@ mod tests {
         };
         let v = j(thread);
         assert_eq!(v["messages"][0]["version"], serde_json::json!({"at":0,"shown":2,"count":2}));
-        assert!(v["messages"][0].get("retry").is_none());
         assert_eq!(v["messages"][1]["version"], serde_json::json!({"at":1,"shown":1,"count":3}));
-        assert_eq!(v["messages"][1]["retry"], true);
-        assert!(v["messages"][2].get("version").is_none() && v["messages"][2].get("retry").is_none(), "neither: left out");
-        // Another screen switched a version (or retried, or edited): every phone hears.
+        assert_eq!(v["messages"][1]["ts"], 1_731_772_800u64);
+        assert!(v["messages"][2].get("version").is_none() && v["messages"][2].get("ts").is_none(), "neither: left out");
+        assert!(v["messages"].as_array().unwrap().iter().all(|m| m.get("retry").is_none() && m.get("rating").is_none()));
+        // Another screen switched a version (or edited): every phone hears.
         assert_eq!(j(Out::Versions { chat: 41 }), serde_json::json!({"type":"versions","chat":41}));
-        assert_eq!(
-            j(Out::Answer { text: "Yes.".into(), done: true, id: Some("chat:3:5".into()), retry: true, edit: 0 }),
-            serde_json::json!({"type":"answer","text":"Yes.","final":true,"id":"chat:3:5","retry":true})
-        );
     }
 
     #[test]
@@ -1412,7 +1368,7 @@ mod tests {
             title: "Trip packing list".into(),
             messages: vec![
                 ThreadMessage { role: "user", text: "What to pack?".into(), edit: 1_731_772_800_123, ..Default::default() },
-                ThreadMessage { role: "assistant", text: "A coat.".into(), id: Some("chat:41:1".into()), retry: true, ..Default::default() },
+                ThreadMessage { role: "assistant", text: "A coat.".into(), id: Some("chat:41:1".into()), ..Default::default() },
                 ThreadMessage { role: "user", text: "The agent: done.".into(), kind: "agentReport".into(), ..Default::default() },
             ],
             more: false,
@@ -1425,8 +1381,8 @@ mod tests {
         assert!(v["messages"][2].get("edit").is_none());
         // A checked answer whose question ✎ may edit (the one just asked): that question's time.
         assert_eq!(
-            j(Out::Answer { text: "Yes.".into(), done: true, id: Some("chat:3:5".into()), retry: true, edit: 1_731_772_800_120 }),
-            serde_json::json!({"type":"answer","text":"Yes.","final":true,"id":"chat:3:5","retry":true,"edit":1_731_772_800_120u64})
+            j(Out::Answer { text: "Yes.".into(), done: true, id: Some("chat:3:5".into()), edit: 1_731_772_800_120 }),
+            serde_json::json!({"type":"answer","text":"Yes.","final":true,"id":"chat:3:5","edit":1_731_772_800_120u64})
         );
     }
 }

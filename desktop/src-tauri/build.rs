@@ -26,6 +26,8 @@ const LINK_SHARED: &[(&str, &str)] = &[
     ("core/working.js", "../src/lib/core/working.js"),
     ("core/codeChats.js", "../src/lib/core/codeChats.js"),
     ("core/chatStatus.js", "../src/lib/core/chatStatus.js"),
+    // (An answer's time in words, as the PC's row under it says it: "12 minutes ago".)
+    ("core/whenSaid.js", "../src/lib/core/whenSaid.js"),
     ("core/pageConfirm.js", "../src/lib/views/chat/pageConfirm.js"),
     ("providers/openai.svg", "../src/assets/providers/openai.svg"),
     ("providers/openai-oss.svg", "../src/assets/providers/openai-oss.svg"),

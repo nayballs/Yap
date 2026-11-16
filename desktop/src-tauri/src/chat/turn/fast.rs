@@ -4,7 +4,7 @@
 //! across the meetings. Each saves its question like any other, and
 //! replaces an answer still coming in its conversation (`stop`).
 
-use super::{resolve_chat_endpoint, save_question, turn_conversation, ChatTurn};
+use super::{resolve_chat_endpoint, turn_conversation, ChatTurn};
 use crate::config::YapConfig;
 
 /// A page Yap opens beside the chat by itself: the page, the answer's line
@@ -81,7 +81,7 @@ pub(super) fn page_turn(
     stop: &crate::chat::stream::Stoppable,
 ) -> Result<ChatTurn, String> {
     let conv = turn_conversation(conversation_id, text);
-    let user_index = save_question(conv.id, text, by_voice, &[])?;
+    let user_index = crate::chat::chats::append_question(conv.id, text, by_voice, &[])?;
     stop.answers(conv.id);
     asked(conv.id, user_index);
     if let Some(w) = watcher {
@@ -126,7 +126,7 @@ pub(super) fn agent_answer_turn(
     stop: &crate::chat::stream::Stoppable,
 ) -> Result<ChatTurn, String> {
     let conv = turn_conversation(conversation_id, text);
-    let user_index = save_question(conv.id, text, by_voice, &[])?;
+    let user_index = crate::chat::chats::append_question(conv.id, text, by_voice, &[])?;
     stop.answers(conv.id);
     asked(conv.id, user_index);
     let (reply, chip) = match answer {
@@ -177,7 +177,7 @@ pub(super) async fn app_turn(
     stop: &crate::chat::stream::Stoppable,
 ) -> Result<ChatTurn, String> {
     let conv = turn_conversation(conversation_id, text);
-    let user_index = save_question(conv.id, text, by_voice, &[])?;
+    let user_index = crate::chat::chats::append_question(conv.id, text, by_voice, &[])?;
     stop.answers(conv.id);
     asked(conv.id, user_index);
     // What its answer leaves open: "Did you mean …?", "Which one?", the app
@@ -225,7 +225,7 @@ pub(super) fn skill_asks_turn(
     if conv.scope.is_empty() && conv.messages.is_empty() {
         crate::chat::chats::set_scope(conv.id, "meetings");
     }
-    let user_index = save_question(conv.id, text, by_voice, &[])?;
+    let user_index = crate::chat::chats::append_question(conv.id, text, by_voice, &[])?;
     stop.answers(conv.id);
     asked(conv.id, user_index);
     let tools_used = vec![format!("Ran /{command}")];
@@ -270,7 +270,7 @@ pub(super) async fn passages_turn(
     if conv.scope.is_empty() && (skill.is_none() || conv.messages.is_empty()) {
         crate::chat::chats::set_scope(conv.id, "meetings");
     }
-    let user_index = save_question(conv.id, text, by_voice, &[])?;
+    let user_index = crate::chat::chats::append_question(conv.id, text, by_voice, &[])?;
     stop.answers(conv.id);
     asked(conv.id, user_index);
     let found = match &skill {

@@ -84,7 +84,7 @@ pub const PAIR_DONE: &str = "yap-link-pair-done";
 /// A phone paired already brought Settings' code (`{name}`): the code has
 /// done its job (it's used up), and Settings → Phone says so.
 pub const ALREADY_PAIRED: &str = "yap-link-already-paired";
-/// A phone switched a conversation's version shown, or retried an answer
+/// A phone switched a conversation's version shown, or edited a message
 /// (`{conversationId}`): the Chat view reads it again if it's the one open.
 pub const VERSIONS: &str = "yap-chat-versions";
 
@@ -254,8 +254,8 @@ impl Hub {
         }
     }
 
-    /// **Conversation `id`'s version shown changed** (16 Nov 2026: a ‹ ›, a
-    /// Retry or an Edit): every connected phone hears `versions` (one that
+    /// **Conversation `id`'s version shown changed** (16 Nov 2026: a ‹ › or
+    /// an Edit): every connected phone hears `versions` (one that
     /// shows it asks for it again), but session `except` (the phone that
     /// switched it, sent its thread already).
     fn tell_versions(&self, id: u64, except: Option<u64>) {
@@ -437,11 +437,10 @@ pub fn titled(id: u64, title: &str) {
     }
 }
 
-/// **Conversation `id`'s version shown changed on the PC** (Chat's ‹ ›, a
-/// Retry or an Edit there, 16 Nov 2026): every connected phone hears, and
-/// one that shows it asks for it again — one version shown a conversation,
-/// the last switch wins, wherever it was made (`link.md`, Retry and
-/// versions).
+/// **Conversation `id`'s version shown changed on the PC** (Chat's ‹ › or
+/// an Edit there, 16 Nov 2026): every connected phone hears, and one that
+/// shows it asks for it again — one version shown a conversation, the last
+/// switch wins, wherever it was made (`link.md`, Versions).
 pub fn versions_changed(id: u64) {
     if let Some(h) = hub() {
         h.tell_versions(id, None);

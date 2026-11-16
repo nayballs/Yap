@@ -16,7 +16,8 @@
 //!   `chats/connector_chats.json`, the connectors each chat switched off, by id, when any, and
 //!   `chats/chat_styles.json`, the person's answer styles and each chat's, when any, and
 //!   `chats/projects.json`, the person's projects and the chats in each, when any, and
-//!   `chats/feedback.json`, their 👍 / 👎 on answers and why, when any: `chat/feedback.rs`), and
+//!   `chats/feedback.json`, the 👍 / 👎 given on answers on 16 Nov 2026 before they were taken out —
+//!   `chat_feedback.json` as it was left, never written since —, when there is one), and
 //!   `memory/` — Memory's own export (`memory::export`) and `memory.json`;
 //! - `agents/` — Yap Code's agents, the tasks Chat handed to Claude Code
 //!   (`agents.json`), the workspaces (`workspaces.json`), each agent's log and the pictures its
@@ -333,10 +334,6 @@ pub fn chat_markdown(c: &crate::chat::chats::Conversation, when: &dyn Fn(u64) ->
         if !shared.is_empty() {
             out.push_str(&format!("\nShared files: {}\n", shared.join(", ")));
         }
-        // Your 👍 / 👎 on it (chat/feedback.rs), and why.
-        if let Some(fb) = m.feedback.as_ref().filter(|_| m.role == "assistant") {
-            out.push_str(&format!("\nYour feedback: {}\n", crate::chat::feedback::line(fb)));
-        }
     }
     out
 }
@@ -389,6 +386,9 @@ pub struct Inputs {
     /// projects.json: the person's projects and which chats are in them
     /// (chat/projects.rs), when there are any (their files stay in projects/).
     pub projects: Option<Value>,
+    /// chat_feedback.json as it was left (👍 / 👎 on answers, 16 Nov 2026,
+    /// taken out the same day: never written since), when there is one.
+    pub feedback: Option<Value>,
     /// config.json as `YapConfig` serialises.
     pub config: Value,
     /// Whether the audio is in it (the README says).
@@ -403,8 +403,8 @@ never what you said.\n\
 - notes/ and meetings/: each note and meeting as Markdown (its summary, your notes and the transcript). \
 notes/notes.json is all of them as Yap keeps them, with your folders and actions; \
 notes/versions.json, each note's earlier versions (Version history), newest first.\n\
-- chats/: each chat as Markdown, and chats.json; feedback.json, your thumbs up and down on Chat's answers and why, \
-with the start of each answer, when you gave any (kept on this PC only: Yap never sent them anywhere).\n\
+- chats/: each chat as Markdown, and chats.json; feedback.json, the thumbs up and down you gave Chat's answers \
+the day Yap had them, when you gave any (kept on this PC only: Yap never sent them anywhere).\n\
 - tasks.json: the tasks you added and the ones you archived.\n\
 - skills.json: the Skills you made (your own instructions, run with /name).\n\
 - routines.json: your routines (Skills that run by themselves) and their recent runs, when you have any.\n\
@@ -477,14 +477,13 @@ screenshots/: Chat's screenshots (PNG).\n"
         files.push((name, chat_markdown(c, when).into_bytes()));
     }
     files.push(("chats/chats.json".into(), pretty(&json!({ "conversations": i.chats }))));
-    // Your 👍 / 👎 on answers and why (chat/feedback.rs), each with its chat and the answer's start, when any.
-    let feedback = crate::chat::feedback::export_rows(&i.chats);
-    if !feedback.is_empty() {
-        files.push(("chats/feedback.json".into(), pretty(&json!({ "feedback": feedback }))));
-    }
     // Which Claude Code session each chat on your Claude plan was (when any was).
     if i.claude_sessions["conversations"].as_object().is_some_and(|c| !c.is_empty()) {
         files.push(("chats/claude_sessions.json".into(), pretty(&i.claude_sessions)));
+    }
+    // The 👍 / 👎 given on answers the day they were there (16 Nov 2026), when any were.
+    if let Some(f) = &i.feedback {
+        files.push(("chats/feedback.json".into(), pretty(f)));
     }
     // The connectors each chat switched off (Connectors ▸), when any did.
     if let Some(c) = &i.connector_chats {
@@ -788,6 +787,7 @@ fn inputs(audio: bool) -> Inputs {
         connector_chats: crate::integrations::connectors::chats::snapshot().and_then(|f| serde_json::to_value(f).ok()),
         chat_styles: crate::chat::styles::snapshot(),
         projects: crate::chat::projects::snapshot(),
+        feedback: std::fs::read(crate::config::data_dir().join("chat_feedback.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()),
         config: serde_json::to_value(&cfg).unwrap_or(Value::Null),
         audio,
     }
@@ -1043,6 +1043,7 @@ mod tests {
             connector_chats: Some(json!({ "version": 1, "chats": { "3": { "off": ["c1"] } } })),
             chat_styles: Some(json!({ "styles": [{ "id": "s-1", "name": "Like a friend", "instructions": "Warm and brief.", "createdMs": 1 }], "chats": { "3": "s-1" } })),
             projects: Some(json!({ "projects": [{ "id": "p-1", "name": "Allotment", "instructions": "Use metric units." }], "chats": { "3": "p-1" } })),
+            feedback: None,
             connectors: Some(json!({ "connectors": [{ "id": "c1", "name": "Allotment tracker", "reached": { "kind": "link", "address": "https://mcp.example.com/mcp", "headerNames": ["X-Api-Key"] } }] })),
             config: serde_json::to_value(cfg).unwrap(),
             audio: false,
@@ -1214,28 +1215,13 @@ mod tests {
     }
 
     #[test]
-    fn your_thumbs_on_answers_are_in_the_file() {
-        use crate::chat::feedback::{clean, FeedbackIn};
-        let rated = |text: &str, ts: u64, rating: &str, reasons: &[&str], note: &str| crate::chat::chats::ChatMessage {
-            role: "assistant".into(),
-            text: text.into(),
-            ts,
-            feedback: Some(clean(&FeedbackIn { rating: rating.into(), reasons: reasons.iter().map(|r| r.to_string()).collect(), note: note.into() }, 5).unwrap()),
-            ..Default::default()
-        };
-        let question = crate::chat::chats::ChatMessage { role: "user".into(), text: "Which bus?".into(), ts: 1, ..Default::default() };
-        let messages = vec![question.clone(), rated("The 42, every ten minutes.", 2, "bad", &["untrue", "other"], "It's the 43 now"), question, rated("The 43.", 4, "good", &[], "")];
-        let conv = crate::chat::chats::Conversation { id: 3, title: "Buses".into(), created_ts: 1, updated_ts: 1, messages, scope: String::new(), note: None, archived_ts: 0, summary: None, closed_tabs: Vec::new(), branches: Vec::new(), forks: Vec::new(), incognito: false };
-        let md = chat_markdown(&conv, &when);
-        assert!(md.contains("\nYour feedback: 👎 Not true: “It's the 43 now”\n") && md.contains("\nYour feedback: 👍\n"), "{md}");
+    fn the_thumbs_given_the_day_they_were_there_are_in_the_file_as_left() {
         let cfg = seeded_config();
-        let files = text_files(&Inputs { chats: vec![conv], ..inputs_with(&cfg) }, &when);
+        let left = json!({ "version": 1, "conversations": [{ "id": 3, "marks": [{ "ts": 2, "rating": "good" }] }] });
+        let files = text_files(&Inputs { feedback: Some(left.clone()), ..inputs_with(&cfg) }, &when);
         let json: Value = serde_json::from_slice(&files.iter().find(|(n, _)| n == "chats/feedback.json").expect("chats/feedback.json").1).unwrap();
-        let rows = json["feedback"].as_array().unwrap();
-        assert_eq!(rows.len(), 2);
-        assert_eq!((rows[0]["chat"].as_str(), rows[0]["rating"].as_str(), rows[0]["note"].as_str()), (Some("Buses"), Some("bad"), Some("It's the 43 now")));
-        assert!(String::from_utf8_lossy(&files[0].1).contains("feedback.json"), "the README says");
-        // None given: no file.
+        assert_eq!(json, left);
+        // None left: no file.
         assert!(!text_files(&inputs_with(&cfg), &when).iter().any(|(n, _)| n == "chats/feedback.json"));
     }
 
