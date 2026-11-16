@@ -197,6 +197,7 @@ export const SETTINGS_INDEX = [
   { page: 'skills', section: 'Your Skills', label: 'New Skill', desc: 'A name, a /command and what it should do', keywords: 'skills create new add slash command prompt template', anchor: 'skills-add' },
   { page: 'skills', section: "Yap's Skills", label: "Yap's Skills", desc: '/prep, /standup, /todos and more: open one, or save a copy', keywords: 'skills slash commands saved prompts instructions decisions follow-up email todos stand-up standup prep summary', anchor: 'skills-builtin' },
   { page: 'skills', section: 'More Skills', label: 'More Skills', desc: '/tickets, /risks, /coach and more, one switch away', keywords: 'skills more extra tickets prd product requirements risks coach weekly recap decision log open questions one-to-one project update', anchor: 'skills-more' },
+  { page: 'skills', section: 'Chat styles', label: 'Chat styles', desc: "How Chat's answers are written: Concise, Formal or your own", keywords: 'style styles tone concise explanatory formal normal writing answers length shorter create edit custom chat', anchor: 'chat-styles' },
   { page: 'skills', section: 'More Skills', label: 'Show in the / menu', desc: "Each Skill's switch: in the / menu and one-tap prompts, or not", keywords: 'skills slash menu show hide switch turn on off add remove list', anchor: 'skills-more' },
 
   // Yap Code (YapCodePage.svelte, agents.rs). ("jobs" in its words: what it was called until 7 Nov 2026.)

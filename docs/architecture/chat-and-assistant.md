@@ -5185,8 +5185,9 @@ read as one long bar. Now (`ChatThread.svelte`, `ChatView.svelte`,
   "Incognito chat" in the greeting's place, its line under it.
 - **The box, the Claude app's proportions**: in a plain chat (start screen
   and thread alike) two rows — the words, room for a second line (46 px),
-  then + on the left and Think, the mic and Send on the right; under it the
-  model, Style and Research as before. "How can I help you today?" on the
+  then + on the left (and what's on beside it: "Research ×", "Concise ×")
+  and Think, the mic and Send on the right; under it only the model (Style
+  and Research moved into the + menu, below). "How can I help you today?" on the
   start screen, "Reply…" after. The messages and the box share a column of
   their own, `--yap-chat-width` (app.css: 600 px × the Text size), measured
   from the Claude app's new-chat screen: its box 3.7 times as wide as its
@@ -5197,6 +5198,48 @@ read as one long bar. Now (`ChatThread.svelte`, `ChatView.svelte`,
 - e2e: `chat-start.spec.js` (the greeting's lines, the layout measured, the
   move frame by frame and none with reduced motion, a late night, light and
   dark), `voice-assistant.spec.js` (the mic's tooltip).
+
+## A plain chat's + menu (2026-11-16)
+
+The maintainer's follow-up, after the Claude desktop app's own + menu (seen on
+his screen): Research and Style move from under the box into the box's menu,
+and the menu takes the app's shape in Yap's own items (`Composer.svelte`
+`plainMenu`; a Code chat's menu as it was):
+
+- **Rows**, an icon each, one line, the shortcut or ›/✓ at the right, dividers
+  between the parts: **Upload or add files** (Ctrl+U), **Take a screenshot**
+  (the snip shortcut) — **Skills ›** (the "/" menu's list, yours then Yap's,
+  `skillMenu`; a pick goes in the box as "/command " for words to follow, as
+  Tab does in the "/" menu; More Skills…), **Connectors ›** (only with the
+  preview on: this chat's switches, as before, "1 of 2 on") — **Research**
+  (✓ while on; greyed with its why when Chat's model can't), **Style ›**
+  (the chat's style named at the right; Yap's four, yours, ✓ on the one in
+  use, Create & edit styles…) — **Voice replies** (✓ while on), its volume
+  slider and Voice settings…. The app's Add folder, Record a skill, Design
+  system and Add plugins have nothing behind them in Yap, so they're not
+  there; nor is Memory: Yap has no "use memory in this chat" switch (memory
+  is on or off for every chat in Settings → Memory, and an incognito chat
+  doesn't use it), and making one is more than a menu row.
+- **What's on shows in the box**, beside the +: "Research ×" (in the accent)
+  and the style's chip ("Concise ×") while it isn't Normal; × turns it off
+  or back to Normal. At Normal with Research off, nothing. Under the box only
+  the model and the context ring.
+- **Where it opens**: upwards from the + in a thread; downwards on the start
+  screen, as the app's does, unless the window has no room below.
+- **Keys**: Enter, Space or ↓ on + opens it on its first row (↑ on its
+  last); ↑ ↓ Home End move; → (or Enter) on a › row opens its submenu on its
+  first row, ← or Esc closes it again; Esc closes the menu and gives + the
+  focus back. The pointer on a › row opens its submenu. It's a dialog, not a
+  menu (it holds the volume slider); the Skills and Style submenus are menus
+  (`menuitem`, `menuitemradio`). **Ctrl+U** in a plain chat opens the file
+  picker from anywhere in Chat but a document being written (its own Ctrl+U),
+  a dialog or Settings, and never a key Yap's in-page shortcuts took first
+  (`defaultPrevented`); the shortcut sheet lists it.
+- e2e: `chat-start.spec.js` (the rows, opening downwards, the keyboard, a
+  Skill into the box, Ctrl+U and Upload with Windows' picker counted, never
+  opened; the menu, Style › and a chip in light and dark),
+  `chat-styles.spec.js`, `chat-research.spec.js` (both chips; light and dark),
+  `chat-connectors.spec.js`.
 
 ## Ctrl+Enter queues a message for after the answer (2026-11-15)
 
@@ -6745,11 +6788,16 @@ The Claude app's styles, from Anthropic's help pages: how answers are
 written, picked per chat. Chat's side only (a Code chat's answers are
 Claude Code's own).
 
-- **Picking one** (`StyleChip.svelte`, under the message box beside the
-  model): the chip names the chat's style; its menu has Yap's four —
+- **Picking one** (the message box's + menu → **Style ›**, `Composer.svelte`
+  with `chatStyles.svelte.js`, since 16 Nov 2026: [the + menu](#a-plain-chats--menu-2026-11-16);
+  a chip under the box beside the model before): Yap's four —
   Normal, Concise ("Shorter and more direct"), Explanatory ("For learning
   something new") and Formal ("Clear and polished") — then the person's own,
-  the one in use ticked, and "Create & edit styles…". A pick is kept for the
+  the one in use ticked, and "Create & edit styles…". Any style but Normal
+  shows as a chip in the box beside the + ("Concise ×": × goes back to
+  Normal). Settings → Skills → **Chat styles** (Settings search finds it)
+  opens the same dialog; its Use there sets the style new chats start with
+  (`chat_style_set` with no conversation). A pick is kept for the
   chat shown (`chat_style_set`) and is the last one picked: a new chat
   starts with it (`chat_style_of(null)`), as the Claude app's selection
   stays; the conversation the first question makes takes it
@@ -6780,9 +6828,10 @@ Claude Code's own).
   never chats.json: an older Yap's save can't lose a pick. A deleted chat's
   pick goes with it (`chat_delete`, `chat_delete_many`, Delete some of your
   data); Download your data has the file.
-- Tests: `cargo test chat::styles`; `chat-styles.spec.js` (the menu, the
-  block in the request, kept per chat and for a new one; one written from a
-  description, edited, used and deleted; light and dark).
+- Tests: `cargo test chat::styles`; `chat-styles.spec.js` (Style › in the +
+  menu, the chip in the box and its ×, the block in the request, kept per
+  chat and for a new one; one written from a description, edited, used and
+  deleted; Settings' Chat styles; light and dark).
 
 ## Research (2026-11-16)
 
@@ -6792,9 +6841,11 @@ research on Claude": turned on under the message box with web search on,
 next from what it finds, a thorough answer "with easy-to-check
 citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
 
-- **Asked for**: the **Research** chip under the message box beside Style
-  (`ResearchChip.svelte`, `chatResearch.svelte.js`): on, it's in the accent
-  and every question from the box is researched, until it's turned off (as
+- **Asked for**: **Research** in the message box's + menu (16 Nov 2026, as
+  the Claude app tucks it in its box's menu; a chip under the box beside
+  Style before; `Composer.svelte`, `chatResearch.svelte.js`): on, it's ticked
+  there and a "Research ×" chip sits in the box beside the + (× turns it
+  off), and every question from the box is researched, until it's turned off (as
   the Claude app's stays; for this run of Yap, never saved). Greyed, its
   tooltip saying why, when Chat's model can't (`chat_research_info`: web
   search off, a model that can't call tools); a click then says so. Or a

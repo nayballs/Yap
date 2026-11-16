@@ -363,7 +363,7 @@ export async function runScript(script, { send, state, options = {} }) {
             ...(step.cards ? { cards: step.cards } : {}),
             // Made-up pictures in the message box with the question (drawPng's options each).
             ...(Array.isArray(step.pictures) && step.pictures.length ? { pictures: step.pictures } : {}),
-            // Style under the box, and a new chat made incognito (chat/styles.rs, chat/incognito.rs).
+            // Style in the box's + menu, and a new chat made incognito (chat/styles.rs, chat/incognito.rs).
             ...(step.style ? { style: step.style } : {}),
             ...(step.incognito ? { incognito: true } : {}),
             ...(step.research ? { research: true } : {}),
