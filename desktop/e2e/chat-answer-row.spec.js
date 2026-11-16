@@ -4,8 +4,8 @@
 // - Under an answer: Copy, Fork from here, Pin as chapter, Read aloud (a speaker), then its time ("just now") and its
 //   model — never 👍 / 👎 or ↻ Retry (taken out the same day). Under the person's message, on hover: Copy and Edit.
 //   Each button's tooltip as the app's: its name, and what it does. Light and dark.
-// - Their size: in the app's proportions to the answer's own text, as measured on its screenshots (each square about
-//   1.6 of the text, its icon about 1.04, the time about 0.82), at any reading size.
+// - Their size: the Claude app's own, measured with Yap beside it on one screen (24 px squares, 18 px icons, the time
+//   13.5 px), in step with the reading size from there. The latest message's row always shown, as the app's.
 // - Copy copies the answer as text; Read aloud reads it (■ to stop).
 // - Fork from here: a new chat with the conversation up to that answer, opened; the original as it was.
 // - Pin as chapter: the answer's turn starts a chapter, named by Chat's model as its own chapters are — a divider
@@ -121,33 +121,35 @@ test('under an answer: Copy, Fork from here, Pin as chapter, Read aloud and its 
   await main.keyboard.press('Escape');
 });
 
-test('its size is the Claude app’s, in proportion to the answer’s text, at any reading size', async ({ yap, main, fakeLlm }) => {
+test('its size is the Claude app’s, measured beside it on one screen: 24 px squares, 18 px icons, 13.5 px time, in step with the reading size', async ({ yap, main, fakeLlm }) => {
   await freshChat(main);
   await ask(main, fakeLlm, 'Is a 35-litre rucksack enough?', 'Yes, for two days.');
-  const measure = () =>
-    rows(main)
+  const measure = (which) =>
+    thread(main)
+      .getByTestId(which)
       .last()
       .evaluate((row) => {
         const text = parseFloat(getComputedStyle(row.closest('.msgsin').querySelector('.cbubble.assistant')).fontSize);
         const b = row.querySelector('button.act').getBoundingClientRect();
         const icon = row.querySelector('button.act svg').getBoundingClientRect();
-        const when = parseFloat(getComputedStyle(row.querySelector('time.when')).fontSize);
-        return { text, square: b.height / text, icon: icon.width / text, when: when / text };
+        const t = row.querySelector('time.when');
+        return { text, square: b.height, wide: b.width, icon: icon.width, when: t ? parseFloat(getComputedStyle(t).fontSize) : null };
       });
-  let last = 0;
-  for (const size of ['default', 'larger']) {
-    await setConfig(yap, main, { readingSize: size });
-    await expect.poll(async () => (await measure()).text).not.toBe(last);
-    const m = await measure();
-    last = m.text;
-    // (The app: a 24 px square and a 12 px icon under 15.7 px text, its time 12.8 px.)
-    expect(m.square).toBeGreaterThan(1.5);
-    expect(m.square).toBeLessThan(1.7);
-    expect(m.icon).toBeGreaterThan(0.95);
-    expect(m.icon).toBeLessThan(1.1);
-    expect(m.when).toBeGreaterThan(0.78);
-    expect(m.when).toBeLessThan(0.86);
-  }
+  // At the default reading size: the Claude app's own (32.webp: Yap and the app side by side, one Windows scale).
+  let m = await measure('chat-answer-actions');
+  expect(m).toMatchObject({ text: 12.5, square: 24, wide: 24, icon: 18, when: 13.5 });
+  // The person's message row: the same squares (Copy, Edit), always shown under the latest message.
+  const u = await measure('chat-message-actions');
+  expect([u.square, u.icon]).toEqual([24, 18]);
+  await expect(thread(main).getByTestId('chat-message-actions').last().locator('.reveal')).toHaveCSS('opacity', '1');
+  // Larger reading: in step with it.
+  await setConfig(yap, main, { readingSize: 'larger' });
+  await expect.poll(async () => (await measure('chat-answer-actions')).text).toBeGreaterThan(12.5);
+  m = await measure('chat-answer-actions');
+  const k = m.text / 12.5;
+  expect(m.square).toBeCloseTo(24 * k, 0);
+  expect(m.icon).toBeCloseTo(18 * k, 0);
+  expect(m.when).toBeCloseTo(13.5 * k, 0);
   await setConfig(yap, main, { readingSize: 'default' });
 });
 

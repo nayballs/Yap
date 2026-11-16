@@ -1548,8 +1548,10 @@ test('Fork from here: a new Code chat with the conversation up to that messageâ€
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(2);
   const original = await ended(yap, agent.id);
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two']);
-  // Shown as the message is hovered (as Claude Code's app has them), hidden otherwise.
-  await expect(actionsOf(main, 'Two').locator('.reveal')).toHaveCSS('opacity', '0');
+  // The latest message's row always shown (as Claude Code's app has it); an earlier one's as it's hovered.
+  await expect(actionsOf(main, 'Two').locator('.reveal')).toHaveCSS('opacity', '1');
+  await main.getByRole('textbox', { name: 'Message' }).hover();
+  await expect(actionsOf(main, 'One').locator('.reveal')).toHaveCSS('opacity', '0');
   await thread(main).locator('.cbubble.user', { hasText: 'One' }).hover();
   await expect(actionsOf(main, 'One').locator('.reveal')).toHaveCSS('opacity', '1');
   await shot(main, '98-message-actions');

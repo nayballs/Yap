@@ -285,7 +285,7 @@ page; moved on in place every half minute). No ↻ Retry and no 👍 / 👎: the
 came and went on 16 Nov 2026 with the PC's, and a thread or an answer that
 still says `retry` gets none. Fork from here and Pin as chapter stay the
 PC's (no chapters here; a fork opens on the PC). The icons keep a thumb's
-44 px target, their ink about 0.8 of the answer's text, the time 0.875rem.
+44 px target, their ink about 0.87 of the answer's text, the time 0.9375rem (about 0.9 of it, as the app's beside Yap on one screen).
 ‹ › sleeps while something's under way (woken by `render()`, not a redraw
 of the thread). A PC from before (no `"versions"` in `ready.can`): no ‹ ›,
 whatever a thread carries. Kept with the thread in `sessionStorage` (`qv`,

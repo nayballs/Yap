@@ -862,8 +862,8 @@ main {
 
 /* Under an answer, as the PC's row (16 Nov 2026, the Claude app's): Copy and
    the speaker as quiet icons (■ while it's read), then its time ("12 minutes
-   ago", about 0.82 of the answer's text, as the app's), or "Speaking…". The
-   icons keep a thumb's 44 px target; their ink about 0.8 of the text. */
+   ago", about 0.9 of the answer's text, as the app's beside Yap on one screen), or "Speaking…". The
+   icons keep a thumb's 44 px target; their ink about 0.87 of the text (the app's 0.89). */
 .msgfoot {
   align-self: flex-start;
   display: flex;
@@ -958,7 +958,7 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   color: var(--yap-muted);
 }
 .speaking {

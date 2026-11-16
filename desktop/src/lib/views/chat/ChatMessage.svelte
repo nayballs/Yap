@@ -60,7 +60,7 @@
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
   const codeFiles = getContext(CODE_FILES) ?? null;
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, answer = null, visuals = null, onvisualprompt = null, keptPages = null, onkept = null, branch = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, answer = null, visuals = null, onvisualprompt = null, keptPages = null, onkept = null, branch = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false, latestAsk = false } = $props();
   // `visuals`: what the answer made to be seen, not read (chat/made.rs: "Made a visual", above its words;
   // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends. `keptPages`: the
   // pages it saved (chat/made/pages.rs: `[{page, version}]`, a card each, PageCard); `onkept(page, n)` opens one.
@@ -71,6 +71,8 @@
   // **Under the person's message in a Code chat** (14 Nov 2026, the Claude Code app's: ✓✓ and its time, Copy, Rewind to
   // here, Fork from here; `actions`: `{ rewind, fork }` — why each can't run now, '' when it can —, `onrewind`, `onfork`,
   // `code: true`; agents/rewind.rs).
+  // `latestAsk`: the person's latest message in the thread — its row always shown, as the Claude app shows it; the
+  // others' on hovering them.
   // **Under an answer** (16 Nov 2026, the Claude app's row; no 👍 / 👎 or ↻ Retry): `answer` — `{ fork, onfork, code,
   // pinned, onpin, pinning }` — Copy, Fork from here (why it can't now; a Code chat's through its session), Pin as
   // chapter (on: the answer starts a chapter, a second click takes it off), Read aloud, then its time and its model.
@@ -322,7 +324,7 @@
   <!-- Under the person's message, as the Claude app's (16 Nov 2026): on hovering the message (or the row, or its
        focus) — in a Code chat "✓✓ 12 minutes ago ·", then Copy, Rewind to here (unavailable while Claude works) and Fork
        from here; in Chat, Copy and Edit. Its versions' ‹ 1/2 › always, and a queued message's ✓ while it waits. -->
-  <div class="uacts" class:forked={!!branch} class:waiting={tick?.state === 'sent'} data-testid="chat-message-actions">
+  <div class="uacts" class:forked={!!branch} class:waiting={tick?.state === 'sent'} class:latest={latestAsk} data-testid="chat-message-actions">
     {#if branch}
       <BranchSwitch fork={branch.fork} why={branch.why} onbranch={branch.onbranch} />
     {/if}
@@ -634,36 +636,39 @@
   :global(:root[data-motion='reduced']) .cbubble.streaming .cbody > :global(* > li)::after {
     animation: none;
   }
-  /* **The rows under a message** (16 Nov 2026), in the Claude app's proportions as measured on its screenshots: each
-     icon about 0.76 of the message text's size, in a square about 1.6 of it, the squares side by side, the time about
-     0.82 of it. Sized to the answer's own text here, so they follow Settings → Appearance's reading size. */
+  /* **The rows under a message** (16 Nov 2026): the Claude app's own sizes, measured with Yap beside it on one screen
+     at one Windows scale (32.webp; the first pass, sized to a share of Yap's text, came out about 0.75 of the app's):
+     24 px squares side by side, glyphs about 13 px, the time 13.5 px. Those at Yap's default reading size, and in step
+     with Settings → Appearance's reading size from there (--row). */
   .uacts,
   .msgfoot {
+    --row: var(--yap-reading-scale);
     display: flex;
     align-items: center;
     min-width: 0;
     max-width: 100%;
-    font-size: calc(12.5px * var(--yap-reading-scale));
+    font-size: calc(13.5px * var(--row));
     line-height: 1.2;
   }
   .uacts {
     justify-content: flex-end;
-    gap: 2px;
-    /* (The last icon's ink under the bubble's text edge.) */
-    margin: 2px calc(13px - 0.42em) 0 auto;
+    gap: 0;
+    /* (The last icon's ink under the bubble's text edge: the square's half less the glyph's.) */
+    margin: 3px calc(13px - 5.4px * var(--row)) 0 auto;
   }
   /* (On hovering the message, the row or its focus; its ‹ 1/2 › always, and a queued message's ✓ while it waits.) */
   .reveal {
     display: inline-flex;
     align-items: center;
-    gap: 1px;
+    gap: 0;
     opacity: 0;
     transition: opacity 120ms ease;
   }
   .cbubble.user:hover + .uacts .reveal,
   .uacts:hover .reveal,
   .uacts:focus-within .reveal,
-  .uacts.waiting .reveal {
+  .uacts.waiting .reveal,
+  .uacts.latest .reveal {
     opacity: 1;
   }
   .act {
@@ -671,11 +676,11 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.6em;
-    height: 1.6em;
+    width: calc(24px * var(--row));
+    height: calc(24px * var(--row));
     padding: 0;
     border: none;
-    border-radius: 0.42em;
+    border-radius: calc(6px * var(--row));
     background: none;
     color: var(--yap-muted);
     font: inherit;
@@ -685,8 +690,8 @@
       color 0.12s;
   }
   .act svg {
-    width: 1.04em;
-    height: 1.04em;
+    width: calc(18px * var(--row));
+    height: calc(18px * var(--row));
   }
   .act:hover {
     background: color-mix(in srgb, var(--yap-fg) 8%, transparent);
@@ -730,30 +735,28 @@
   .when,
   .dot {
     flex: 0 0 auto;
-    font-size: 0.82em;
     color: var(--yap-muted);
     white-space: nowrap;
   }
   .when {
-    margin: 0 0.2em 0 0.55em;
+    margin: 0 0.2em 0 0.75em;
   }
   .dot {
-    margin: 0 0.35em;
+    margin: 0 0.4em;
   }
   .ticks {
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
     gap: 0.25em;
-    font-size: 0.82em;
     color: var(--yap-muted);
   }
   .ticks + .when {
-    margin-left: 0.3em;
+    margin-left: 0.35em;
   }
   .ticks svg {
-    width: 1.35em;
-    height: 1.15em;
+    width: 1.3em;
+    height: 1.1em;
   }
   .vh {
     position: absolute;
@@ -936,9 +939,9 @@
      "Speaking…" (the rows' sizes: .uacts, .msgfoot above). The first icon's ink under the bubble's text. */
   .msgfoot {
     align-self: flex-start;
-    gap: 1px;
-    min-height: 1.6em;
-    margin: -3px 0 2px calc(13px - 0.42em);
+    gap: 0;
+    min-height: calc(24px * var(--row));
+    margin: -2px 0 2px calc(13px - 5.4px * var(--row));
   }
   /* (Being read: Read aloud's square in the primary colour.) */
   .msgfoot .act.reading {
@@ -948,8 +951,8 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    margin-left: 0.55em;
-    font-size: 0.82em;
+    margin-left: 0.75em;
+    font-size: 0.93em;
     font-weight: 600;
     color: var(--yap-primary);
   }
@@ -994,7 +997,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.82em;
+    /* (Smaller than the time: the app has none, so it stays out of the way.) */
+    font-size: 0.89em;
     color: var(--yap-muted-55);
   }
   .byline.stopped {

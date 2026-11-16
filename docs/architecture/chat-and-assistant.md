@@ -6262,7 +6262,8 @@ tiny". So both rows are the app's, in every chat:
   ago") and the model that wrote it, cut short with an ellipsis when the row's
   narrow; "· Stopped" after it when it was. An older Retry's ‹ k/n › goes
   first.
-- **Under the person's message**, on hover (‹ 1/2 › always): in Chat **Copy**
+- **Under the person's message**, on hover, and always under the latest one
+  as the app shows it (‹ 1/2 › always): in Chat **Copy**
   and **Edit**; in a Code chat **✓✓ and its time** ("✓✓ 12 minutes ago ·":
   ✓ while a queued message waits, `data-testid chat-ticks`; ✓✓ once Claude
   has it, `chat-read` on every other), **Copy**, **Rewind to here** and
@@ -6280,14 +6281,17 @@ tiny". So both rows are the app's, in every chat:
   `ts` as Chat saved it, or — just sent, not read back yet — when it showed
   (`shownAt`). One 30-second clock moves them all on while the thread is
   shown (`views/chat/clock.svelte.js`).
-- **Their size, measured on the app's screenshots** (16 Nov 2026): its
-  icons about 0.76 of its answer text's size (12 px under 15.7 px text) in a
-  square about 1.53 of it (24 px), side by side, the time about 0.82 of it.
-  Yap's are the same proportions to Yap's own answer text: the rows'
-  `font-size` is the answer's (`12.5px × --yap-reading-scale`), each square
-  1.6em, its icon 1.04em (its ink ≈ 0.76em), the time 0.82em — so they follow
-  Settings → Appearance's reading size. Before, they were 22 px circles with
-  borders around 6–7 px of ink (`chat-answer-row.spec.js` measures them).
+- **Their size: the Claude app's own** (16 Nov 2026). Measured with Yap
+  beside the app on one screen at one Windows scale, glyph by glyph on the
+  decoded pixels: the app's squares 24 px side by side, its glyphs about
+  13 px, its time about 13.5 px, its message row the same. Yap's are those
+  at the default reading size — `.act` 24 px with an 18 px icon (its ink
+  about 13 px), the time 13.5 px, the model label a little smaller (the app
+  has none) — and in step with Settings → Appearance's reading size from
+  there (`--row`, the reading scale). A first pass sized them to a share of
+  Yap's own text and came out about three quarters of the app's (the app's
+  text is larger than Yap's too); before that they were 22 px circles with
+  borders around 6–7 px of ink. `chat-answer-row.spec.js` measures them.
 
 **Fork from here under an answer** (`chat_fork {id, index}`): a new chat with
 the conversation up to and including that answer — the person's messages and
