@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { REPO, buildFresh, feedbackOf, inWorktree, labConfig, minutesFrom, onOff, parseArgs, parseModel, parseSize, targetDir } from './options.mjs';
+import { REPO, buildFresh, inWorktree, labConfig, minutesFrom, onOff, parseArgs, parseModel, parseSize, targetDir } from './options.mjs';
 import { coloursIn, drawPng, meanLuma, pngSize, readPng, stitch } from './png.mjs';
 import { checkTurn, kindOf, probePasses, resultObject, screenChecks, valueHolds } from './script.mjs';
 import { pageCuts, PAGE_MAX } from './sheet.mjs';
@@ -46,10 +46,6 @@ describe('options', () => {
     // (Nor a side question's: `side "…" --keep --timeout 360` left "360" in the question, 15 Nov 2026.)
     assert.deepEqual(parseArgs(['Which file?', '--keep', '--timeout', '360', '--close']), { _: ['Which file?'], keep: true, timeout: '360', close: true });
     assert.throws(() => parseArgs(['--chat']), /--chat needs a value/);
-    // 👎's reasons and line for `ask --retry` (16 Nov 2026): the card's order, a line alone is Other's.
-    assert.deepEqual(feedbackOf('long, untrue,long', undefined), { reasons: ['untrue', 'long'], note: '' });
-    assert.deepEqual(feedbackOf(undefined, '  Shuts at 5 '), { reasons: ['other'], note: 'Shuts at 5' });
-    assert.throws(() => feedbackOf('rude'), /--feedback takes/);
     assert.equal(onOff('on', false, 'web'), true);
     assert.equal(onOff(undefined, true, 'web'), true);
     assert.throws(() => onOff('maybe', true, 'web'), /on or off/);
@@ -380,7 +376,7 @@ function lab(...args) {
   }
 }
 describe('the lab’s own turns (16 Nov 2026)', () => {
-  test('a Retry or an Edit starts at the person’s last message, so a Code chat’s rewound thread still has its answer', () => {
+  test('an Edit starts at the person’s last message, so a Code chat’s rewound thread still has its answer', () => {
     const conv = { messages: [{ role: 'user', text: 'Rename x' }, { role: 'assistant', text: 'Done.' }, { role: 'user', text: 'And y?' }, { role: 'assistant', text: 'Renamed y.' }] };
     assert.deepEqual(branchFrom(conv), { index: 2, text: 'And y?' });
     assert.equal(branchFrom({ messages: [] }), null);

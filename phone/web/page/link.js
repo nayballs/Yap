@@ -105,6 +105,7 @@ import { h } from './dom.js';
 import { CODE_INTRO, CODE_PROMPTS } from './core/codeChats.js';
 import { messageAt } from './core/chatStatus.js';
 import { statusTone, statusWord, modeLabel } from './core/agents.js';
+import { whenSaid, whenFull } from './core/whenSaid.js';
 
 const KIND_UP = 0x01;
 const KIND_DOWN = 0x02;
@@ -230,10 +231,10 @@ function loadThread() {
         ...(t.report ? { report: true, marker: String(t.marker || t.q || '') } : {}),
         qAt: Number.isInteger(t.qAt) ? t.qAt : -1,
         aAt: Number.isInteger(t.aAt) ? t.aAt : -1,
-        // Its versions' ‹ k/n › (the question's, the answer's) and whether ↻ may ask it again.
+        // Its versions' ‹ k/n › (the question's, the answer's) and the answer's time in Chat.
         qv: versionOf(t.qv),
         av: versionOf(t.av),
-        retry: !!t.retry,
+        aTs: chatTime(t.aTs),
         // ✎: its question's time in Chat, where the PC says it may be edited from here.
         edit: chatTime(t.edit),
       }))
@@ -385,13 +386,11 @@ const S = {
   told: '',
   modeAt: 0,
   codeNewAt: 0,
-  // Retry and versions (16 Nov 2026): `versions` heard while something of
-  // this phone's was under way here (the thread asked for again once it's
-  // over); a ‹ › sent, until its thread (or why not) comes; ↻ sent, with
-  // what it took off the thread here, put back if the PC says no.
+  // Versions (16 Nov 2026): `versions` heard while something of this
+  // phone's was under way here (the thread asked for again once it's over);
+  // a ‹ › sent, until its thread (or why not) comes.
   threadAgain: false,
   switching: 0,
-  retrying: null,
   // ✎ Edit (16 Nov 2026): the question in the box to change — {chat, at,
   // ts, draft} (its place and time in Chat, what the box had before, back
   // once it's sent or left) — and an edit sent, with what it took off the
@@ -1018,27 +1017,17 @@ function onText(text) {
       S.step = String(m.label ?? '');
       if (!S.workSince) S.workSince = performance.now();
       break;
-    case 'rated': {
-      // An answer's 👍 / 👎 as Chat keeps it now (`rate`'s reply).
-      const t = S.turns.find((x) => x.answerId && x.answerId === m.id);
-      if (t) {
-        t.rating = m.rating === 'good' || m.rating === 'bad' ? m.rating : '';
-        renderConvo();
-      }
-      break;
-    }
     case 'answer': {
       const t = currentTurn(true);
       t.a = String(m.text ?? '');
       if (m.final) {
         t.final = true;
-        // Its id in Chat: ▶ under it asks the PC to read it (and ↻, where the PC says, to ask it again).
+        // Its id in Chat: ▶ under it asks the PC to read it. Its time: now.
         if (typeof m.id === 'string') t.answerId = m.id;
-        t.retry = m.retry === true;
+        t.aTs = Math.floor(Date.now() / 1000);
         // ✎ on its question (the one just asked), where the PC says: by its time in Chat.
         t.edit = chatTime(m.edit);
-        // A retry's or an edit's new answer is in: nothing to put back now (its ‹ 2/2 › comes with `versions`).
-        if (S.retrying?.t === t) S.retrying = null;
+        // An edit's new answer is in: nothing to put back now (its ‹ 2/2 › comes with `versions`).
         if (S.edited?.t === t) S.edited = null;
         // Where it sits in the chat (a Code chat's pills go under it).
         const at = messageAt(t.answerId);
@@ -1074,11 +1063,10 @@ function onText(text) {
       if (codeError(String(m.message || ''))) break;
       S.error = String(m.message || 'Something went wrong on the PC.');
       S.step = '';
-      // ‹ › refused: the version shown stays. ↻ refused (or no answer came):
-      // the answer it took off the thread here goes back as it was. ✎ the
-      // same, its words back in the box to send again or leave.
+      // ‹ › refused: the version shown stays. ✎ refused (or no answer came):
+      // what it took off the thread here goes back as it was, its words back
+      // in the box to send again or leave.
       S.switching = 0;
-      undoRetry();
       undoEdit();
       const wasListening = S.local !== 'idle';
       if (S.local !== 'idle') endLocalQuestion();
@@ -1182,7 +1170,7 @@ function clearFragment() {
 function currentTurn(create, typed = false) {
   let t = S.turns[S.turns.length - 1];
   if ((!t || t.final) && create) {
-    t = { id: ++S.turnId, q: '', a: '', final: false, cancelled: false, typed, answerId: '', pictures: 0, pics: [], qAt: -1, aAt: -1, qv: null, av: null, retry: false, edit: 0 };
+    t = { id: ++S.turnId, q: '', a: '', final: false, cancelled: false, typed, answerId: '', pictures: 0, pics: [], qAt: -1, aAt: -1, qv: null, av: null, aTs: 0, edit: 0 };
     S.turns.push(t);
     if (S.turns.length > KEEP_TURNS) S.turns.shift();
   }
@@ -1235,7 +1223,7 @@ function turnsOf(messages, more = false) {
   const turns = [];
   list.forEach((m, i) => {
     if (!m || typeof m.text !== 'string') return;
-    const blank = { id: ++S.turnId, q: '', a: '', final: true, cancelled: false, typed: true, answerId: '', pictures: 0, pics: [], files: [], qAt: -1, aAt: -1, qv: null, av: null, retry: false, edit: 0 };
+    const blank = { id: ++S.turnId, q: '', a: '', final: true, cancelled: false, typed: true, answerId: '', pictures: 0, pics: [], files: [], qAt: -1, aAt: -1, qv: null, av: null, aTs: 0, edit: 0 };
     if (m.role === 'user' && m.kind === 'agentReport') {
       // An agent's report (Yap Code): never the person's own bubble; its
       // first line as a quiet note above the answer that follows it (a
@@ -1249,13 +1237,11 @@ function turnsOf(messages, more = false) {
       if (!t || t.a) turns.push((t = blank));
       t.a = m.text;
       t.answerId = typeof m.id === 'string' ? m.id : '';
-      // Its 👍 / 👎 as Chat keeps it (chat/feedback.rs).
-      t.rating = m.rating === 'good' || m.rating === 'bad' ? m.rating : '';
       t.aAt = at[i];
       t.files = [...(t.files || []), ...sharedNames(m.files)];
-      // (A retried answer's versions: ‹ k/n › under it; ↻ where the PC says it may ask it again.)
+      // (An answer's versions — an older Retry's: ‹ k/n › under it — and its time in Chat.)
       t.av = versionOf(m.version);
-      t.retry = m.retry === true;
+      t.aTs = chatTime(m.ts);
     }
   });
   return turns.slice(-KEEP_TURNS);
@@ -1268,9 +1254,8 @@ function turnsOf(messages, more = false) {
  */
 function onThread(m) {
   const id = typeof m.id === 'number' && m.id > 0 ? m.id : null;
-  // (Its version shown is the PC's: a ‹ ›, ↻ or ✎ on its way is answered by it.)
+  // (Its version shown is the PC's: a ‹ › or ✎ on its way is answered by it.)
   S.switching = 0;
-  S.retrying = null;
   S.edited = null;
   S.threadAgain = false;
   const sameChat = id != null && id === S.chat;
@@ -1320,16 +1305,9 @@ function onThread(m) {
 
 /** Chat's model can't read the question's pictures: the question back in the composer with them, and Chat's line. */
 function onCantRead(message) {
-  // ↻ on a question with pictures Chat's model can't read: said, and the
-  // answer as it was (the PC puts it back too). Another model, then ↻ again.
-  if (S.retrying) {
-    S.error = `${message || "This model can't read images"}. Choose another model, then try again.`.replace('.. ', '. ');
-    S.step = '';
-    undoRetry();
-    return;
-  }
-  // ✎ on a question whose pictures it can't read: the same, its new words
-  // back in the box to send once another model is chosen.
+  // ✎ on a question whose pictures it can't read: said, the answer as it
+  // was (the PC puts it back too), its new words back in the box to send
+  // once another model is chosen.
   if (S.edited) {
     S.error = `${message || "This model can't read images"}. Choose another model, then send it again.`.replace('.. ', '. ');
     S.step = '';
@@ -1522,7 +1500,7 @@ function catchUp() {
   if (S.threadAgain && S.ready && !busyHere()) askThread();
 }
 
-/** ‹ › and ↻ may act now: connected, and nothing under way here but a voice (it stops first). */
+/** ‹ › and ✎ may act now: connected, and nothing under way here but a voice (it stops first). */
 const versionsFree = () => {
   const now = phaseNow();
   const t = currentTurn(false);
@@ -1550,51 +1528,8 @@ function showVersion(v, place) {
   render();
 }
 
-/**
- * **↻ Retry** under an answer (the Claude app's): its question asked again
- * on the PC, this answer kept as a version (‹ 1/2 › once the new one is
- * in). Here its answer is written afresh where it was, and what followed it
- * leaves the thread (it went with the old version); the PC saying no puts
- * them back. Answered on screen, as a typed question is: ▶ to hear it.
- */
-function retryAnswer(t) {
-  if (!can('retry') || !t.retry || !t.answerId || !versionsFree()) return;
-  endCall();
-  cancelEdit();
-  keepAwake();
-  S.error = '';
-  S.note = '';
-  S.cantRead = '';
-  if (phaseNow() === 'speaking') interrupt();
-  if (!send({ type: 'retry', id: t.answerId })) return;
-  const i = S.turns.indexOf(t);
-  const after = i >= 0 ? S.turns.splice(i + 1) : [];
-  S.retrying = { t, was: { a: t.a, answerId: t.answerId, av: t.av, retry: t.retry, files: t.files, aAt: t.aAt }, after };
-  Object.assign(t, { a: '', final: false, cancelled: false, answerId: '', av: null, retry: false, files: [] });
-  S.pending = null;
-  S.phase = 'thinking';
-  S.step = '';
-  S.workSince = performance.now();
-  threadPinned = true;
-  renderConvo();
-  syncTicker();
-  render();
-}
-
-/** ↻ came to nothing here (the PC said no, or no answer came): the answer and what followed it as they were. */
-function undoRetry() {
-  const r = S.retrying;
-  S.retrying = null;
-  if (!r || !S.turns.includes(r.t)) return;
-  Object.assign(r.t, r.was, { final: true, cancelled: false });
-  if (S.turns.at(-1) === r.t) S.turns.push(...r.after);
-  saveThread();
-  renderConvo();
-}
-
 const CHEV_LEFT = ['m14.5 6-6 6 6 6'];
 const CHEV_RIGHT = ['m9.5 6 6 6-6 6'];
-const RETRY = ['M3.5 12a8.5 8.5 0 0 1 14.6-5.9L20.5 8.5', 'M20.5 3.5v5h-5', 'M20.5 12a8.5 8.5 0 0 1-14.6 5.9L3.5 15.5', 'M3.5 20.5v-5h5'];
 
 /** **‹ 2/3 ›** for message versions `v` (the PC's BranchSwitch, a thumb's size here). */
 function versionSwitch(v, testid) {
@@ -2194,21 +2129,6 @@ const SQUARE = ['M7.5 5h9A2.5 2.5 0 0 1 19 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.
 const COPY = ['M9 9.5A1.5 1.5 0 0 1 10.5 8h8A1.5 1.5 0 0 1 20 9.5v9a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 9 18.5z', 'M15 8V5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H9'];
 const COPIED = ['M5 12.5l4.5 4.5L19 7.5'];
 const SPEAKER = ['M4 9.5h3.5L12 5.5v13l-4.5-4H4z', 'M15.5 9a4 4 0 0 1 0 6', 'M18 6.5a7.5 7.5 0 0 1 0 11'];
-// 👍 (👎 is the same, turned over: link.css `.thumb.down`), as the desktop's thumbs under an answer.
-const THUMB = ['M7 10.5 10.6 4a1.9 1.9 0 0 1 3.5 1.3l-.9 4.2h5.3a2 2 0 0 1 1.95 2.45l-1.35 6A2.2 2.2 0 0 1 16.95 19.7H7z', 'M7 10.5H4.6A1.6 1.6 0 0 0 3 12.1v6A1.6 1.6 0 0 0 4.6 19.7H7z'];
-
-/**
- * **👍 / 👎 on an answer** (`rate`, 16 Nov 2026: chat/feedback.rs): kept with it in Chat on the PC, sent nowhere.
- * Pressed again, taken back. Shown at once; the PC's `rated` says what's kept. Why it wasn't good is said on the PC
- * (its 👎 card).
- */
-function rateAnswer(t, rating) {
-  if (!S.ready || !t.answerId) return;
-  const next = t.rating === rating ? null : rating;
-  if (!send({ type: 'rate', id: t.answerId, rating: next })) return;
-  t.rating = next || '';
-  renderConvo();
-}
 const PHOTO = ['M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z', 'M5 17l4.5-4.5 3 3L15 13l4 4'];
 const FILE = ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z', 'M14 3v5h5'];
 
@@ -2255,6 +2175,15 @@ function vh(text) {
   s.textContent = text;
   return s;
 }
+
+// The answers' times ("12 minutes ago", core/whenSaid.js) move on in place every half minute, the thread left as it is.
+setInterval(() => {
+  if (document.hidden) return;
+  for (const el of document.querySelectorAll('time.when[datetime]')) {
+    const said = whenSaid(Date.parse(el.dateTime) / 1000);
+    if (said && el.textContent !== said) el.textContent = said;
+  }
+}, 30_000);
 
 /** Is turn `t`'s answer being said now? */
 const speakingNow = (t) => S.speakingTurn === t.id && phaseNow() === 'speaking';
@@ -2389,7 +2318,9 @@ function renderConvo() {
     if (done || speaking) {
       const foot = document.createElement('div');
       foot.className = 'msgfoot';
-      // A retried answer's versions first (as the PC's foot has them), then Copy, ▶ and ↻.
+      // As the PC's row under an answer (16 Nov 2026, the Claude app's): an older Retry's versions first, then Copy,
+      // the speaker (▶ Read aloud) and its time. (Fork from here and Pin as chapter are the PC's: the phone has no
+      // chapters, and a fork opens on the PC.)
       if (done && t.av && can('versions')) foot.appendChild(versionSwitch(t.av, 'answer-versions'));
       if (done) {
         const c = document.createElement('button');
@@ -2399,20 +2330,6 @@ function renderConvo() {
         c.append(icon('', COPY), vh('Copy'));
         c.addEventListener('click', () => copyAnswer(t, c));
         foot.appendChild(c);
-        // 👍 / 👎, kept with the answer in Chat on the PC (a PC that keeps them: `rate`).
-        if (t.answerId && can('rate')) {
-          for (const [rating, label] of [['good', 'Good answer'], ['bad', 'Not a good answer']]) {
-            const b = document.createElement('button');
-            b.type = 'button';
-            const on = t.rating === rating;
-            b.className = 'footbtn thumb' + (rating === 'bad' ? ' down' : '') + (on ? ' on' : '');
-            b.dataset.testid = rating === 'good' ? 'thumbs-up' : 'thumbs-down';
-            b.setAttribute('aria-pressed', on ? 'true' : 'false');
-            b.append(icon('', THUMB), vh(label));
-            b.addEventListener('click', () => rateAnswer(t, rating));
-            foot.appendChild(b);
-          }
-        }
       }
       if (readHere || (readable && !speaking)) {
         const b = document.createElement('button');
@@ -2423,20 +2340,9 @@ function renderConvo() {
         b.addEventListener('click', () => (readHere ? interrupt() : readAloud(t)));
         foot.appendChild(b);
       }
-      // ↻ Retry (the Claude app's): where the PC says this answer may be asked again from here (not in a Code chat).
-      if (done && t.retry && t.answerId && can('retry')) {
-        const r = h('button', {
-          type: 'button',
-          class: 'footbtn',
-          testid: 'retry',
-          'aria-label': 'Retry',
-          title: 'Retry: answer it again (this answer is kept)',
-          disabled: !versionsFree(),
-          data: { busyOff: '1' },
-          on: { click: () => retryAnswer(t) },
-        });
-        r.append(icon('', RETRY));
-        foot.appendChild(r);
+      if (done && !speaking && t.aTs) {
+        const when = whenSaid(t.aTs);
+        if (when) foot.appendChild(h('time', { class: 'when', testid: 'answer-when', datetime: new Date(t.aTs * 1000).toISOString(), title: whenFull(t.aTs) }, when));
       }
       if (speaking) {
         const s = document.createElement('span');
@@ -5004,10 +4910,9 @@ window.__yapLink = {
         final: !!t.final,
         answerId: t.answerId || '',
         ...(t.pictures ? { pictures: t.pictures } : {}),
-        // Its versions (‹ k/n ›) and whether ↻ may ask it again.
+        // Its versions (‹ k/n ›).
         ...(t.qv ? { qv: t.qv } : {}),
         ...(t.av ? { av: t.av } : {}),
-        ...(t.retry ? { retry: true } : {}),
         // ✎: its question's time in Chat, where it may be edited from here.
         ...(t.edit ? { edit: t.edit } : {}),
       })),

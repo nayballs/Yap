@@ -577,7 +577,7 @@ const STORES: &[(&str, Rule)] = &[
     ("chat_attachments.json", Choice::chats),
     // (And the branches' copy, Retry and Edit's versions: chat/chats/branches.rs.)
     ("chat_branches.json", Choice::chats),
-    // (And the answers' 👍 / 👎 copy: chat/feedback.rs.)
+    // (And the answers' 👍 / 👎 the day they were there, 16 Nov 2026: never written since, still the person's.)
     ("chat_feedback.json", Choice::chats),
     ("chat-images/", Choice::chat_images),
     // (Files attached to Chat's questions: Chat's alone, as its screenshots are.)

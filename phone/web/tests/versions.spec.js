@@ -1,12 +1,12 @@
-// Retry and its versions on the phone (16 Nov 2026): a chat's messages
-// with versions show the PC's ‹ k/n › (`thread`'s `version`), and ‹ › here
-// switches the PC's version shown (`show_version`: one version shown a
-// conversation, the last switch wins, wherever it was made); `versions`
-// from the PC (another screen switched, retried or edited) asks for the
-// thread again, once nothing of this phone's is under way there; ↻ Retry
-// under an answer the PC says may be asked again (`retry`) asks its question
-// again, the old answer kept as a version, and the PC saying no puts the
-// thread back as it was; a PC from before shows neither. ✎ Edit (the same
+// Versions on the phone (16 Nov 2026): a chat's messages with versions show
+// the PC's ‹ k/n › (`thread`'s `version`: an Edit's, or an older Retry's on
+// an answer), and ‹ › here switches the PC's version shown (`show_version`:
+// one version shown a conversation, the last switch wins, wherever it was
+// made); `versions` from the PC (another screen switched or edited) asks for
+// the thread again, once nothing of this phone's is under way there. Under
+// an answer, as the PC's row: Copy, the speaker and its time — no ↻ Retry
+// (taken out the same day), whatever a thread carries; a PC from before
+// shows no versions. ✎ Edit (the same
 // day): the pencil under the person's own question (`edit` on it: its time
 // in Chat) puts it in the box to change, "Editing your message" over it;
 // Send makes a new version on the PC (`edit {chat, at, ts, text}`) with its
@@ -19,21 +19,25 @@ import { test, expect } from '@playwright/test';
 import { servePage, seedDevice, mockPc, open, ready, type, ask, snapshot, sentences, CAN } from './support/harness.js';
 import { mockCodePc, codeThread, CAN_CODE } from './support/code-pc.js';
 
-/** A PC with Retry and versions on the phone (`ready.can`). */
-const CAN_VERSIONS = [...CAN, 'versions', 'retry'];
+/** A PC with versions on the phone (`ready.can`). */
+const CAN_VERSIONS = [...CAN, 'versions'];
+/** Answers' times in Chat (seconds): 12 minutes ago, and 3 hours ago. */
+const NOW = Math.floor(Date.now() / 1000);
+const TWELVE_MIN = NOW - 12 * 60 - 5;
+const THREE_H = NOW - 3 * 3600 - 5;
 
 /**
  * A chat on the PC whose first question was edited once (‹ 2/2 › on it)
- * and its answer retried twice (‹ 3/3 ›), each answer one ↻ may ask again.
- * Fictional, as everything in this public repo.
+ * and its answer retried twice by an older Yap (‹ 3/3 ›), each answer with
+ * its time in Chat. Fictional, as everything in this public repo.
  */
 const shown = () => ({
   title: 'Trip packing list',
   messages: [
     { role: 'user', text: 'What should I pack for three days of hiking in the rain?', version: { at: 0, shown: 2, count: 2 } },
-    { role: 'assistant', text: 'Layers: a waterproof jacket, two base layers and spare socks.', id: 'chat:41:1', version: { at: 1, shown: 3, count: 3 }, retry: true },
+    { role: 'assistant', text: 'Layers: a waterproof jacket, two base layers and spare socks.', id: 'chat:41:1', version: { at: 1, shown: 3, count: 3 }, ts: THREE_H },
     { role: 'user', text: 'Is a 35-litre rucksack enough?' },
-    { role: 'assistant', text: 'Yes, for three days if you stay in huts.', id: 'chat:41:3', retry: true },
+    { role: 'assistant', text: 'Yes, for three days if you stay in huts.', id: 'chat:41:3', ts: TWELVE_MIN },
   ],
 });
 /** …with its answer's second version shown instead (what followed the third went with it). */
@@ -41,7 +45,7 @@ const second = () => ({
   title: 'Trip packing list',
   messages: [
     { role: 'user', text: 'What should I pack for three days of hiking in the rain?', version: { at: 0, shown: 2, count: 2 } },
-    { role: 'assistant', text: 'A rain jacket, overtrousers and a dry bag.', id: 'chat:41:1', version: { at: 1, shown: 2, count: 3 }, retry: true },
+    { role: 'assistant', text: 'A rain jacket, overtrousers and a dry bag.', id: 'chat:41:1', version: { at: 1, shown: 2, count: 3 }, ts: THREE_H },
   ],
 });
 
@@ -88,14 +92,16 @@ test("a message's versions show the PC's ‹ k/n ›, and ‹ › switches the v
   await expect(q.getByTestId('version-next')).toBeDisabled();
   await expect(q.getByTestId('version-prev')).toBeEnabled();
   await expect(a.getByTestId('version-next')).toBeDisabled();
-  // A message with none has none; ↻ under each answer the PC says may be asked again.
+  // A message with none has none.
   await expect(turn(page, 1).getByTestId('question-versions')).toHaveCount(0);
   await expect(turn(page, 1).getByTestId('answer-versions')).toHaveCount(0);
-  await expect(page.getByTestId('retry')).toHaveCount(2);
-  // The foot's order, as the PC's: the versions, Copy, ▶, ↻.
+  // The foot's order, as the PC's: the versions, Copy, ▶, its time. No ↻.
+  await expect(page.getByTestId('retry')).toHaveCount(0);
   await expect(turn(page, 0).locator('.msgfoot > *')).toHaveCount(4);
   await expect(turn(page, 0).locator('.msgfoot > :first-child')).toHaveAttribute('data-testid', 'answer-versions');
-  await expect(turn(page, 0).locator('.msgfoot > :last-child')).toHaveAttribute('data-testid', 'retry');
+  await expect(turn(page, 0).locator('.msgfoot > :last-child')).toHaveAttribute('data-testid', 'answer-when');
+  await expect(turn(page, 0).getByTestId('answer-when')).toHaveText('3 hours ago');
+  await expect(turn(page, 1).getByTestId('answer-when')).toHaveText('12 minutes ago');
 
   // ‹ on the answer: the PC shows version 2 (here and on the PC), what followed version 3 goes with it.
   await a.getByTestId('version-prev').click();
@@ -110,7 +116,8 @@ test("a message's versions show the PC's ‹ k/n ›, and ‹ › switches the v
   await expect(page.getByTestId('turn')).toHaveCount(2);
   // The page keeps them as the PC sent them (a reload asks the PC again anyway).
   const snap = await snapshot(page);
-  expect(snap.turns[0]).toMatchObject({ qv: { at: 0, shown: 2, count: 2 }, av: { at: 1, shown: 3, count: 3 }, retry: true });
+  expect(snap.turns[0]).toMatchObject({ qv: { at: 0, shown: 2, count: 2 }, av: { at: 1, shown: 3, count: 3 } });
+  expect(snap.turns[0].retry).toBeUndefined();
 });
 
 test('‹ › refused while an answer is being written there: the version shown stays, and why', async ({ page }) => {
@@ -158,63 +165,24 @@ test('a version switched on another screen: the thread again, at once or once th
   expect((await snapshot(page)).threadAgain).toBe(false);
 });
 
-test('↻ Retry: its question asked again, what followed leaves the thread, then the new answer with its ‹ k/n ›', async ({ page }) => {
-  const pc = await inChat(page);
-  // ↻ on the first answer: the second question and its answer went with the old version.
-  await turn(page, 0).getByTestId('retry').click();
-  await expect.poll(() => pc.of('retry')).toEqual([{ type: 'retry', id: 'chat:41:1' }]);
-  await expect(page.getByTestId('turn')).toHaveCount(1);
-  await expect(page.getByTestId('heard')).toHaveText('What should I pack for three days of hiking in the rain?');
-  await expect(page.getByTestId('answer')).toHaveCount(0);
-  // Working it out (Chat's activity line, as for a typed question); ‹ › and ↻ asleep meanwhile.
-  await expect(page.getByTestId('step')).toBeVisible();
-  expect((await snapshot(page)).now).toBe('working');
-  await expect(turn(page, 0).getByTestId('question-versions').getByTestId('version-prev')).toBeDisabled();
-  // The PC answers it again, on screen (typed: nothing said)…
-  pc.send({ type: 'state', phase: 'thinking' });
-  pc.send({ type: 'answer', text: 'Pack a', final: false });
-  await expect(page.getByTestId('answer')).toHaveText('Pack a');
-  pc.send({ type: 'answer', text: 'Pack a rain jacket, overtrousers and gaiters.', final: true, id: 'chat:41:1', retry: true });
+test('no ↻ under an answer, whatever a thread carries; a new answer says "just now"', async ({ page }) => {
+  // (A PC from earlier the same day said `retry` on its answers: never offered now.)
+  const old = shown();
+  for (const m of old.messages) if (m.role === 'assistant') m.retry = true;
+  const pc = await inChat(page, { can: [...CAN_VERSIONS, 'retry'], threads: { 41: old } });
+  await expect(page.getByTestId('retry')).toHaveCount(0);
+  await expect(page.getByTestId('copy')).toHaveCount(2);
+  await expect(page.getByTestId('read-aloud')).toHaveCount(2);
+  // A question asked here: its answer's row, its time now.
+  await type(page, pc, 'And for five days?');
+  pc.send({ type: 'heard', text: 'And for five days?' });
+  pc.send({ type: 'answer', text: 'Add a second base layer.', final: true, id: 'chat:41:5', retry: true });
   pc.send({ type: 'state', phase: 'idle' });
-  await expect(page.getByTestId('answer')).toHaveText('Pack a rain jacket, overtrousers and gaiters.');
-  expect(pc.of('read_aloud')).toEqual([]);
-  // …and says its versions changed: the thread again, the new answer's ‹ 4/4 › on it.
-  const opens = pc.of('open_chat').length;
-  pc.threads[41] = {
-    title: 'Trip packing list',
-    messages: [
-      { role: 'user', text: 'What should I pack for three days of hiking in the rain?', version: { at: 0, shown: 2, count: 2 } },
-      { role: 'assistant', text: 'Pack a rain jacket, overtrousers and gaiters.', id: 'chat:41:1', version: { at: 1, shown: 4, count: 4 }, retry: true },
-    ],
-  };
-  pc.send({ type: 'versions', chat: 41 });
-  await expect.poll(() => pc.of('open_chat').length).toBe(opens + 1);
-  await expect(turn(page, 0).getByTestId('answer-versions').getByTestId('version-count')).toHaveText('4/4');
-  await expect(turn(page, 0).getByTestId('retry')).toBeEnabled();
+  await expect(turn(page, 2).getByTestId('answer-when')).toHaveText('just now');
+  await expect(turn(page, 2).getByTestId('retry')).toHaveCount(0);
 });
 
-test('↻ refused by the PC (a Code chat, an answer being written): the answer and what followed it back, and why', async ({ page }) => {
-  const why = "In a Code chat, Retry is on your PC: there it rewinds Claude's session first.";
-  const pc = await inChat(page, {
-    onText: (m, conn, pc) => {
-      if (m.type === 'retry') {
-        pc.sendTo(conn, { type: 'error', message: why });
-        pc.sendTo(conn, { type: 'state', phase: 'idle' });
-      }
-    },
-  });
-  await turn(page, 0).getByTestId('retry').click();
-  await expect(page.getByTestId('error')).toHaveText(why);
-  await expect(page.getByTestId('turn')).toHaveCount(2);
-  await expect(page.getByTestId('answer').first()).toHaveText('Layers: a waterproof jacket, two base layers and spare socks.');
-  await expect(turn(page, 0).getByTestId('answer-versions').getByTestId('version-count')).toHaveText('3/3');
-  await expect(page.getByTestId('stop')).toBeHidden();
-  expect((await snapshot(page)).now).toBe('idle');
-  // ↻ awake again: another tap goes.
-  await expect(turn(page, 0).getByTestId('retry')).toBeEnabled();
-});
-
-test('‹ › or ↻ while ▶ is said: the voice stops first', async ({ page }) => {
+test('‹ › while ▶ is said: the voice stops first', async ({ page }) => {
   const pc = await inChat(page);
   await turn(page, 1).getByTestId('read-aloud').click();
   await expect.poll(() => pc.of('read_aloud').length).toBe(1);
@@ -230,7 +198,7 @@ test('‹ › or ↻ while ▶ is said: the voice stops first', async ({ page })
   expect(types.lastIndexOf('interrupt')).toBeLessThan(types.lastIndexOf('show_version'));
 });
 
-test('a PC from before Retry and versions: neither shown, whatever a thread carries', async ({ page }) => {
+test('a PC from before versions: none shown, whatever a thread carries', async ({ page }) => {
   await inChat(page, { can: CAN });
   await expect(page.getByTestId('question-versions')).toHaveCount(0);
   await expect(page.getByTestId('answer-versions')).toHaveCount(0);
@@ -255,9 +223,9 @@ const editable = () => ({
   title: 'Trip packing list',
   messages: [
     { role: 'user', text: Q1, edit: Q1_TS },
-    { role: 'assistant', text: A1, id: 'chat:41:1', retry: true },
+    { role: 'assistant', text: A1, id: 'chat:41:1' },
     { role: 'user', text: Q2, edit: Q2_TS },
-    { role: 'assistant', text: 'Yes, for three days if you stay in huts.', id: 'chat:41:3', retry: true },
+    { role: 'assistant', text: 'Yes, for three days if you stay in huts.', id: 'chat:41:3' },
   ],
 });
 const EDITED = 'What should I pack for five days of hiking in the rain?';
@@ -268,7 +236,7 @@ const edited = () => ({
   title: 'Trip packing list',
   messages: [
     { role: 'user', text: EDITED, edit: EDITED_TS, version: { at: 0, shown: 2, count: 2 } },
-    { role: 'assistant', text: EDITED_ANSWER, id: 'chat:41:1', retry: true },
+    { role: 'assistant', text: EDITED_ANSWER, id: 'chat:41:1' },
   ],
 });
 /** …and switched back (‹): the question as it was, with what followed it. */
@@ -326,7 +294,7 @@ test('✎ puts your question in the box; Send makes a new version with its own a
   pc.send({ type: 'heard', text: EDITED });
   pc.send({ type: 'state', phase: 'thinking' });
   pc.send({ type: 'answer', text: 'For five wet days:', final: false });
-  pc.send({ type: 'answer', text: EDITED_ANSWER, final: true, id: 'chat:41:1', retry: true, edit: EDITED_TS });
+  pc.send({ type: 'answer', text: EDITED_ANSWER, final: true, id: 'chat:41:1', edit: EDITED_TS });
   pc.send({ type: 'state', phase: 'idle' });
   await expect(page.getByTestId('answer')).toHaveText(EDITED_ANSWER);
   expect(pc.of('read_aloud')).toEqual([]);
@@ -432,7 +400,7 @@ test('a version switched on another screen while you edit: your words stay in th
     title: 'Trip packing list',
     messages: [
       { role: 'user', text: 'What do I need for a wet weekend?', edit: 1_731_772_800_050, version: { at: 0, shown: 1, count: 2 } },
-      { role: 'assistant', text: 'A good coat and spare socks.', id: 'chat:41:1', retry: true },
+      { role: 'assistant', text: 'A good coat and spare socks.', id: 'chat:41:1' },
     ],
   };
   pc.send({ type: 'versions', chat: 41 });
@@ -475,7 +443,7 @@ test('✎ on a question just asked here, once its answer says it may be edited',
   await expect(turn(page, 0).getByTestId('edit')).toBeDisabled();
   pc.send({ type: 'heard', text: 'And for a week?' });
   pc.send({ type: 'state', phase: 'thinking' });
-  pc.send({ type: 'answer', text: 'Add a spare fleece.', final: true, id: 'chat:41:5', retry: true, edit: 1_731_772_801_000 });
+  pc.send({ type: 'answer', text: 'Add a spare fleece.', final: true, id: 'chat:41:5', edit: 1_731_772_801_000 });
   pc.send({ type: 'state', phase: 'idle' });
   await expect(turn(page, 2).getByTestId('edit')).toBeEnabled();
   await expect(turn(page, 0).getByTestId('edit')).toBeEnabled();
@@ -491,8 +459,8 @@ test('✎ on a question just asked here, once its answer says it may be edited',
 test('no ✎ from a PC from before Edit, whatever a thread carries', async ({ page }) => {
   await inChat(page, { can: CAN_VERSIONS, threads: { 41: editable() } });
   await expect(page.getByTestId('edit')).toHaveCount(0);
-  // ↻ as before.
-  await expect(page.getByTestId('retry')).toHaveCount(2);
+  // Copy as before.
+  await expect(page.getByTestId('copy')).toHaveCount(2);
 });
 
 test('no ✎ in a Code chat: there Edit is a Rewind, on the PC', async ({ page }) => {
@@ -505,7 +473,7 @@ test('no ✎ in a Code chat: there Edit is a Rewind, on the PC', async ({ page }
   // (Even were a thread to carry `edit`, as the PC never does in a Code chat.)
   const thread = codeThread();
   thread.messages[0].edit = 1_731_772_800_100;
-  const pc = await mockCodePc(page, { can: [...CAN_CODE, 'versions', 'retry', 'edit'], threads: { 12: thread } });
+  const pc = await mockCodePc(page, { can: [...CAN_CODE, 'versions', 'edit'], threads: { 12: thread } });
   await open(page);
   await ready(page, pc);
   await expect(page.getByTestId('heard').first()).toHaveText('Add a watering schedule to notes.md');

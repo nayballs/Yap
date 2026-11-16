@@ -692,7 +692,7 @@ pub fn mark_read(conversation: u64, upto: usize) {
     });
 }
 
-/// **Another branch shown from message `at` on** (Retry, Edit, ‹ ›:
+/// **Another branch shown from message `at` on** (an Edit, ‹ ›:
 /// `chat/chats/branches.rs`): what a pass read of conversation
 /// `conversation` from there is read again by the next one — it says
 /// something else now.

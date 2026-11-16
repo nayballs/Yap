@@ -192,7 +192,7 @@ const ECHOES_NO_FLAG = [{ _exit_if_arg: { arg: '--resume-session-at', stderr: "e
 const ECHOES_NO_POINT = [{ _exit_if_arg: { arg: '--resume-session-at', stderr: 'No message found with message.uuid of: end-One', code: 1 } }, ...ECHOES];
 /** The words the latest turn's first message carried, as the stand-in saw them. */
 const lastUserText = () => fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).at(-1)?.user_text ?? '';
-/** The row under the person's message `text`: Copy, Rewind, Fork from here. */
+/** The row under the person's message `text`: ✓✓ and its time, Copy, Rewind to here, Fork from here. */
 const actionsOf = (main, text) => thread(main).locator('.cbubble.user', { hasText: text }).locator('xpath=following-sibling::*[1][@data-testid="chat-message-actions"]');
 const queuedBubble = (main) => thread(main).getByTestId('chat-queued');
 /** The ticks of the one message sent from the queue (each test sends one). */
@@ -1385,7 +1385,7 @@ test('Rewind takes a Code chat back to before a message: it and what came after 
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
   await thread(main).locator('.cbubble.user', { hasText: 'One' }).hover();
   await expect(actionsOf(main, 'One').getByTestId('chat-rewind')).toHaveAttribute('aria-disabled', 'true');
-  await expect(actionsOf(main, 'One').getByTestId('chat-rewind')).toHaveAttribute('title', /unavailable while claude is working/);
+  await expect(actionsOf(main, 'One').getByTestId('chat-rewind')).toHaveAttribute('aria-label', /unavailable while claude is working/);
   await expect(actionsOf(main, 'One').getByTestId('chat-fork')).not.toHaveAttribute('aria-disabled', 'true');
   await shot(main, '95-rewind-unavailable-while-working');
   await ended(yap, agent.id, 40_000);
@@ -1426,9 +1426,12 @@ test('Rewind takes a Code chat back to before a message: it and what came after 
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two, again']);
 });
 
-// 15 Nov 2026, the Claude app's message actions: in a Code chat, Edit and Retry are Claude Code's own Rewind (no
-// second mechanism, no versions kept), asked first as Rewind is, then the message sent (chat/commands.rs `edit`).
-test('in a Code chat, Edit and Retry rewind to before the message and send it again: new words, or the same', async ({ yap, main, shot }) => {
+// 16 Nov 2026, the Claude app's rows: under the person's message in a Code chat ✓✓ and its time, Copy, Rewind to here
+// and Fork from here (no Edit: Rewind puts its words back in the box), with the app's tooltips; under Claude's answer
+// Copy, Fork from here, Pin as chapter, Read aloud and its time — no 👍 / 👎, no ↻ Retry. Fork from here under an
+// answer forks at the message it answers; Pin as chapter puts a titled divider above the answer's turn and in the
+// chat's contents, and a second click takes it off.
+test('a Code chat’s rows are the Claude app’s: ✓✓ time, Copy, Rewind to here, Fork under the message; Copy, Fork, Pin, Read aloud, time under the answer', async ({ yap, main, shot }) => {
   test.setTimeout(150_000);
   await script(yap, ECHOES, 'echoes');
   const before = (await agents(yap)).length;
@@ -1438,79 +1441,63 @@ test('in a Code chat, Edit and Retry rewind to before the message and send it ag
   await ended(yap, agent.id);
   await send(main, 'Two');
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(2);
-  await ended(yap, agent.id);
+  const original = await ended(yap, agent.id);
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two']);
-  // Edit "Two": in place, then asked first as a Rewind.
+  const labels = (row) => row.locator('button').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')));
+
+  // Under the message, on hover: ✓✓ and when, then Copy, Rewind to here, Fork from here — no Edit.
   await thread(main).locator('.cbubble.user', { hasText: 'Two' }).hover();
-  await actionsOf(main, 'Two').getByTestId('chat-edit-message').click();
-  const input = thread(main).getByTestId('chat-edit-input');
-  await expect(input).toHaveValue('Two');
-  await input.fill('Two, edited');
-  await thread(main).getByTestId('chat-edit-save').click();
-  const ask = main.getByRole('alertdialog', { name: 'Send the edited message?' });
-  await expect(ask).toBeVisible();
-  await shot(main, '98-code-edit-asked-first');
-  await ask.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(thread(main).locator('.cbubble.user')).toHaveText(['One', 'Two, edited']);
-  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two, edited'], { timeout: 30_000 });
-  // Claude Code's own fork of the session at the end of "One": "Two" unseen. No versions in a Code chat.
-  let args = argsSeen().at(-1);
-  expect([after(args, '--resume-session-at'), args.includes('--fork-session')]).toEqual(['end-One', true]);
-  await expect(thread(main).getByTestId('chat-branch')).toHaveCount(0);
-  await ended(yap, agent.id);
-  // Retry under its answer: the same words again, from the same place.
-  const turns = (await agents(yap)).find((j) => j.id === agent.id).turnList.length;
-  await thread(main).locator('.cbubble.assistant', { hasText: 'Answer to: Two, edited' }).hover();
-  await thread(main).getByTestId('chat-retry').last().click();
-  const retry = main.getByRole('alertdialog', { name: 'Retry from this message?' });
-  await expect(retry).toBeVisible();
-  await retry.getByRole('button', { name: 'Retry', exact: true }).click();
-  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(turns + 1);
-  await ended(yap, agent.id);
-  await expect(thread(main).locator('.cbubble.user')).toHaveText(['One', 'Two, edited']);
-  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two, edited']);
-  args = argsSeen().at(-1);
-  expect([after(args, '--resume-session-at'), args.includes('--fork-session')]).toEqual(['end-One', true]);
+  const row = actionsOf(main, 'Two');
+  await expect(row.getByTestId('chat-read')).toHaveAttribute('data-state', 'read');
+  await expect(row.locator('time.when')).toHaveText(/just now|1 minute ago/);
+  expect(await labels(row)).toEqual(['Copy', 'Rewind to here', 'Fork from here']);
+  await expect(row.getByTestId('chat-edit-message')).toHaveCount(0);
+  // The app's tooltip: its name, and what it does.
+  await row.getByTestId('chat-rewind').hover();
+  await expect(main.getByTestId('action-tip')).toContainText('Rewind to here');
+  await expect(main.getByTestId('action-tip')).toContainText('Takes this message and everything after it out of the conversation');
+  await shot(main, '98-code-message-row');
+  await row.getByTestId('chat-fork').hover();
+  await expect(main.getByTestId('action-tip')).toContainText('Starts a new session from this point. This one stays as it is.');
+
+  // Under the answer: Copy, Fork from here, Pin as chapter, Read aloud, then when — never 👍 / 👎 or ↻.
+  const foot = thread(main).getByTestId('chat-answer-actions').last();
+  expect(await labels(foot)).toEqual(['Copy', 'Fork from here', 'Pin as chapter', 'Read aloud']);
+  await expect(foot.locator('time.when')).toHaveText(/just now|1 minute ago/);
+  await expect(main.getByTestId('chat-retry')).toHaveCount(0);
+  await expect(main.getByTestId('chat-thumbs-up')).toHaveCount(0);
+  await expect(main.getByTestId('chat-thumbs-down')).toHaveCount(0);
+
+  // Pin as chapter: a titled divider above the answer's turn (under its message), in the contents, the pin filled.
+  await foot.getByTestId('chat-pin-chapter').click();
+  await expect(foot.getByTestId('chat-pin-chapter')).toHaveAttribute('aria-pressed', 'true', { timeout: 60_000 });
+  const divider = thread(main).getByTestId('chat-chapter');
+  await expect(divider).toHaveCount(1);
+  await expect(divider.locator('.ctitle')).not.toHaveText('');
+  // (Under "Two", before its answer.)
+  expect(await divider.evaluate((d) => !!(d.previousElementSibling?.matches('[data-testid="chat-message-actions"]')))).toBe(true);
+  await expect(main.getByTestId('chat-chapters')).toBeVisible();
+  const kept = (await yap.invoke('chat_get', { id: original.conversation })).messages.at(-1);
+  expect(kept.chapter).toMatchObject({ pinned: true });
+  await shot(main, '98-code-answer-pinned');
+  // A second click takes it off.
+  await foot.getByTestId('chat-pin-chapter').click();
+  await expect(divider).toHaveCount(0);
+  await expect(foot.getByTestId('chat-pin-chapter')).toHaveAttribute('aria-pressed', 'false');
+  expect((await yap.invoke('chat_get', { id: original.conversation })).messages.at(-1).chapter).toBeUndefined();
+
+  // Fork from here under "Answer to: One": a new Code chat up to that answer, as Fork from here under "One".
+  const count = (await yap.invoke('chat_get', { id: original.conversation })).messages.length;
+  await thread(main).getByTestId('chat-answer-actions').first().getByTestId('chat-answer-fork').click();
+  await expect.poll(async () => Number(await main.locator('.conv.active').getAttribute('data-conv')), { timeout: 10_000 }).not.toBe(original.conversation);
+  const fork = Number(await main.locator('.conv.active').getAttribute('data-conv'));
+  await expect(thread(main).locator('.cbubble.user')).toHaveText(['One']);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One']);
+  expect((await yap.invoke('code_chats_list')).chats[fork]?.name).toBe('garden-planner');
+  // The original as it was.
+  expect((await yap.invoke('chat_get', { id: original.conversation })).messages).toHaveLength(count);
 });
 
-// 16 Nov 2026 (chat/feedback.rs): 👍 / 👎 beside a Code chat's answer actions too; 👎's Retry with this note goes
-// through Rewind, the note after the message for Claude only. No "Learn from this": a Code chat keeps memory out.
-test('in a Code chat, 👎 with a reason and Retry with this note rewinds and sends the message again with the note for Claude', async ({ yap, main, shot }) => {
-  test.setTimeout(150_000);
-  await script(yap, ECHOES, 'echoes');
-  const before = (await agents(yap)).length;
-  await codeChat(main);
-  await send(main, 'One');
-  const agent = await newAgent(yap, before);
-  await ended(yap, agent.id);
-  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One']);
-  const turns = (await agents(yap)).find((j) => j.id === agent.id).turnList.length;
-  // The thumbs beside Copy and ↻.
-  await expect(thread(main).getByTestId('chat-thumbs-up')).toBeVisible();
-  await thread(main).getByTestId('chat-thumbs-down').click();
-  const card = thread(main).getByTestId('chat-feedback-card');
-  await expect(card).toBeVisible();
-  await card.getByTestId('chat-feedback-reason-ignored').click();
-  await card.getByTestId('chat-feedback-reason-other').click();
-  await card.getByTestId('chat-feedback-note').fill('Use the notes file');
-  await expect(card.getByTestId('chat-feedback-learn')).toHaveCount(0);
-  await shot(main, '99-code-thumbs-down-card');
-  await card.getByTestId('chat-feedback-retry').click();
-  const ask = main.getByRole('alertdialog', { name: 'Retry with your note?' });
-  await expect(ask).toBeVisible();
-  await ask.getByRole('button', { name: 'Retry', exact: true }).click();
-  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(turns + 1);
-  await ended(yap, agent.id);
-  // The message is as it was asked; Claude got the note after it (the stand-in answers with what it got).
-  await expect(thread(main).locator('.cbubble.user')).toHaveText(['One']);
-  const answer = thread(main).locator('.cbubble.assistant');
-  await expect(answer).toHaveCount(1);
-  await expect(answer).toContainText('Answer to: One');
-  await expect(answer).toContainText('do exactly that this time');
-  await expect(answer).toContainText('Use the notes file');
-  const conv = (await agents(yap)).find((j) => j.id === agent.id).conversation;
-  expect((await yap.invoke('chat_get', { id: conv })).messages[0].text).toBe('One');
-});
 
 test('Rewind to before the first message puts back the files Claude changed, and the next message starts a new session', async ({ yap, main }) => {
   test.setTimeout(120_000);
@@ -1562,9 +1549,9 @@ test('Fork from here: a new Code chat with the conversation up to that message�
   const original = await ended(yap, agent.id);
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Answer to: One', 'Answer to: Two']);
   // Shown as the message is hovered (as Claude Code's app has them), hidden otherwise.
-  await expect(actionsOf(main, 'Two')).toHaveCSS('opacity', '0');
+  await expect(actionsOf(main, 'Two').locator('.reveal')).toHaveCSS('opacity', '0');
   await thread(main).locator('.cbubble.user', { hasText: 'One' }).hover();
-  await expect(actionsOf(main, 'One')).toHaveCSS('opacity', '1');
+  await expect(actionsOf(main, 'One').locator('.reveal')).toHaveCSS('opacity', '1');
   await shot(main, '98-message-actions');
   await actionsOf(main, 'One').getByTestId('chat-fork').click();
   // The fork is shown: "One" and its answer, nothing after.

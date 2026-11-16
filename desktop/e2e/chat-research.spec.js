@@ -12,9 +12,9 @@
 //   in the thread the summary with its pills, the document's card and the research's chip.
 // - ■ Stop mid-research: "Research stopped…", no document. A plain "research …" without the switch
 //   researches too; a greeting with it on is answered as ever (the plan step says it's not research).
-// - Retry and Edit of a question researched only because the switch was on (16 Nov 2026): researched again, the
-//   plan first, though the switch is off by then (the question keeps it: `research` in chats.json); one asked with
-//   it off is answered again as ever.
+// - An Edit of a question researched only because the switch was on (16 Nov 2026): researched again, the plan
+//   first, though the switch is off by then (the question keeps it: `research` in chats.json); one asked with it off
+//   is answered as ever. (↻ Retry did the same until it was taken out, 16 Nov 2026.)
 // - On your Claude plan, a page Claude Code's WebFetch read that no search found (16 Nov 2026: it showed its address)
 //   is titled with its own <title>, read on this PC, in the Sources row and the report's list; a word to the person
 //   before the report's # title goes, the title the report's own.
@@ -313,9 +313,8 @@ const questions = (main) => thread(main).locator('.cbubble.user');
 const plans = (fakeLlm, from) => fakeLlm.requests.slice(from).filter((r) => r.kind === 'researchPlan');
 /** The newest conversation whose title starts so (the spec's tests ask the same question). */
 const newest = (yap, title) => (yap.readJson('chats.json')?.conversations ?? []).filter((x) => x.title.startsWith(title)).sort((a, b) => b.id - a.id)[0];
-const noteTitled = (yap, title) => (yap.readJson('notes.json')?.notes ?? []).some((n) => n.title === title);
 
-test('Retry and Edit of a question researched by the switch alone research it again, the switch off by then; one asked without it is answered again as ever', async ({ yap, main, fakeLlm, shot }) => {
+test('an Edit of a question researched by the switch alone researches it again, the switch off by then; one asked without it is answered as ever', async ({ yap, main, fakeLlm, shot }) => {
   test.setTimeout(150_000);
   await freshChat(main);
   await research(main, true);
@@ -330,29 +329,10 @@ test('Retry and Edit of a question researched by the switch alone research it ag
   await expect.poll(() => conv()?.messages?.[0]?.research ?? null).toBe(true);
   expect(conv().messages[1].research).toBeUndefined();
 
-  // The switch off now: ↻ researches again, as it was asked — the plan first.
+  // The switch off now: an Edit researches again, as it was asked — the plan first (■ there: nothing researched,
+  // the edit kept).
   await research(main, false);
-  const atRetry = fakeLlm.requests.length;
-  fakeLlm.scriptChat(loopOf('QWERTY, looked into again'));
-  await lastAnswer(main).hover();
-  await thread(main).getByTestId('chat-retry').last().click();
-  await expect(card(main)).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
-  await expect(card(main)).toHaveAttribute('data-research', 'true');
-  await expect(card(main).locator('.otitle')).toContainText('Research plan · How did the QWERTY keyboard layout come about');
-  expect(plans(fakeLlm, atRetry)).toHaveLength(1);
   await expect(chip(main)).toHaveAttribute('aria-pressed', 'false');
-  await shot(main, '07-retry-researches-again-light');
-  await card(main).getByRole('button', { name: 'Start research' }).click();
-  await expect(lastAnswer(main)).toContainText('The full report is open on the right.', { timeout: 30_000 });
-  await expect.poll(() => noteTitled(yap, 'QWERTY, looked into again')).toBe(true);
-  await expect(thread(main).getByTestId('chat-branch-count')).toHaveText('2/2');
-  const searched = fakeLlm.requests.slice(atRetry).find((r) => r.tools.includes('web_search'));
-  expect(searched.user).toContain('This is a research turn');
-  await theme(yap, main, 'dark');
-  await shot(main, '08-retried-research-dark');
-  await theme(yap, main, 'light');
-
-  // Edit: the new words researched too, the plan first (■ there: nothing researched, the edit kept).
   await questions(main).first().hover();
   await thread(main).getByTestId('chat-edit-message').first().click();
   await thread(main).getByTestId('chat-edit-input').fill('How did the Dvorak keyboard layout come about?');
@@ -368,15 +348,17 @@ test('Retry and Edit of a question researched by the switch alone research it ag
   await expect(questions(main)).toHaveText(['How did the Dvorak keyboard layout come about?']);
   await expect.poll(() => conv()?.messages?.[0]?.research ?? null).toBe(true);
 
-  // Asked with the switch off (words that don't ask): its ↻ answers it again as any question, no plan.
+  // Asked with the switch off (words that don't ask): its Edit answers it as any question, no plan.
   await freshChat(main);
   fakeLlm.scriptChat([{ content: 'A machine for typing letters.' }]);
   await ask(main, 'What is a typewriter?');
   await expect(lastAnswer(main)).toContainText('A machine for typing letters.', { timeout: 20_000 });
   const atPlain = fakeLlm.requests.length;
   fakeLlm.scriptChat([{ content: 'A writing machine with keys.' }]);
-  await lastAnswer(main).hover();
-  await thread(main).getByTestId('chat-retry').last().click();
+  await questions(main).first().hover();
+  await thread(main).getByTestId('chat-edit-message').first().click();
+  await thread(main).getByTestId('chat-edit-input').fill('What was a typewriter for?');
+  await thread(main).getByTestId('chat-edit-save').click();
   await expect(lastAnswer(main)).toContainText('A writing machine with keys.', { timeout: 20_000 });
   await expect(thread(main).getByTestId('chat-outline-card')).toHaveCount(0);
   expect(plans(fakeLlm, atPlain)).toHaveLength(0);

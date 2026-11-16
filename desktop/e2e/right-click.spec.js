@@ -170,10 +170,11 @@ test('Chat: a conversation is renamed in place, copied and deleted; messages cop
     .toBe(`# Lisbon trip\n\n**You:** Where should we stay in Lisbon?\n\n**Yap:** ${ANSWER}\n`);
   await closeToasts(main);
 
-  // An answer: Copy (as text), Copy as Markdown, Read aloud, Retry. A question: Copy, Edit (chat-branches.spec.js).
+  // An answer: Copy (as text), Copy as Markdown, Read aloud, Fork from here, Pin as chapter (as its row,
+  // chat-answer-row.spec.js). A question: Copy, Edit (chat-branches.spec.js).
   const answer = main.locator('.cbubble.assistant').first();
   await answer.click({ button: 'right', position: { x: 8, y: 8 } });
-  await expect(allItems(main)).toHaveText(['Copy', 'Copy as Markdown', 'Read aloud', 'Retry']);
+  await expect(allItems(main)).toHaveText(['Copy', 'Copy as Markdown', 'Read aloud', 'Fork from here', 'Pin as chapter']);
   await shot(main, '03-chat-answer-menu');
   await menu(main).getByRole('menuitem', { name: 'Copy', exact: true }).click();
   await expect.poll(copied).toBe('Try Alfama for:\n\n• the views\n• the old streets');

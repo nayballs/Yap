@@ -126,7 +126,7 @@ It reads the model file and writes nothing of Yap's. Stop the server when you're
 `start` on the plan, then `stop`: is Claude Code on this PC and signed in, as Yap sees
 it? Asks the model nothing.
 
-### `ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--retry [--feedback <reasons>] [--note <line>]] [--edit] [--style <name>] [--research] [--incognito] [--project <name> [--project-instructions <text>] [--project-page] [--project-files <path>[,<path>…]]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
+### `ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>] [--attach <path>[,<path>…]] [--edit] [--style <name>] [--research] [--incognito] [--project <name> [--project-instructions <text>] [--project-page] [--project-files <path>[,<path>…]]] [--timeout 600] [--cards allow|deny] [--no-shots] [--theme light|dark]`
 
 Puts a question to Chat and waits until the turn ends (answered, stopped or failed),
 **or a card waits for the person**, or `--timeout` seconds pass.
@@ -170,24 +170,15 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   would mid-answer (14 Nov 2026, the message box's queue), with no turn of the lab's
   own: returns at once; the queued bubble, its ✓✓ and the answers show in the thread
   (`probe`, `shot`, `wait --agents`).
-- `--retry`: ↻ **Retry** under the chat's last answer instead (15 Nov 2026, the Claude
-  app's message actions: chat/chats/branches.rs), in the chat shown — its question
-  answered again, the old answer kept as a version (‹ 2/2 ›; `probe --css
-  '[data-testid="chat-branch-count"]'`). No words needed. `--retry --feedback
-  long,untrue [--note "…"]` (16 Nov 2026, `chat/feedback.rs`): 👎 under the last
-  answer first, its card's reasons (`untrue`, `ignored`, `long`, `short`, `tone`,
-  `other`) and line (a note alone is Other's), then the card's **Retry with this
-  note** — the question answered again with what was wrong given to the model,
-  both versions kept. `--edit`: **Edit** the
-  person's last message to `<text>` — the pencil, the words in place, Save and send —
-  a new version from there. Both are turns of the lab's own, waited on as `ask` is.
-  In a Code chat both go through Rewind (no versions kept) and ask first ("Retry from
-  this message?"): the lab presses its confirm, as the person would. The turn starts at
-  the person's message it answers again (`turns.mjs` `branchFrom`), so its `answer` is
-  the new one — in a Code chat too, where Rewind cuts the thread there and asks again
-  (16 Nov 2026: before, the lab looked after the conversation's length when asked and
-  came back empty). A Retry's `question` is that message; the JSON says `branch:
-  "retry"` or `"edit"`. A script's `ask` step takes `retry: true` / `edit: true`.
+- `--edit`: **Edit** the person's last message to `<text>` instead (15 Nov 2026, the
+  Claude app's message actions: chat/chats/branches.rs), in the chat shown — the
+  pencil, the words in place, Save and send — a new version from there (‹ 2/2 ›;
+  `probe --css '[data-testid="chat-branch-count"]'`). A turn of the lab's own, waited
+  on as `ask` is. It starts at the person's message it replaces (`turns.mjs`
+  `branchFrom`), so its `answer` is the new one; the JSON says `branch: "edit"`. A
+  script's `ask` step takes `edit: true`. (A Code chat has no Edit since 16 Nov 2026,
+  as the Claude app's: its Rewind to here puts the words back in the box. `--retry`
+  and `--feedback` went with ↻ Retry and 👍 / 👎 the same day.)
 - `--cards allow|deny`: answer every card this turn asks at once (otherwise `ask`
   returns `status: "waiting"` and you `answer` it).
 - `shots`: the turn's screenshots ([Screenshots](#screenshots)) — after it ends, and
@@ -370,6 +361,17 @@ sentence), and the reading card is `shot --window bar`. Asks the model nothing.
 
 ```json
 {"ok":true,"spoken":[{"messageId":"chat:1:2","engine":"windows","streamed":false,"sentences":["The area of a circle is A equals pi r squared, where r is the radius."]}],"reading":{"phase":"paused","index":0,"count":3,"shown":"The area of a circle is $A = \\pi r^2$, where $r$ is the radius.","word":7,"lit":"pi","timing":"estimate","messageId":"chat:1:2"}}
+```
+
+### `copied [--clear]`
+
+What the test Yap copied (16 Nov 2026, the rows under Chat's messages: Copy, `click
+--window thread --css '[data-testid="chat-answer-copy"]'`). From `start` on, its page's
+clipboard writes are held in the page, never put on this PC's clipboard — the person's
+own, in use meanwhile. `--clear` forgets them after reading. Asks the model nothing.
+
+```json
+{"ok":true,"copied":["Pack layers, a waterproof and a flask."]}
 ```
 
 ### `type --window main|thread|panel [--css <selector>] [--text <words>] [--press <keys>]`
@@ -712,7 +714,7 @@ warn).
 
 | Step | |
 |---|---|
-| `ask` | `"ask": "<text>"`, with `spoken`, `chat` (`new`, `same`, an id, `code:<workspace>`), `retry: true` / `edit: true` (↻ Retry the last answer; Edit the last message to the text), `cards` (`allow`/`deny`), `timeout`, `shots: false`, `theme`, `pictures` (made-up pictures put in the message box with a typed question, as a person drops a picture file there: a list of `{ width, height, shape, color, background }`, drawn here, nothing from outside). |
+| `ask` | `"ask": "<text>"`, with `spoken`, `chat` (`new`, `same`, an id, `code:<workspace>`), `edit: true` (Edit the last message to the text), `cards` (`allow`/`deny`), `timeout`, `shots: false`, `theme`, `pictures` (made-up pictures put in the message box with a typed question, as a person drops a picture file there: a list of `{ width, height, shape, color, background }`, drawn here, nothing from outside). |
 | `answer` | `"answer": "next"` (the first card waiting), a card's id, or `{ "kind": "page", "label": "…" }`; `how`: `allow` (default), `deny`, `always`, `pick`, `said`, `edit`, `revise`; `with`: what `pick`, `said`, `edit` or `revise` carry (an outline's `{ "sections": […], "note": "…" }`, an option, the words). |
 | `wait` | `"wait": "turn"` or `"agents"` (with `cards`: answer the agents' cards on the way). |
 | `shot` | `"shot": "<name>"`, `window` (`thread` default, `main`, `panel`, `page`, `bar`), `theme` (both by default), `selector`, `optional: true` (nothing to shoot is a skip, not a failure). |
@@ -758,7 +760,6 @@ warn).
 | `code-chat-link-dots` | `start --yap-code on` (live) | A file link's ⋯ never over its link (16 Nov 2026, `ui/fileLinks.js` `moreSpot`: a short link ending its line had the ⋯ over its end). In a Bypass Code chat on `lab-sandbox`: a new file with a long path written, the answer's short links (`TODO.md`, `src/convert.js`) and the long one that wraps each hovered — its ⋯ shows, nothing over the link's start or end (`covered: false`, `at`) — then a one-line answer ending in `README.md` at the answer's edge, hovered, and clicked at its very end (`click --at end`): the file view, no menu. Shots of each, light and dark. Passed 20 of 20 on Opus the day it was written. |
 | `kept-page-outside` | the default `start` | A kept page outside Yap (16 Nov 2026; #130): Chat's model keeps a tip calculator (`save_page`), then `kept save` (Windows' dialog answered by the lab: the suggested `.html` name, the toast, the file with the sandbox's policy and a title) and `kept open` (the copy test mode would have opened, run in the lab's own browser, light and dark; no console errors or policy refusals: soft). |
 | `outline-card` | any `start`: the plan (since 16 Nov 2026), `--model ondevice` or `--fake` | A new document's outline before the writing on a real model (16 Nov 2026; #129 was checked on `--fake` only): asked for a short guide, its `create_document` is a card first, nothing written; Edit's Go with a section renamed, one taken out and a note; the document made with those sections. Its `fake` steps make it pass on `--fake` too. |
-| `code-chat-retry` | `start --yap-code on` (live) | ↻ Retry and Edit in a Code chat that works directly (16 Nov 2026): the new answer read back — it came back empty before, Rewind having cut the thread where the old one was — with `branch` and the question it answered again. |
 | `agent-sizing` | `start --yap-code on` | Chat sizes each agent (8 Nov 2026, `agents/sizing.rs`): in a Code chat on `lab-sandbox`, a trivial change ("rename the variable x to count in convert.js"), then a hard one ("the tests fail intermittently, find the root cause and fix it"). Soft checks on each turn's `model` and `effort` (the model's judgement): the first small (Haiku or Sonnet, low or medium), the second big (Opus or Fable, high or above); the panel's rows shot. Its `fake` steps size them as the guide says, so `--fake` checks the plumbing. |
 
 ## Checking that it looks right

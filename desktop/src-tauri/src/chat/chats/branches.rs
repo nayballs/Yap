@@ -1,10 +1,10 @@
 //! **Branches** (15 Nov 2026, the Claude app's ‹ 1/2 ›): a conversation's
-//! other versions from a message on. **Retry** under an answer sets the
-//! answer (and everything after it) aside and the same question is answered
-//! again; **Edit** on the person's message sets that message and everything
-//! after it aside and the new words are asked in its place. What was set
-//! aside stays one switch away: ‹ 1/2 › on the answer (a retry) or on the
-//! person's message (an edit), as many as were made.
+//! other versions from a message on. **Edit** on the person's message sets
+//! that message and everything after it aside and the new words are asked
+//! in its place. What was set aside stays one switch away: ‹ 1/2 › on the
+//! person's message, as many as were made. (↻ Retry under an answer made
+//! them too until 16 Nov 2026, set aside at the answer: a chat saved with
+//! those still shows their ‹ › on the answer, and switches.)
 //!
 //! **What an older Yap keeps.** The branch shown is the conversation's
 //! `messages`, as ever: everything that reads a conversation (the history
@@ -237,23 +237,6 @@ fn collect<'a>(forks: &'a [Fork], out: &mut Vec<&'a ChatMessage>) {
         for b in &f.others {
             out.extend(b.messages.iter());
             collect(&b.forks, out);
-        }
-    }
-}
-
-/// [`other_messages`], to change: a copy put back after an older Yap's
-/// save (an answer's 👍 / 👎, `chat/feedback.rs`). Pure.
-pub fn other_messages_mut(forks: &mut [Fork]) -> Vec<&mut ChatMessage> {
-    let mut out = Vec::new();
-    collect_mut(forks, &mut out);
-    out
-}
-
-fn collect_mut<'a>(forks: &'a mut [Fork], out: &mut Vec<&'a mut ChatMessage>) {
-    for f in forks {
-        for b in f.others.iter_mut() {
-            out.extend(b.messages.iter_mut());
-            collect_mut(&mut b.forks, out);
         }
     }
 }

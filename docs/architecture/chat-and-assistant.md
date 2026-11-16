@@ -254,14 +254,13 @@ one side.
   (`chat:<id>:<index>`) count only the person's own (kind empty); search by
   meaning's passages say the report is the agent's ("Agent", never "You"). An
   older Yap drops `kind` on its save.
-- **`chat/chats/branches.rs`** — **Retry and Edit's versions** (2026-11-15, ‹ 1/2 ›):
-  the branch shown is `messages`; `Conversation.branches` the forks along it,
-  each with its other branches; copied to `chat_branches.json` for an older
-  Yap's save. [Below](#retry-edit-and-versions-2026-11-15).
-- **`chat/feedback.rs`** — **👍 / 👎 on an answer** (2026-11-16, the Claude
-  app's thumbs): `ChatMessage.feedback`, kept on this PC and sent nowhere;
-  copied to `chat_feedback.json` for an older Yap's save; Retry with the
-  note; Learn from this. [Below](#thumbs-up-and-down-on-an-answer-2026-11-16).
+- **`chat/chats/branches.rs`** — **Edit's versions** (2026-11-15, ‹ 1/2 ›; an
+  older Retry's on its answer still switch): the branch shown is `messages`;
+  `Conversation.branches` the forks along it, each with its other branches;
+  copied to `chat_branches.json` for an older Yap's save.
+  [Below](#edit-and-versions-2026-11-15). Under an answer, Fork from here
+  (`chat_fork`) and Pin as chapter (`chat_chapter_pin`):
+  [the rows under a message](#the-rows-under-a-message-2026-11-16-the-claude-apps).
 - **`chat/note_chats.rs`** — **a meeting's Ask thread, kept** (Wispr Flow's
   "New chat" / "Past chats"; the private roadmap's R15): what was asked about
   a meeting in the notepad's Ask sheet or its note's "Ask anything…" bar
@@ -4425,7 +4424,7 @@ and its Undo, Preview / Source, find, copy, light and dark).
   **Voice replies** (🔊 / 🔇 pill beside the model chip, `aria-pressed`) is
   Settings' "Speak replies" (`voice_replies_set`; Settings adopts
   `yap-voice-replies`, the toggle re-reads on `yap-config-saved`); every
-  answer has **▶ Read aloud** under it (■ Stop reading + "Speaking…" with
+  answer has **Read aloud** under it (a speaker since 16 Nov 2026, as the Claude app's; ■ Stop reading + "Speaking…" with
   three bars while it's read; also on the Notes view's Ask bar answers and
   the notepad's Ask sheet, not while that meeting records), via the shared
   `speech.svelte.js` store (`speakingId` from `yap-tts-state`; each window
@@ -6137,34 +6136,39 @@ rules pure in `core/chatStatus.js`, kept live for the whole main window by
   light and dark), `cargo test chat::stream` (the list of conversations
   answering) and `chat::chats` (`answerAt` / `askedAt`).
 
-## Retry, Edit and versions (2026-11-15)
+## Edit and versions (2026-11-15)
 
-The Claude app's everyday message actions, as its Chat tab has them: **Retry**
-(↻) under an answer asks its question again and keeps both answers, ‹ 1/2 ›
-on the answer; **Edit** (the pencil) on the person's message opens it in
-place with its words, and **Save and send** asks the new words in its place
-as a new version from there, the old one reachable through ‹ 1/2 › on that
-message. As many versions as are made (at most 50 at one message:
-`branches::MAX_BRANCHES`), each with everything that followed it.
+The Claude app's everyday message action, as its Chat tab has it: **Edit**
+(the pencil) on the person's message opens it in place with its words, and
+**Save and send** asks the new words in its place as a new version from
+there, the old one reachable through ‹ 1/2 › on that message. As many
+versions as are made (at most 50 at one message: `branches::MAX_BRANCHES`),
+each with everything that followed it.
+
+**↻ Retry came and went** (15–16 Nov 2026): under an answer it asked the
+question again and kept both answers, ‹ 1/2 › on the answer. The maintainer
+took it out with 👍 / 👎 on 16 Nov ("Rewind only appears in the desktop app on
+my messages, not Claude's ones"): an answer's row is now the Claude app's
+(next section). A chat saved with Retry's versions still opens with them —
+‹ › on the answer still switches (`chat_branch`), on the PC and on a phone —
+and nothing makes new ones.
 
 **The model: one shown branch, the others set aside** (`chat/chats/branches.rs`,
 pure but for its copy on disk). The branch shown *is* the conversation's
 `messages`, as ever. A `Fork` along it says where versions part (`at`: the
-answer retried, or the message edited — `messages[..at]` are all of theirs
-alike), which one is shown (`shown`, its number in the order they were made),
-the shown one's first message's time (`ts`) and the other `Branch`es: each
-its messages from the fork on, its own forks further on, and the summary of
-a long chat written while it was shown when that covers past the fork
-(`compact.rs`: it goes with its branch, as a Rewind drops it). Retry is
-`branch_off` at the answer (what's shown from there set aside; the turn
-answers the question again); Edit is `branch_off` at the message (the new
-words are appended in its place); ‹ › is `switch` (the shown branch set
-aside, the chosen one put in). `undo` goes back to the branch set aside when
-the new one never answered; `heal`, at load, puts right a fork Yap closed
-during (the old answer back) or one an older Yap cut under; `cut_at` drops the
-forks after a Code chat's Rewind. A page gets the ‹ k/n › only
-(`Conversation.forks`, set on `chat_get`'s copy, never stored), never the
-other branches.
+message edited, or an older Retry's answer — `messages[..at]` are all of
+theirs alike), which one is shown (`shown`, its number in the order they were
+made), the shown one's first message's time (`ts`) and the other `Branch`es:
+each its messages from the fork on, its own forks further on, and the summary
+of a long chat written while it was shown when that covers past the fork
+(`compact.rs`: it goes with its branch, as a Rewind drops it). Edit is
+`branch_off` at the message (the new words are appended in its place); ‹ › is
+`switch` (the shown branch set aside, the chosen one put in). `undo` goes
+back to the branch set aside when the new one never answered; `heal`, at
+load, puts right a fork Yap closed during (the old message back) or one an
+older Yap cut under; `cut_at` drops the forks after a Code chat's Rewind. A
+page gets the ‹ k/n › only (`Conversation.forks`, set on `chat_get`'s copy,
+never stored), never the other branches.
 
 **Everything follows the branch shown**, because everything reads `messages`:
 the history a model gets (`history_messages`), a long chat's summary
@@ -6180,15 +6184,13 @@ Only the screenshot sweep and deleting look further: a version not shown
 keeps its screenshots (`Conversation::every_message`: `image_ids`,
 `delete_many`, `unshown`), and they go with it.
 
-**On a paired phone** (Yap Link, 16 Nov 2026: [link.md](./link.md#retry-and-versions-on-the-phone-16-nov-2026)):
+**On a paired phone** (Yap Link, 16 Nov 2026: [link.md](./link.md#versions-on-the-phone-16-nov-2026)):
 the same versions, the version shown being this one — one a conversation,
 the last switch winning wherever it was made. A phone's ‹ › is `switch_branch`
-(`link/session.rs` `show_version`), its ↻ in a plain chat `begin_retry` with
-the question asked the phone's way under `turn::again`, its ✎ in a plain
-chat `begin_edit` with the new words asked the phone's way (the question
-named by its place and its time in Chat; kept unless it ended in an error,
-as an edit here is); a change here
-(`chat_branch`, `chat_retry`, an edit's end) tells the phones
+(`link/session.rs` `show_version`), its ✎ in a plain chat `begin_edit` with
+the new words asked the phone's way (the question named by its place and its
+time in Chat; kept unless it ended in an error, as an edit here is); a change
+here (`chat_branch`, an edit's end) tells the phones
 (`link::versions_changed`), and one there tells this view
 (`yap-chat-versions` → `chatState.onVersions`, the chat open read again).
 
@@ -6199,173 +6201,135 @@ forks to **`chat_branches.json`** (`branches::mirror_to_disk`, only when they
 changed; removed when there are none), a file an older Yap never touches,
 and the next start puts them back (`restore_from_disk`) on every
 conversation that has none, keeping each fork that still fits: its shown
-branch's first message still there at its time (or none yet, mid-retry).
+branch's first message still there at its time (or none yet, mid-edit).
 Messages the older Yap added after the fork are kept; a fork its own Rewind
 cut under is lost for good — the branch shown is then all there is, as
 before. Unit-tested (`branches::tests::an_older_yaps_save_loses_no_branch_that_still_fits`)
 and in the app (`chat-branches.spec.js`).
 
-**Retry** (`chat_retry {conversationId, index, onStream, turnId}`, streamed as
-`chat_send` is, the same reply plus `forks`): `chats::begin_retry` sets the
-answer and what followed aside (only an answer just after the person's own
-question), then the turn runs **asked again** (`turn::again`, a task-local:
-the question is never saved a second time — `save_question`, Yap's own
-answers in `fast.rs` too — and the history before it is the conversation's
-up to it, `turn_conversation`). The question goes as it was: its words with
-the passage it was about (`sent_text`), its screenshots still on this PC
-(their text instead when it went as text), as dictated (spoken answers
-follow "When to speak"), and the Skill it ran. `end_branch` keeps the new
-answer (stopped part-way too), or — no answer at all (an error, ■ before any
-of it) — puts the old one back; the page says "Couldn't try again".
-
 **Edit** (`chat_send`'s `edit: index`): `chats::begin_edit` sets the message
 and what followed aside, and the new words are asked as any question, with
 the message's screenshots (their sources kept: an element's picture stays
 its chip's), the passage it was about (a document's as its selection, other
-text as selected text, treated as web content) and its picked elements'
-blocks. An error before any answer puts it all back, and the editor opens
-again with the new words; stopped, or replaced by a newer question, it
-stays as any question does.
+text as selected text, treated as web content), its picked elements' blocks,
+its attached files and the Research switch it was asked with
+(`ChatMessage::research`). An error before any answer puts it all back, and
+the editor opens again with the new words ("Couldn't send"); stopped, or
+replaced by a newer question, it stays as any question does.
 
 **Not while an answer is being written** in that chat (`stream::is_answering`;
-the page greys the buttons with "Unavailable while an answer is being
-written"). The person's message has its actions row from the moment it's
-sent (15 Nov 2026, `ChatThread`'s `actionsFor`): Copy at once, Edit waiting
-for its answer ("Not saved yet" until it has an id), and in a Code chat
-Rewind and Fork joining the same row once its turn is known. Drawn only once
-the answer was in, it pushed the thread 36 px down at every answer's end
+the page greys Edit and ‹ › with "Unavailable while an answer is being
+written"). The person's message has its row from the moment it's sent (15
+Nov 2026, `ChatThread`'s `actionsFor`): Copy at once, Edit waiting for its
+answer ("Not saved yet" until it has an id). Drawn only once the answer was
+in, it pushed the thread 36 px down at every answer's end
 (`chat-scroll.spec.js`).
 
-**In a Code chat** there's no second mechanism: Edit and Retry are Claude
-Code's own **Rewind** ([yap-code.md](./yap-code.md), `agents/rewind.rs`),
-asked first as a Rewind is ("Send the edited message?" / "Retry from this
-message?", with "Also put back the files Claude changed since" when it
-did), then the message sent — the new words, or the same ones — as the
-session's next turn, forked at the end of the turn before it. Its
-screenshots stay to go again (`chats::rewind`'s `keep_shots`,
-`rewind_for_edit`). No versions are kept there: what came after is gone from
-the chat and from Claude's session, as with Rewind. Retry sits under the
-answer of a turn the person's message started; both are unavailable while
-Claude works, as Rewind is.
+**In a Code chat** there's no Edit (16 Nov 2026, as the Claude app's Code
+sessions): its message's row is ✓✓ and its time, Copy, **Rewind to here** and
+**Fork from here** ([yap-code.md](./yap-code.md), `agents/rewind.rs`). Rewind
+puts the message's words back in the box to change and send again; no
+versions are kept there. (`chat_send`'s `edit` still rewinds a Code chat
+first, `rewind_for_edit`, for anything that sends one.)
 
-**The page** (`views/chat/`): `BranchSwitch.svelte` (‹ k/n ›: under an answer
-in its foot before ↻, or at the start of the person's message's actions row,
-always shown while the buttons fade in on hover), `MessageEdit.svelte` (in
+**The page** (`views/chat/`): `BranchSwitch.svelte` (‹ k/n ›: at the start of
+the person's message's row, always shown while the buttons fade in on hover,
+or first in an answer's row for an older Retry's), `MessageEdit.svelte` (in
 place of the bubble, its own chunk: Enter sends, Shift+Enter a new line, Esc
 cancels; "Its screenshots go again" when it has some), `chatState`'s
-`retryAt`, `startEdit` / `saveEdit` / `cancelEdit`, `switchBranch` and
-`forks` (read with every load of the conversation), `send`'s `retry` /
-`edit`; ChatThread's `retryOf` / `branchOf` / `actionsFor` and the right-click
-menu's Edit and Retry.
+`startEdit` / `saveEdit` / `cancelEdit`, `switchBranch` and `forks` (read
+with every load of the conversation), `send`'s `edit`; ChatThread's
+`branchOf` / `actionsFor` and the right-click menu's Edit.
 
-Tests: `cargo test chats::branches` (the model: retry, edit, nested versions,
-undo, the summary, Rewind's cut, heal, the copy for an older Yap's save, the
-cap), `chats::tests::a_retry_and_an_edit_keep_every_version…` (the store),
-`turn::again_tests` (asked again, never saved twice), `compact::tests` (a
-summary over messages that changed is dropped); `chat-branches.spec.js`
-(Retry, Edit, switching, the history sent, a retry with no answer, after a
-restart and after an older Yap's save) and `agents-direct.spec.js` (a Code
-chat's Edit and Retry through Rewind).
+Tests: `cargo test chats::branches` (the model: an older Retry's versions,
+edit, nested versions, undo, the summary, Rewind's cut, heal, the copy for an
+older Yap's save, the cap), `chats::tests::an_edit_and_an_older_retry_keep_every_version…`
+(the store), `compact::tests` (a summary over messages that changed is
+dropped); `chat-branches.spec.js` (Edit, switching, the history sent, an edit
+with no answer, after a restart and after an older Yap's save).
 
-## Thumbs up and down on an answer (2026-11-16)
+## The rows under a message (2026-11-16, the Claude app's)
 
-The Claude app's 👍 / 👎 under an answer (row H9 of the parity catalogue, the
-last of its chat features). Yap is local, so the feedback goes to no one: it's
-the person's own mark on the answer, kept with it on this PC, and put to use
-here — never sent anywhere, never read by a model except as a Retry's note.
+The maintainer compared Yap's rows with the Claude desktop app's on 16 Nov:
+no 👍 / 👎 and no ↻ under Claude's answers there, and Yap's buttons "super
+tiny". So both rows are the app's, in every chat:
 
-**Where it is**: under every answer of Chat's (not an agent's report marker,
-not one still being written), in the answer actions row: ▶ Read aloud, Copy,
-👍, 👎, ↻ (the Claude app's order: Copy, 👍, 👎, Retry), then the model's
-byline. A thumb is a toggle (`aria-pressed`): pressed, kept (`.readbtn.on`,
-the hand filled softly in the primary colour); pressed again, taken back;
-👍 and 👎 replace each other. In a Code chat they sit beside its answer
-actions too. On the phone (Yap Link, a PC that says `"rate"` in
-`ready.can`): 👍 and 👎 between Copy and ▶ under each answer it was given,
-the same toggles (`rate {id, rating}` → `rated {id, rating?}`, the PC's
-`link/session.rs` `rate`: only an answer that phone was given; the same mark
-again keeps the reasons the PC's card gave; a thread's answers carry their
-`rating`). The phone has no reasons card: why it wasn't good is said on the
-PC.
+- **Under an answer** (`ChatMessage`'s `.msgfoot`, `data-testid
+  chat-answer-actions`): **Copy** (as text; Copy as Markdown stays in the
+  right-click menu), **Fork from here**, **Pin as chapter**, **Read aloud**
+  (a speaker; ■ while it reads, Esc stops), then its **time** ("12 minutes
+  ago") and the model that wrote it, cut short with an ellipsis when the row's
+  narrow; "· Stopped" after it when it was. An older Retry's ‹ k/n › goes
+  first.
+- **Under the person's message**, on hover (‹ 1/2 › always): in Chat **Copy**
+  and **Edit**; in a Code chat **✓✓ and its time** ("✓✓ 12 minutes ago ·":
+  ✓ while a queued message waits, `data-testid chat-ticks`; ✓✓ once Claude
+  has it, `chat-read` on every other), **Copy**, **Rewind to here** and
+  **Fork from here**.
+- **Tooltips as the app's** (`ui/actionTip.js`, `.yap-action-tip` in
+  app.css): a dark bubble above the button after a short hover or on the
+  keyboard's focus — its name in bold and, where there's more to say, a line
+  under it: Rewind to here "Takes this message and everything after it out of
+  the conversation"; Fork from here "Starts a new session from this point.
+  This one stays as it is." in a Code chat, "a new chat" in Chat; a button
+  that can't act now says why there. The buttons keep their `aria-label`.
+- **The time** (`core/whenSaid.js`, pure, shared with the phone): "just
+  now", "1 minute ago", "12 minutes ago", "3 hours ago", "yesterday", "3
+  days ago", then the day; the full date and time on hover. A message's
+  `ts` as Chat saved it, or — just sent, not read back yet — when it showed
+  (`shownAt`). One 30-second clock moves them all on while the thread is
+  shown (`views/chat/clock.svelte.js`).
+- **Their size, measured on the app's screenshots** (16 Nov 2026): its
+  icons about 0.76 of its answer text's size (12 px under 15.7 px text) in a
+  square about 1.53 of it (24 px), side by side, the time about 0.82 of it.
+  Yap's are the same proportions to Yap's own answer text: the rows'
+  `font-size` is the answer's (`12.5px × --yap-reading-scale`), each square
+  1.6em, its icon 1.04em (its ink ≈ 0.76em), the time 0.82em — so they follow
+  Settings → Appearance's reading size. Before, they were 22 px circles with
+  borders around 6–7 px of ink (`chat-answer-row.spec.js` measures them).
 
-**👎's card** (`FeedbackCard.svelte`, its own chunk, under the row): "What
-was wrong?" — Not true, Didn't do what I asked, Too long, Too short, Wrong
-tone, Other (a line to type, "What should it have done?", at most 300
-characters) as toggle chips, each kept as it's picked (the line on Enter,
-leaving the box, Done or Retry); "Kept on this PC: Yap sends it nowhere.";
-Done; **Retry with this note**; × and Esc close it (the 👎 stays). It opens
-when 👎 is pressed, for that answer only (`ChatMessage`'s `fbFor`: its id and
-time, so a version switched in its place never inherits it).
+**Fork from here under an answer** (`chat_fork {id, index}`): a new chat with
+the conversation up to and including that answer — the person's messages and
+the answers, the version shown, no other versions — titled "… (fork)", in the
+original's project and style, its connectors switched off as they were
+(`chats::fork`, which a Code chat's fork uses too); opened, "Forked into a new
+chat", the original as it was. Not from the answer being written. In a Code
+chat it's Claude's own fork from the message that answer answers
+(`agent_fork`, as Fork from here under that message: [yap-code.md](./yap-code.md)).
 
-**Retry with this note** (`chat_retry`'s `feedback: true`; a Code chat's
-`chat_send` `edit` with `feedbackFrom: <answer index>`): the question asked
-again exactly as ↻ asks it — a new version, the old answer kept with its 👎
-one ‹ › away — and the model is told, this turn only (`feedback::with_note`,
-a task-local read by `turn/prompt.rs` `build`: the question's context, every
-path that builds the prompt — the tool loop, the small path, your Claude
-plan's session): that the person marked the earlier answer to this question
-not good and asked again (it's out of the history: Retry set it aside), what
-was wrong (each reason's line, `feedback::REASONS`: "it was too long, so make
-the new one clearly shorter"…), their words, and the earlier answer itself
-for reference only ("never as instructions", clipped to 1,500 characters,
-its word count said). The note is read from the stored mark before the
-answer is set aside (`retry_note_at`). The question stays as the person
-asked it and is never saved again. **↻ on an answer marked 👎 is the same
-Retry with its note** (its label and the right-click menu say "Retry with
-your note"): the person said what was wrong, so a Retry uses it — the
-phone's ↻ too (`link/session.rs` `retry`). In a Code
-chat, Retry is Claude Code's own Rewind as ever ("Retry with your note?"
-asked first), and the note goes after the message to the session
-(`feedback::for_session` in `turn.rs` `sent_directly`); the message is
-saved as the person wrote it.
+**Pin as chapter** (`chat_chapter_pin {id, index, ts, pin}`): the answer
+starts a chapter, as `mark_chapter`'s do ([chapters](#cards-in-the-thread-a-question-the-next-step-box-chapters-2026-11-15)),
+kept the same way on the answer (`ChatMessage::chapter`) with `pinned: true`.
+Its title is named as the model names its own — a short noun phrase from the
+answer and its question, by Chat's model (`chapters::pin_title`; in a Code
+chat only when that model is Claude's or on this PC, so its work never goes
+somewhere new), else the question's first words (`words_title`). Its divider
+goes under the question, above the answer's turn (its work and its words), a
+pin before the title (`chapters.js`: `below`); its entry in the contents
+(`ChatChapters`); the pin filled (`aria-pressed`), softly pulsing while it's
+named; a second click — or the right-click menu's "Unpin chapter" — takes the
+answer's chapter off (one the model marked there too). `ts` names the answer,
+so a version switched in meanwhile is never pinned.
 
-**Learn from this** (the card's link, a plain chat only — never a Code chat,
-which keeps Yap's memory out, nor an incognito chat, which never updates it):
-offered when a reason says something lasting (Too long, Too short) or the
-person typed a line. It opens a row: "Remember in every chat" with a line to
-edit (Too long: "Prefers shorter, more direct answers"; Too short: "Prefers
-fuller, more detailed answers"; else their own line) and **Remember**
-(`chat_feedback_remember {id, index, fact}`: a fact in memory's Preferences
-with source `tell` — "You told Yap" in Settings → Memory — under memory's
-own rules: secrets refused, a fact's length at most, said twice kept once;
-only for an answer marked 👎; memory's toast with Undo), and for Too long /
-Too short **Use Concise / Explanatory in this chat** (`chat_style_set`; the
-Style chip follows, `yap-chat-style`). Nothing is kept until it's pressed.
+**What was taken out with them** (16 Nov 2026): 👍 / 👎 and their card (what
+was wrong, Retry with that note, Learn from this: `chat/feedback.rs`,
+`FeedbackCard.svelte`), ↻ Retry (`chat_retry`, `chats::begin_retry`,
+`turn::again`), a Code chat's Edit and Retry through Rewind, the phone's ↻
+and 👍 / 👎 (`retry`, `rate`: [link.md](./link.md)), the Lab's `--retry`
+and `--feedback`. Old data reads harmlessly: a chat saved with a thumb opens
+as any (its `feedback` field read past, dropped at its next save); its copy
+`chat_feedback.json` is never written or read again, never deleted but by
+Delete your data's chats, and in Download your data as it was left
+(`chats/feedback.json`).
 
-**Where it's kept** (`chat/feedback.rs`, [config-and-data.md](./config-and-data.md)):
-the answer's `feedback` in chats.json — `{rating, reasons?, note?, ts}` —
-set by `chat_feedback {id, index, ts?, feedback?}` (`chats::set_feedback`:
-an answer of the chat's only; `ts`, when the page knows it, must be the
-answer's, so one that moved since a version switched is refused). It goes
-where its answer goes: into the version Retry sets aside (and back with ‹ ›),
-out with a Rewind, deleted with the chat. **An older Yap's save** drops the
-field, so every save also writes the marks to `chat_feedback.json`
-(`{version, answers: [{conversation, ts, chars, feedback}]}`, every version's,
-removed when there are none), and the next start puts each back
-(`restore_from_disk`, after the branches are back) on the answer of that
-conversation at that time and length — in the branch shown or another
-version — when it has none. **Download your data** (`privacy/export.rs`):
-chats.json, "Your feedback: 👎 Too long: “…”" under the answer in its chat's
-Markdown, and `chats/feedback.json` (every mark with its chat, the answer's
-start and why). Delete some of your data and Reset app take
-`chat_feedback.json` with the chats.
-
-The log says ratings and counts, never the person's words.
-
-Tests: `cargo test feedback` (`feedback::tests`: a mark kept clean, its line,
-a Retry's note, the note the turn's only, an older Yap's save, Learn from
-this, the export rows), `chats::tests::an_answers_thumbs_are_kept_with_it_and_only_an_answers`,
-`turn::prompt::tests::a_code_chats_prompt_keeps_yaps_memory_out_…` (the note
-in the question's context), `privacy::export::tests::your_thumbs_on_answers_are_in_the_file`,
-`link::chats` / `link::wire` (the phone's rating and `rate`);
-`chat-feedback.spec.js` (the row's order, 👍 kept and taken back, 👎's card,
-Retry with the note — what the model got, both versions — ↻ with the note,
-Learn from this, an older Yap's save; light and dark),
-`agents-direct.spec.js` (a Code chat's 👎 and Retry with the note through
-Rewind), and the phone page's `chats.spec.js` (rate / rated) and
-`screens.spec.js` (the row, light and dark). Yap Lab: `ask --retry
---feedback long,untrue --note "…"` presses 👎, its reasons and line, then
-the card's Retry ([lab.md](../lab.md)).
+Tests: `chat-answer-row.spec.js` (each row's buttons and order, the
+tooltips, light and dark; their size against the answer's text at two reading
+sizes; Copy, Read aloud; Fork from here and the fork going on alone; Pin as
+chapter, its divider, contents and menu, unpinned; a chat saved with a thumb
+opening, its file left as it was), `agents-direct.spec.js` (a Code chat's
+rows, Pin and Fork from its answer), `right-click.spec.js` (the answer's
+menu); `cargo test chapters` (`pin_title`'s words, `pinned` kept) and
+`privacy::export` (the thumbs' file as it was left).
 
 ## Export a chat (2026-11-15)
 
@@ -6796,15 +6760,15 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   rule runs on every call as ever (`tools::refused_after_outside`) — and a
   research runs none of the tools it locks anyway. The plan step has no
   tools and reads no outside content.
-- **Retry and Edit** (16 Nov 2026): a question that plainly asks ("research
-  …") researches again; so does one researched by the switch alone,
-  whatever the switch says by then — a question asked with it on keeps it
+- **Edit** (16 Nov 2026): a question that plainly asks ("research …")
+  researches again; so does one researched by the switch alone, whatever the
+  switch says by then — a question asked with it on keeps it
   (`ChatMessage::research`, set by `turn.rs` as the research starts;
-  `chats::set_research`), and `chat_retry` runs the question again under
-  `research::scoped(question.research)`, an Edit under its message's
-  (`chat_send`'s `edit`): the plan first, as it was asked. One asked with
-  it off is answered again as ever. An older Yap's save drops the field
-  (its Retry then answers plainly).
+  `chats::set_research`), and an Edit runs under its message's
+  (`chat_send`'s `edit`): the plan first, as it was asked. One asked with it
+  off is answered as ever. An older Yap's save drops the field (its Edit
+  then answers plainly). (↻ Retry did the same until it was taken out, the
+  same day.)
 - **Pages by their own titles** (16 Nov 2026): a page read that came with
   no title of its own — Claude Code's `WebFetch` gives none, so a page no
   search found showed its address ("en.wikipedia.org/wiki/QWERTY"), as did
@@ -6828,17 +6792,17 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   to the request, the plan read, the loop's words, citations only to pages
   read and numbered as first cited, progress, the quiet stream, a plan turn's
   caps, a word before the title); `chat::chats` (a question kept as
-  researched, for its Retry and Edit); `web::page` (a page's own title, the
+  researched, for its Edit); `web::page` (a page's own title, the
   read pages titled); `chat::tools::agent` (a research turn's gate); e2e
   `chat-research.spec.js` (the switch, the plan before any search, the loop on
   the free sources with its progress, an app and memory refused, the report
   beside the chat with its citations and Sources, ■ Stop, a plain ask, a
-  greeting, web search off; Retry and Edit of a switch-researched question
-  researching again with the switch off, a plain one's Retry not; on the
+  greeting, web search off; an Edit of a switch-researched question
+  researching again with the switch off, a plain one's not; on the
   plan, a page `WebFetch` read that no search found titled in the row and
   the report, a word before the title gone; light and dark); Yap Lab on Opus
-  on the plan (`research the history of the QWERTY keyboard layout`; then ↻,
-  the row's titles).
+  on the plan (`research the history of the QWERTY keyboard layout`; then
+  ↻, before it was taken out; the row's titles).
 
 ## Projects (2026-11-15)
 

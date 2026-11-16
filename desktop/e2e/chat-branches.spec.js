@@ -1,12 +1,11 @@
-// Retry, Edit and ‹ 1/2 › (15 Nov 2026, the Claude app's message actions: desktop/src-tauri/src/chat/chats/branches.rs,
-// chat/commands.rs `chat_retry` / `chat_send`'s `edit` / `chat_branch`; desktop/src/lib/views/chat/BranchSwitch.svelte,
-// MessageEdit.svelte).
-// - Retry under an answer: its question answered again, never asked twice; the old answer and what followed kept as
-//   a version, ‹ 2/2 › on the new one, ‹ back to the first.
+// Edit and ‹ 1/2 › (15 Nov 2026, the Claude app's message actions: desktop/src-tauri/src/chat/chats/branches.rs,
+// chat/commands.rs `chat_send`'s `edit` / `chat_branch`; desktop/src/lib/views/chat/BranchSwitch.svelte,
+// MessageEdit.svelte). (↻ Retry under an answer came and went on 16 Nov 2026: a chat an older Yap retried keeps its
+// answer's ‹ › — the saved conversation, below.)
 // - Edit on the person's message: open in place with its words (Esc leaves it as it was); Save and send asks the new
 //   words in its place, ‹ 2/2 › on it, the old message, its answer and the follow-up one switch away.
 // - What the model gets is the branch shown: a question after switching goes with that branch's history only.
-// - A retry that gets no answer puts the old one back.
+// - An edit that gets no answer puts the message back as it was, its new words open in place again.
 // - The saved conversation: chats.json's `messages` is the branch shown, the others in `branches` and copied to
 //   chat_branches.json; after a restart the versions are there, as switched; an older Yap's save (no `branches`)
 //   loses none that still fit: the copy puts them back.
@@ -65,51 +64,6 @@ function sentWith(fakeLlm, from, words) {
 /** The conversation saved whose title starts with `title`. */
 const saved = (yap, title) => yap.readJson('chats.json').conversations.find((c) => c.title.startsWith(title));
 
-test('Retry answers the question again and keeps both answers, ‹ 1/2 › to switch between them', async ({ yap, main, fakeLlm, shot }) => {
-  await freshChat(main);
-  fakeLlm.scriptChat([{ content: 'Pack warm socks.' }]);
-  await send(main, 'What should I pack for the trip?');
-  await expect(answers(main)).toHaveText(['Pack warm socks.']);
-  await expect(count(main)).toHaveCount(0);
-
-  const from = fakeLlm.requests.length;
-  fakeLlm.scriptChat([{ content: 'Pack walking boots.' }]);
-  await answers(main).first().hover();
-  await thread(main).getByTestId('chat-retry').click();
-  await expect(answers(main)).toHaveText(['Pack walking boots.']);
-  // The question once — in the thread and to the model — and the old answer never in what it got.
-  await expect(questions(main)).toHaveText(['What should I pack for the trip?']);
-  const sent = sentWith(fakeLlm, from, 'What should I pack for the trip?');
-  expect(sent.split('What should I pack for the trip?').length - 1).toBe(1);
-  expect(sent).not.toContain('Pack warm socks.');
-  await expect(count(main)).toHaveText('2/2');
-  await shot(main, '01-retried-2-of-2');
-
-  // ‹ back to the first answer; › to the second.
-  await thread(main).getByTestId('chat-branch-prev').click();
-  await expect(answers(main)).toHaveText(['Pack warm socks.']);
-  await expect(count(main)).toHaveText('1/2');
-  await expect(thread(main).getByTestId('chat-branch-prev')).toBeDisabled();
-  await shot(main, '02-switched-1-of-2');
-
-  // Saved: the branch shown is the conversation's messages, the other kept in `branches` and in its copy.
-  await expectStore(yap, 'chats.json', (s) => {
-    const c = s.conversations.find((x) => x.title.startsWith('What should I pack'));
-    return c?.messages.map((m) => m.text).join('|') === 'What should I pack for the trip?|Pack warm socks.' && c.branches?.[0]?.others?.[0]?.messages?.[0]?.text === 'Pack walking boots.';
-  });
-  expect(saved(yap, 'What should I pack').forks).toBeUndefined();
-  await expectStore(yap, 'chat_branches.json', (m) => m.conversations?.some((c) => c.forks?.[0]?.at === 1));
-
-  // A third: ‹ 3/3 ›, the one before still a click away.
-  fakeLlm.scriptChat([{ content: 'Pack a rain jacket.' }]);
-  await thread(main).getByTestId('chat-retry').click();
-  await expect(answers(main)).toHaveText(['Pack a rain jacket.']);
-  await expect(count(main)).toHaveText('3/3');
-  await thread(main).getByTestId('chat-branch-prev').click();
-  await expect(answers(main)).toHaveText(['Pack walking boots.']);
-  await expect(count(main)).toHaveText('2/3');
-});
-
 test('Edit opens the message in place; Save and send asks the new words, ‹ 1/2 › on it, and the model gets the branch shown', async ({ yap, main, fakeLlm, shot }) => {
   await freshChat(main);
   fakeLlm.scriptChat([{ content: 'Try the harbour walk.' }, { content: 'Bring a light jacket.' }]);
@@ -165,7 +119,7 @@ test('Edit opens the message in place; Save and send asks the new words, ‹ 1/2
   await expect(answers(main)).toHaveText(['Visit the museum.']);
 });
 
-test('a retry that gets no answer puts the old one back, and says so', async ({ main, fakeLlm }) => {
+test('an edit that gets no answer puts the message back as it was, and says so', async ({ main, fakeLlm }) => {
   await freshChat(main);
   fakeLlm.scriptChat([{ content: 'It opens at nine.' }]);
   await send(main, 'When does the library open?');
@@ -173,11 +127,15 @@ test('a retry that gets no answer puts the old one back, and says so', async ({ 
   const kind = fakeLlm.requests.find((r) => JSON.stringify(r.messages || []).includes('When does the library open?')).kind;
   fakeLlm.failNext(kind, 6, 400, { error: { message: 'fake failure: no answer today' } });
   try {
-    await answers(main).first().hover();
-    await thread(main).getByTestId('chat-retry').click();
-    await expect(main.getByText("Couldn't try again")).toBeVisible({ timeout: 20_000 });
+    await questions(main).first().hover();
+    await thread(main).getByTestId('chat-edit-message').first().click();
+    await thread(main).getByTestId('chat-edit-input').fill('When does the library open on Sunday?');
+    await thread(main).getByTestId('chat-edit-save').click();
+    await expect(main.getByText("Couldn't send")).toBeVisible({ timeout: 20_000 });
+    // The answer as it was, no versions; the new words open in place again.
     await expect(answers(main)).toHaveText(['It opens at nine.']);
     await expect(count(main)).toHaveCount(0);
+    await expect(thread(main).getByTestId('chat-edit-input')).toHaveValue('When does the library open on Sunday?');
   } finally {
     fakeLlm.failNext(kind, 0);
   }

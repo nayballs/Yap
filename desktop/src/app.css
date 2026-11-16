@@ -1282,3 +1282,41 @@ mark.found {
     opacity: 0;
   }
 }
+/* A small button's tooltip (ui/actionTip.js, the Claude app's under a
+   message): its name in bold, a quieter line under it when there's more to
+   say; the same dark bubble. */
+.yap-action-tip {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 240px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: var(--yap-ink);
+  color: var(--yap-ink-fg);
+  font-family: var(--yap-font-ui, inherit);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  animation: yap-overflow-tip-in 120ms ease-out;
+}
+.yap-action-tip.wide {
+  white-space: normal;
+  width: max-content;
+}
+.yap-action-tip strong {
+  font-weight: 650;
+}
+.yap-action-tip span {
+  color: color-mix(in srgb, var(--yap-ink-fg) 72%, transparent);
+  font-size: 11.5px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .yap-action-tip {
+    animation: none;
+  }
+}

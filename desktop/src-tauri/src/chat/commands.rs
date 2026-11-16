@@ -174,10 +174,6 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// the conversation it makes is in that project. Ignored for an existing one
 /// (its ⋯ moves it: `chat_project_set`).
 ///
-/// `feedbackFrom` (with `edit`; 16 Nov 2026, a Code chat's Retry with the
-/// note on 👎's card): that answer's 👎 goes to Claude after the message,
-/// this turn only (`chat/feedback.rs`); the message is saved as it is.
-///
 /// `research`: the Research switch under the box was on (chat/research.rs):
 /// this question researched — its plan first, then many searches and page
 /// reads, then a report as a document beside the chat — and kept with it, so
@@ -207,7 +203,6 @@ pub async fn chat_send(
     edit_files: Option<bool>,
     incognito: Option<bool>,
     project: Option<String>,
-    feedback_from: Option<usize>,
     research: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     // The files attached in the box (chat/attachments.rs): each still there,
@@ -215,11 +210,6 @@ pub async fn chat_send(
     let files = files.unwrap_or_default();
     crate::chat::attachments::sent_from_box(&files);
     let files = crate::chat::attachments::taken(&files)?;
-    // A Retry with its 👎's note (an edit with the same words): read before the edit rewinds past the answer.
-    let note = match (edit, conversation_id, feedback_from) {
-        (Some(_), Some(id), Some(answer)) => crate::chat::feedback::retry_note_at(id, answer),
-        _ => None,
-    };
     // A Skill (`/decisions`, a one-tap prompt): asked across the meetings,
     // its own passages and instructions (chat/skills.rs).
     let skill_turn = match skill.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
@@ -292,8 +282,6 @@ pub async fn chat_send(
     // replaces asked with it on: researched again, as it was asked.
     let research = research.unwrap_or(false) || editing.as_ref().is_some_and(|e| e.question.research);
     let send = Box::pin(crate::chat::research::scoped(research, send));
-    // A Retry with its 👎's note: given to the model (or the Code chat's session) this turn only.
-    let send = Box::pin(crate::chat::feedback::with_note(note, send));
     // Chat's own turn: Think pressed (the model on this PC), or a cloud
     // model at its effort (`ai/effort.rs`): what it thought comes back.
     let (out, thought) = crate::chat::think::scoped(think.unwrap_or(false), send).await;
@@ -398,67 +386,79 @@ fn with_forks(out: Result<serde_json::Value, String>, id: u64) -> Result<serde_j
     })
 }
 
-/// A Skill's question ("/decisions last week") run again as that Skill.
-fn skill_again(text: &str) -> Option<crate::chat::skills::SkillTurn> {
-    let command = text.trim().strip_prefix('/')?.split_whitespace().next()?;
-    crate::chat::skills::turn_for(command, text).ok()
-}
+// ---- Under an answer: Fork from here and Pin as chapter (16 Nov 2026, the Claude app's answer row) ----
 
-/// **Retry** (15 Nov 2026, the Claude app's): conversation `conversationId`'s
-/// answer `index` set aside as a branch with everything after it
-/// (`chats::begin_retry`), and the person's question before it answered
-/// again — its screenshots, the passage it was about, the Skill it ran
-/// with and the Research switch it was asked with (`ChatMessage::research`);
-/// ‹ 2/2 › on the new answer switches back. Streamed like
-/// [`chat_send`] (`onStream`, `turnId` for ■), the same reply, with the
-/// chat's `forks`. An answer that never comes (an error, ■ before any of
-/// it) puts the old one back. Not in a Code chat: there Retry is an Edit
-/// with the same words (Claude Code's own Rewind, `chat_send`'s `edit`).
-///
-/// `feedback` (16 Nov 2026, 👎's card: Retry with this note): the answer's
-/// 👎 — what was wrong, the person's words, the earlier answer for
-/// reference — goes to the model with the question, this turn only
-/// (`chat/feedback.rs`). The question stays as it was.
+/// **Fork from here** under an answer in Chat (16 Nov 2026, the Claude
+/// app's): a new chat with conversation `id` up to and including its answer
+/// `index` — the person's messages and the answers, as shown (no other
+/// versions) —, titled "… (fork)", in the original's project and style, its
+/// connectors as they were. The original stays as it is. The new chat's id.
+/// A Code chat forks through Claude's own session instead (`agent_fork`,
+/// `agents/rewind.rs`), from the message the answer answers.
 #[tauri::command]
-pub async fn chat_retry(
-    app: AppHandle,
-    conversation_id: u64,
-    index: usize,
-    on_stream: crate::chat::stream::PageChannel,
-    turn_id: Option<String>,
-    feedback: Option<bool>,
-) -> Result<serde_json::Value, String> {
-    if crate::chat::stream::is_answering(conversation_id) {
+pub fn chat_fork(id: u64, index: usize) -> Result<u64, String> {
+    if crate::agents::code_chat::folder_of(Some(id)).is_some() {
+        return Err("A Code chat forks through Claude's own session: use Fork from here on it.".to_string());
+    }
+    let conv = crate::chat::chats::get(id).ok_or("That chat isn't there any more.")?;
+    let m = conv.messages.get(index).ok_or("That answer isn't there any more.")?;
+    if m.role != "assistant" || !m.kind.is_empty() {
+        return Err("Fork from here goes under an answer.".to_string());
+    }
+    // (The answer being written is the chat's last: an earlier one forks meanwhile.)
+    if crate::chat::stream::is_answering(id) && index + 1 >= conv.messages.len() {
         return Err(WAIT_FOR_ANSWER.to_string());
     }
-    if crate::agents::code_chat::folder_of(Some(conversation_id)).is_some() {
-        return Err("In a Code chat, Retry sends the message again from a Rewind.".to_string());
+    let title = format!("{} (fork)", if conv.title.trim().is_empty() { "Untitled" } else { conv.title.trim() });
+    let new = crate::chat::chats::fork(id, index + 1, &title)?;
+    // Where it was and how it talks, as the original (an incognito fork is one too, and in no project).
+    if !new.incognito {
+        if let Some(p) = crate::chat::projects::of_conversation(Some(id)) {
+            if let Err(e) = crate::chat::projects::chat_project_set(new.id, Some(p.id)) {
+                tracing::info!(error_len = e.len(), "Chat: a fork's project couldn't be set");
+            }
+        }
     }
-    // (Its 👎's note: read before the answer is set aside.)
-    let note = if feedback == Some(true) { crate::chat::feedback::retry_note_at(conversation_id, index) } else { None };
-    let begun = crate::chat::chats::begin_retry(conversation_id, index)?;
-    tracing::info!(conversation = conversation_id, index, "Chat: an answer retried (the old one set aside)");
-    let question = &begun.question;
-    let (image_ids, as_text) = images_again(question);
-    // (A screenshot that went as its text: that text is in its words already.)
-    let image_ids = if as_text { Vec::new() } else { image_ids };
-    // (Its words, and its attached files through the turn's own: chat/attachments.rs.)
-    let turn = send_turn(&app, Some(conversation_id), question.sent_words(), None, Some(question.voice), on_stream, turn_id, image_ids, Vec::new(), None);
-    let turn = crate::chat::attachments::with(question.attachments.clone(), turn);
-    let send = crate::chat::skills::with(skill_again(&question.text), turn);
-    // Asked with the Research switch on: researched again, as it was asked (chat/research.rs).
-    let send = Box::pin(crate::chat::research::scoped(question.research, send));
-    let send = Box::pin(crate::chat::feedback::with_note(note, crate::chat::turn::again(conversation_id, begun.question_at, send)));
-    let (out, thought) = crate::chat::think::scoped(false, send).await;
-    let out = keep_thought(out, thought);
-    if crate::chat::chats::end_branch(conversation_id, begun.at, begun.back_to, true) {
-        crate::memory::read_again_from(conversation_id, begun.at);
+    let style = crate::chat::styles::chat_style_of(Some(id));
+    if style != crate::chat::styles::NORMAL {
+        if let Err(e) = crate::chat::styles::chat_style_set(Some(new.id), style) {
+            tracing::info!(error_len = e.len(), "Chat: a fork's style couldn't be set");
+        }
     }
-    // A phone showing this chat follows the version shown (link.rs).
-    crate::link::versions_changed(conversation_id);
-    let out = with_forks(out, conversation_id);
-    crate::shell::lab::sent(Some(conversation_id), &out);
-    out
+    for off in crate::integrations::connectors::chats::off(Some(id)) {
+        let _ = crate::integrations::connectors::chats::set(new.id, &off, false);
+    }
+    tracing::info!(conversation = id, fork = new.id, messages = index + 1, "Chat: forked from an answer");
+    Ok(new.id)
+}
+
+/// **Pin as chapter** (16 Nov 2026, the Claude app's: under an answer):
+/// conversation `id`'s answer `index` starts a chapter — a short title, as
+/// `mark_chapter`'s are, written by Chat's model from the answer and its
+/// question (else their first words: `chapters::pin_title`) — its divider
+/// above the answer and an entry in the chat's contents. `pin` false takes
+/// the answer's chapter off (one the model marked there too). `ts`: the
+/// answer's, so another version shown meanwhile is never pinned. In a Code
+/// chat or a Chat answer alike; the chapter as kept (`None`: none now).
+#[tauri::command]
+pub async fn chat_chapter_pin(id: u64, index: usize, ts: Option<u64>, pin: bool) -> Result<Option<crate::chat::cards::chapters::Chapter>, String> {
+    let conv = crate::chat::chats::get(id).ok_or("That chat isn't there any more.")?;
+    let m = conv.messages.get(index).ok_or("That answer isn't there any more.")?;
+    if m.role != "assistant" || !m.kind.is_empty() {
+        return Err("Pin as chapter goes under an answer.".to_string());
+    }
+    if !pin {
+        let kept = crate::chat::chats::set_chapter(id, index, ts, None)?;
+        tracing::info!(conversation = id, index, "Chat: a chapter unpinned");
+        return Ok(kept);
+    }
+    let question = conv.messages[..index].iter().rev().take_while(|q| q.role != "assistant" || !q.kind.is_empty()).find(|q| q.role == "user" && q.kind.is_empty()).map(|q| q.text.clone()).unwrap_or_default();
+    let code = crate::agents::code_chat::folder_of(Some(id)).is_some();
+    let title = crate::chat::cards::chapters::pin_title(&question, &m.text, code).await;
+    let chapter = crate::chat::cards::chapters::Chapter { title, summary: String::new(), pinned: true };
+    let kept = crate::chat::chats::set_chapter(id, index, ts, Some(chapter))?;
+    tracing::info!(conversation = id, index, "Chat: an answer pinned as a chapter");
+    Ok(kept)
 }
 
 /// **‹ › on a message** (Retry's and Edit's versions): conversation `id`'s

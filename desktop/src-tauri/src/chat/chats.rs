@@ -150,18 +150,14 @@ pub struct ChatMessage {
     /// back at the next start (`attachments::restore_from_disk`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<crate::chat::attachments::Attachment>,
-    /// **The person's 👍 / 👎 on an answer** (`chat/feedback.rs`, 16 Nov
-    /// 2026): good, or not good with why — kept on this PC, sent nowhere,
-    /// never read by a model (but a Retry with its note). An older Yap's save
-    /// drops the field; `chat_feedback.json` puts it back at the next start
-    /// (`feedback::restore_from_disk`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub feedback: Option<crate::chat::feedback::Feedback>,
+    // (An answer's 👍 / 👎, 16 Nov 2026, taken out the same day: a chat saved with one — its `feedback` — reads as
+    // ever, the mark set aside; `chat_feedback.json` is never written or read again, nor deleted but by Delete your
+    // data's chats, `privacy/reset.rs`.)
     /// **A question asked with the Research switch on** (`chat/research.rs`,
-    /// 16 Nov 2026): researched because the switch under the box was, so
-    /// Retry and Edit research it again, as it was asked (one whose words
-    /// plainly ask does anyway). An older Yap's save drops it: its Retry is
-    /// then answered as an ordinary question.
+    /// 16 Nov 2026): researched because the switch under the box was, so an
+    /// Edit researches it again, as it was asked (one whose words plainly ask
+    /// does anyway). An older Yap's save drops it: its Edit is then answered
+    /// as an ordinary question.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub research: bool,
 }
@@ -196,9 +192,8 @@ impl ChatMessage {
         }
     }
 
-    /// [`ChatMessage::sent_text`] without the files (a Retry sends those
-    /// through the turn's own, `chat_retry`).
-    pub fn sent_words(&self) -> String {
+    /// [`ChatMessage::sent_text`] without the files.
+    fn sent_words(&self) -> String {
         // An agent's report: the agent's words, never the person's (web content).
         if self.kind == crate::chat::turn::AGENT_REPORT {
             return format!("{}{}", crate::chat::turn::AGENT_REPORT_PREFIX, self.text);
@@ -599,8 +594,6 @@ fn load_from_disk() -> Store {
     for c in store.conversations.iter_mut() {
         branches::heal(c);
     }
-    // …and the answers' 👍 / 👎 (chat/feedback.rs), in whichever version they are now.
-    crate::chat::feedback::restore_from_disk(&mut store.conversations);
     store
 }
 
@@ -629,20 +622,18 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
     if SAVER.write_json(&chats_path(), store, false).is_ok() {
-        // The shares', the attached files', the branches' and the 👍 / 👎
-        // copies for an older Yap's save (chat/shares.rs, chat/attachments.rs,
-        // chats/branches.rs, chat/feedback.rs): never an incognito chat's.
+        // The shares', the attached files' and the branches' copies for an
+        // older Yap's save (chat/shares.rs, chat/attachments.rs,
+        // chats/branches.rs): never an incognito chat's.
         if store.conversations.iter().any(|c| c.incognito) {
             let kept: Vec<Conversation> = store.conversations.iter().filter(|c| !c.incognito).cloned().collect();
             crate::chat::shares::mirror_to_disk(&kept);
             crate::chat::attachments::mirror_to_disk(&kept);
             branches::mirror_to_disk(&kept);
-            crate::chat::feedback::mirror_to_disk(&kept);
         } else {
             crate::chat::shares::mirror_to_disk(&store.conversations);
             crate::chat::attachments::mirror_to_disk(&store.conversations);
             branches::mirror_to_disk(&store.conversations);
-            crate::chat::feedback::mirror_to_disk(&store.conversations);
         }
     }
     // Search by meaning reads what changed, in the background.
@@ -660,7 +651,6 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
         crate::chat::shares::restore_from_disk(&mut store.conversations);
         crate::chat::attachments::restore_from_disk(&mut store.conversations);
         branches::restore_from_disk(&mut store.conversations);
-        crate::chat::feedback::restore_from_disk(&mut store.conversations);
         save_to_disk(store);
     }
     f(store)
@@ -1068,36 +1058,6 @@ pub fn set_thinking(id: u64, index: usize, thought: crate::chat::think::Thought)
     });
 }
 
-/// **The person's 👍 / 👎 on an answer** (`chat/feedback.rs`): conversation
-/// `id`'s message `index`, an answer of the chat's (never an agent's report
-/// marker) — at time `ts` when the page knows it, so a message that moved
-/// since (a version switched meanwhile) is refused. `None` takes it back.
-/// Its place in the list stays (`updated_ts` untouched). The mark as kept.
-pub fn set_feedback(id: u64, index: usize, ts: Option<u64>, feedback: Option<crate::chat::feedback::Feedback>) -> Result<Option<crate::chat::feedback::Feedback>, String> {
-    with_store(|s| {
-        let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
-        let m = conv
-            .messages
-            .get_mut(index)
-            .filter(|m| m.role == "assistant" && m.kind.is_empty() && ts.is_none_or(|t| m.ts == t))
-            .ok_or("That answer isn't there any more.")?;
-        if m.feedback != feedback {
-            m.feedback = feedback;
-            save_to_disk(s);
-        }
-        Ok(s.conversations.iter().find(|c| c.id == id).and_then(|c| c.messages.get(index)).and_then(|m| m.feedback.clone()))
-    })
-}
-
-/// Conversation `id`'s answer `index`: its 👍 / 👎 and its words (a Retry
-/// with the note, read before the answer is set aside).
-pub fn answer_feedback(id: u64, index: usize) -> Option<(crate::chat::feedback::Feedback, String)> {
-    with_store(|s| {
-        let m = s.conversations.iter().find(|c| c.id == id)?.messages.get(index).filter(|m| m.role == "assistant")?;
-        Some((m.feedback.clone()?, m.text.clone()))
-    })
-}
-
 /// Keep the documents an answer made or changed with it (`documents.rs`):
 /// conversation `id`'s message `index`, when it's an answer.
 pub fn set_documents(id: u64, index: usize, docs: &[crate::chat::documents::DocRef]) {
@@ -1232,6 +1192,25 @@ pub fn set_cards(id: u64, index: usize, next_step: Option<&crate::chat::cards::n
     });
 }
 
+/// **An answer's chapter pinned or taken off** (Pin as chapter, 16 Nov
+/// 2026: `chat_chapter_pin`): conversation `id`'s answer `index` — the one
+/// at `ts` when given, so a version shown meanwhile is never changed — starts
+/// `chapter`, or none. The chapter as kept.
+pub fn set_chapter(id: u64, index: usize, ts: Option<u64>, chapter: Option<crate::chat::cards::chapters::Chapter>) -> Result<Option<crate::chat::cards::chapters::Chapter>, String> {
+    with_store(|s| {
+        let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
+        let m = conv.messages.get_mut(index).filter(|m| m.role == "assistant" && m.kind.is_empty()).ok_or("That answer isn't there any more.")?;
+        if ts.is_some_and(|t| t != m.ts) {
+            return Err("That answer has changed since: try again.".to_string());
+        }
+        if m.chapter != chapter {
+            m.chapter = chapter;
+            save_to_disk(s);
+        }
+        Ok(s.conversations.iter().find(|c| c.id == id).and_then(|c| c.messages.get(index)).and_then(|m| m.chapter.clone()))
+    })
+}
+
 /// The "Search in your browser" an answer offers, as saved (the page's
 /// answer to `chat_send` carries it).
 pub fn browser_search_of(id: u64, index: usize) -> Option<crate::web::BrowserSearch> {
@@ -1322,44 +1301,19 @@ pub fn print_of(messages: &[ChatMessage]) -> u64 {
     h.finish()
 }
 
-// ---- Retry and Edit: branches (chats/branches.rs) -----------------------------------------------
+// ---- Edit: branches (chats/branches.rs; an older Yap's Retry made them too, 15–16 Nov 2026) --------
 
-/// **A branch begun** ([`begin_retry`], [`begin_edit`]): where it parts, the
-/// branch set aside, and the message asked.
+/// **A branch begun** ([`begin_edit`]): where it parts, the branch set
+/// aside, and the message the new words replace.
 #[derive(Debug, Clone)]
 pub struct Begun {
-    /// Where the branches part: the answer retried, or the message edited.
+    /// Where the branches part: the message edited.
     pub at: usize,
     /// The branch set aside: back to it when the new one never answers
     /// ([`end_branch`]).
     pub back_to: u32,
-    /// The question answered again (Retry), or the message the new words
-    /// replace (Edit): its screenshots and quote go again.
+    /// The message the new words replace: its screenshots and quote go again.
     pub question: ChatMessage,
-    /// Its index (the question's stays in place for a Retry).
-    pub question_at: usize,
-}
-
-/// **Retry** conversation `id`'s answer `index` (the Claude app's): it and
-/// everything after it set aside, kept as a branch, so the person's question
-/// just before it is answered again — the new answer a branch of its own.
-pub fn begin_retry(id: u64, index: usize) -> Result<Begun, String> {
-    with_store(|s| {
-        let conv = s.conversations.iter_mut().find(|c| c.id == id).ok_or("That chat isn't there any more.")?;
-        let m = conv.messages.get(index).ok_or("That answer isn't there any more.")?;
-        if m.role != "assistant" || !m.kind.is_empty() {
-            return Err("Only an answer can be tried again.".to_string());
-        }
-        let question = index
-            .checked_sub(1)
-            .and_then(|i| conv.messages.get(i))
-            .filter(|q| q.role == "user" && q.kind.is_empty())
-            .cloned()
-            .ok_or("That answer has no question of yours just before it to ask again.")?;
-        let back_to = branches::branch_off(conv, index)?;
-        save_to_disk(s);
-        Ok(Begun { at: index, back_to, question, question_at: index - 1 })
-    })
 }
 
 /// **Edit** conversation `id`'s message `index`, the person's own: it and
@@ -1371,11 +1325,11 @@ pub fn begin_edit(id: u64, index: usize) -> Result<Begun, String> {
         let question = conv.messages.get(index).filter(|m| m.role == "user" && m.kind.is_empty()).cloned().ok_or("That message isn't there any more.")?;
         let back_to = branches::branch_off(conv, index)?;
         save_to_disk(s);
-        Ok(Begun { at: index, back_to, question, question_at: index })
+        Ok(Begun { at: index, back_to, question })
     })
 }
 
-/// **A branch's turn over** ([`begin_retry`], [`begin_edit`]): `kept` and
+/// **A branch's turn over** ([`begin_edit`]): `kept` and
 /// something there from `at` on — the new branch stays, shown; else back to
 /// the one set aside (`back_to`), what the new one had dropped with its
 /// screenshots. Whether it was kept.
@@ -1493,7 +1447,6 @@ pub fn append_message(
             chapter: None,
             kind: String::new(),
             attachments: Vec::new(),
-            feedback: None,
             research: false,
         });
         conv.updated_ts = now_secs();
@@ -2375,7 +2328,6 @@ mod tests {
             chapter: None,
             kind: String::new(),
             attachments: vec![],
-            feedback: None,
             research: false,
         };
         let messages = vec![
@@ -2658,30 +2610,40 @@ mod tests {
         assert!(image_ids().contains("img_1111111111111111"));
     }
 
-    /// Retry and Edit (15 Nov 2026, `chats/branches.rs`): the branch shown is
-    /// `messages`, the others kept with their screenshots; a retry that never
-    /// answered puts the old answer back; ‹ › switches; a page gets the ‹ ›
-    /// only; an older Yap reads the branch shown.
+    /// An older Yap's Retry (15–16 Nov 2026): answer `at` and what followed set aside as a branch.
+    fn set_aside(id: u64, at: usize) -> u32 {
+        with_store(|s| {
+            let conv = s.conversations.iter_mut().find(|c| c.id == id).unwrap();
+            let back = branches::branch_off(conv, at).unwrap();
+            save_to_disk(s);
+            back
+        })
+    }
+
+    /// Edit, and an older Yap's Retry (15 Nov 2026, `chats/branches.rs`): the
+    /// branch shown is `messages`, the others kept with their screenshots; a
+    /// new version that never answered puts the old one back; ‹ › switches; a
+    /// page gets the ‹ › only; an older Yap reads the branch shown.
     #[test]
-    fn a_retry_and_an_edit_keep_every_version_and_the_branch_shown_is_the_conversation() {
+    fn an_edit_and_an_older_retry_keep_every_version_and_the_branch_shown_is_the_conversation() {
         let shot = |id: &str| ChatImage { id: id.into(), ..Default::default() };
         let c = create("Trip");
         append_question(c.id, "Pack list?", false, &[shot("img_3333333333333333")]).unwrap();
         append(c.id, "assistant", "Socks.", &[], None, false).unwrap();
         append(c.id, "user", "More?", &[], None, false).unwrap();
         append(c.id, "assistant", "A hat.", &[], None, false).unwrap();
-        // Retry the first answer: it and what followed set aside; the question stays, answered again.
-        let b = begin_retry(c.id, 1).unwrap();
-        assert_eq!((b.at, b.back_to, b.question_at, b.question.text.as_str()), (1, 1, 0, "Pack list?"));
+        // A Retry of the first answer (an older Yap's): it and what followed set aside; the question stays.
+        let back = set_aside(c.id, 1);
+        assert_eq!(back, 1);
         assert_eq!(get(c.id).unwrap().messages.len(), 1);
         append(c.id, "assistant", "Boots.", &[], None, false).unwrap();
-        assert!(end_branch(c.id, b.at, b.back_to, true));
+        assert!(end_branch(c.id, 1, back, true));
         let page = for_page(get(c.id).unwrap());
         assert_eq!(page.forks.iter().map(|f| (f.at, f.shown, f.count)).collect::<Vec<_>>(), [(1, 2, 2)]);
         assert!(page.branches.is_empty(), "a page gets the ‹ › only");
-        // A retry that never answered: back to the answer it replaced, nothing lost.
-        let again = begin_retry(c.id, 1).unwrap();
-        assert!(!end_branch(c.id, again.at, again.back_to, true));
+        // One that never answered: back to the answer it replaced, nothing lost.
+        let again = set_aside(c.id, 1);
+        assert!(!end_branch(c.id, 1, again, true));
         assert_eq!(get(c.id).unwrap().messages.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["Pack list?", "Boots."]);
         // ‹ 1/2 ›: the first answer and its follow-up again.
         let shown = switch_branch(c.id, 1, 1).unwrap();
@@ -2708,8 +2670,7 @@ mod tests {
         v.as_object_mut().unwrap().remove("branches");
         let old: Conversation = serde_json::from_value(v).unwrap();
         assert_eq!(old.messages.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["Pack list for the beach?", "Sun cream."]);
-        // Only an answer after the person's own question can be retried; only their message edited.
-        assert!(begin_retry(c.id, 0).is_err());
+        // Only the person's own message is edited.
         assert!(begin_edit(c.id, 1).is_err());
         // A Rewind cuts the versions after it, and deleting the chat lets their screenshots go.
         switch_branch(c.id, 0, 1).unwrap();
@@ -2736,29 +2697,6 @@ mod tests {
         assert_eq!(rename(9999, "Nope").unwrap_err(), "Conversation not found");
         // The list shows the new name.
         assert!(list().as_array().unwrap().iter().any(|c| c["title"] == "Launch plan"));
-    }
-
-    #[test]
-    fn an_answers_thumbs_are_kept_with_it_and_only_an_answers() {
-        use crate::chat::feedback::{clean, FeedbackIn};
-        let c = create("Buses");
-        append(c.id, "user", "Which bus?", &[], None, false).unwrap();
-        let a = append(c.id, "assistant", "The 42.", &[], None, false).unwrap();
-        let ts = get(c.id).unwrap().messages[a].ts;
-        let bad = clean(&FeedbackIn { rating: "bad".into(), reasons: vec!["untrue".into()], note: "The 43".into() }, 5).unwrap();
-        assert_eq!(set_feedback(c.id, a, Some(ts), Some(bad.clone())).unwrap(), Some(bad.clone()));
-        assert_eq!(answer_feedback(c.id, a), Some((bad.clone(), "The 42.".to_string())));
-        // A question, a time that moved, a chat that's gone: refused.
-        assert!(set_feedback(c.id, 0, None, Some(bad.clone())).is_err());
-        assert!(set_feedback(c.id, a, Some(ts + 99), None).is_err());
-        assert!(set_feedback(c.id + 999, a, None, None).is_err());
-        // Taken back.
-        assert_eq!(set_feedback(c.id, a, None, None).unwrap(), None);
-        assert_eq!(answer_feedback(c.id, a), None);
-        // Saved with the answer, as chats.json's save writes it; the page gets it with the chat.
-        set_feedback(c.id, a, None, Some(bad.clone())).unwrap();
-        assert!(saved_json().contains(r#""feedback":{"rating":"bad","reasons":["untrue"],"note":"The 43","ts":5}"#), "{}", saved_json());
-        assert_eq!(for_page(get(c.id).unwrap()).messages[a].feedback, Some(bad));
     }
 
     #[test]
@@ -2795,7 +2733,7 @@ mod tests {
     }
 
     #[test]
-    fn a_question_asked_with_research_on_says_so_for_its_retry_and_edit() {
+    fn a_question_asked_with_research_on_says_so_for_its_edit() {
         let c = create("How did QWERTY come about?");
         let q = append_question(c.id, "How did QWERTY come about?", false, &[]).unwrap();
         let a = append(c.id, "assistant", "It came with the typewriter [1].", &[], None, false).unwrap();
@@ -2811,18 +2749,15 @@ mod tests {
         assert!(serde_json::to_value(&conv.messages[a]).unwrap().get("research").is_none());
         let older: ChatMessage = serde_json::from_value(json!({ "role": "user", "text": "Hi", "ts": 1 })).unwrap();
         assert!(!older.research);
-        // Retry: the question it answers again still says so (chat_retry researches again)…
-        let begun = begin_retry(c.id, a).unwrap();
+        // The message an Edit replaces says so (chat_send's `edit` researches again)…
+        let begun = begin_edit(c.id, q).unwrap();
         assert!(begun.question.research);
         // (Never answered: back as it was.)
         assert!(!end_branch(c.id, begun.at, begun.back_to, false));
-        // …and so does the message an Edit replaces (chat_send's `edit`).
-        let begun = begin_edit(c.id, q).unwrap();
-        assert!(begun.question.research);
-        // A question asked with it off: neither does.
+        // …and a question asked with it off doesn't.
         let d = create("Plain");
         let plain = append_question(d.id, "What's a typewriter?", false, &[]).unwrap();
         append(d.id, "assistant", "A machine for typing.", &[], None, false).unwrap();
-        assert!(!begin_retry(d.id, plain + 1).unwrap().question.research);
+        assert!(!begin_edit(d.id, plain).unwrap().question.research);
     }
 }

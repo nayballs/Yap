@@ -24,16 +24,15 @@
 //   then says it on the phone. ☰'s drawer with that conversation marked;
 //   + New chat and a question in a conversation of its own; a picture from
 //   the phone that GPT-OSS can't read, sent as its text (test mode's OCR)
-//   and kept with the question; the first conversation opened again. ↻ Retry
-//   on the phone (16 Nov 2026): the typed answer's question asked again, the
-//   old answer kept as a version (‹ 2/2 › on the phone and in this PC's Chat
-//   view), ‹ on the phone switching this PC's version shown too, › on this
-//   PC switching the phone's (one version shown a conversation). ✎ Edit on
-//   the phone (the same day): the typed question in the phone's box, changed
-//   and sent — a new version with its own answer (the old question and its
-//   answer not in what the model read, kept as a version), ‹ 2/2 › on the
-//   question on the phone and in this PC's Chat view; ‹ on the phone back
-//   to the question as it was, here and on this PC. Chat's
+//   and kept with the question; the first conversation opened again, its
+//   answer's row as the PC's (Copy, the speaker, its time; no ↻ since 16 Nov
+//   2026). ✎ Edit on the phone (16 Nov 2026): the typed question in the
+//   phone's box, changed and sent — a new version with its own answer (the
+//   old question and its answer not in what the model read, kept as a
+//   version), ‹ 2/2 › on the question on the phone and in this PC's Chat
+//   view; ‹ on the phone back to the question as it was, here and on this
+//   PC; › on this PC switching the phone's (one version shown a
+//   conversation). Chat's
 //   picker over the wire: the rail, Latest, a switch that switches Chat's
 //   model on this PC.
 // - Remove cuts the phone off at once; a replayed pairing link, a wrong
@@ -67,7 +66,6 @@ const SIGN_Q = 'What does this sign say?';
 const SIGN_TEXT = 'Platform 4: the 10:42 to the coast is delayed.';
 const SIGN_ANSWER = 'It says the 10:42 to the coast, from platform 4, is delayed.';
 const WORDS_ANSWER = 'That came through clearly: a short test from the phone.';
-const RETRY_ANSWER = 'Let it rest an hour or two, somewhere warm, until it has doubled in size.';
 const EDITED_Q = 'How long should a rye dough rest?';
 const EDIT_ANSWER = 'Rye needs less: rest it about forty minutes, somewhere warm.';
 
@@ -420,9 +418,8 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   await expect(page.getByText(TYPED_ANSWER)).toBeVisible();
   expect((await snapshot(page)).chat).toBe(first);
 
-  // ↻ Retry and ‹ › on the phone (16 Nov 2026): one version shown a
-  // conversation — this PC's — on every screen, the last switch winning.
-  // The PC's Chat view on this conversation, to see it follow.
+  // ✎ Edit and ‹ › on the phone (16 Nov 2026): one version shown a conversation — this PC's — on every screen,
+  // the last switch winning. The PC's Chat view on this conversation, to see it follow.
   await closeSettings(main);
   await openView(main, 'Chat');
   await main.locator(`.conv[data-conv="${first}"]`).click();
@@ -430,46 +427,10 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   const pcCount = main.locator('.msgs').getByTestId('chat-branch-count');
   await expect(pcAnswers.last()).toContainText(TYPED_ANSWER);
   const typedTurn = page.getByTestId('turn').filter({ has: page.getByTestId('heard').filter({ hasText: TYPED }) });
-  const phoneCount = typedTurn.getByTestId('answer-versions').getByTestId('version-count');
-  // ↻ under the typed answer: its question asked again, answered on screen, the old answer kept as a version.
-  await yap.invoke('tts_e2e_spoken', { clear: true });
-  fakeLlm.scriptChat([{ plain: true, content: RETRY_ANSWER }]);
-  const retriedAt = fakeLlm.requests.length;
-  await typedTurn.getByTestId('retry').click();
-  await expect(page.getByText(RETRY_ANSWER)).toBeVisible({ timeout: 20_000 });
-  await expect(phoneCount).toHaveText('2/2', { timeout: 10_000 });
-  await expect.poll(async () => (await snapshot(page)).phase, { timeout: 15_000 }).toBe('idle');
-  const again = fakeLlm.requests.slice(retriedAt).find((r) => JSON.stringify(r.messages).includes(TYPED));
-  expect(again, 'the question went to the model again').toBeTruthy();
-  expect(JSON.stringify(again.messages), 'the old answer is a version now: not in what the model read').not.toContain(TYPED_ANSWER);
-  expect(await yap.invoke('tts_e2e_spoken')).toEqual([]);
-  await expectStore(yap, 'chats.json', (store) => {
-    const conv = store.conversations.find((c) => c.id === first);
-    // The question once; the new answer shown; the old one kept as a version.
-    expect(conv.messages.filter((m) => m.role === 'user' && m.text === TYPED)).toHaveLength(1);
-    expect(conv.messages.at(-1).text).toBe(RETRY_ANSWER);
-    expect(conv.branches).toHaveLength(1);
-    expect(JSON.stringify(conv.branches)).toContain(TYPED_ANSWER);
-    return true;
-  });
-  // This PC's Chat view followed: the new answer, ‹ 2/2 ›.
-  await expect(pcAnswers.last()).toContainText(RETRY_ANSWER, { timeout: 10_000 });
-  await expect(pcCount).toHaveText('2/2');
-  await shot(page, '04f-phone-retried');
-  // ‹ on the phone: version 1, here and on this PC.
-  await typedTurn.getByTestId('answer-versions').getByTestId('version-prev').click();
-  await expect(phoneCount).toHaveText('1/2', { timeout: 10_000 });
-  await expect(page.getByText(TYPED_ANSWER)).toBeVisible();
-  await expect(pcAnswers.last()).toContainText(TYPED_ANSWER, { timeout: 10_000 });
-  await expect(pcCount).toHaveText('1/2');
-  await shot(main, '04g-pc-follows-the-phone');
-  // › on this PC: the phone follows (`versions`, then its thread again).
-  await main.locator('.msgs').getByTestId('chat-branch-next').click();
-  await expect(pcAnswers.last()).toContainText(RETRY_ANSWER);
-  await expect(phoneCount).toHaveText('2/2', { timeout: 10_000 });
-  await expect(page.getByText(RETRY_ANSWER)).toBeVisible();
-  await shot(page, '04h-phone-follows-the-pc');
-  await expectStore(yap, 'chats.json', (store) => store.conversations.find((c) => c.id === first).messages.at(-1).text === RETRY_ANSWER);
+  // Its answer's row, as the PC's: Copy, the speaker, its time — no ↻.
+  await expect(typedTurn.getByTestId('copy')).toBeVisible();
+  await expect(typedTurn.getByTestId('answer-when')).toBeVisible();
+  await expect(typedTurn.getByTestId('retry')).toHaveCount(0);
 
   // ✎ Edit on the phone: the typed question in its box, changed and sent — a
   // new version of it with its own answer; ‹ 2/2 › on the question, here and
@@ -491,7 +452,7 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   const editAsked = fakeLlm.requests.slice(editedAt).find((r) => JSON.stringify(r.messages).includes(EDITED_Q));
   expect(editAsked, 'the new words went to the model').toBeTruthy();
   expect(JSON.stringify(editAsked.messages), 'the old question and its answer are a version now').not.toContain(TYPED);
-  expect(JSON.stringify(editAsked.messages)).not.toContain(RETRY_ANSWER);
+  expect(JSON.stringify(editAsked.messages)).not.toContain(TYPED_ANSWER);
   await expectStore(yap, 'chats.json', (store) => {
     const conv = store.conversations.find((c) => c.id === first);
     // The new words and their answer shown; the question as it was kept as a version.
@@ -506,12 +467,18 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   await expect(pcCount).toHaveText('2/2');
   await shot(page, '04j-phone-edited');
   await shot(main, '04k-pc-follows-the-edit');
-  // ‹ on the phone's question: the question as it was (its retried answer too), here and on this PC.
+  // ‹ on the phone's question: the question as it was (its answer too), here and on this PC.
   await editedTurn.getByTestId('question-versions').getByTestId('version-prev').click();
   await expect(page.getByTestId('heard').filter({ hasText: TYPED })).toHaveCount(1, { timeout: 10_000 });
-  await expect(page.getByText(RETRY_ANSWER)).toBeVisible();
-  await expect(pcAnswers.last()).toContainText(RETRY_ANSWER, { timeout: 10_000 });
-  await expect(pcCount).toHaveText(['1/2', '2/2']);
+  await expect(page.getByText(TYPED_ANSWER)).toBeVisible();
+  await expect(pcAnswers.last()).toContainText(TYPED_ANSWER, { timeout: 10_000 });
+  await expect(pcCount).toHaveText('1/2');
+  await shot(main, '04g-pc-follows-the-phone');
+  // › on this PC: the phone follows (`versions`, then its thread again).
+  await main.locator('.msgs').getByTestId('chat-branch-next').click();
+  await expect(pcAnswers.last()).toContainText(EDIT_ANSWER);
+  await expect(page.getByText(EDIT_ANSWER)).toBeVisible({ timeout: 10_000 });
+  await shot(page, '04h-phone-follows-the-pc');
   await openSettings(main, 'Phone');
 
   // Chat's picker over the wire: the rail with Groq connected; a switch

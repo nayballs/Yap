@@ -860,8 +860,8 @@
   Rewritten with chats.json, it goes with the chats in Delete some of your
   data and Reset app. Its picture a sweep took (an older Yap's, which
   doesn't know them) shows as its file's card.
-- **A conversation's other versions** (2026-11-15, Retry and Edit:
-  `chat/chats/branches.rs`, [chat-and-assistant.md](./chat-and-assistant.md#retry-edit-and-versions-2026-11-15))
+- **A conversation's other versions** (2026-11-15, Edit, and Retry's from 15–16 Nov:
+  `chat/chats/branches.rs`, [chat-and-assistant.md](./chat-and-assistant.md#edit-and-versions-2026-11-15))
   keep `branches` on the conversation — `[{at, shown, ts?, others: [{n,
   messages, forks?, summary?}]}]`, the forks along the branch shown, which is
   `messages` — written only when there are some. **New field**: an older
@@ -872,19 +872,16 @@
   next start puts back each fork that still fits a conversation with none
   (its shown branch's first message there at its time). It goes with the
   chats in Delete some of your data and Reset app.
-- **The person's 👍 / 👎 on an answer** (16 Nov 2026, `chat/feedback.rs`,
-  [chat-and-assistant.md](./chat-and-assistant.md#thumbs-up-and-down-on-an-answer-2026-11-16))
-  is the answer's `feedback`: `{rating: "good" | "bad", reasons?: ["untrue" |
-  "ignored" | "long" | "short" | "tone" | "other"], note?, ts}`, written only
-  when there is one, in whichever version (`branches`) the answer is. Kept on
-  this PC, sent nowhere; in Download your data (`chats/chats.json`, a line
-  under the answer in its chat's Markdown, and `chats/feedback.json`). **New
-  field**: an older Yap's save drops it, so every save of chats.json also
-  writes the marks to `%APPDATA%/yap/chat_feedback.json` (`{version,
-  answers: [{conversation, ts, chars, feedback}]}`, removed when there are
-  none), which no older Yap touches; the next start puts each back on the
-  answer of that conversation at that time and length when it has none. It
-  goes with the chats in Delete some of your data and Reset app.
+- **`%APPDATA%/yap/chat_feedback.json`** (16 Nov 2026 only): the 👍 / 👎 given
+  on answers the day Yap had them, and their copy for an older Yap's save.
+  Taken out the same day: never written or read again, never deleted but
+  with the chats in Delete some of your data and Reset app, and in Download
+  your data as it was left (`chats/feedback.json`). A message's `feedback`
+  in chats.json is read past and dropped at its next save.
+- **A pinned chapter** (16 Nov 2026, Pin as chapter under an answer:
+  `chat_chapter_pin`) is the answer's `chapter` with `pinned: true`
+  (`{title, summary?, pinned?}`); an older Yap's save drops `pinned` (the
+  chapter stays, drawn above the question as a model's).
 - What a chat made (15 Nov 2026, `chat/made.rs`): `%APPDATA%/yap/chat-made/` —
   a folder per conversation (`<chat id>/`) with its `made.json` (`{version,
   created, items: [{id, kind, title, format, after: {index, ts}, at,

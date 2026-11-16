@@ -9,10 +9,13 @@
   // "Stopped" under a question stopped before any answer came; a web
   // answer's Sources; the pills of the documents it wrote and the pictures
   // it found online (PicturePills, its own chunk), each opening the panel
-  // beside the chat; and ▶ Read aloud and the model that wrote it. Its
-  // right-click menu: Copy / Copy as Markdown / Read aloud, a question's
-  // Copy.
-  import { renderMarkdown } from '../../core/markdown.js';
+  // beside the chat; and its row, as the Claude app's (16 Nov 2026): Copy,
+  // Fork from here, Pin as chapter, Read aloud, its time and the model that
+  // wrote it. Under the person's message (on hover): ✓✓ and its time in a
+  // Code chat, Copy, then Edit — or in a Code chat Rewind to here and Fork
+  // from here. Its right-click menu: Copy / Copy as Markdown / Read aloud,
+  // Fork from here and Pin as chapter (ChatThread's), a question's Copy.
+  import { renderMarkdown, markdownToText } from '../../core/markdown.js';
   import { colourCode } from '../../ui/colourCode.js';
   import { codeCopy } from '../../ui/codeCopy.js';
   import { markdownVisuals } from '../../ui/markdownVisuals.js';
@@ -25,7 +28,7 @@
   import { menuKey, openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { removedLine, sizeLine, imageItems, splitScreenText, sentPlaced, shown } from './chatImages.js';
   import { splitElements } from '../../core/selectedElements.js';
-  import { copyText, messageItems } from '../../core/itemMenus.js';
+  import { copyText } from '../../core/itemMenus.js';
   import ElementChip from './ElementChip.svelte';
   import FileChip from './FileChip.svelte';
   import { mentionParts } from './chatMentions.js';
@@ -35,6 +38,9 @@
   import SourcesRow from './SourcesRow.svelte';
   import ChatSteps from './ChatSteps.svelte';
   import BranchSwitch from './BranchSwitch.svelte';
+  import { actionTip } from '../../ui/actionTip.js';
+  import { whenSaid, whenFull } from '../../core/whenSaid.js';
+  import { clock } from './clock.svelte.js';
 
   /**
    * `m`: the message; `last`: the thread's last; `sources`: what its
@@ -54,35 +60,20 @@
    * since the answer was read (chat/pages/thumb.rs), for its card.
    */
   const codeFiles = getContext(CODE_FILES) ?? null;
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, visuals = null, onvisualprompt = null, keptPages = null, onkept = null, branch = null, retry = null, rating = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false } = $props();
-  // **👍 / 👎** (16 Nov 2026, chat/feedback.rs; the Claude app's thumbs): `rating` — `{ value, onrate(fb), learn }`
-  // (ChatThread's `ratingOf`) — under an answer, beside Copy and ↻. 👎 opens its card (FeedbackCard, its own chunk):
-  // what was wrong, Retry with that note, Learn from this. Open for this answer only (`fbFor`: its id and time, so a
-  // version switched in its place, or another chat's answer at the same place, never inherits it).
-  const fbKey = $derived(`${m.id ?? ''}|${m.ts ?? ''}`);
-  let fbFor = $state(null);
-  const fbOpen = $derived(!!rating && fbFor === fbKey);
-  const mark = $derived(rating?.value?.rating ?? null);
-  /** A thumb pressed: marked (👎 opens its card), or — pressed again — taken back. */
-  function thumb(r) {
-    if (!rating) return;
-    if (mark === r) {
-      fbFor = null;
-      rating.onrate?.(null);
-      return;
-    }
-    rating.onrate?.({ rating: r, reasons: [], note: '' });
-    fbFor = r === 'bad' ? fbKey : null;
-  }
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null, tick = null, pagethumb = null, actions = null, answer = null, visuals = null, onvisualprompt = null, keptPages = null, onkept = null, branch = null, editing = null, onedited = null, oneditcancel = null, onnext = null, busy = false } = $props();
   // `visuals`: what the answer made to be seen, not read (chat/made.rs: "Made a visual", above its words;
   // VisualFrame, its own chunk); `onvisualprompt(text, v)` a message one's button sends. `keptPages`: the
   // pages it saved (chat/made/pages.rs: `[{page, version}]`, a card each, PageCard); `onkept(page, n)` opens one.
-  // **Retry, Edit and ‹ ›** (15 Nov 2026, the Claude app's; chat/chats/branches.rs): `branch` — `{ fork, why, onbranch }`,
-  // this message's versions (‹ 2/3 ›; `why` it can't switch now) —; `retry` — `{ why, onretry }`, under an answer —;
-  // `actions.onedit` (and `actions.edit`, why not now) under the person's message; `editing` — `{ text }` — it's open in
-  // place (MessageEdit, its own chunk): `onedited(words)` Save and send, `oneditcancel()`.
-  // **Under the person's message in a Code chat** (14 Nov 2026, the Claude Code app's: Copy, Rewind, Fork from here;
-  // `actions`: `{ rewind, fork }` — why each can't run now, '' when it can —, `onrewind`, `onfork`; agents/rewind.rs).
+  // **Edit and ‹ ›** (15 Nov 2026, the Claude app's; chat/chats/branches.rs): `branch` — `{ fork, why, onbranch }`,
+  // this message's versions (‹ 2/3 ›; `why` it can't switch now: an Edit's on the person's message, an older Retry's on
+  // its answer) —; `actions.onedit` (and `actions.edit`, why not now) under the person's message; `editing` —
+  // `{ text }` — it's open in place (MessageEdit, its own chunk): `onedited(words)` Save and send, `oneditcancel()`.
+  // **Under the person's message in a Code chat** (14 Nov 2026, the Claude Code app's: ✓✓ and its time, Copy, Rewind to
+  // here, Fork from here; `actions`: `{ rewind, fork }` — why each can't run now, '' when it can —, `onrewind`, `onfork`,
+  // `code: true`; agents/rewind.rs).
+  // **Under an answer** (16 Nov 2026, the Claude app's row; no 👍 / 👎 or ↻ Retry): `answer` — `{ fork, onfork, code,
+  // pinned, onpin, pinning }` — Copy, Fork from here (why it can't now; a Code chat's through its session), Pin as
+  // chapter (on: the answer starts a chapter, a second click takes it off), Read aloud, then its time and its model.
   const act = (why, run) => () => {
     if (!why) run?.();
   };
@@ -91,8 +82,24 @@
     const n = (m.images || []).filter((i) => !i.gone).length;
     return !n ? '' : n === 1 ? 'Its screenshot goes again' : 'Its screenshots go again';
   });
+  // **Its time** ("12 minutes ago", core/whenSaid.js): as Chat saved it, or — just sent, not read back yet — when it
+  // showed here; moved on with the thread's clock.
+  const saidAt = $derived(m.ts || m.shownAt || 0);
+  const when = $derived(whenSaid(saidAt, clock.now));
   // A message sent from the queue (chatState's `ticks`): ✓ sent, ✓✓ once Claude read it, and when.
   const readAt = $derived(tick?.readAt ? new Date(tick.readAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+  // A Code chat's message: ✓ while it waits in the queue, ✓✓ once Claude has it (every message a turn of its read).
+  const tickState = $derived(tick?.state === 'sent' ? 'sent' : 'read');
+  // Copy's ✓ for a moment after it copied.
+  let copied = $state(false);
+  let copiedTimer = 0;
+  async function copyIt(text) {
+    if (!(await copyText(text))) return;
+    copied = true;
+    clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => (copied = false), 1500);
+  }
+  const forkTip = $derived(answer?.code || actions?.code ? 'Starts a new session from this point. This one stays as it is.' : 'Starts a new chat from this point. This one stays as it is.');
 
   // The documents it made or changed: saved with it, or (while it's
   // written) as they come.
@@ -311,58 +318,86 @@
   {/if}
 </div>
 {/if}
-{#if m.role === 'user' && !editing && (actions || branch)}
-  <!-- Shown on hovering the message (or the row, or its focus): Copy, Edit, and in a Code chat Rewind (unavailable
-       while Claude works) and Fork from here. Its versions' ‹ 1/2 › always. -->
-  <div class="uacts" class:forked={!!branch} data-testid="chat-message-actions">
+{#if m.role === 'user' && !editing && (actions || branch || tick)}
+  <!-- Under the person's message, as the Claude app's (16 Nov 2026): on hovering the message (or the row, or its
+       focus) — in a Code chat "✓✓ 12 minutes ago ·", then Copy, Rewind to here (unavailable while Claude works) and Fork
+       from here; in Chat, Copy and Edit. Its versions' ‹ 1/2 › always, and a queued message's ✓ while it waits. -->
+  <div class="uacts" class:forked={!!branch} class:waiting={tick?.state === 'sent'} data-testid="chat-message-actions">
     {#if branch}
       <BranchSwitch fork={branch.fork} why={branch.why} onbranch={branch.onbranch} />
     {/if}
-    {#if actions}
-    <button type="button" class="uact" onclick={() => copyText(picks.text)} aria-label="Copy" title="Copy">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
-    </button>
-    {#if actions.onedit}
-      <button
-        type="button"
-        class="uact"
-        class:off={!!actions.edit}
-        aria-disabled={actions.edit ? 'true' : undefined}
-        onclick={act(actions.edit, actions.onedit)}
-        aria-label={actions.edit ? `Edit (${actions.edit.toLowerCase()})` : 'Edit'}
-        title={actions.edit ? `Edit (${actions.edit.toLowerCase()})` : 'Edit: change it and send again'}
-        data-testid="chat-edit-message"
+    <span class="reveal">
+    {#if actions?.code || tick}
+      <!-- ✓ with Claude, ✓✓ read (as Claude Code's own app ticks a message), and when it was sent. -->
+      <span
+        class="ticks"
+        data-testid={tick ? 'chat-ticks' : 'chat-read'}
+        data-state={tickState}
+        use:actionTip={{ title: tickState === 'read' ? 'Claude has read it' : 'Sent', text: tickState === 'read' ? (readAt ? `At ${readAt}` : '') : 'Claude reads it at its next step' }}
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+        {#if tickState === 'read'}
+          <svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12.5l4.5 4.5L17 7.5" /><path d="M12.5 16l1 1L23 7.5" /></svg>
+          <span class="vh">Read</span>
+        {:else}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+          Sent
+        {/if}
+      </span>
+      {#if when}<time class="when" datetime={new Date(saidAt * 1000).toISOString()} title={whenFull(saidAt)}>{when}</time>{/if}
+      {#if actions}<span class="dot" aria-hidden="true">·</span>{/if}
+    {/if}
+    {#if actions}
+      <button type="button" class="act" onclick={() => copyIt(picks.text)} aria-label="Copy" use:actionTip={{ title: copied ? 'Copied' : 'Copy' }} data-testid="chat-message-copy">
+        {#if copied}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+        {:else}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.2" /><path d="M15.5 8.5V6.2A2.2 2.2 0 0 0 13.3 4H6.2A2.2 2.2 0 0 0 4 6.2v7.1a2.2 2.2 0 0 0 2.2 2.2h2.3" /></svg>
+        {/if}
       </button>
+      {#if actions.onedit}
+        <button
+          type="button"
+          class="act"
+          class:off={!!actions.edit}
+          aria-disabled={actions.edit ? 'true' : undefined}
+          onclick={act(actions.edit, actions.onedit)}
+          aria-label={actions.edit ? `Edit (${actions.edit.toLowerCase()})` : 'Edit'}
+          use:actionTip={{ title: 'Edit', text: actions.edit || 'Change it and send it again' }}
+          data-testid="chat-edit-message"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h8.5" /><path d="M16.3 3.8a2.1 2.1 0 0 1 3 3L7.2 18.9 3.5 20l1.1-3.7z" /></svg>
+        </button>
+      {/if}
+      {#if actions.onrewind}
+        <button
+          type="button"
+          class="act"
+          class:off={!!actions.rewind}
+          aria-disabled={actions.rewind ? 'true' : undefined}
+          onclick={act(actions.rewind, actions.onrewind)}
+          aria-label={actions.rewind ? `Rewind to here (${actions.rewind.toLowerCase()})` : 'Rewind to here'}
+          use:actionTip={{ title: 'Rewind to here', text: actions.rewind || 'Takes this message and everything after it out of the conversation' }}
+          data-testid="chat-rewind"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.6 13.2A7.6 7.6 0 1 0 6.9 6.6L4.5 9" /><path d="M4.5 4.6V9h4.4" /></svg>
+        </button>
+      {/if}
+      {#if actions.onfork}
+        <button
+          type="button"
+          class="act"
+          class:off={!!actions.fork}
+          aria-disabled={actions.fork ? 'true' : undefined}
+          onclick={act(actions.fork, actions.onfork)}
+          aria-label={actions.fork ? `Fork from here (${actions.fork.toLowerCase()})` : 'Fork from here'}
+          use:actionTip={{ title: 'Fork from here', text: actions.fork || forkTip }}
+          data-testid="chat-fork"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 12H8l5-6h7" /><path d="M8 12l5 6h7" /><path d="M17.5 3.5 20.5 6l-3 2.5" /><path d="M17.5 15.5l3 2.5-3 2.5" /></svg>
+        </button>
+      {/if}
     {/if}
-    {#if actions.onrewind}
-    <button
-      type="button"
-      class="uact"
-      class:off={!!actions.rewind}
-      aria-disabled={actions.rewind ? 'true' : undefined}
-      onclick={act(actions.rewind, actions.onrewind)}
-      aria-label={actions.rewind ? `Rewind (${actions.rewind.toLowerCase()})` : 'Rewind'}
-      title={actions.rewind ? `Rewind (${actions.rewind.toLowerCase()})` : 'Rewind: back to before this message'}
-      data-testid="chat-rewind"
-    >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h11a5 5 0 0 1 0 10H9" /><path d="M8 5 4 9l4 4" /></svg>
-    </button>
-    <button
-      type="button"
-      class="uact"
-      class:off={!!actions.fork}
-      aria-disabled={actions.fork ? 'true' : undefined}
-      onclick={act(actions.fork, actions.onfork)}
-      aria-label={actions.fork ? `Fork from here (${actions.fork.toLowerCase()})` : 'Fork from here'}
-      title={actions.fork ? `Fork from here (${actions.fork.toLowerCase()})` : 'Fork from here: a new chat with the conversation up to this message’s answer'}
-      data-testid="chat-fork"
-    >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7" /><path d="M12 12v5" /></svg>
-    </button>
-    {/if}
-    {/if}
+    </span>
   </div>
 {/if}
 {#if shared.length}
@@ -382,18 +417,6 @@
   {#await import('./PageConfirm.svelte') then { default: PageConfirm }}
     <PageConfirm confirms={acts} />
   {/await}
-{/if}
-{#if m.role === 'user' && tick}
-  <!-- Sent from the queue: ✓ with Claude, ✓✓ read (as Claude Code's own app ticks a queued message). -->
-  <p class="ticks" data-testid="chat-ticks" data-state={tick.state} title={tick.state === 'read' ? 'Claude has read it' : 'Sent: Claude reads it at its next step'}>
-    {#if tick.state === 'read'}
-      <svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12.5l4.5 4.5L17 7.5" /><path d="M12.5 16l1 1L23 7.5" /></svg>
-      Read{readAt ? ` · ${readAt}` : ''}
-    {:else}
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
-      Sent
-    {/if}
-  </p>
 {/if}
 {#if m.role === 'user' && m.stopped && last}
   <!-- Stopped before any of the answer came. -->
@@ -440,75 +463,69 @@
   </div>
 {/if}
 {#if m.role === 'assistant' && !m.streaming}
-  <div class="msgfoot">
+  <!-- Under an answer, as the Claude app's (16 Nov 2026): Copy, Fork from here, Pin as chapter, Read aloud, then its
+       time and the model that wrote it (cut short when the row's narrow). No 👍 / 👎, no ↻ Retry. -->
+  <div class="msgfoot" data-testid="chat-answer-actions">
     {#if branch}
-      <!-- Its versions (Retry): ‹ 2/2 ›. -->
+      <!-- Its versions (an older Retry's): ‹ 2/2 ›. -->
       <BranchSwitch fork={branch.fork} why={branch.why} onbranch={branch.onbranch} />
-    {/if}
-    {#if m.id}
-      <button
-        class="readbtn"
-        class:on={reading}
-        aria-label={reading ? 'Stop reading' : 'Read aloud'}
-        title={reading ? 'Stop reading (Esc)' : 'Read aloud'}
-        onclick={onread}
-      >
-        {#if reading}
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
-        {:else}
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.9v14.2a1.2 1.2 0 0 0 1.8 1l11.6-7.1a1.2 1.2 0 0 0 0-2L8.8 3.9A1.2 1.2 0 0 0 7 4.9z" /></svg>
-        {/if}
-      </button>
     {/if}
     {#if m.text?.trim()}
       <!-- Copy, as the right-click menu's Copy (markdown marks dropped; Copy as Markdown stays in the menu). -->
-      <button class="readbtn copybtn" aria-label="Copy" title="Copy" data-testid="chat-answer-copy" onclick={() => messageItems(m)[0]?.onselect()}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
+      <button type="button" class="act" aria-label="Copy" use:actionTip={{ title: copied ? 'Copied' : 'Copy' }} data-testid="chat-answer-copy" onclick={() => copyIt(m.plain ? m.text : markdownToText(m.text))}>
+        {#if copied}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+        {:else}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.2" /><path d="M15.5 8.5V6.2A2.2 2.2 0 0 0 13.3 4H6.2A2.2 2.2 0 0 0 4 6.2v7.1a2.2 2.2 0 0 0 2.2 2.2h2.3" /></svg>
+        {/if}
       </button>
     {/if}
-    {#if rating && m.id}
-      <!-- 👍 / 👎 (the Claude app's, between Copy and ↻): kept with the answer on this PC, sent nowhere. -->
+    {#if answer?.onfork}
       <button
         type="button"
-        class="readbtn thumbbtn"
-        class:on={mark === 'good'}
-        aria-pressed={mark === 'good' ? 'true' : 'false'}
-        aria-label="Good answer"
-        title={mark === 'good' ? 'You marked it a good answer: press again to take that back' : 'Good answer'}
-        data-testid="chat-thumbs-up"
-        onclick={() => thumb('good')}
+        class="act"
+        class:off={!!answer.fork}
+        aria-disabled={answer.fork ? 'true' : undefined}
+        onclick={act(answer.fork, answer.onfork)}
+        aria-label={answer.fork ? `Fork from here (${answer.fork.toLowerCase()})` : 'Fork from here'}
+        use:actionTip={{ title: 'Fork from here', text: answer.fork || forkTip }}
+        data-testid="chat-answer-fork"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="hand" d="M7 10.5 10.6 4a1.9 1.9 0 0 1 3.5 1.3l-.9 4.2h5.3a2 2 0 0 1 1.95 2.45l-1.35 6A2.2 2.2 0 0 1 16.95 19.7H7z" /><path d="M7 10.5H4.6A1.6 1.6 0 0 0 3 12.1v6A1.6 1.6 0 0 0 4.6 19.7H7z" /></svg>
-      </button>
-      <button
-        type="button"
-        class="readbtn thumbbtn down"
-        class:on={mark === 'bad'}
-        aria-pressed={mark === 'bad' ? 'true' : 'false'}
-        aria-label="Not a good answer"
-        aria-expanded={mark === 'bad' ? String(fbOpen) : undefined}
-        title={mark === 'bad' ? 'You marked it not a good answer: press again to take that back' : 'Not a good answer: say what was wrong'}
-        data-testid="chat-thumbs-down"
-        onclick={() => thumb('bad')}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="hand" d="M7 10.5 10.6 4a1.9 1.9 0 0 1 3.5 1.3l-.9 4.2h5.3a2 2 0 0 1 1.95 2.45l-1.35 6A2.2 2.2 0 0 1 16.95 19.7H7z" /><path d="M7 10.5H4.6A1.6 1.6 0 0 0 3 12.1v6A1.6 1.6 0 0 0 4.6 19.7H7z" /></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 12H8l5-6h7" /><path d="M8 12l5 6h7" /><path d="M17.5 3.5 20.5 6l-3 2.5" /><path d="M17.5 15.5l3 2.5-3 2.5" /></svg>
       </button>
     {/if}
-    {#if retry && m.id}
-      <!-- Retry, beside Copy (the Claude app's ↻): its question answered again, this answer kept as a version (one
-           marked 👎: with what was wrong given to the model, chat/feedback.rs). -->
-      {@const label = retry.noted ? 'Retry with your note' : 'Retry'}
+    {#if answer?.onpin}
       <button
         type="button"
-        class="readbtn retrybtn"
-        class:off={!!retry.why}
-        aria-disabled={retry.why ? 'true' : undefined}
-        aria-label={retry.why ? `${label} (${retry.why.toLowerCase()})` : label}
-        title={retry.why ? `${label} (${retry.why.toLowerCase()})` : retry.noted ? 'Retry with your note: answered again with what you said was wrong (this answer is kept)' : 'Retry: answer it again (this answer is kept)'}
-        data-testid="chat-retry"
-        onclick={act(retry.why, retry.onretry)}
+        class="act"
+        class:on={answer.pinned}
+        class:busy={answer.pinning}
+        aria-pressed={answer.pinned ? 'true' : 'false'}
+        aria-busy={answer.pinning ? 'true' : undefined}
+        onclick={() => !answer.pinning && answer.onpin()}
+        aria-label={answer.pinned ? 'Unpin chapter' : 'Pin as chapter'}
+        use:actionTip={{ title: answer.pinning ? 'Naming the chapter…' : answer.pinned ? 'Unpin chapter' : 'Pin as chapter' }}
+        data-testid="chat-pin-chapter"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" /><path d="M3 21v-5h5" /></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g transform="rotate(45 12 12)"><path class="pinhead" d="M8.6 2.6h6.8l-1 6.4 3.6 3.4v2.4H6.6v-2.4L10.2 9z" /><path d="M12 14.8v6.8" /></g></svg>
+      </button>
+    {/if}
+    {#if m.id}
+      <button
+        type="button"
+        class="act"
+        class:on={reading}
+        class:reading
+        aria-label={reading ? 'Stop reading' : 'Read aloud'}
+        use:actionTip={{ title: reading ? 'Stop reading' : 'Read aloud', text: reading ? 'Esc' : '' }}
+        data-testid="chat-read-aloud"
+        onclick={onread}
+      >
+        {#if reading}
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.2" /></svg>
+        {:else}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 9h3.8l5.2-4.5v15L7.3 15H3.5z" /><path d="M15.6 8.6a4.8 4.8 0 0 1 0 6.8" /><path d="M18.6 5.6a9 9 0 0 1 0 12.8" /></svg>
+        {/if}
       </button>
     {/if}
     {#if reading}
@@ -516,26 +533,18 @@
         <span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>
         Speaking…
       </span>
-    {:else if m.model}
-      <!-- The model that wrote it (older answers don't say). -->
-      <span class="byline" title={whereItRuns(m.model)}>{paidLine(m.model, m.tokens)}</span>
+    {:else}
+      {#if when}<time class="when" datetime={new Date(saidAt * 1000).toISOString()} title={whenFull(saidAt)}>{when}</time>{/if}
+      {#if m.model}
+        <!-- The model that wrote it (older answers don't say), after its time; cut short when the row's narrow. -->
+        {#if when}<span class="dot" aria-hidden="true">·</span>{/if}
+        <span class="byline" title={whereItRuns(m.model)}>{paidLine(m.model, m.tokens)}</span>
+      {/if}
     {/if}
     {#if m.stopped}
       <span class="byline stopped" title="You stopped this answer while it was being written">· Stopped</span>
     {/if}
   </div>
-  {#if fbOpen}
-    <!-- 👎's card (its own chunk): what was wrong, Retry with that note, Learn from this. -->
-    {#await import('./FeedbackCard.svelte') then { default: FeedbackCard }}
-      <FeedbackCard
-        value={rating.value}
-        {retry}
-        learn={rating.learn}
-        onchange={(fb) => rating.onrate?.(fb)}
-        onclose={() => (fbFor = null)}
-      />
-    {/await}
-  {/if}
 {/if}
 {#if m.role === 'assistant' && m.nextStep?.recap && last && !m.streaming}
   <!-- The next-step box (suggest_next_step): under the chat's latest answer only, its buttons sending the
@@ -625,82 +634,137 @@
   :global(:root[data-motion='reduced']) .cbubble.streaming .cbody > :global(* > li)::after {
     animation: none;
   }
-  .uacts {
+  /* **The rows under a message** (16 Nov 2026), in the Claude app's proportions as measured on its screenshots: each
+     icon about 0.76 of the message text's size, in a square about 1.6 of it, the squares side by side, the time about
+     0.82 of it. Sized to the answer's own text here, so they follow Settings → Appearance's reading size. */
+  .uacts,
+  .msgfoot {
     display: flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+    font-size: calc(12.5px * var(--yap-reading-scale));
+    line-height: 1.2;
+  }
+  .uacts {
     justify-content: flex-end;
     gap: 2px;
-    margin: 2px 2px 0 auto;
-    opacity: 0;
-    transition: opacity 120ms ease;
+    /* (The last icon's ink under the bubble's text edge.) */
+    margin: 2px calc(13px - 0.42em) 0 auto;
   }
-  .cbubble.user:hover + .uacts,
-  .uacts:hover,
-  .uacts:focus-within {
-    opacity: 1;
-  }
-  /* A message with versions: its ‹ 1/2 › always there, the buttons on hover as ever. */
-  .uacts.forked {
-    opacity: 1;
+  /* (On hovering the message, the row or its focus; its ‹ 1/2 › always, and a queued message's ✓ while it waits.) */
+  .reveal {
+    display: inline-flex;
     align-items: center;
-  }
-  .uacts.forked .uact {
+    gap: 1px;
     opacity: 0;
     transition: opacity 120ms ease;
   }
-  .cbubble.user:hover + .uacts.forked .uact,
-  .uacts.forked:hover .uact,
-  .uacts.forked:focus-within .uact {
+  .cbubble.user:hover + .uacts .reveal,
+  .uacts:hover .reveal,
+  .uacts:focus-within .reveal,
+  .uacts.waiting .reveal {
     opacity: 1;
   }
-
-  .uact {
+  .act {
+    flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    width: 1.6em;
+    height: 1.6em;
     padding: 0;
     border: none;
-    border-radius: var(--yap-r);
+    border-radius: 0.42em;
     background: none;
-    color: var(--yap-paper-muted);
+    color: var(--yap-muted);
+    font: inherit;
     cursor: pointer;
+    transition:
+      background 0.12s,
+      color 0.12s;
   }
-  .uact svg {
-    width: 15px;
-    height: 15px;
+  .act svg {
+    width: 1.04em;
+    height: 1.04em;
   }
-  .uact:hover {
-    background: var(--yap-paper-s2);
-    color: var(--yap-paper-ink);
+  .act:hover {
+    background: color-mix(in srgb, var(--yap-fg) 8%, transparent);
+    color: var(--yap-fg);
   }
-  .uact.off {
+  .act:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 0;
+  }
+  .act.on {
+    color: var(--yap-fg);
+  }
+  .act.off,
+  .act.off:hover {
     opacity: 0.45;
+    background: none;
+    color: var(--yap-muted);
     cursor: default;
   }
-  .uact.off:hover {
-    background: none;
-    color: var(--yap-paper-muted);
+  /* Pinned as a chapter: the pin filled; while it's named, a soft pulse. */
+  .act.on :global(.pinhead) {
+    fill: currentColor;
   }
-  .uact:focus-visible {
-    outline: 2px solid var(--yap-focus-ring);
-    outline-offset: 1px;
+  .act.busy {
+    cursor: progress;
+    animation: pinning 1s ease-in-out infinite;
+  }
+  @keyframes pinning {
+    50% {
+      opacity: 0.45;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .act.busy {
+      animation: none;
+    }
+  }
+  :global(:root[data-motion='reduced']) .act.busy {
+    animation: none;
+  }
+  .when,
+  .dot {
+    flex: 0 0 auto;
+    font-size: 0.82em;
+    color: var(--yap-muted);
+    white-space: nowrap;
+  }
+  .when {
+    margin: 0 0.2em 0 0.55em;
+  }
+  .dot {
+    margin: 0 0.35em;
   }
   .ticks {
-    display: flex;
+    flex: 0 0 auto;
+    display: inline-flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 4px;
-    margin: 2px 2px 0 auto;
-    color: var(--yap-paper-muted);
-    font-size: 12px;
+    gap: 0.25em;
+    font-size: 0.82em;
+    color: var(--yap-muted);
+  }
+  .ticks + .when {
+    margin-left: 0.3em;
   }
   .ticks[data-state='read'] {
     color: var(--yap-link);
   }
   .ticks svg {
-    width: 16px;
-    height: 14px;
+    width: 1.35em;
+    height: 1.15em;
+  }
+  .vh {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
   .stoppednote {
     align-self: flex-end;
@@ -871,71 +935,24 @@
     width: 11px;
     height: 11px;
   }
-  /* Under an answer: ▶ Read aloud / ■ Stop, then the model or "Speaking…". */
+  /* Under an answer: Copy, Fork from here, Pin as chapter, Read aloud (■ while it reads), then its time and model or
+     "Speaking…" (the rows' sizes: .uacts, .msgfoot above). The first icon's ink under the bubble's text. */
   .msgfoot {
     align-self: flex-start;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 20px;
-    margin: -4px 0 2px 2px;
+    gap: 1px;
+    min-height: 1.6em;
+    margin: -3px 0 2px calc(13px - 0.42em);
   }
-  .readbtn {
-    display: inline-flex;
-    width: 22px;
-    height: 22px;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r-full);
-    background: var(--yap-s1);
-    color: var(--yap-muted);
-    cursor: pointer;
-    flex: 0 0 auto;
-  }
-  .readbtn:hover {
-    color: var(--yap-fg);
-    border-color: var(--yap-border-hover);
-  }
-  .readbtn:focus-visible {
-    outline: 2px solid var(--yap-primary-line);
-    outline-offset: 1px;
-  }
-  .readbtn.on {
+  /* (Being read: Read aloud's square in the primary colour.) */
+  .msgfoot .act.reading {
     color: var(--yap-primary);
-    border-color: color-mix(in srgb, var(--yap-primary) 45%, var(--yap-border-subtle));
-    background: var(--yap-primary-wash);
-  }
-  .readbtn svg {
-    width: 10px;
-    height: 10px;
-  }
-  .copybtn svg,
-  .retrybtn svg,
-  .thumbbtn svg {
-    width: 12px;
-    height: 12px;
-  }
-  /* 👎 is 👍 turned over; a thumb pressed is filled softly, in the primary colour (.readbtn.on). */
-  .thumbbtn.down svg {
-    transform: rotate(180deg);
-  }
-  .thumbbtn.on .hand {
-    fill: currentColor;
-    fill-opacity: 0.22;
-  }
-  .retrybtn.off,
-  .retrybtn.off:hover {
-    opacity: 0.45;
-    cursor: default;
-    color: var(--yap-muted);
-    border-color: var(--yap-border-subtle);
   }
   .speaking {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 10.5px;
+    margin-left: 0.55em;
+    font-size: 0.82em;
     font-weight: 600;
     color: var(--yap-primary);
   }
@@ -973,9 +990,19 @@
       transform: scaleY(0.7);
     }
   }
+  /* The model that wrote it: after the time, quieter, cut short when the row's narrow. */
   .byline {
-    font-size: 10.5px;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.82em;
     color: var(--yap-muted-55);
+  }
+  .byline.stopped {
+    flex: 0 0 auto;
+    margin-left: 0.35em;
   }
 
   /* ---- Snip to Chat: the screenshots in a question ---- */

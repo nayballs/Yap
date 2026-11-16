@@ -335,12 +335,11 @@ export function routineEnd(listing, { id, after = 0 }) {
 }
 
 /**
- * **Where a new version of `conv` starts** (`ask --retry` / `--edit`): its
- * person's last message, `{ index, text }`, or null. A Retry answers that
- * message again; in a Code chat it goes through Rewind, which cuts the thread
- * there and asks again — so the conversation is no longer than it was, and
- * its length (a new turn's start) would find no answer at all (16 Nov 2026).
- * Pure.
+ * **Where a new version of `conv` starts** (`ask --edit`): its person's last
+ * message, `{ index, text }`, or null. An Edit replaces that message; in a
+ * Code chat it goes through Rewind, which cuts the thread there and asks
+ * again — so the conversation is no longer than it was, and its length (a new
+ * turn's start) would find no answer at all (16 Nov 2026). Pure.
  */
 export function branchFrom(conv) {
   const messages = conv?.messages ?? [];

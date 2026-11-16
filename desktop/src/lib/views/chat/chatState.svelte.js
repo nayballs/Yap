@@ -504,7 +504,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // The open conversation's summary of its older messages ({ text, upto,
   // model }): a divider over the messages after it, "Show summary".
   let summary = $state(null);
-  // Its versions (Retry, Edit: chat/chats/branches.rs): `{at, shown, count}` each message that has some (chat_get's `forks`).
+  // Its versions (Edit's, an older Retry's: chat/chats/branches.rs): `{at, shown, count}` each message that has some (chat_get's `forks`).
   let forks = $state([]);
   // The person's message open to edit in place: `{id, text}` (MessageEdit), or null.
   let editing = $state(null);
@@ -1841,70 +1841,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     else waitingOpen.add(conv);
   }
 
-  // ---- Retry, Edit and ‹ › (15 Nov 2026, chat/chats/branches.rs; the Claude app's message actions) ----
+  // ---- Edit and ‹ › (15 Nov 2026, chat/chats/branches.rs; the Claude app's message actions) ----
 
-  /** The ‹ k/n › of the message at index `i`, or null. */
+  /** The ‹ k/n › of the message at index `i`, or null (an Edit's on the person's message, an older Retry's on its answer). */
   const forkOf = (i) => forks.find((f) => f.at === i) ?? null;
-
-  /**
-   * **Retry** the answer `m` (Chat's: the Claude app's ↻): its question answered again, the old answer and what
-   * followed kept as a version, ‹ 2/2 › on the new one. (A Code chat's is an edit with the same words: `saveEdit`.)
-   */
-  function retryAt(m, { feedback = false } = {}) {
-    const index = indexOf(m?.id);
-    if (activeId == null || sending || !Number.isInteger(index)) return false;
-    const q = messages[index - 1];
-    if (q?.role !== 'user' || q.kind) return false;
-    editing = null;
-    // (`feedback`: 👎's card's Retry with this note — the answer's 👎 goes to the model with it, chat/feedback.rs.)
-    send({ text: q.text?.trim() || DEFAULT_PROMPT, retry: index, voice: !!q.voice, feedback: !!feedback });
-    return true;
-  }
-
-  // ---- 👍 / 👎 on an answer (16 Nov 2026, chat/feedback.rs; the Claude app's thumbs) ----
-
-  /** Answer `id`'s mark as the thread shows it (`fb` null: none). */
-  function markShown(id, fb) {
-    messages = messages.map((x) => (x.id === id ? { ...x, feedback: fb ?? undefined } : x));
-  }
-
-  /**
-   * **👍 / 👎 on answer `m`**: `fb` `{rating: 'good'|'bad', reasons, note}`, or null to take it back. Shown at once,
-   * kept with the answer on this PC (never sent anywhere); the mark as kept, or undefined when it couldn't be.
-   */
-  async function rate(m, fb) {
-    const conv = activeId;
-    const index = indexOf(m?.id);
-    if (conv == null || !m?.id || !Number.isInteger(index)) return undefined;
-    const before = m.feedback ?? null;
-    markShown(m.id, fb);
-    try {
-      const kept = await invoke('chat_feedback', { id: conv, index, ts: m.ts ?? null, feedback: fb });
-      if (activeId === conv) markShown(m.id, kept);
-      return kept ?? null;
-    } catch (e) {
-      if (activeId === conv) markShown(m.id, before);
-      toast({ title: "Couldn't keep your feedback", description: String(e?.message ?? e), variant: 'destructive' });
-      return undefined;
-    }
-  }
-
-  /** **Learn from this** (👎's card): `fact` kept in memory's Preferences, as the person left it (memory's toast says so, Undo on it). */
-  async function rememberFrom(m, fact) {
-    const index = indexOf(m?.id);
-    if (activeId == null || !Number.isInteger(index)) return false;
-    try {
-      await invoke('chat_feedback_remember', { id: activeId, index, fact });
-      return true;
-    } catch (e) {
-      toast({ title: "Couldn't remember that", description: String(e?.message ?? e), variant: 'default' });
-      return false;
-    }
-  }
 
   /** The person's message `m`'s own words (no screenshot text, no picked elements' blocks). */
   const wordsOf = (m) => splitScreenText(splitElements(m?.text || '').text).question ?? '';
-  /** **Edit** the person's message `m`: open in place with its own words. */
+  /** **Edit** the person's message `m` (Chat's: a Code chat's is Rewind to here): open in place with its own words. */
   function startEdit(m) {
     if (!m?.id || m.role !== 'user') return;
     editing = { id: m.id, text: wordsOf(m) };
@@ -1915,22 +1859,61 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
 
   /**
    * **Save and send** the edited message `m` as `text`: a new version of the conversation from there (‹ 1/2 › on the
-   * message), its screenshots and the passage it was about going again. `code`: a Code chat's — a Rewind to before it
-   * first (`files`: the files Claude changed since go back too). False when it didn't go.
+   * message), its screenshots and the passage it was about going again. False when it didn't go.
    */
-  function saveEdit(m, text, { files = false, code = false, feedbackFrom = null } = {}) {
+  function saveEdit(m, text) {
     const index = indexOf(m?.id);
     const words = String(text ?? '').trim();
     if (activeId == null || sending || !Number.isInteger(index) || !words) return false;
     editing = null;
-    // (`feedbackFrom`: a Code chat's Retry with the note on 👎's card — that answer's index; its 👎 goes to Claude.)
-    const fromAnswer = Number.isInteger(feedbackFrom) ? feedbackFrom : null;
-    send({ text: words, edit: index, from: m, elements: splitElements(m.text || '').elements, editFiles: !!files, code: !!code, feedbackFrom: fromAnswer });
+    send({ text: words, edit: index, from: m, elements: splitElements(m.text || '').elements });
+    return true;
+  }
+
+  // ---- Under an answer: Fork from here, Pin as chapter (16 Nov 2026, the Claude app's answer row) ----
+
+  /**
+   * **Fork from here** under Chat's answer `m`: a new chat with the conversation up to and including it (its project,
+   * style and connectors as this one's), opened; this one stays as it is. (A Code chat's goes through its session:
+   * `forkAt` on the message it answers.)
+   */
+  async function forkAnswer(m) {
+    const conv = activeId;
+    const index = indexOf(m?.id);
+    if (conv == null || !Number.isInteger(index)) return false;
+    let id;
+    try {
+      id = await invoke('chat_fork', { id: conv, index });
+    } catch (e) {
+      toast({ title: "Couldn't fork the chat", description: String(e?.message ?? e), variant: 'destructive' });
+      return false;
+    }
+    await refreshList();
+    await selectConversation(id);
+    toast({ title: 'Forked into a new chat', description: 'The original chat is as it was.', variant: 'success' });
     return true;
   }
 
   /**
-   * **A phone switched a version, or retried an answer** (`yap-chat-versions`, Yap Link: link.rs): one version shown a
+   * **Pin as chapter** (`pin` true) answer `m`, or take its chapter off: Rust names it as the model's chapters are
+   * named (chat/cards/chapters.rs `pin_title`); the divider and the contents follow what it kept.
+   */
+  async function pinChapter(m, pin) {
+    const conv = activeId;
+    const index = indexOf(m?.id);
+    if (conv == null || !Number.isInteger(index)) return false;
+    try {
+      const chapter = await invoke('chat_chapter_pin', { id: conv, index, ts: m.ts ?? null, pin: !!pin });
+      if (activeId === conv) messages = messages.map((x) => (x.id === m.id ? { ...x, chapter: chapter ?? null } : x));
+      return true;
+    } catch (e) {
+      toast({ title: pin ? "Couldn't pin it as a chapter" : "Couldn't unpin the chapter", description: String(e?.message ?? e), variant: 'destructive' });
+      return false;
+    }
+  }
+
+  /**
+   * **A phone switched a version, or edited a message** (`yap-chat-versions`, Yap Link: link.rs): one version shown a
    * conversation, the same on every screen — the chat open here reads it again (after its own answer, when it's
    * sending: `reloadActive`). Reading aloud stops and an edit closes: their words may be in the version set aside.
    */
@@ -2136,12 +2119,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   const earlyReads = new Set();
 
   async function send(opts) {
-    // **Retry** (`retry`: the answer's index, its question answered again) or **Edit** (`edit`: the person's message's
-    // index, `from` that message; the new words in its place): a new version of the conversation from there
-    // (chat/chats/branches.rs). Never from the box, nor queued.
-    const retry = Number.isInteger(opts?.retry) ? opts.retry : null;
+    // **Edit** (`edit`: the person's message's index, `from` that message; the new words in its place): a new version
+    // of the conversation from there (chat/chats/branches.rs). Never from the box, nor queued.
     const edit = Number.isInteger(opts?.edit) ? opts.edit : null;
-    const branching = retry != null || edit != null;
+    const branching = edit != null;
     const asText = opts?.asText === true;
     // With a screenshot waiting, an empty box asks "What's this?".
     const fromBox = opts?.text == null;
@@ -2165,7 +2146,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // waits for nothing then). With nothing going on it's sent as Enter sends it.
     const later = fromBox && opts?.later === true;
     // (Asked out loud, `spokenWhileWorking`: its words alone, never the box's screenshots, elements or passage.)
-    // (A retry or an edit is never queued; nor a message with files.)
+    // (An edit is never queued; nor a message with files.)
     const queueable = branching ? false : fromBox ? !shots.length && !elements.length && !quote && !sentFiles.length : opts?.spoken === true;
     const gated = queueGate();
     if (queueable && text && activeId != null && (!sending || later) && (gated || later) && !skills.parse(text)?.skill) {
@@ -2229,28 +2210,23 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const turn = ++sendSeq;
     // (Words from a page beside the chat: quoted as a selection, its site named.)
     const sentQuote = about ? (about.page ? { noteId: 0, text: about.text, app: about.page.site || about.page.title || '' } : { noteId: about.noteId, text: about.text }) : null;
-    let question;
-    if (retry != null) {
-      // Its question stays as saved, the turn's now; the answer and what followed set aside.
-      question = { ...messages[retry - 1], turn };
-      messages = [...messages.slice(0, retry - 1), question];
-    } else {
-      // (An edit: its screenshots, its passage and its picked elements go again, as the message had them.)
-      const from = edit != null ? opts.from : null;
-      question = {
-        role: 'user',
-        text,
-        voice,
-        id: null,
-        turn,
-        images: from ? (from.images || []).filter((i) => !i.gone) : shots,
-        quote: from ? (from.quote ?? null) : sentQuote,
-        elements: from ? opts.elements || [] : sentElements,
-        // (Its attached files go again with an edit: chat/attachments.rs.)
-        attachments: from ? from.attachments || [] : sentFiles,
-      };
-      messages = edit != null ? [...messages.slice(0, edit), question] : [...messages, question];
-    }
+    // (An edit: its screenshots, its passage and its picked elements go again, as the message had them.)
+    const from = edit != null ? opts.from : null;
+    const question = {
+      role: 'user',
+      text,
+      voice,
+      id: null,
+      turn,
+      // (Its time for the row under it until Chat's saved one is read back: core/whenSaid.js.)
+      shownAt: Math.floor(Date.now() / 1000),
+      images: from ? (from.images || []).filter((i) => !i.gone) : shots,
+      quote: from ? (from.quote ?? null) : sentQuote,
+      elements: from ? opts.elements || [] : sentElements,
+      // (Its attached files go again with an edit: chat/attachments.rs.)
+      attachments: from ? from.attachments || [] : sentFiles,
+    };
+    messages = edit != null ? [...messages.slice(0, edit), question] : [...messages, question];
     // **The answer, in its own conversation** (`Answer`): a new chat's is
     // that new chat's until its question makes the conversation. Another
     // conversation opened while it's written (a click in the list, New
@@ -2258,7 +2234,6 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // written — shown again, where it is, when its conversation opens; it
     // lands there.
     const rec = new Answer({ conv: activeId, turn, view: viewSeq, question });
-    if (retry != null) rec.askedId = question.id ?? null;
     // A new chat's ghost on (never a Code chat's): its conversation is incognito.
     rec.ghost = activeId == null && ghostNew && !newProject && !(newChatFolder?.() ?? null);
     // A new chat started from a project's page (chat/projects.rs).
@@ -2306,9 +2281,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       rec.took(ev);
       paint(rec);
     };
-    const call = retry != null
-      ? streamCall('chat_retry', { conversationId: activeId, index: retry, ...(opts.feedback ? { feedback: true } : {}) }, onEvent)
-      : streamCall(
+    const call = streamCall(
       'chat_send',
       {
         conversationId: activeId,
@@ -2331,7 +2304,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         // A new chat's connectors switched off in its + menu (connectors/chats.rs).
         connectorsOff: activeId == null ? connectors.newChatOff() : null,
         // An edit (chat/commands.rs `edit`): the message it replaces, its picked elements again.
-        ...(edit != null ? { edit, editFiles: opts.editFiles === true, elements: opts.elements?.length ? opts.elements : null, ...(Number.isInteger(opts.feedbackFrom) ? { feedbackFrom: opts.feedbackFrom } : {}) } : {}),
+        ...(edit != null ? { edit, elements: opts.elements?.length ? opts.elements : null } : {}),
         // A new chat asked incognito (chat/incognito.rs).
         incognito: rec.ghost || null,
         // …or in a project (chat/projects.rs).
@@ -2407,6 +2380,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         model: res.model ?? null,
         sources: res.sources || [],
         id: res.messageId ?? null,
+        // (Its time for the row under it until Chat's saved one is read back.)
+        shownAt: Math.floor(Date.now() / 1000),
         stopped: !!res.stopped,
         tokens: res.tokens ?? null,
         thinking: res.thinking ?? null,
@@ -2431,7 +2406,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // The question as saved: with its screenshots' text when it went as text.
       const saved = asText && res.question ? { text: res.question, images: shots.map((s) => ({ ...s, asText: true })) } : {};
       messages = [...messages.slice(0, qi), { ...asked, ...saved, id: res.userMessageId ?? null }, answer];
-      // Its versions now (a retry's or an edit's ‹ ›).
+      // Its versions now (an edit's ‹ ›).
       if (Array.isArray(res.forks)) forks = res.forks;
       refreshList();
       followThread();
@@ -2444,16 +2419,15 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (!alive) return;
       // Its conversation shown now (another one: its messages and its box stay as they are).
       const shown = isShown(rec);
-      // A retry or an edit that never answered: Rust put the chat back as it was (read again as it ends). A Code
-      // chat's edit has rewound: its words go back in the box, as any send's.
-      if (branching && !(edit != null && opts.code)) {
+      // An edit that never answered: Rust put the chat back as it was (read again as it ends).
+      if (branching) {
         if (shown) reloadAfter = true;
         if (!String(e).includes(SUPERSEDED) && !String(e).includes(STOPPED)) {
           // (An edit's words: back in its box, open in place.)
           if (shown && edit != null) editing = { id: chatId(activeId, edit), text };
           const why = aiError(e);
           toast({
-            title: retry != null ? "Couldn't try again" : "Couldn't send",
+            title: "Couldn't send",
             description: why.text,
             ...(why.known ? { variant: 'default', kind: 'error', chip: 'Error', icon: 'alert' } : { variant: 'destructive' }),
           });
@@ -2673,9 +2647,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     rewindAt,
     forkAt,
     forkOf,
-    retryAt,
-    rate,
-    rememberFrom,
+    forkAnswer,
+    pinChapter,
     wordsOf,
     startEdit,
     cancelEdit,

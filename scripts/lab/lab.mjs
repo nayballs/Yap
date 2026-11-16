@@ -24,6 +24,7 @@
 //   probe --window <w> [--css <selector>] [--text <words>] [--at end|start]
 //   click --window main|thread|panel|bar --css <selector> [--right|--hover] [--at end|start]   (one of Yap's own buttons, as the person would)
 //   spoken [--clear]                       what the test Yap's voice was given, and the reading card now
+//   copied [--clear]                       what the test Yap copied (held there: never this PC's clipboard)
 //   type --window main|thread|panel [--css <selector>] [--text <words>] [--press Enter,Tab…]   (keys, as the person types)
 //   pick "<words on the page>" | pick --css <selector>   select an element beside the chat
 //   side "<question>" [--keep] [--close] [--timeout 180]   a side question (Ctrl+;) about the chat shown
@@ -257,6 +258,7 @@ async function main() {
     case 'probe':
     case 'click':
     case 'spoken':
+    case 'copied':
     case 'type':
     case 'state':
     case 'agents':
@@ -270,7 +272,7 @@ async function main() {
     case 'kept':
       return send(command, args);
     default:
-      return { ok: false, error: `Commands: build, start, check, ask, side, wait, answer, cancel, shot, probe, click, spoken, type, pick, set, state, agents, logs, report, sheet, run, fake, routine, meeting, age, archive, summary, kept, stop (docs/lab.md)` };
+      return { ok: false, error: `Commands: build, start, check, ask, side, wait, answer, cancel, shot, probe, click, spoken, copied, type, pick, set, state, agents, logs, report, sheet, run, fake, routine, meeting, age, archive, summary, kept, stop (docs/lab.md)` };
   }
 }
 

@@ -46,14 +46,6 @@
     loadCurrent(id);
   });
   loadList();
-  // Its style changed elsewhere (👎's card, Learn from this: FeedbackCard.svelte): the chip follows.
-  $effect(() => {
-    const changed = (e) => {
-      if (e.detail?.conversation === conversationId && e.detail?.style) current = e.detail.style;
-    };
-    window.addEventListener('yap-chat-style', changed);
-    return () => window.removeEventListener('yap-chat-style', changed);
-  });
 
   async function pick(id) {
     try {

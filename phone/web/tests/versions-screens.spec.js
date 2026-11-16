@@ -1,10 +1,9 @@
-// Retry and its versions on the phone as named screenshots (16 Nov 2026),
-// light and dark, at a small and a middling phone, in
-// test-results/link/screenshots/ (to look at, not compared): a chat whose
-// question was edited (‹ 2/2 › under its bubble) and whose answer was
-// retried (‹ 3/3 › first under it, then Copy, 👍 / 👎, ▶ and ↻: the fullest row), a ↻ under way (its
-// answer written afresh, what followed gone with the old version), and the
-// new answer in with its ‹ 4/4 ›; then ✎ Edit: a question in the box with
+// Versions on the phone as named screenshots (16 Nov 2026), light and dark,
+// at a small and a middling phone, in test-results/link/screenshots/ (to
+// look at, not compared): a chat whose question was edited (‹ 2/2 › under
+// its bubble) and whose answer an older Yap retried (‹ 3/3 › first under it,
+// then Copy, the speaker and its time, as the PC's row: no ↻), and ‹ to its
+// second version (what followed gone with the version set aside); then ✎ Edit: a question in the box with
 // "Editing your message" over it and its bubble marked (`edit-open-*`), the
 // new words answered in its place (`edit-answering-*`), and ‹ 2/2 › with ✎
 // under it once the PC says so (`edit-versions-*`). Also checks nothing overflows sideways and
@@ -43,10 +42,10 @@ const THREAD = {
       text: 'Pack **layers** you can add and take off:\n\n- A waterproof jacket and overtrousers\n- Two merino base layers\n- Spare socks in a dry bag',
       id: 'chat:41:1',
       version: { at: 1, shown: 3, count: 3 },
-      retry: true,
+      ts: Math.floor(Date.now() / 1000) - 12 * 60 - 5,
     },
     { role: 'user', text: 'Is a 35-litre rucksack enough?' },
-    { role: 'assistant', text: 'Yes, for three days if you stay in huts.', id: 'chat:41:3', retry: true },
+    { role: 'assistant', text: 'Yes, for three days if you stay in huts.', id: 'chat:41:3', ts: Math.floor(Date.now() / 1000) - 3 * 60 - 5 },
   ],
 };
 
@@ -56,7 +55,7 @@ for (const scheme of ['light', 'dark']) {
     test.describe(`${scheme} ${w}×${h}`, () => {
       test.use({ colorScheme: scheme, viewport: { width: w, height: h } });
 
-      test(`Retry and versions (${at})`, async ({ page }) => {
+      test(`Versions and the answer row (${at})`, async ({ page }) => {
         await servePage(page);
         await seedDevice(page);
         await page.addInitScript(() => {
@@ -65,7 +64,12 @@ for (const scheme of ['light', 'dark']) {
             sessionStorage.setItem('in-chat', '1');
           }
         });
-        const pc = await mockPc(page, { can: [...CAN, 'versions', 'retry', 'rate'], threads: { 41: THREAD } });
+        const pc = await mockPc(page, {
+          can: [...CAN, 'versions'],
+          threads: { 41: THREAD },
+          // (‹ ›: the PC shows that version and answers with the chat as it is now.)
+          onText: (m, conn, pc) => m.type === 'show_version' && pc.sendTo(conn, { type: 'thread', id: 41, ...pc.threads[41], more: false }),
+        });
         await open(page);
         await ready(page, pc);
         await expect(page.getByTestId('turn')).toHaveCount(2);
@@ -74,30 +78,21 @@ for (const scheme of ['light', 'dark']) {
         expect(await tooSmall(page)).toEqual([]);
         expect(await noSideways(page)).toBe(true);
 
-        // ↻ on the first answer: written afresh, what followed gone with the old version.
-        await page.getByTestId('turn').first().getByTestId('retry').click();
-        await expect.poll(() => pc.of('retry').length).toBe(1);
-        pc.send({ type: 'state', phase: 'thinking' });
-        pc.send({ type: 'step', label: 'Searching the web · rain hiking kit list' });
-        pc.send({ type: 'answer', text: 'For three wet days, pack a', final: false });
-        await expect(page.getByTestId('answer')).toHaveText('For three wet days, pack a');
-        await shot(page, `versions-retrying-${at}`);
-        expect(await noSideways(page)).toBe(true);
+        // The answer's row, as the PC's: no ↻, its time.
+        await expect(page.getByTestId('retry')).toHaveCount(0);
+        await expect(page.getByTestId('answer-when').first()).toHaveText('12 minutes ago');
 
-        // The new answer in, the thread again with its ‹ 4/4 ›.
-        const text = 'For three wet days, pack a rain jacket, overtrousers, gaiters and a warm hat.';
-        pc.send({ type: 'answer', text, final: true, id: 'chat:41:1', retry: true });
-        pc.send({ type: 'state', phase: 'idle' });
+        // ‹ on the first answer: its second version, what followed gone with the version set aside.
         pc.threads[41] = {
           title: 'Trip packing list',
           messages: [
             { role: 'user', text: QUESTION, version: { at: 0, shown: 2, count: 2 } },
-            { role: 'assistant', text, id: 'chat:41:1', version: { at: 1, shown: 4, count: 4 }, retry: true },
+            { role: 'assistant', text: 'A rain jacket, overtrousers and a dry bag.', id: 'chat:41:1', version: { at: 1, shown: 2, count: 3 }, ts: THREAD.messages[1].ts - 60 },
           ],
         };
-        pc.send({ type: 'versions', chat: 41 });
-        await expect(page.getByTestId('answer-versions').getByTestId('version-count')).toHaveText('4/4');
-        await shot(page, `versions-retried-${at}`);
+        await page.getByTestId('answer-versions').getByTestId('version-prev').click();
+        await expect(page.getByTestId('answer-versions').getByTestId('version-count')).toHaveText('2/3');
+        await shot(page, `versions-switched-${at}`);
         expect(await tooSmall(page)).toEqual([]);
         expect(await noSideways(page)).toBe(true);
       });
@@ -116,7 +111,7 @@ for (const scheme of ['light', 'dark']) {
           title: 'Trip packing list',
           messages: [{ ...THREAD.messages[0], edit: 1_731_772_800_100 }, THREAD.messages[1], questions, THREAD.messages[3]],
         };
-        const pc = await mockPc(page, { can: [...CAN, 'versions', 'retry', 'rate', 'edit'], threads: { 41: thread } });
+        const pc = await mockPc(page, { can: [...CAN, 'versions', 'edit'], threads: { 41: thread } });
         await open(page);
         await ready(page, pc);
         await expect(page.getByTestId('turn')).toHaveCount(2);
@@ -141,7 +136,7 @@ for (const scheme of ['light', 'dark']) {
 
         // The answer in, the thread again: ‹ 2/2 › and ✎ under the edited question.
         const text = 'For two nights out, a 45-litre pack is safer: the tent and stove need the room.';
-        pc.send({ type: 'answer', text, final: true, id: 'chat:41:3', retry: true, edit: 1_731_772_800_900 });
+        pc.send({ type: 'answer', text, final: true, id: 'chat:41:3', edit: 1_731_772_800_900 });
         pc.send({ type: 'state', phase: 'idle' });
         pc.threads[41] = {
           title: 'Trip packing list',
@@ -149,7 +144,7 @@ for (const scheme of ['light', 'dark']) {
             thread.messages[0],
             thread.messages[1],
             { role: 'user', text: 'Is a 35-litre rucksack enough for five days, camping two nights?', edit: 1_731_772_800_900, version: { at: 2, shown: 2, count: 2 } },
-            { role: 'assistant', text, id: 'chat:41:3', retry: true },
+            { role: 'assistant', text, id: 'chat:41:3' },
           ],
         };
         pc.send({ type: 'versions', chat: 41 });

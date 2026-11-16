@@ -256,19 +256,20 @@ afresh. A rename in Chat on the PC (`title`) shows in the header and the
 drawer. A PC from before the drawer (no `"chats"` in `ready.can`): no ☰,
 and nothing about a conversation is sent.
 
-## Retry and versions (16 Nov 2026)
+## Versions and the answer's row (16 Nov 2026)
 
-Retry's and Edit's versions (Chat's ‹ 1/2 ›, `chat/chats/branches.rs` on
-the PC) show here as **whichever version is shown**: a thread's message
-with versions carries `version {at, shown, count}`, drawn as **‹ 2/3 ›** —
-under an edited question's bubble at its right edge, and first under a
-retried answer, before Copy, ▶ and ↻ (the PC's order). ‹ at the first
+Edit's versions (Chat's ‹ 1/2 ›, `chat/chats/branches.rs` on the PC; an
+older Yap's Retry made them on an answer too) show here as **whichever
+version is shown**: a thread's message with versions carries `version {at,
+shown, count}`, drawn as **‹ 2/3 ›** — under an edited question's bubble at
+its right edge, and first under a retried answer, before Copy, the speaker
+and its time (the PC's order). ‹ at the first
 version and › at the last are asleep. A tap sends `show_version {chat, at,
 place}` and the PC answers with the thread as it is then: **there is one
 version shown a conversation, the PC's** — ‹ › here switches it on the PC
-too, and the last switch wins wherever it was made (`link.md`, "Retry and
-versions on the phone"). When another screen switches it (the PC's ‹ ›,
-another phone's) or retries or edits there, every phone hears `versions
+too, and the last switch wins wherever it was made (`link.md`, "Versions
+on the phone"). When another screen switches it (the PC's ‹ ›,
+another phone's) or edits there, every phone hears `versions
 {chat}` and the page showing that chat asks for its thread again
 (`open_chat`, without letting anything go) — at once, or, while a question
 of its own is under way there (asked, answered, said, Talk's words on
@@ -277,20 +278,18 @@ words may be in the version set aside). The PC's refusal (an answer being
 written there: "Wait for the answer being written, or stop it first.") is
 said as an error and the version shown stays.
 
-**↻ Retry** under an answer the PC says may be asked again (`retry` on
-the thread's message or the checked `answer`: just after the person's own
-question, never in a Code chat — there Retry is Claude Code's Rewind, the
-PC's only) sends `retry {id}`: the answer is written afresh where it was,
-what followed it leaves the thread (it went with the old version), Chat's
-activity line meanwhile, answered **on screen** as a typed question is (▶
-to hear it). The new answer in, the PC's `versions` brings the thread
-again with its ‹ 2/2 ›. The PC saying no (`error`, then `state idle`), or
-its model unable to read the question's pictures (`cant_read`: said as an
-error here, nothing put in the composer), puts the answer and what
-followed back as they were. ‹ › and ↻ sleep while something's under way
-(woken by `render()`, not a redraw of the thread). A PC from before (no
-`"versions"` / `"retry"` in `ready.can`): neither shown, whatever a thread
-carries. Kept with the thread in `sessionStorage` (`qv`, `av`, `retry`).
+**Under an answer**, as the PC's row (the Claude app's): Copy, the speaker
+(▶ Read aloud) and its **time** ("12 minutes ago": the thread message's
+`ts`, or now for an answer just in; `core/whenSaid.js`, served beside the
+page; moved on in place every half minute). No ↻ Retry and no 👍 / 👎: they
+came and went on 16 Nov 2026 with the PC's, and a thread or an answer that
+still says `retry` gets none. Fork from here and Pin as chapter stay the
+PC's (no chapters here; a fork opens on the PC). The icons keep a thumb's
+44 px target, their ink about 0.8 of the answer's text, the time 0.875rem.
+‹ › sleeps while something's under way (woken by `render()`, not a redraw
+of the thread). A PC from before (no `"versions"` in `ready.can`): no ‹ ›,
+whatever a thread carries. Kept with the thread in `sessionStorage` (`qv`,
+`av`, `aTs`).
 
 ## Edit (16 Nov 2026)
 
@@ -843,16 +842,14 @@ npm run test:link
   words does: the fake mic's steady tone isn't speech for hands-free talk to
   end on), the answer's voice in sentences with pauses (`sentences`: where
   the media player cuts its pieces).
-  `versions.spec.js` — Retry and versions: ‹ 2/2 › under an edited
-  question and ‹ 3/3 › first under a retried answer (the foot's order, the
-  ends asleep), ‹ › as `show_version` and the PC's thread after it, its
-  refusal said with the version kept; `versions` from the PC asking for the
-  thread at once, not for another chat, and while a typed question is
-  answered only once it's over; ↻ as `retry {id}` (what followed leaves,
-  the activity line, ‹ › asleep, the new answer on screen, nothing said,
-  then `versions` and the new ‹ k/n ›); ↻ refused (the answer and what
-  followed back, why said, awake again); ‹ › while ▶ is said (`interrupt`
-  first); a PC from before showing neither. ✎ Edit: the question in the box
+  `versions.spec.js` — versions and the answer's row: ‹ 2/2 › under an
+  edited question and ‹ 3/3 › first under an older retried answer (the
+  foot's order — versions, Copy, the speaker, its time —, the ends asleep),
+  ‹ › as `show_version` and the PC's thread after it, its refusal said with
+  the version kept; `versions` from the PC asking for the thread at once, not
+  for another chat, and while a typed question is answered only once it's
+  over; no ↻ whatever a thread or an answer says, a new answer's "just now";
+  ‹ › while ▶ is said (`interrupt` first); a PC from before showing none. ✎ Edit: the question in the box
   with "Editing your message" (its bubble marked, + and hands-free talk
   aside), sent as `edit {chat, at, ts, text}`, the question and what
   followed replaced by the new words, its answer on screen and ✎ on the new
@@ -864,7 +861,7 @@ npm run test:link
   `ask`); Talk's words added to an edit (`speak`); ✎ on a question just
   asked; none from a PC from before, none in a Code chat.
   `versions-screens.spec.js` — screenshots light and dark at 360 × 780 and
-  390 × 844 (`versions-thread-*`, `versions-retrying-*`, `versions-retried-*`,
+  390 × 844 (`versions-thread-*`, `versions-switched-*`,
   `edit-open-*`, `edit-answering-*`, `edit-versions-*`), 44 px targets,
   nothing sideways.
   **The Code side** (Remote Control), against a PC mocked from
