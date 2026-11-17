@@ -164,7 +164,8 @@ pub fn prompt_line_for(folder: &Folder) -> String {
 /// model knows a follow-up carries it on (`chat/turn/prompt.rs`, after
 /// [`prompt_line_for`]). None while the chat has none there.
 pub fn agent_line_in(conversation: Option<u64>, folder: &Folder) -> Option<String> {
-    let agent = store::of_conversation(conversation?).into_iter().find(|j| workspaces::norm(&j.path) == workspaces::norm(&folder.path))?;
+    let conversation = conversation?;
+    let agent = store::of_conversation(conversation).into_iter().find(|j| workspaces::norm(&j.path) == workspaces::norm(&folder.path) && !super::menu::cleared(conversation, &j.id))?;
     Some(agent_line(&agent))
 }
 

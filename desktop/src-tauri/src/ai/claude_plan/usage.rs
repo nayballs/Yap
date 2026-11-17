@@ -206,6 +206,19 @@ pub fn forget_context(conv: u64) {
     with(|s| s.contexts.retain(|(id, _)| *id != conv));
 }
 
+/// [`note_context`], the page told at once (a Code chat's own session after a
+/// turn or a `/compact`: `agents/runner.rs`, `agents/slash.rs`).
+pub fn note_context_now(conv: u64, fill: Fill) {
+    note_context(conv, fill);
+    emit();
+}
+
+/// [`forget_context`], the page told at once (a Code chat's `/clear`).
+pub fn forget_context_now(conv: u64) {
+    forget_context(conv);
+    emit();
+}
+
 /// Every conversation's context goes (Delete some of your data → Chats).
 pub fn forget_contexts() {
     with(|s| s.contexts.clear());

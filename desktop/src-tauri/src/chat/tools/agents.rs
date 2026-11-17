@@ -572,7 +572,9 @@ pub fn decide(code_chat: bool, new_folder: bool, fresh: bool, prev: Option<&Agen
 /// **This chat's agent in `folder`**: its latest there (the one a follow-up
 /// carries on).
 pub(crate) fn chats_agent_in(conversation: Option<u64>, folder: &Folder) -> Option<Agent> {
-    store::of_conversation(conversation?).into_iter().find(|j| workspaces::norm(&j.path) == workspaces::norm(&folder.path))
+    let conversation = conversation?;
+    // (One a /clear set aside is never carried on: the chat's next request starts afresh, `agents/slash.rs`.)
+    store::of_conversation(conversation).into_iter().find(|j| workspaces::norm(&j.path) == workspaces::norm(&folder.path) && !crate::agents::menu::cleared(conversation, &j.id))
 }
 
 /// **Why `agent`'s session can't be carried on** (`None`: it can). One that

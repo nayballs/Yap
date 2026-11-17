@@ -137,7 +137,7 @@ fn a_chats_servers_off_and_folders_reach_its_runs_arguments() {
     let mut spec = Spec::new(r"C:\Users\imogen\Projects\garden-planner", Pay::Plan);
     // (A read-only turn's own, first: kept.)
     spec.disallowed_tools = vec!["Edit".into()];
-    let choices = Choices { folders: vec![r"D:\Shared\seeds".into(), r"D:\Gone".into()], servers_off: vec!["claude.ai Example Docs".into(), "issue-tracker".into()] };
+    let choices = Choices { folders: vec![r"D:\Shared\seeds".into(), r"D:\Gone".into()], servers_off: vec!["claude.ai Example Docs".into(), "issue-tracker".into()], clears: Vec::new() };
     apply_choices(&mut spec, &choices, &|p| !p.ends_with("Gone"));
     let a = session::args(&spec, &no_files());
     let after = |flag: &str| a.iter().position(|x| x == flag).map(|i| a[i + 1].as_str());
@@ -250,4 +250,28 @@ fn a_workspaces_menu_is_kept_and_looked_at_again_once_stale_or_old() {
     assert!(known(ws, super::super::store::now_secs() + KEEP_SECS + 1).1);
     stale();
     assert!(known(ws, super::super::store::now_secs()).1);
+}
+
+#[test]
+fn a_clear_sets_its_agents_aside_and_never_goes_with_a_fork() {
+    assert!(!cleared(51, "a1"));
+    set_server(Some(51), Some(r"C:\Users\imogen\Projects\garden-planner"), "issue-tracker", false).unwrap();
+    add_clear(51, 4, vec!["a1".into()]);
+    assert!(cleared(51, "a1"));
+    assert!(!cleared(51, "a2"), "an agent after the clear is the chat's own");
+    assert!(!cleared(52, "a1"), "another chat's");
+    let ch = choices(Some(51), None);
+    assert_eq!(ch.clears.len(), 1);
+    assert_eq!(ch.clears[0].at, 4);
+    // A second clear later: both kept, in order.
+    add_clear(51, 9, vec!["a2".into()]);
+    assert!(cleared(51, "a2"));
+    assert_eq!(choices(Some(51), None).clears.iter().map(|c| c.at).collect::<Vec<_>>(), [4, 9]);
+    // A fork gets the servers off, never the clears (they're this chat's thread and agents).
+    forked(51, 53);
+    let fork = choices(Some(53), None);
+    assert_eq!(fork.servers_off, ["issue-tracker"]);
+    assert!(fork.clears.is_empty());
+    chat_deleted(51);
+    assert!(!cleared(51, "a1"));
 }

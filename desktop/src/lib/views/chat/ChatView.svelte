@@ -129,6 +129,7 @@
   import { layoutMotion } from './pageMotion.svelte.js';
   import { chatBrowser } from '../../stores/chatBrowser.svelte.js';
   import { chatSummary } from '../../stores/chatSummary.svelte.js';
+  import { CodeMenu } from './codeMenu.svelte.js';
   import { chatOutputs } from '../../stores/chatOutputs.svelte.js';
   import { CODE_FILES } from '../../ui/fileLinks.js';
   import { openFileLink, openFileLinkMenu, loadEditors } from './fileOpen.svelte.js';
@@ -159,6 +160,13 @@
   // **Code chats** (codeChats.svelte.js): with Yap Code on, the list's Chat |
   // Code switch, a Code chat's workspace and its look.
   const code = createCodeChats(chat, { opensettings: () => onopensettings });
+  // **A Code chat's + menu, "/" commands and choices** (codeMenu.svelte.js, agents/menu.rs): one for the view — the
+  // box's menu and "/" list, the edge's "+N folders", the thread's /clear dividers.
+  const codeMenu = new CodeMenu();
+  $effect(() => {
+    codeMenu.follow(chat.activeId ?? null, code.current?.path ?? null);
+  });
+  onDestroy(() => codeMenu.destroy());
   // **A Code chat's files and ▶ Run** (15 Nov 2026, agents/files.rs, agents/run_block.rs): its
   // answers and rows read this (ui/fileLinks.js, ui/codeRun.js, StepRows): a path in the workspace
   // opens the file beside the chat; ▶ on a one-line shell block runs it (asked first but in Bypass),
@@ -825,8 +833,8 @@
         <ProjectsView {chat} />
       {/await}
     {:else}
-      <ChatThread {chat} {code} {onopensettings} />
-      <Composer {chat} {code} {onopensettings} {onopenusage} />
+      <ChatThread {chat} {code} {codeMenu} {onopensettings} />
+      <Composer {chat} {code} {codeMenu} {onopensettings} {onopenusage} />
       {#if startScreen}
         <!-- The start screen's lower part: the greeting and the box sit a little above the middle. -->
         <div class="startgap chatstart" aria-hidden="true"></div>

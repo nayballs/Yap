@@ -743,7 +743,16 @@ fn start(
         None => Conversation::fresh(),
     };
     let resumed = resume.is_some();
-    let (session, rx) = Session::start(spec(model, effort, system, web, code, conversation, &run, incognito)?)?;
+    let mut s = spec(model, effort, system, web, code, conversation, &run, incognito)?;
+    // **A Code chat's added folders** (its + menu's Add folder, `agents/menu.rs`): readable as its workspace is
+    // (`--add-dir`: working directories, so `blockReadsOutsideWorkingDirectories` lets them through).
+    if code.is_some() {
+        s.add_dirs = crate::agents::menu::folders_for_run(conv);
+        if !s.add_dirs.is_empty() {
+            tracing::info!(conversation = conv, folders = s.add_dirs.len(), "Claude plan: a Code chat's added folders on its session");
+        }
+    }
+    let (session, rx) = Session::start(s)?;
     let warm = Arc::new(sessions::Warm::new(session, rx, conv, model.to_string(), effort, print, Some(run)));
     warm.set_total(total_before);
     sessions::keep(warm.clone());
@@ -955,8 +964,11 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         tracing::info!("Claude plan: a Code chat's workspace folder is gone");
         return Err("This Code chat's workspace folder isn't on this PC any more. Pick another workspace, or make it a plain chat.".to_string());
     }
+    // (Its + menu's added folders too, 17 Nov 2026: another set is another session — `--add-dir` is a start flag.)
+    let added = if built.code.is_some() { crate::agents::menu::folders_for_run(conv.id) } else { Vec::new() };
     let cwd = built.code.as_ref().map(|f| f.path.clone()).unwrap_or_default();
-    let print = fingerprint(&system, web, agents, eyes, &cwd, crate::integrations::claude_live::connectors::hash_of(connectors.as_ref()));
+    let with_added = if added.is_empty() { cwd.clone() } else { format!("{cwd}|{}", added.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("|")) };
+    let print = fingerprint(&system, web, agents, eyes, &with_added, crate::integrations::claude_live::connectors::hash_of(connectors.as_ref()));
     // The question, its context (a question asked away from Chat told it
     // has no screen or panel) and its screenshots.
     let mut context = across_lines(t.meetings, t.skill.as_ref());

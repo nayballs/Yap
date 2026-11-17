@@ -156,12 +156,51 @@ pub struct Choices {
     pub folders: Vec<String>,
     /// Servers switched off for it (Claude Code's names).
     pub servers_off: Vec<String>,
+    /// **Its `/clear`s** (`slash.rs`, 17 Nov 2026), oldest first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub clears: Vec<Clear>,
+}
+
+/// **A `/clear` in a Code chat**: Claude starts afresh from message `at`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Clear {
+    /// The thread's divider goes above this message (how many there were).
+    pub at: usize,
+    /// Unix seconds.
+    pub ts: u64,
+    /// The chat's agents then (their sessions are never carried on again).
+    pub agents: Vec<String>,
 }
 
 impl Choices {
     fn is_empty(&self) -> bool {
-        self.folders.is_empty() && self.servers_off.is_empty()
+        self.folders.is_empty() && self.servers_off.is_empty() && self.clears.is_empty()
     }
+}
+
+/// **Agent `agent` of chat `conversation` was cleared** (`/clear`): the chat's
+/// next message starts a new one.
+pub fn cleared(conversation: u64, agent: &str) -> bool {
+    with_store(|s| s.chats.get(&conversation).is_some_and(|c| c.clears.iter().any(|cl| cl.agents.iter().any(|a| a == agent))))
+}
+
+/// **A `/clear` kept** for chat `conversation` (`slash.rs`): `agents` never
+/// carried on again, the divider above message `at`.
+pub fn add_clear(conversation: u64, at: usize, agents: Vec<String>) {
+    with_store(|s| {
+        let ch = s.chats.entry(conversation).or_default();
+        ch.clears.push(Clear { at, ts: super::store::now_secs(), agents });
+        save(s);
+    });
+    emit(None, Some(conversation));
+}
+
+/// The folders chat `conversation` added that are still on this PC (the
+/// plan's read-only session in a Code chat that doesn't work directly:
+/// `chat/turn/plan.rs`).
+pub fn folders_for_run(conversation: u64) -> Vec<PathBuf> {
+    choices(Some(conversation), None).folders.iter().map(PathBuf::from).filter(|p| p.is_dir()).collect()
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -468,6 +507,11 @@ fn describe(plugins: &mut [Plugin]) {
     }
 }
 
+/// What's known names no command, or most with no line yet. Pure.
+fn bare(o: &Offered) -> bool {
+    o.commands.is_empty() || o.commands.iter().filter(|c| c.description.is_empty()).count() * 2 > o.commands.len()
+}
+
 /// **A run's `system/init`** in `workspace`: what it offers there, kept.
 pub fn learn_init(workspace: &str, init: &Init) {
     let key = norm(workspace);
@@ -478,6 +522,11 @@ pub fn learn_init(workspace: &str, init: &Init) {
     let changed = with_store(|s| {
         let old = s.workspaces.get(&key);
         let mut fresh = from_init(init, old, now);
+        // (An init that names no commands, or names most with no line yet — its `commands_changed` doesn't always
+        // come: Yap Lab, 17 Nov 2026 —: still looked at, so the menu isn't empty or bare for a day.)
+        if bare(&fresh) {
+            fresh.at = 0;
+        }
         describe(&mut fresh.plugins);
         let same = old.is_some_and(|o| o.commands == fresh.commands && o.servers == fresh.servers && o.plugins == fresh.plugins && o.terminal == fresh.terminal);
         s.workspaces.insert(key.clone(), fresh);
@@ -502,7 +551,11 @@ pub fn learn_commands(workspace: &str, event: &Value) {
     }
     let changed = with_store(|s| {
         let old = s.workspaces.get(&key).cloned().unwrap_or_default();
-        let fresh = with_details(old.clone(), list);
+        let mut fresh = with_details(old.clone(), list);
+        // (Its lines in now: no look needed.)
+        if fresh.at == 0 && !bare(&fresh) {
+            fresh.at = super::store::now_secs();
+        }
         if fresh == old {
             return false;
         }
@@ -865,7 +918,8 @@ pub fn chat_deleted(conversation: u64) {
 
 /// **A Fork from here**: the new chat starts with the original's choices.
 pub fn forked(from: u64, to: u64) {
-    let ch = choices(Some(from), None);
+    // (Never its /clears: they're the original's thread and agents.)
+    let ch = Choices { clears: Vec::new(), ..choices(Some(from), None) };
     if ch.is_empty() {
         return;
     }
@@ -975,6 +1029,24 @@ pub async fn code_chat_folder_add(app: tauri::AppHandle, window: tauri::WebviewW
         saved().map_err(|e| e.to_string())?;
     }
     Ok(Some(rows(&out)))
+}
+
+/// What a chat chose, read without looking at what Claude Code offers: the
+/// Code edge's "+N folders", the thread's `/clear` dividers.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Chosen {
+    pub folders: Vec<FolderRow>,
+    pub servers_off: Vec<String>,
+    pub clears: Vec<Clear>,
+}
+
+/// **A chat's own choices** (`conversation`, or a new chat's `workspace`).
+#[tauri::command]
+pub fn code_chat_choices(conversation: Option<u64>, workspace: Option<String>) -> Chosen {
+    let ws = workspace_of(conversation, workspace.as_deref()).ok();
+    let ch = choices(conversation, ws.as_deref());
+    Chosen { folders: rows(&ch), servers_off: ch.servers_off, clears: ch.clears }
 }
 
 /// **A folder taken off a chat** (the summary panel's ×).

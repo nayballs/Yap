@@ -90,6 +90,14 @@
 //!   `{"commands": …}` and `mcp_status` with `{"mcpServers": …}`, as 2.1.296
 //!   answers them, until stdin closes; `dump`: a line appended there with its
 //!   arguments and folder. Without `_offers`, both are refused.
+//! - `{"_compact":{"before":N,"after":N,"fail":"…","dump":"<file>"}}`
+//!   (anywhere in the script): **`-p "/compact …" --resume <session>`** (a
+//!   Code chat's `/compact`, `agents/slash.rs`) prints what 2.1.296 prints
+//!   for a compaction — `status` compacting, `compact_result`, an init, a
+//!   `compact_boundary` with `pre_tokens` / `post_tokens`, the summary and an
+//!   empty result — or, with `fail`, `compact_result: "failed"` and its
+//!   `compact_error`; `dump`: its arguments, folder and whether it would keep
+//!   the session (`persist`). No turn.
 //! - `{"_plugins":{"list":[…],"state":"<file>","dump":"<file>"}}` (anywhere
 //!   in the script): **`plugin list --json`** prints `list` (or, once a switch
 //!   wrote it, `state`'s), as `claude plugin list --json` does; **`plugin
@@ -198,6 +206,10 @@ pub fn main(args: Vec<String>) -> i32 {
     if claude_args.iter().any(|a| a == "/context") {
         return context_answer(&script, claude_args);
     }
+    // `-p "/compact …" --resume <session>`: Claude Code's own compaction, no turn (`_compact`).
+    if claude_args.iter().any(|a| a == "/compact" || a.starts_with("/compact ")) {
+        return compact_answer(&script, claude_args);
+    }
     // `plugin list --json`, `plugin enable|disable <id>` (`_plugins`).
     if claude_args.first().is_some_and(|a| a == "plugin" || a == "plugins") {
         return plugin_command(&script, &claude_args[1..]);
@@ -301,6 +313,33 @@ fn dump_line(file: Option<&str>, line: &Value) {
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
         let _ = writeln!(f, "{line}");
     }
+}
+
+/// **`/compact`** from the script's `_compact` (`{before, after, fail?, dump?}`), as 2.1.296 answers it: the status
+/// lines, its init, the boundary with its sizes, the summary and an empty result — or, with `fail`, a failed one.
+fn compact_answer(script: &str, args: &[String]) -> i32 {
+    let rule = rule_of(script, "_compact");
+    let ctx = Ctx::from_args(args).unwrap_or_default();
+    dump_line(rule.get("dump").and_then(Value::as_str), &json!({"args": args, "cwd": ctx.cwd, "persist": ctx.persist}));
+    let session = ctx.session_id.as_str();
+    let mut lines = vec![json!({"type": "system", "subtype": "status", "status": "compacting", "session_id": session})];
+    if let Some(why) = rule.get("fail").and_then(Value::as_str) {
+        lines.push(json!({"type": "system", "subtype": "status", "status": null, "compact_result": "failed", "compact_error": why, "session_id": session}));
+    } else {
+        let n = |k: &str, d: u64| rule.get(k).and_then(Value::as_u64).unwrap_or(d);
+        lines.push(json!({"type": "system", "subtype": "status", "status": null, "compact_result": "success", "session_id": session}));
+        lines.push(json!({"type": "system", "subtype": "init", "cwd": ctx.cwd, "session_id": session, "tools": [], "mcp_servers": [], "model": "<synthetic>", "apiKeySource": "none", "claude_code_version": "2.1.296"}));
+        lines.push(json!({"type": "system", "subtype": "compact_boundary", "session_id": session, "compact_metadata": {"trigger": "manual", "pre_tokens": n("before", 50_000), "post_tokens": n("after", 3_000), "duration_ms": 1200}}));
+        lines.push(json!({"type": "user", "message": {"role": "user", "content": "This session is being continued from a previous conversation…"}, "isSynthetic": true, "session_id": session}));
+    }
+    lines.push(json!({"type": "result", "subtype": "success", "is_error": false, "num_turns": 0, "result": "", "session_id": session, "total_cost_usd": 0}));
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    for l in lines {
+        let _ = writeln!(out, "{l}");
+    }
+    let _ = out.flush();
+    0
 }
 
 /// **A look** (`YAP_CLAUDE_PROBE=1`, a Code chat's + menu): `initialize`
@@ -762,7 +801,7 @@ impl Player<'_> {
             "_exit" => return Ok(Some(arg.as_i64().unwrap_or(0) as i32)),
             "_usage" => self.usage = Some(arg.clone()).filter(|a| !a.is_null()),
             // (Read before anything plays: a look's answers, `plugin …`'s list.)
-            "_offers" | "_plugins" | "_context" | "_exit_if_arg" => {}
+            "_offers" | "_plugins" | "_compact" | "_context" | "_exit_if_arg" => {}
             other => eprintln!("fake-claude: unknown instruction {other}"),
         }
         Ok(None)

@@ -45,6 +45,47 @@ export function matchCommands(commands, query) {
     .map((x) => x.c);
 }
 
+/**
+ * **Yap's own handling of three of Claude Code's commands** in a Code chat (17 Nov 2026, the Claude Code app's):
+ * the words in the box as `{ name: 'clear'|'compact'|'model', arg }`, or null — anything else typed with "/" goes to
+ * Claude Code as typed. Pure.
+ */
+export function codeCommand(text) {
+  const m = /^\/(clear|compact|model)(?:\s+([\s\S]*))?$/i.exec(String(text ?? '').trim());
+  if (!m) return null;
+  const name = m[1].toLowerCase();
+  const arg = (m[2] || '').trim();
+  // (/clear takes nothing: "/clear the cache" is words for Claude.)
+  if (name === 'clear' && arg) return null;
+  return { name, arg };
+}
+
+/**
+ * **The model `/model <name>` means** among `rows` (the provider's list, `{ value, label }`, newest first): its id
+ * typed in full, else the first whose id or name holds every word ("haiku", "sonnet 5", "opus-5-5"). null: none. Pure.
+ */
+export function modelFor(rows, name) {
+  const want = String(name ?? '').trim().toLowerCase();
+  if (!want) return null;
+  const list = Array.isArray(rows) ? rows : [];
+  const exact = list.find((r) => String(r.value).toLowerCase() === want);
+  if (exact) return exact;
+  const words = want.split(/[\s._-]+/).filter(Boolean);
+  const holds = (r) => {
+    const hay = `${r.value} ${r.label}`.toLowerCase().replace(/[._-]/g, ' ');
+    return words.every((w) => hay.includes(w));
+  };
+  return list.find(holds) ?? null;
+}
+
+/** "about 54k" for a token count. Pure. */
+export function roughTokens(n) {
+  const v = Number(n) || 0;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(v >= 10_000_000 ? 0 : 1)}M`;
+  if (v >= 1000) return `${Math.round(v / 1000)}k`;
+  return String(v);
+}
+
 /** The groups drawn: the person's own (their commands, skills, their plugins'), then Claude Code's own. Pure. */
 export function commandGroups(commands) {
   const list = Array.isArray(commands) ? commands : [];
@@ -102,11 +143,18 @@ export class CodeMenu {
   #seq = 0;
   #un = null;
 
+  /** The chat's /clears (`{at, ts, agents}`): the thread's dividers. */
+  clears = $state([]);
+  #choiceSeq = 0;
+
   constructor() {
     listen('yap-code-menu', (e) => {
       const p = e.payload || {};
       const mine = (p.conversation != null && p.conversation === this.conversation) || (p.workspace && sameSpot(p.workspace, this.workspace));
-      if (mine && this.loaded) this.load();
+      if (!mine) return;
+      // (Its choices always — a /clear's divider, a folder's "+1" —, and the menu's lists when it has them.)
+      this.loadChoices();
+      if (this.loaded) this.load();
     }).then((u) => (this.#un = u));
   }
 
@@ -119,8 +167,25 @@ export class CodeMenu {
     this.offered = null;
     this.folders = [];
     this.serversOff = [];
+    this.clears = [];
     this.loaded = false;
     this.error = '';
+    this.loadChoices();
+  }
+
+  /** The chat's own choices only (its folders, servers off, /clears): no look at what Claude Code offers. */
+  async loadChoices() {
+    if (this.conversation == null && !this.workspace) return;
+    const seq = ++this.#choiceSeq;
+    try {
+      const c = await invoke('code_chat_choices', { conversation: this.conversation, workspace: this.workspace });
+      if (seq !== this.#choiceSeq) return;
+      this.folders = c?.folders ?? [];
+      this.serversOff = c?.serversOff ?? [];
+      this.clears = c?.clears ?? [];
+    } catch {
+      /* an older Yap, or not a Code chat: nothing chosen */
+    }
   }
 
   /** Read what's offered and the chat's choices (a look starts in the background when nothing's known). */
