@@ -199,6 +199,8 @@ test('the "/" list matches names (a plugin skill by its own part too), groups yo
     { name: 'plant-plan', description: 'Plan the tidy bit' },
   ];
   expect(matchCommands(list, 'wa').map((c) => c.name)).toEqual(['garden-tools:water']);
+  // Another name of a command's counts as its own (/review for /code-review).
+  expect(matchCommands([...list, { name: 'code-review', aliases: ['review'], description: 'Review the diff' }], 'rev')[0].name).toBe('code-review');
   expect(matchCommands(list, 'tidy').map((c) => c.name)).toEqual(['tidy-beds', 'plant-plan']);
   expect(matchCommands(list, '').length).toBe(4);
   expect(commandGroups(list).map((g) => [g.label, g.items.length, g.start])).toEqual([

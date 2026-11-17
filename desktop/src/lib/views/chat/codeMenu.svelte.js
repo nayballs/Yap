@@ -20,7 +20,8 @@ export function commandQuery(text) {
 
 /**
  * The commands for `query`, best first: its name in full, then names that start with it (a plugin's
- * `plugin:skill` by its skill's part too), then names that hold it, then lines that do. Pure.
+ * `plugin:skill` by its skill's part too, and a command's other names), then names that hold it, then lines that
+ * do. Pure.
  */
 export function matchCommands(commands, query) {
   const q = String(query ?? '').toLowerCase();
@@ -29,8 +30,10 @@ export function matchCommands(commands, query) {
   const rank = (c) => {
     const n = String(c.name || '').toLowerCase();
     const part = n.includes(':') ? n.slice(n.indexOf(':') + 1) : n;
-    if (n === q) return 0;
-    if (n.startsWith(q) || part.startsWith(q)) return 1;
+    // (Its other names count as its name: /review for /code-review.)
+    const aliases = (c.aliases || []).map((a) => String(a).toLowerCase());
+    if (n === q || aliases.includes(q)) return 0;
+    if (n.startsWith(q) || part.startsWith(q) || aliases.some((a) => a.startsWith(q))) return 1;
     if (n.includes(q)) return 2;
     if (String(c.description || '').toLowerCase().includes(q)) return 3;
     return -1;
@@ -241,8 +244,9 @@ export class CommandPicker {
     }
     if ((e.key === 'Enter' && !e.shiftKey && !e.ctrlKey) || e.key === 'Tab') {
       const pick = this.items[Math.min(this.active, n - 1)];
-      // A command typed in full: Enter sends it as typed (Tab still puts it in the box for words).
-      if (e.key === 'Enter' && String(pick?.name || '').toLowerCase() === this.query) return null;
+      // A command typed in full (or one of its other names): Enter sends it as typed (Tab still puts it in the box).
+      const names = [pick?.name, ...(pick?.aliases || [])].map((n) => String(n || '').toLowerCase());
+      if (e.key === 'Enter' && names.includes(this.query)) return null;
       e.preventDefault();
       return { command: pick };
     }

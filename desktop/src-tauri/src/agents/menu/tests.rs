@@ -15,7 +15,7 @@ fn init_line() -> Value {
             {"name": "yap", "status": "connected", "source": "user"}
         ],
         "model": "claude-opus-5-5", "permissionMode": "default",
-        "slash_commands": ["tidy-beds", "plant-plan", "garden-tools:water", "garden-tools:prune", "compact", "doctor", "__internal-thing", "review"],
+        "slash_commands": ["tidy-beds", "plant-plan", "garden-tools:water", "garden-tools:prune", "compact", "doctor", "__internal-thing", "review", "garden-kit:soil-test"],
         "terminal_slash_commands": ["doctor"],
         "skills": ["plant-plan", "garden-tools:prune"],
         "plugins": [
@@ -35,7 +35,8 @@ fn details() -> Vec<Value> {
         {"name": "garden-tools:prune", "description": "(garden-tools) Prune what's overgrown", "argumentHint": "", "aliases": ["prune"]},
         {"name": "compact", "description": "Free up context by summarizing the conversation so far", "argumentHint": "<optional custom summarization instructions>", "builtin": true},
         {"name": "doctor", "description": "Health-check the setup", "builtin": true},
-        {"name": "review", "description": "(removed) Use code-review instead", "builtin": true}
+        {"name": "review", "description": "(removed) Use code-review instead", "builtin": true},
+        {"name": "soil-test", "description": "Test the soil's pH", "argumentHint": "", "aliases": ["garden-kit:soil-test"]}
     ]))
     .unwrap()
 }
@@ -48,7 +49,7 @@ fn init() -> Init {
 #[test]
 fn the_init_event_carries_its_commands_skills_plugins_and_servers() {
     let i = init();
-    assert_eq!(i.slash_commands.len(), 8);
+    assert_eq!(i.slash_commands.len(), 9);
     assert_eq!(i.terminal_slash_commands, ["doctor"]);
     assert_eq!(i.skills, ["plant-plan", "garden-tools:prune"]);
     assert_eq!(i.plugins[0].name, "garden-tools");
@@ -64,7 +65,7 @@ fn the_init_event_carries_its_commands_skills_plugins_and_servers() {
 fn what_a_run_offers_leaves_out_the_terminals_commands_plumbing_and_yaps_own_server() {
     let o = from_init(&init(), None, 100);
     let names: Vec<&str> = o.commands.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, ["tidy-beds", "plant-plan", "garden-tools:water", "garden-tools:prune", "compact", "review"]);
+    assert_eq!(names, ["tidy-beds", "plant-plan", "garden-tools:water", "garden-tools:prune", "compact", "review", "garden-kit:soil-test"]);
     let c = |n: &str| o.commands.iter().find(|c| c.name == n).unwrap().clone();
     assert!(c("plant-plan").skill && !c("tidy-beds").skill);
     assert_eq!(c("garden-tools:water").plugin, "garden-tools");
@@ -84,13 +85,17 @@ fn what_a_run_offers_leaves_out_the_terminals_commands_plumbing_and_yaps_own_ser
     assert_eq!(c("plant-plan").unwrap().description, "Plan this season's planting. Two lines.", "one line");
     assert_eq!(c("garden-tools:water").unwrap().description, "Water the seedlings", "its plugin's name off");
     assert!(c("compact").unwrap().builtin);
-    assert!(c("review").is_none(), "removed");
+    assert!(c("review").is_some() && !shown(o.clone()).commands.iter().any(|c| c.name == "review"), "removed: kept, never shown");
     assert!(c("plant-plan").unwrap().skill, "still a skill");
+    // A name the init gives that the details know by another (`anthropic-skills:docs` is `docs`): its line all the same.
+    assert_eq!(c("garden-kit:soil-test").unwrap().description, "Test the soil's pH");
 
-    // The next run's init keeps what was known of each.
+    // The next run's init keeps what was known of each; the removed one stays hidden.
     let again = from_init(&init(), Some(&o), 200);
     assert_eq!(again.commands.iter().find(|c| c.name == "tidy-beds").unwrap().description, "Tidy the flower beds' notes");
     assert!(again.commands.iter().find(|c| c.name == "compact").unwrap().builtin);
+    assert_eq!(again.commands.iter().find(|c| c.name == "garden-kit:soil-test").unwrap().description, "Test the soil's pH");
+    assert!(!shown(again).commands.iter().any(|c| c.name == "review"));
 }
 
 #[test]
@@ -104,7 +109,7 @@ fn a_look_lists_initializes_commands_and_mcp_statuss_servers() {
     let plugins = vec![Plugin { name: "garden-tools".into(), id: "garden-tools@example-market".into(), ..Default::default() }];
     let o = from_probe(&details(), &servers, plugins, 50);
     // (A look's list has no terminal field: 2.1.296's four are left out until a run says which.)
-    assert_eq!(o.commands.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["tidy-beds", "plant-plan", "garden-tools:water", "garden-tools:prune", "compact"]);
+    assert_eq!(shown(o.clone()).commands.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["tidy-beds", "plant-plan", "garden-tools:water", "garden-tools:prune", "compact", "soil-test"]);
     assert_eq!(o.commands[2].plugin, "garden-tools");
     assert_eq!(o.servers.iter().map(|s| (s.label.as_str(), s.source.as_str())).collect::<Vec<_>>(), [("Example Docs", "claudeai"), ("issue-tracker", "local")]);
     assert_eq!(o.from, "probe");
@@ -236,7 +241,7 @@ fn a_workspaces_menu_is_kept_and_looked_at_again_once_stale_or_old() {
     learn_init(ws, &init());
     let (found, _) = known(&ws.to_uppercase(), super::super::store::now_secs());
     let found = found.unwrap();
-    assert_eq!(found.commands.len(), 6);
+    assert_eq!(found.commands.len(), 7);
     learn_commands(ws, &json!({"type": "system", "subtype": "commands_changed", "commands": details()}));
     let (found, again) = known(ws, super::super::store::now_secs());
     assert!(!again, "fresh");

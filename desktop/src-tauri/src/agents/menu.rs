@@ -65,6 +65,12 @@ pub const PROBE_VAR: &str = "YAP_CLAUDE_PROBE";
 /// How long a look waits for Claude Code's answers.
 #[cfg_attr(test, allow(dead_code))]
 const PROBE_WAIT: Duration = Duration::from_secs(30);
+/// Servers still starting: asked about again this long later, at most this
+/// many times.
+#[cfg_attr(test, allow(dead_code))]
+const PROBE_GAP: Duration = Duration::from_millis(1500);
+#[cfg_attr(test, allow(dead_code))]
+const PROBE_AGAIN: u32 = 6;
 /// What a workspace's menu is good for before it's looked at again (a run's
 /// init keeps it fresh meanwhile).
 const KEEP_SECS: u64 = 24 * 60 * 60;
@@ -92,6 +98,10 @@ pub struct Command {
     pub skill: bool,
     /// The plugin it comes with (empty: none).
     pub plugin: String,
+    /// Its other names (`aliases`; one list's name in another's: a run's
+    /// init calls `docs` `anthropic-skills:docs`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }
 
 /// **An MCP server or connector** the session has.
@@ -295,10 +305,28 @@ fn plugin_of(name: &str, plugins: &[String]) -> String {
     }
 }
 
-/// Whether a command is one to list: not one of Claude Code's own plumbing
-/// (`__…`), not a terminal's, not one it says was removed. Pure.
-fn listed(name: &str, description: &str, terminal: &[String]) -> bool {
-    !name.is_empty() && !name.starts_with("__") && !terminal.iter().any(|t| t == name) && !description.trim_start().starts_with("(removed)")
+/// Whether a command is one to keep: not one of Claude Code's own plumbing
+/// (`__…`), not a terminal's. Pure.
+fn listed(name: &str, terminal: &[String]) -> bool {
+    !name.is_empty() && !name.starts_with("__") && !terminal.iter().any(|t| t == name)
+}
+
+/// One Claude Code says it removed ("(removed) …"): kept, so a later init's
+/// bare name is still known, but never shown. Pure.
+fn removed(c: &Command) -> bool {
+    c.description.trim_start().starts_with("(removed)")
+}
+
+/// `c` answers to `name`: its own, or one of its aliases (2.1.296's init
+/// names a skill `anthropic-skills:docs` that `initialize` calls `docs`). Pure.
+fn answers_to(c: &Command, name: &str) -> bool {
+    c.name == name || c.aliases.iter().any(|a| a == name)
+}
+
+/// **What the page shows** of `offered`: the removed ones left out.
+pub fn shown(mut offered: Offered) -> Offered {
+    offered.commands.retain(|c| !removed(c));
+    offered
 }
 
 /// **What a run's `system/init` says is offered**, with what `old` knew of
@@ -321,9 +349,9 @@ pub fn from_init(init: &Init, old: Option<&Offered>, now: u64) -> Offered {
     } else {
         init.slash_commands
             .iter()
-            .filter(|n| listed(n, "", &terminal))
+            .filter(|n| listed(n, &terminal))
             .map(|n| {
-                let was = old.and_then(|o| o.commands.iter().find(|c| &c.name == n));
+                let was = old.and_then(|o| o.commands.iter().find(|c| answers_to(c, n)));
                 Command {
                     name: n.clone(),
                     description: was.map(|c| c.description.clone()).unwrap_or_default(),
@@ -331,9 +359,9 @@ pub fn from_init(init: &Init, old: Option<&Offered>, now: u64) -> Offered {
                     builtin: was.is_some_and(|c| c.builtin),
                     skill: init.skills.iter().any(|s| s == n),
                     plugin: plugin_of(n, &names),
+                    aliases: was.map(|c| c.aliases.iter().chain(std::iter::once(&c.name)).filter(|a| *a != n).cloned().collect()).unwrap_or_default(),
                 }
             })
-            .filter(|c| listed(&c.name, &c.description, &terminal))
             .collect()
     };
     Offered { commands, servers: servers_of(&init.mcp_servers), plugins, terminal, at: now, from: "init".into() }
@@ -365,6 +393,7 @@ pub fn with_details(mut offered: Offered, list: &[Value]) -> Offered {
             builtin: v.get("builtin").and_then(Value::as_bool).unwrap_or(false),
             skill: false,
             plugin,
+            aliases: v.get("aliases").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default(),
             name,
         })
     };
@@ -373,7 +402,7 @@ pub fn with_details(mut offered: Offered, list: &[Value]) -> Offered {
         let skills: Vec<(String, bool)> = offered.commands.iter().map(|c| (c.name.clone(), c.skill)).collect();
         offered.commands = details
             .into_iter()
-            .filter(|c| listed(&c.name, &c.description, &terminal))
+            .filter(|c| listed(&c.name, &terminal))
             .map(|mut c| {
                 c.skill = skills.iter().any(|(n, s)| n == &c.name && *s);
                 c
@@ -381,17 +410,21 @@ pub fn with_details(mut offered: Offered, list: &[Value]) -> Offered {
             .collect();
     } else {
         for c in offered.commands.iter_mut() {
-            if let Some(d) = details.iter().find(|d| d.name == c.name) {
+            // By its name, or one of either's aliases (`anthropic-skills:docs` is `docs`).
+            if let Some(d) = details.iter().find(|d| answers_to(d, &c.name) || c.aliases.iter().any(|a| answers_to(d, a))) {
                 c.description = d.description.clone();
                 c.hint = d.hint.clone();
                 c.builtin = d.builtin;
                 if c.plugin.is_empty() {
                     c.plugin = d.plugin.clone();
                 }
+                for a in d.aliases.iter().chain(std::iter::once(&d.name)) {
+                    if *a != c.name && !c.aliases.contains(a) {
+                        c.aliases.push(a.clone());
+                    }
+                }
             }
         }
-        // (One it says it removed since: gone.)
-        offered.commands.retain(|c| listed(&c.name, &c.description, &terminal));
     }
     offered
 }
@@ -518,18 +551,34 @@ pub async fn probe(folder: PathBuf) -> Result<Offered, String> {
     spec.env = vec![(PROBE_VAR.to_string(), "1".to_string())];
     let (session, mut rx) = Session::start_with(&program, spec)?;
     let asked_commands = session.control(json!({"subtype": "initialize"}))?;
-    let asked_servers = session.control(json!({"subtype": "mcp_status"}))?;
+    let mut asked_servers = session.control(json!({"subtype": "mcp_status"}))?;
     let mut commands: Option<Vec<Value>> = None;
     let mut servers: Option<Vec<Value>> = None;
+    // Servers still connecting ("pending") are asked about again a moment later, a few times: the look's
+    // process is young, and "Starting" would be all it said of most of them.
+    let mut again = 0;
+    let mut settled = false;
     let until = tokio::time::Instant::now() + PROBE_WAIT;
-    while commands.is_none() || servers.is_none() {
+    while commands.is_none() || !settled {
         match tokio::time::timeout_at(until, rx.recv()).await {
             Ok(Some(Event::ControlResponse(r))) if r.request_id == asked_commands => {
                 // (Only its commands: never the account or anything else it says.)
                 commands = Some(if r.ok { r.response.get("commands").and_then(Value::as_array).cloned().unwrap_or_default() } else { Vec::new() });
             }
             Ok(Some(Event::ControlResponse(r))) if r.request_id == asked_servers => {
-                servers = Some(if r.ok { r.response.get("mcpServers").and_then(Value::as_array).cloned().unwrap_or_default() } else { Vec::new() });
+                let list = if r.ok { r.response.get("mcpServers").and_then(Value::as_array).cloned().unwrap_or_default() } else { Vec::new() };
+                let pending = list.iter().any(|s| s.get("status").and_then(Value::as_str) == Some("pending"));
+                servers = Some(list);
+                if pending && again < PROBE_AGAIN && tokio::time::Instant::now() + PROBE_GAP < until {
+                    again += 1;
+                    tokio::time::sleep(PROBE_GAP).await;
+                    match session.control(json!({"subtype": "mcp_status"})) {
+                        Ok(id) => asked_servers = id,
+                        Err(_) => settled = true,
+                    }
+                } else {
+                    settled = true;
+                }
             }
             Ok(Some(Event::Exited(_))) | Ok(None) | Err(_) => break,
             Ok(Some(_)) => {}
@@ -899,7 +948,7 @@ pub async fn code_menu(conversation: Option<u64>, workspace: Option<String>) -> 
     let (offered, again) = known(&ws, super::store::now_secs());
     let looking = again && crate::ai::claude_code::cli::find().is_some() && look(&ws);
     let ch = choices(conversation, Some(&ws));
-    Ok(Menu { workspace: ws, offered, looking, folders: rows(&ch), servers_off: ch.servers_off })
+    Ok(Menu { workspace: ws, offered: offered.map(shown), looking, folders: rows(&ch), servers_off: ch.servers_off })
 }
 
 /// **A server on or off** for a chat (`conversation`, or a new chat's
