@@ -368,6 +368,9 @@ pub struct Inputs {
     /// each agent's log (its id, the log's lines).
     pub agents: Value,
     pub workspaces: Value,
+    /// Each Code chat's + menu choices: its added folders, its servers off
+    /// (`agents/menu.rs`).
+    pub code_chat_choices: Value,
     pub agent_logs: Vec<(String, String)>,
     /// About you's lines for Memory's You.md.
     pub about: Vec<(&'static str, String)>,
@@ -409,7 +412,8 @@ the day Yap had them, when you gave any (kept on this PC only: Yap never sent th
 - skills.json: the Skills you made (your own instructions, run with /name).\n\
 - routines.json: your routines (Skills that run by themselves) and their recent runs, when you have any.\n\
 - memory/: what Yap remembers about you, as Markdown, and memory.json.\n\
-- agents/: Yap Code's agents, the tasks Chat handed to Claude Code (agents.json), the workspaces they may work in (workspaces.json) \
+- agents/: Yap Code's agents, the tasks Chat handed to Claude Code (agents.json), the workspaces they may work in (workspaces.json), \
+the folders each Code chat added and the servers it switched off (code_chats.json, when any) \
 and each agent's log (<id>.log.jsonl), with the pictures its steps read or took (<id>.pictures/). \
 Not the backups: they're copies of your own files.\n\
 - dictionary/dictionary.csv: your corrections and snippets, as the Dictionary's Export writes them \
@@ -512,6 +516,9 @@ screenshots/: Chat's screenshots (PNG).\n"
     // Yap Code (agents/store.rs): the agents, their folders and their logs.
     files.push(("agents/agents.json".into(), pretty(&i.agents)));
     files.push(("agents/workspaces.json".into(), pretty(&json!({ "workspaces": i.workspaces }))));
+    if i.code_chat_choices.as_object().is_some_and(|o| !o.is_empty()) {
+        files.push(("agents/code_chats.json".into(), pretty(&json!({ "chats": i.code_chat_choices }))));
+    }
     for (id, log) in &i.agent_logs {
         files.push((format!("agents/{}.log.jsonl", file_stem(id)), log.clone().into_bytes()));
     }
@@ -776,6 +783,7 @@ fn inputs(audio: bool) -> Inputs {
         memory: crate::memory::items(),
         agents: json!({ "agents": crate::agents::store::list() }),
         workspaces: serde_json::to_value(crate::agents::workspaces::list()).unwrap_or(Value::Null),
+        code_chat_choices: crate::agents::menu::export(),
         agent_logs: crate::agents::store::list()
             .iter()
             .filter_map(|j| crate::agents::store::log_path(&j.id).and_then(|p| std::fs::read_to_string(p).ok()).map(|l| (j.id.clone(), l)))
@@ -1031,6 +1039,7 @@ mod tests {
             memory: vec![],
             agents: json!({ "agents": [{ "id": "ab12", "folder": "garden-planner", "status": "done", "text": "Done. I tidied the readme." }] }),
             workspaces: json!([{ "name": "garden-planner", "path": "D:\\Projects\\garden-planner" }]),
+            code_chat_choices: json!({ "3": { "folders": ["D:\\Shared\\seeds"], "serversOff": ["issue-tracker"] } }),
             agent_logs: vec![("ab12".into(), "{\"id\":\"ab12\",\"status\":\"running\",\"step\":\"Reading README.md\"}\n".into())],
             about: vec![("Name", "Robin Example".into())],
             dictionary: cfg.dictionary.clone(),
@@ -1078,6 +1087,7 @@ mod tests {
             "memory/memory.json",
             "agents/agents.json",
             "agents/workspaces.json",
+            "agents/code_chats.json",
             "agents/ab12.log.jsonl",
             "dictionary/dictionary.csv",
             "writing_samples.json",

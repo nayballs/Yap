@@ -153,7 +153,7 @@ pub async fn workspaces_add(path: String, name: Option<String>, cap: Option<Stri
 /// takes.
 #[tauri::command]
 pub async fn workspaces_pick(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<Option<Folder>, String> {
-    let Some(path) = pick_folder(&app, window).await? else { return Ok(None) };
+    let Some(path) = pick_folder(&app, window, &format!("Choose a folder for {}", super::FEATURE)).await? else { return Ok(None) };
     let path = path.to_string_lossy().into_owned();
     let added = workspaces::add(&path, None, None)?;
     workspaces::saved().map_err(|e| e.to_string())?;
@@ -162,8 +162,9 @@ pub async fn workspaces_pick(app: tauri::AppHandle, window: tauri::WebviewWindow
     Ok(Some(added))
 }
 
-/// The folder the person picked (a test run: the one it named).
-async fn pick_folder(app: &tauri::AppHandle, window: tauri::WebviewWindow) -> Result<Option<std::path::PathBuf>, String> {
+/// The folder the person picked (a test run: the one it named), the dialog
+/// titled `title` (a Code chat's Add folder too: `menu.rs`).
+pub(super) async fn pick_folder(app: &tauri::AppHandle, window: tauri::WebviewWindow, title: &str) -> Result<Option<std::path::PathBuf>, String> {
     #[cfg(debug_assertions)]
     if crate::shell::e2e::active() {
         let _ = (app, window);
@@ -175,7 +176,7 @@ async fn pick_folder(app: &tauri::AppHandle, window: tauri::WebviewWindow) -> Re
             .ok_or_else(|| "A test run names the folder first (e2e_workspace).".to_string());
     }
     use tauri_plugin_dialog::DialogExt;
-    let dialog = app.dialog().file().set_parent(&window).set_title(format!("Choose a folder for {}", super::FEATURE));
+    let dialog = app.dialog().file().set_parent(&window).set_title(title);
     let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_folder()).await.map_err(|e| e.to_string())?;
     Ok(picked.and_then(|p| p.into_path().ok()))
 }

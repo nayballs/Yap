@@ -411,7 +411,7 @@ into view and clicked through DevTools' own inspect overlay (real input:
 {"ok":true,"picked":"<h1 class=\"title\">","page":"http://localhost:5180/","chips":1}
 ```
 
-### `set '<json>'` or `set [--web on|off] [--yap-code on|off] [--connectors on|off] [--clock <time>]`
+### `set '<json>'` or `set [--web on|off] [--yap-code on|off] [--connectors on|off] [--clock <time>] [--folder-pick <dir>]`
 
 Changes the running test Yap as another surface would (`save_config`, Settings told,
 checked after): `web`, `yapCode` (with it: Claude Code checked, the scratch workspace
@@ -422,6 +422,9 @@ height, shape, color, background}}]` seeded into **the lab's scratch workspace o
 `--clock <time>` (16 Nov 2026): a time of the lab's own for Chat's start screen greeting
 only — `23:40` (today), `2026-11-18T23:40`, or `now` for the real time again — so its
 late-night line can be shot (`window.__yapTestClock`, ChatThread.svelte).
+`--folder-pick <dir>` (17 Nov 2026): the folder a Code chat's next **Add folder** (its
++ menu, `agents/menu.rs`) takes in place of Windows' picker, which test mode never
+opens (`e2e_workspace`); Yap's own folder rules still check it.
 
 ```json
 {"ok":true,"config":{"webSearch":true},"files":["pictures/sun.png","notes.md"]}

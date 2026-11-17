@@ -1247,6 +1247,15 @@ async function setThings(a) {
     }, ms);
     done.clock = ms == null ? 'now' : new Date(ms).toString();
   }
+  // The folder a Code chat's next Add folder takes (17 Nov 2026, the + menu: agents/menu.rs): test mode never opens
+  // Windows' folder picker, so the lab names it (`e2e_workspace`). Yap's own rules still check it.
+  const pick = a['folder-pick'] ?? a.folderPick;
+  if (pick !== undefined) {
+    const dir = path.resolve(String(pick));
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`${dir} isn't a folder`);
+    await invoke('e2e_workspace', { path: dir });
+    done.folderPick = dir;
+  }
   const files = a.files ?? (a.file ? [a.file] : []);
   if (files.length) {
     if (!workspace) throw new Error('No workspace to seed files in: start the lab with --yap-code on');
@@ -1254,7 +1263,7 @@ async function setThings(a) {
     if (!path.resolve(workspace.path).startsWith(path.resolve(LAB) + path.sep)) throw new Error(`set only seeds the lab's scratch workspace, not ${workspace.path}`);
     done.files = files.map((f) => seedFile(workspace.path, f));
   }
-  if (!Object.keys(done).length) throw new Error('Nothing to set: --web, --yap-code, --connectors, --bypass, --gh, --git, --clock, config or files');
+  if (!Object.keys(done).length) throw new Error('Nothing to set: --web, --yap-code, --connectors, --bypass, --gh, --git, --clock, --folder-pick, config or files');
   return done;
 }
 

@@ -115,14 +115,38 @@ pub struct Init {
     pub version: String,
     pub capabilities: Vec<String>,
     pub effort: Option<String>,
+    /// **What the session offers after "/"** (2.1.296): every command and
+    /// skill by name — the person's own, their plugins' (`plugin:skill`),
+    /// Claude Code's built-in ones (a Code chat's + menu: `agents/menu.rs`).
+    pub slash_commands: Vec<String>,
+    /// Those of [`Init::slash_commands`] that work only in Claude Code's own
+    /// terminal (`doctor`, `color`…), never in `-p`.
+    pub terminal_slash_commands: Vec<String>,
+    /// Which of them are skills.
+    pub skills: Vec<String>,
+    /// The plugins loaded (enabled) for this session.
+    pub plugins: Vec<Plugin>,
 }
-
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct McpServer {
     pub name: String,
-    /// `connected`, `pending`, `failed`, …
+    /// `connected`, `pending`, `failed`, `needs-auth`, …
     pub status: String,
+    /// Where it's set up (2.1.296): `user`, `project`, `local`, `plugin`,
+    /// `claudeai` (a claude.ai connector), …; empty when not said.
+    pub source: String,
+}
+
+/// **A plugin a session loaded** (`system/init`'s `plugins`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Plugin {
+    pub name: String,
+    /// `name@marketplace` (`…@builtin`: Claude Code's own).
+    pub source: String,
+    pub version: String,
+    /// Where it's installed.
+    pub path: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -752,7 +776,7 @@ fn init(v: &Value) -> Init {
             .and_then(Value::as_array)
             .map(|a| {
                 a.iter()
-                    .map(|s| McpServer { name: str_of(s, "name").to_string(), status: str_of(s, "status").to_string() })
+                    .map(|s| McpServer { name: str_of(s, "name").to_string(), status: str_of(s, "status").to_string(), source: str_of(s, "source").to_string() })
                     .collect()
             })
             .unwrap_or_default(),
@@ -761,6 +785,19 @@ fn init(v: &Value) -> Init {
         version: str_of(v, "claude_code_version").to_string(),
         capabilities: strings(v, "capabilities"),
         effort: opt_str(v, "effort"),
+        slash_commands: strings(v, "slash_commands"),
+        terminal_slash_commands: strings(v, "terminal_slash_commands"),
+        skills: strings(v, "skills"),
+        plugins: v
+            .get("plugins")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter(|p| !str_of(p, "name").is_empty())
+                    .map(|p| Plugin { name: str_of(p, "name").to_string(), source: str_of(p, "source").to_string(), version: str_of(p, "version").to_string(), path: str_of(p, "path").to_string() })
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 

@@ -802,6 +802,141 @@ goes with the next message that works directly, after the person's words
 (and after attached files' text) as an `<earlier_in_this_chat>` block
 (`side::with_kept`), once.
 
+## A Code chat's + menu (2026-11-17)
+
+After the Claude Code app's box in a Code session (the maintainer: "Can we add
+this type of thing to our Code chat in Yap"). Built from Claude Code's public
+docs and what its CLI prints, never its own code. A plain chat's + menu is
+[chat-and-assistant.md](chat-and-assistant.md)'s (#170); a Code chat's has the
+same look and keys (`Composer.svelte` `codeMenuView`: icon rows, the shortcut on
+the right, dividers, › for a submenu, ↑ ↓ → ← Esc), in the app's order:
+
+- **Add files or photos** (Ctrl+U, in a Code chat too now): Attach files, as
+  before.
+- **Take a screenshot** (Win+Alt+S): Snip to Chat, as before.
+- **Add folder** (`agents/menu.rs` `add_folder`): a folder on this PC the
+  chat's Claude Code may use too — `--add-dir` on every run of the chat (its
+  own session's turns and the agents sent from it; a folder gone from the PC
+  is skipped). Kept per chat; "N added" on the row; shown in the summary
+  panel's Environment under the workspace, each with × to take it off
+  (`code_chat_environment`'s `folders`, `code_chat_folder_remove`). The
+  workspace rules (`menu::refused`, pure): never a whole drive or share,
+  Windows' own folders (the Windows folder, Program Files, ProgramData:
+  their environment variables), the folder of every account (`C:\Users`),
+  one that holds Yap's own data folder or is inside it (so not the person's
+  profile folder either), nor one in the chat's workspace already; links
+  followed first. The picker is Windows' (`commands::pick_folder`); a test
+  run names the folder (`e2e_workspace`).
+- **Slash commands ›**: what the chat's Claude Code offers after "/" in its
+  workspace, the person's own and their plugins' ("Commands and skills"),
+  then Claude Code's own ("Built in"), each with its line; a pick puts
+  `/name ` in the box (before any words there). **"/" at the start of the
+  box opens the same list** (`CommandMenu.svelte`, `codeMenu.svelte.js`
+  `CommandPicker`: the name begun narrows it, a plugin's `plugin:skill` by
+  its own part too; ↑ ↓, Enter or Tab put it in, Esc closes; a command typed
+  in full, Enter sends it as typed). The box says "Type / for commands". `@`
+  stays the workspace's files. In a Code chat "/" is never one of Yap's own
+  Skills (`chatState` `skillOf`): the words go to Claude Code as typed, which
+  runs them.
+- **Plugins ›**: **Search plugins** (filters what's under it); the
+  session's **MCP servers and connectors** (claude.ai's without "claude.ai ",
+  a plugin's by its own name, its state when it isn't connected: "Needs
+  sign-in", "Failed", "Starting"), each with a switch for this chat; the
+  **plugins** (several skills: "12 skills ›", its skills beside it; one: that
+  skill's line, a click puts it in the box; none: the plugin's own line);
+  **Manage plugins…**, Settings → Yap Code → Plugins. Nothing is installed
+  from Yap.
+- **Voice replies**, their volume and **Voice settings…** at the bottom, as
+  a plain chat's. (Yap's own Connectors preview isn't in a Code chat's menu:
+  a Code chat that works directly never had them.)
+
+**What's offered, per workspace** (`agents/menu.rs`, `code_menu.json`'s
+`workspaces`):
+
+- **From every run** of a Code chat's session or an agent (`runner.rs`
+  `Follow::on`): its `system/init` (2.1.296 sends `slash_commands`,
+  `terminal_slash_commands` — `doctor`, `color`, `focus`, `reload-plugins`,
+  which only Claude Code's terminal runs, left out — `skills`, `plugins`
+  with each one's name, `name@marketplace`, version and folder, and
+  `mcp_servers` with each one's `status` and `source`), then the
+  `system/commands_changed` after it (each command's `description`,
+  `argumentHint`, `builtin`, `aliases`). A command is matched by its name or
+  an alias (the init names some skills `plugin:skill` where `initialize`
+  says `skill`), and the "/" list ranks an alias as the name (/review finds
+  /code-review). Names starting `__` (its own plumbing) are left out, and
+  "(removed)" ones are kept in the cache but never shown (the next init
+  names them bare); Claude Code's own plugins (`…@builtin`) too. An MCP
+  server's prompts show as Claude Code lists them (`/mcp__<server>__…`).
+- **Before a workspace's first run, a look** (`menu::probe`): Claude Code
+  started in the workspace with no message and asked the Agent SDK's
+  documented `initialize` (its `supportedCommands()`: the same commands with
+  their lines) and `mcp_status` (`mcpServerStatus()`: the servers) control
+  requests, then ended — no model call, no tokens, nothing saved
+  (`--no-session-persistence`). Only those two lists are read: its answer
+  also names the account, which Yap never reads or keeps (Yap Lab's record
+  never keeps a `control_response`). Servers still connecting are asked
+  about again (`mcp_status` up to six more times, 1.5 s apart): the first
+  answer of a young process says "pending" of most of them. Its plugins:
+  `claude plugin list --json` in the workspace (`plugins.rs` `enabled_in`). The person's own
+  SessionStart hooks run, as for any session there. Looked at again a day
+  later, or once a plugin is switched in Settings (`menu::stale`); a run's
+  init keeps it fresh meanwhile. One look at a time a workspace; Claude Code
+  not there: none. While it looks, the lists say "Asking Claude Code what it
+  offers here…" and fill when `yap-code-menu` says so.
+- A plugin's one line is its own manifest's (`.claude-plugin/plugin.json`
+  `description`, the documented plugin format).
+
+**The chat's own choices** (`code_menu.json`'s `chats`, never `agents.json`
+or `chats.json`, which an older Yap sharing the data folder would save
+without them):
+
+- **A server switched off**: its tools are disallowed on the chat's runs,
+  `--disallowedTools mcp__<name>` with every character but letters, digits,
+  `_` and `-` made `_` (`menu::tool_rule`: "claude.ai Example Docs" →
+  `mcp__claude_ai_Example_Docs`), after the Mode's own. Checked on 2.1.296:
+  `mcp__<server>` and `mcp__<server>__*` both take the server's tools out of
+  the session's list; the server itself still connects. Yap's own run
+  endpoint (`claude_live::SERVER`, "yap", which an agent's run puts in place
+  of a server of that name) is never listed nor switched.
+- **A new code chat** (no conversation yet) chooses for its workspace; its
+  first question's conversation takes them (`code_chat::adopt_new` →
+  `menu::adopt_new`), typed or asked out loud. A chat deleted loses them
+  (`code_chat::chat_deleted`); **Fork from here** copies them
+  (`rewind.rs`). Reset's "agents" takes the file too.
+- Not on the plan path that doesn't work directly (`chat/turn/plan.rs`, a
+  read-only session kept warm): the agents it sends get them.
+
+**Settings → Yap Code → Plugins** (`settings/ClaudePlugins.svelte`,
+`agents/plugins.rs`): every installed plugin from `claude plugin list
+--json` (its id, version, scope, on or off), its manifest's line, and a
+switch that runs `claude plugin enable|disable <id> --scope <its scope>` —
+the person's Claude Code setting, everywhere, as `/plugin` does (said under
+the heading). A plugin synced from claude.ai or managed by an organisation
+has no switch. Every workspace's menu is looked at again after a switch.
+Installing and removing stay in Claude Code itself.
+
+**Tests**: `agents/menu/tests.rs` (the init's new fields; what a run and a
+look offer; the disallowed-tools and `--add-dir` arguments; the folder
+rules; a new chat's choices, a fork, a deletion; when to look again),
+`plugins.rs`'s (the list read, a switch's arguments) and
+`code-plus-menu.spec.js` (Yap's stand-in answering `initialize`,
+`mcp_status` and `plugin list` from its script's `_offers` and `_plugins`:
+the menu and its submenus, light and dark; "/" in the box; a server off
+reaching a run's arguments and back on; Add folder refused inside the
+workspace, then added, its `--add-dir`, the summary's row and ×; Manage
+plugins… and a switch's `claude plugin disable`). Yap Lab on the real
+Claude Code: `set --folder-pick <dir>` names the folder Add folder takes.
+
+**Tried for real** (17 Nov 2026, Yap Lab on Opus, the maintainer's own
+Claude Code 2.1.296): a new Code chat's menu filled from a look before its
+first message (about 95 commands, 9 servers, 5 plugins), each plugin's
+skills beside it; a server switched off for the chat, then asked for one of
+its tools: "I don't have any tools from the … server in this session"; a
+folder added in Manual mode, Claude read a file in it with no permission
+asked, and once it was taken off in the summary panel, the same read asked
+and was refused. Plugins weren't switched in the Lab (it would change the
+person's own Claude Code).
+
 ## Dev servers
 
 A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 Nov 2026; the maintainer, on the Claude Code app's Dev servers menu in its browser pane: "Can we add this to Yap, please? And an ability to do this"). Built from Anthropic's public docs for the app ("Configure preview servers") and the preview tools as Claude Code's own session is given them, never from the app's files (Anthropic's terms forbid taking it apart).
@@ -3188,7 +3323,10 @@ Rust (`desktop/src-tauri/src/`):
   on the Yap bar) · `remote.rs` (Remote Control's records: the phones'
   ticks, the workspaces' switches, a phone's turns, the audit trail;
   `remote_control.json`) · `files.rs` (a Code chat's files: links, the file
-  view, Open in editor, the Environment) · `run_block.rs` (▶ Run) · `commands.rs`.
+  view, Open in editor, the Environment) · `run_block.rs` (▶ Run) · `menu.rs`
+  (a Code chat's + menu: what Claude Code offers in a workspace, the chat's
+  folders and servers off; `code_menu.json`) · `plugins.rs` (Claude Code's
+  plugins listed and switched) · `commands.rs`.
 - `link/code.rs` (+ `code/`) — Remote Control's side of Yap Link: the phone's
   Code messages through their gates ([link.md](./link.md)).
 - `chat/tools/agents.rs` — the four tools, for the tool loop and a plan chat.
@@ -3202,10 +3340,11 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 `codeChats.svelte.js`, `WorkspacePicker`, `CodeChips`, `CodeEdge`,
 `codeChat.css`, `CodeEmpty`, `ModeChip`, `AgentTab`, `AgentPanel`, `AgentTaskTab` (a row's own view), `AgentTimeline`, `AgentFiles`,
 `AgentPills`, `AgentTodoCard`, `AgentWork`, `StepRows`, `StepPictures`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`,
-`FileTab`, `SheetTab` + `sheetView.js`, `RunsTab`, `codeRuns.svelte.js`, `SummaryTab`, `OutputsList` + `outputs.js`), `ui/fileLinks.js`, `ui/codeRun.js`, `stores/chatSummary.svelte.js`,
+`FileTab`, `SheetTab` + `sheetView.js`, `RunsTab`, `codeRuns.svelte.js`, `SummaryTab`, `OutputsList` + `outputs.js`,
+`codeMenu.svelte.js` + `CommandMenu.svelte` (the + menu's lists, the "/" list)), `ui/fileLinks.js`, `ui/codeRun.js`, `stores/chatSummary.svelte.js`,
 `core/codeChats.js`, `core/agents.js`, `core/codeColours.js` (+ `codeColours.hljs.js`), `core/intralineDiff.js`, `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
 `stores/agents.svelte.js`, `settings/YapCodePage.svelte`,
-`settings/ClaudeCodeStatus.svelte`.
+`settings/ClaudeCodeStatus.svelte`, `settings/ClaudePlugins.svelte`.
 
 ## The event and command contract
 
@@ -3222,6 +3361,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 | `yap-agent-mode` | `{conversation, mode}` — a chat's Mode changed (the chip, or a phone) |
 | `yap-code-run` | `{id, conversation, text?, run?}`: a ▶ Run's news (`agents/run_block.rs`): `run` when it starts and ends (`{id, conversation, command, shell, ranIn, note?, state, code?, startedMs, endedMs, cut}`, state running \| done \| failed \| stopped), `text` its new output |
 | `yap-code-chat` | `{conversations, folder, removed?}` — those chats are Code chats in `folder` now (`null`: plain); `removed`: a workspace removed in Settings, its name; no conversations: the workspaces changed |
+| `yap-code-menu` | `{workspace?, conversation?}` — what Claude Code offers in that workspace was read again (a run's init, a look), or that chat's folders or servers off changed (`agents/menu.rs`) |
 
 **Chat's stream**: `{kind: "agent", agent: {id, folder, status, mode, conversation?, turn?}}`
 when a turn starts one, or carries a Code chat's agent on (`stream::Event::Agent`, an

@@ -74,14 +74,42 @@
   onMount(() => {
     const t = setInterval(() => (now = Date.now() / 1000), 1000);
     let un = null;
+    let unMenu = null;
     let gone = false;
     listen('yap-link-changed', () => loadRemote()).then((u) => (gone ? u() : (un = u)));
+    // The + menu's Add folder (agents/menu.rs): its folders read again.
+    listen('yap-code-menu', (e) => {
+      const p = e.payload || {};
+      if ((p.conversation != null && p.conversation === conversationId) || (conversationId == null && p.conversation == null && p.workspace)) loadFolders();
+    }).then((u) => (gone ? u() : (unMenu = u)));
     return () => {
       gone = true;
       clearInterval(t);
       un?.();
+      unMenu?.();
     };
   });
+
+  /** The chat's added folders, read again (the + menu's Add folder, a × here). */
+  async function loadFolders() {
+    const conv = conversationId;
+    try {
+      const fresh = await invoke('code_chat_environment', { conversation: conv ?? null, workspace: workspace ?? null });
+      if (conv === conversationId && env) env = { ...env, folders: fresh.folders ?? [] };
+    } catch {
+      /* the panel keeps what it showed */
+    }
+  }
+
+  /** × on an added folder: Claude Code no longer gets it in this chat's runs. */
+  async function removeFolder(f) {
+    try {
+      const rows = await invoke('code_chat_folder_remove', { conversation: conversationId ?? null, workspace: workspace ?? null, path: f.path });
+      if (env) env = { ...env, folders: rows ?? [] };
+    } catch (e) {
+      toast({ title: `Couldn't take ${f.name} off this chat`, description: String(e?.message ?? e), variant: 'destructive' });
+    }
+  }
 
   async function loadRemote() {
     const name = env?.name;
@@ -302,6 +330,16 @@
           <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
           <span class="sv" title={env.path}><b>{env.name}</b> <span class="sdim">· {env.path}</span></span>
         </div>
+        {#each env.folders ?? [] as f (f.path)}
+          <!-- A folder the + menu's Add folder gave this chat's Claude Code too (agents/menu.rs: `--add-dir`); × takes it off. -->
+          <div class="srow" data-testid="chat-summary-folder">
+            <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M12 11v5M9.5 13.5h5" /></svg>
+            <span class="sv" title={f.path}><b>{f.name}</b> <span class="sdim">· {f.exists ? f.path : `${f.path} (not on this PC)`}</span></span>
+            <button type="button" class="sx" aria-label={`Take ${f.name} off this chat`} title="Take it off this chat" onclick={() => removeFolder(f)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+            </button>
+          </div>
+        {/each}
         {#if !env.exists}
           <p class="snote">This workspace's folder isn't on this PC any more.</p>
         {:else if env.repo}
@@ -658,6 +696,37 @@
   .right {
     flex: 0 0 auto;
     font-size: 11.5px;
+  }
+  /* An added folder's ×: quiet until its row is hovered. */
+  .sx {
+    flex: 0 0 auto;
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: var(--yap-r-sm);
+    background: none;
+    color: var(--yap-paper-muted);
+    cursor: pointer;
+    opacity: 0.55;
+  }
+  .srow:hover .sx,
+  .sx:focus-visible {
+    opacity: 1;
+  }
+  .sx:hover {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
+  }
+  .sx:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  .sx svg {
+    width: 11px;
+    height: 11px;
   }
   .stag {
     flex: 0 0 auto;

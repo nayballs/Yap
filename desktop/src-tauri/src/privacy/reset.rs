@@ -226,8 +226,8 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: crate::agents::FEATURE,
         says: "Every agent Chat sent, with its log and the backups Undo uses, each chat's Mode and your workspaces. The files the agents changed stay as they are",
-        files: &["agents.json", "agents/", "workspaces.json", "(remote_control.json)"],
-        stores: &["agents", "workspaces"],
+        files: &["agents.json", "agents/", "workspaces.json", "code_menu.json", "(remote_control.json)"],
+        stores: &["agents", "workspaces", "code_menu"],
     },
     About {
         kind: Kind::Suggestions,
@@ -598,6 +598,7 @@ const STORES: &[(&str, Rule)] = &[
     ("agents.json", Choice::agents),
     ("agents/", Choice::agents),
     ("workspaces.json", Choice::agents),
+    ("code_menu.json", Choice::agents),
     ("remote_control.json", Choice::remote_control),
     ("ai_usage.json", Choice::ai_usage),
     ("groq_usage.json", Choice::ai_usage),
@@ -625,6 +626,7 @@ const SET_ASIDE: &[(&str, Rule)] = &[
     ("connections", Choice::receipts),
     ("agents", Choice::agents),
     ("workspaces", Choice::agents),
+    ("code_menu", Choice::agents),
 ];
 
 /// Whether `file` (a name in the data folder) is a set-aside copy of one of
@@ -817,7 +819,7 @@ fn measure(pages: Option<&Path>) -> Vec<Line> {
                 Kind::Agents => {
                     let n = crate::agents::store::list().len();
                     let folders = crate::agents::workspaces::list().len();
-                    let bytes = crate::agents::store::disk_bytes() + file_bytes(&data.join("agents.json")) + file_bytes(&data.join("workspaces.json"));
+                    let bytes = crate::agents::store::disk_bytes() + file_bytes(&data.join("agents.json")) + file_bytes(&data.join("workspaces.json")) + file_bytes(&data.join("code_menu.json"));
                     (counts([count(n, "agent", "agents"), count(folders, "workspace", "workspaces")]), bytes, n == 0 && folders == 0 && bytes == 0)
                 }
                 Kind::Suggestions => {
@@ -1069,6 +1071,8 @@ fn clear_files(app: &AppHandle, c: &Choice, done: &mut Done) -> Result<(), Strin
         crate::agents::runner::stop_all();
         done.agents = crate::agents::store::reset();
         crate::agents::workspaces::reset();
+        // (And each Code chat's + menu: its folders, servers off, what Claude Code offered.)
+        crate::agents::menu::reset();
     }
     // Remote Control's turns and its trail go with them; its ticks and
     // workspace switches stay, as the pairing does (agents/remote.rs).
@@ -1169,6 +1173,7 @@ fn run(app: &AppHandle, c: &Choice, signed: crate::integrations::connectors::pri
     if c.agents() != Cut::Keep {
         crate::agents::store::saved()?;
         crate::agents::workspaces::saved()?;
+        crate::agents::menu::saved()?;
     }
     if c.remote_control() != Cut::Keep {
         crate::agents::remote::saved()?;

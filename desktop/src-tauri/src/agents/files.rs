@@ -355,6 +355,9 @@ pub struct Environment {
     pub detached: bool,
     /// A linked worktree (`git worktree add`).
     pub worktree: bool,
+    /// The folders the chat's + menu added (Add folder: `menu.rs`), each with
+    /// its × in the panel.
+    pub folders: Vec<super::menu::FolderRow>,
 }
 
 /// What a `HEAD` file says: `(branch, detached)`. Pure.
@@ -490,7 +493,13 @@ pub async fn code_file_reveal(conversation: u64, path: String) -> Result<(), Str
 #[tauri::command]
 pub async fn code_chat_environment(conversation: Option<u64>, workspace: Option<String>) -> Result<Environment, String> {
     let folder = conversation.and_then(|c| code_chat::folder_of(Some(c))).or_else(|| workspace.as_deref().and_then(code_chat::folder_at)).ok_or("That isn't one of Yap Code's workspaces.")?;
-    tauri::async_runtime::spawn_blocking(move || environment(&folder.name, &folder.path)).await.map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut env = environment(&folder.name, &folder.path);
+        env.folders = super::menu::folder_rows(conversation, &folder.path);
+        env
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

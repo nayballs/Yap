@@ -1206,7 +1206,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // A Skill is asked across the meetings, its passages cited, wherever it's
   // run; a plain chat with messages stays a plain chat.
   const skills = new SkillPicker('meetings');
-  $effect(() => skills.update(input));
+  // (In a Code chat "/" is its Claude Code's commands instead: Composer's CommandPicker, codeMenu.svelte.js.)
+  $effect(() => skills.update(mentionGate() ? '' : input));
+  /** What `text` runs as one of Yap's Skills: never in a Code chat, where "/name" goes to its Claude Code as typed. */
+  const skillOf = (text) => (mentionGate() ? null : skills.parse(text));
   /** The "/" menu's keys, before the box's own (true: the menu took it). */
   function skillKey(e) {
     const picked = skills.key(e);
@@ -2144,7 +2147,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // (An edit is never queued; nor a message with files.)
     const queueable = branching ? false : fromBox ? !shots.length && !elements.length && !quote && !sentFiles.length : opts?.spoken === true;
     const gated = queueGate();
-    if (queueable && text && activeId != null && (!sending || later) && (gated || later) && !skills.parse(text)?.skill) {
+    if (queueable && text && activeId != null && (!sending || later) && (gated || later) && !skillOf(text)?.skill) {
       // Rust says (agents/runner.rs `queue_state`): writing its answer — it waits; a tool call out — it goes now,
       // read as that ends (✓, then ✓✓); nothing of the chat's own working — sent as ever.
       let state = 'idle';
@@ -2183,7 +2186,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const voice = fromBox ? byVoice : opts?.voice === true;
     // "/decisions last week" (or a one-tap prompt): a Skill, asked across
     // the meetings (chat/skills.rs).
-    const skill = opts?.skill ?? skills.parse(text)?.skill?.command ?? null;
+    const skill = opts?.skill ?? skillOf(text)?.skill?.command ?? null;
     if (skill && !messages.length && !scope) scope = 'meetings';
     if (fromBox) input = '';
     // The passage it's about (the document panel), out of the box with it.

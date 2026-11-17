@@ -52,6 +52,12 @@
 //! - [`remote`]: Remote Control's records (`remote_control.json`, 2026-11-08):
 //!   which phones and workspaces allow it, the turns a phone asked for (run
 //!   at most at Auto, reported on that phone), the audit trail.
+//! - [`menu`]: a Code chat's + menu (17 Nov 2026) — what its Claude Code
+//!   offers in the workspace (slash commands, servers, plugins:
+//!   `code_menu.json`, from each run's init or a look), and the chat's own
+//!   folders (`--add-dir`) and servers off (`--disallowedTools`).
+//! - [`plugins`]: Claude Code's installed plugins, switched on or off with
+//!   its own `claude plugin` commands (Settings → Yap Code → Plugins).
 //!
 //! Chat's side: `chat/tools/agents.rs` (`start_agent`, `agent_status`,
 //! `message_agent`, `stop_agent`), `chat/turn/report.rs` (the report turn).
@@ -69,10 +75,12 @@ pub mod editors;
 pub mod direct;
 pub mod files;
 pub mod mention;
+pub mod menu;
 pub mod workspaces;
 pub mod modes;
 pub mod output;
 pub mod pictures;
+pub mod plugins;
 pub mod prs;
 pub mod remote;
 pub mod rewind;

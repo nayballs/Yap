@@ -1,0 +1,255 @@
+// **A Code chat's + menu and "/" list** (17 Nov 2026, after the Claude Code app's; agents/menu.rs):
+// what the chat's Claude Code offers in its workspace — its slash commands and skills, its MCP servers and
+// connectors, its plugins — and the chat's own choices: more folders its runs may use (`--add-dir`), servers
+// switched off for it (`--disallowedTools`).
+//
+// - `code_menu` reads them (a workspace nothing is known of yet is looked at in the background: `looking`, then
+//   `yap-code-menu` says it's in). Every run's init keeps them fresh.
+// - A new code chat (no conversation yet) chooses for its workspace; its first question makes them its own.
+// - `CommandPicker`: the box's "/" list in a Code chat — "/" at the start of the box, then letters, `:` or `-`:
+//   the commands whose name holds them, the ones that start with them first; ↑ ↓ move, Enter or Tab put
+//   `/name ` in the box, Esc closes.
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+
+/** The Code chat's commands after "/" as typed: `/` then its name begun (letters, digits, `-`, `_`, `:`). */
+export function commandQuery(text) {
+  const m = /^\/([a-z0-9:_-]*)$/i.exec(String(text ?? '').trimStart());
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * The commands for `query`, best first: its name in full, then names that start with it (a plugin's
+ * `plugin:skill` by its skill's part too, and a command's other names), then names that hold it, then lines that
+ * do. Pure.
+ */
+export function matchCommands(commands, query) {
+  const q = String(query ?? '').toLowerCase();
+  const list = Array.isArray(commands) ? commands : [];
+  if (!q) return list;
+  const rank = (c) => {
+    const n = String(c.name || '').toLowerCase();
+    const part = n.includes(':') ? n.slice(n.indexOf(':') + 1) : n;
+    // (Its other names count as its name: /review for /code-review.)
+    const aliases = (c.aliases || []).map((a) => String(a).toLowerCase());
+    if (n === q || aliases.includes(q)) return 0;
+    if (n.startsWith(q) || part.startsWith(q) || aliases.some((a) => a.startsWith(q))) return 1;
+    if (n.includes(q)) return 2;
+    if (String(c.description || '').toLowerCase().includes(q)) return 3;
+    return -1;
+  };
+  return list
+    .map((c, i) => ({ c, i, r: rank(c) }))
+    .filter((x) => x.r >= 0)
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((x) => x.c);
+}
+
+/** The groups drawn: the person's own (their commands, skills, their plugins'), then Claude Code's own. Pure. */
+export function commandGroups(commands) {
+  const list = Array.isArray(commands) ? commands : [];
+  const yours = list.filter((c) => !c.builtin);
+  const builtin = list.filter((c) => c.builtin);
+  const groups = [];
+  if (yours.length) groups.push({ label: 'Commands and skills', items: yours, start: 0 });
+  if (builtin.length) groups.push({ label: 'Built in', items: builtin, start: yours.length });
+  return groups;
+}
+
+/**
+ * The plugins as the menu lists them, each with its commands (`plugin:skill`): one with several says "12 skills ›",
+ * one with one says that one's line, one with none its own. `query` keeps those whose name, line or skills hold it.
+ * Pure.
+ */
+export function pluginRows(offered, query = '') {
+  const q = String(query ?? '').trim().toLowerCase();
+  const commands = offered?.commands ?? [];
+  return (offered?.plugins ?? [])
+    .map((p) => {
+      const skills = commands.filter((c) => c.plugin === p.name);
+      return { ...p, skills, line: skills.length === 1 ? skills[0].description || p.description : p.description };
+    })
+    .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.line || '').toLowerCase().includes(q) || p.skills.some((s) => s.name.toLowerCase().includes(q)));
+}
+
+/** The servers as the menu lists them, `query` keeping those whose name holds it. Pure. */
+export function serverRows(offered, off, query = '') {
+  const q = String(query ?? '').trim().toLowerCase();
+  const isOff = new Set(off ?? []);
+  return (offered?.servers ?? [])
+    .filter((s) => !q || s.label.toLowerCase().includes(q) || s.name.toLowerCase().includes(q))
+    .map((s) => ({ ...s, on: !isOff.has(s.name) }));
+}
+
+/** A server's state in a word or two, when it isn't simply connected. */
+export const SERVER_STATUS = { 'needs-auth': 'Needs sign-in', failed: 'Failed', pending: 'Starting', disabled: 'Off in Claude Code' };
+
+const sameSpot = (a, b) => String(a || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase() === String(b || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+
+/**
+ * The menu's state for the chat shown: `follow(conversation, workspace)` as it changes (ChatView / Composer), then
+ * `load()` when the menu opens or "/" is typed.
+ */
+export class CodeMenu {
+  conversation = $state(null);
+  workspace = $state(null);
+  offered = $state(null);
+  looking = $state(false);
+  folders = $state([]);
+  serversOff = $state([]);
+  loaded = $state(false);
+  error = $state('');
+  #seq = 0;
+  #un = null;
+
+  constructor() {
+    listen('yap-code-menu', (e) => {
+      const p = e.payload || {};
+      const mine = (p.conversation != null && p.conversation === this.conversation) || (p.workspace && sameSpot(p.workspace, this.workspace));
+      if (mine && this.loaded) this.load();
+    }).then((u) => (this.#un = u));
+  }
+
+  /** The chat shown: its conversation (null: a new chat) and workspace path. Read again when it changes. */
+  follow(conversation, workspace) {
+    const same = conversation === this.conversation && sameSpot(workspace, this.workspace);
+    if (same) return;
+    this.conversation = conversation ?? null;
+    this.workspace = workspace ?? null;
+    this.offered = null;
+    this.folders = [];
+    this.serversOff = [];
+    this.loaded = false;
+    this.error = '';
+  }
+
+  /** Read what's offered and the chat's choices (a look starts in the background when nothing's known). */
+  async load() {
+    if (this.conversation == null && !this.workspace) return;
+    const seq = ++this.#seq;
+    try {
+      const m = await invoke('code_menu', { conversation: this.conversation, workspace: this.workspace });
+      if (seq !== this.#seq) return;
+      this.offered = m.offered ?? null;
+      this.looking = !!m.looking;
+      this.folders = m.folders ?? [];
+      this.serversOff = m.serversOff ?? [];
+      this.error = '';
+    } catch (e) {
+      if (seq !== this.#seq) return;
+      this.error = String(e?.message ?? e);
+    } finally {
+      if (seq === this.#seq) this.loaded = true;
+    }
+  }
+
+  /** A server on or off for this chat. */
+  async setServer(name, on) {
+    const before = this.serversOff;
+    this.serversOff = on ? before.filter((s) => s !== name) : [...before.filter((s) => s !== name), name];
+    try {
+      this.serversOff = await invoke('code_menu_server', { conversation: this.conversation, workspace: this.workspace, server: name, on });
+      return { ok: true };
+    } catch (e) {
+      this.serversOff = before;
+      return { ok: false, why: String(e?.message ?? e) };
+    }
+  }
+
+  /** Add folder: Windows' folder picker (a test run: the folder it named), checked and added. */
+  async addFolder() {
+    try {
+      const rows = await invoke('code_chat_folder_add', { conversation: this.conversation, workspace: this.workspace });
+      if (rows) this.folders = rows;
+      return { ok: true, added: !!rows };
+    } catch (e) {
+      return { ok: false, why: String(e?.message ?? e) };
+    }
+  }
+
+  /** A folder taken off this chat. */
+  async removeFolder(path) {
+    try {
+      this.folders = await invoke('code_chat_folder_remove', { conversation: this.conversation, workspace: this.workspace, path });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, why: String(e?.message ?? e) };
+    }
+  }
+
+  get commands() {
+    return this.offered?.commands ?? [];
+  }
+
+  destroy() {
+    this.#un?.();
+  }
+}
+
+/**
+ * **The box's "/" list in a Code chat** (as Claude Code's own box has it): open while the box holds "/" and a
+ * command begun, the chat's commands matching. `menu`: its CodeMenu (read when the list first opens).
+ */
+export class CommandPicker {
+  text = $state('');
+  active = $state(0);
+  /** Esc closed it, for the text as it is. */
+  dismissed = $state(false);
+  /** On only in a Code chat (`setOn`). */
+  on = $state(false);
+  query = $derived(this.on ? commandQuery(this.text) : null);
+  items = $derived(this.query == null || this.dismissed ? [] : matchCommands(this.menu.commands, this.query));
+  /** Just "/": grouped; a name begun: one list, the best match first. */
+  groups = $derived(this.query ? [{ label: '', items: this.items, start: 0 }] : commandGroups(this.items));
+  open = $derived(this.query != null && !this.dismissed);
+
+  constructor(menu) {
+    this.menu = menu;
+  }
+
+  setOn(on) {
+    this.on = !!on;
+  }
+
+  /** The box's text now. */
+  update(text) {
+    if (text === this.text) return;
+    const was = this.query;
+    this.text = text;
+    this.active = 0;
+    this.dismissed = false;
+    // First opened: what the chat offers, read (a look starts when nothing's known).
+    if (was == null && this.query != null && !this.menu.loaded) this.menu.load();
+  }
+
+  close() {
+    this.dismissed = true;
+  }
+
+  /** A key in the box while it's open: ↑ ↓ move (true), Esc closes (true), Enter or Tab → the command. null: not its key. */
+  key(e) {
+    if (!this.open || e.isComposing) return null;
+    const n = this.items.length;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      this.close();
+      return true;
+    }
+    if (!n) return null;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      this.active = (this.active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+      return true;
+    }
+    if ((e.key === 'Enter' && !e.shiftKey && !e.ctrlKey) || e.key === 'Tab') {
+      const pick = this.items[Math.min(this.active, n - 1)];
+      // A command typed in full (or one of its other names): Enter sends it as typed (Tab still puts it in the box).
+      const names = [pick?.name, ...(pick?.aliases || [])].map((n) => String(n || '').toLowerCase());
+      if (e.key === 'Enter' && names.includes(this.query)) return null;
+      e.preventDefault();
+      return { command: pick };
+    }
+    return null;
+  }
+}

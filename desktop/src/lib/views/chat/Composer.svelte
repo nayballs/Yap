@@ -53,6 +53,9 @@
   import { mentionedPaths } from './chatMentions.js';
   import { picked, removePicked } from '../../stores/pickedElements.svelte.js';
   import ConnectorLogo from '../../settings/connectors/ConnectorLogo.svelte';
+  // A Code chat's + menu and "/" list (17 Nov 2026, the Claude Code app's: agents/menu.rs).
+  import { CodeMenu, CommandPicker, commandGroups, pluginRows, serverRows, SERVER_STATUS } from './codeMenu.svelte.js';
+  import CommandMenu from './CommandMenu.svelte';
   // Toasts never cover the box (ui/toastClear.js).
   import { keepClear } from '../../ui/toastClear.js';
 
@@ -91,7 +94,7 @@
   // up to a cap (`boxCap`), then scrolls. Enter sends, Shift+Enter makes a new line, Ctrl+Enter queues it for later;
   // the "@" picker and the "/" Skills menu take their keys first, and an IME's composition is its own.
   function keydown(e) {
-    if (chat.mentionKey(e) || chat.skillKey(e)) return;
+    if (commandKey(e) || chat.mentionKey(e) || chat.skillKey(e)) return;
     // (Enter that confirms an IME's composition: the IME's.)
     if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229 || e.shiftKey) return;
     e.preventDefault();
@@ -134,6 +137,42 @@
     ro.observe(el);
     return () => ro.disconnect();
   });
+
+  // **A Code chat's + menu and "/" list** (17 Nov 2026, the Claude Code app's; codeMenu.svelte.js, agents/menu.rs):
+  // what its Claude Code offers in the workspace (slash commands and skills, MCP servers, plugins) and the chat's own
+  // folders and servers off. "/" at the start of the box opens the commands; a pick puts `/name ` in the box.
+  const codeMenu = new CodeMenu();
+  const commands = new CommandPicker(codeMenu);
+  $effect(() => () => codeMenu.destroy());
+  $effect(() => {
+    codeMenu.follow(chat.activeId ?? null, code?.current?.path ?? null);
+  });
+  $effect(() => {
+    commands.setOn(!!code?.current);
+    commands.update(chat.input);
+  });
+  /** The "/" list's keys, before the box's own (true: taken). */
+  function commandKey(e) {
+    const picked = commands.key(e);
+    if (picked?.command) pickCommand(picked.command);
+    return !!picked;
+  }
+  /** A command picked (the "/" list, Slash commands ›, a plugin's skill): `/name ` in the box, before any words there. */
+  function pickCommand(c) {
+    if (!c?.name) return;
+    chat.plusOpen = false;
+    const rest = String(chat.input || '')
+      .replace(/^\s*\/[^\s]*\s*/, '')
+      .trimStart();
+    chat.input = `/${c.name} ${rest}`;
+    commands.close();
+    tick().then(() => {
+      const el = chat.inputEl;
+      el?.focus();
+      const at = `/${c.name} `.length;
+      el?.setSelectionRange?.(at, at);
+    });
+  }
 
   // The model chip (its picker opens for "Choose another model…").
   let chipRef = $state(null);
@@ -233,12 +272,9 @@
     if (chat.plusOpen && plusEl && !plusEl.contains(e.target)) chat.plusOpen = false;
   }
 
-  // Connectors ▸ (connectors/chats.rs): read again as the menu opens, its
-  // flyout shut with it.
-  let connOpen = $state(false);
+  // Connectors ▸ (connectors/chats.rs, a plain chat's): read again as the menu opens.
   $effect(() => {
-    if (chat.plusOpen) chat.connectors.refresh();
-    else connOpen = false;
+    if (chat.plusOpen && plain) chat.connectors.refresh();
   });
   async function flipConnector(c) {
     const r = await chat.connectors.toggle(c.id, !c.on);
@@ -263,11 +299,51 @@
   // replies, their volume, Voice settings…. Icon rows, dividers, › for a submenu, ✓ for what's on. Enter, Space or
   // ↓ on + opens it at its first row, ↑ at its last; ↑ ↓ Home End move, → opens a submenu, ← or Esc closes it, Esc
   // closes the menu and gives + the focus back. On the start screen it opens downwards, as the app's does, unless
-  // there's no room. What's on shows in the box as a chip (Research ×, Concise ×). A Code chat's menu as ever.
+  // there's no room. What's on shows in the box as a chip (Research ×, Concise ×). A Code chat's has the same look
+  // and keys with the Claude Code app's items (`codeMenuView`, 17 Nov 2026).
   let plusBtn = $state(null);
   let menuEl = $state(null);
-  /** The submenu open: 'skills' | 'connectors' | 'style' | null. */
+  /** The submenu open: 'skills' | 'connectors' | 'style' (a plain chat's), 'commands' | 'plugins' (a Code chat's) | null. */
   let sub = $state(null);
+  /** A Code chat's Plugins ›: the plugin whose skills are open beside it, and the search box's words. */
+  let sub2 = $state(null);
+  let pluginQuery = $state('');
+  /** A plugin's skills open on the other side when the window has no room for them on the right. */
+  let sub3Flip = $state(false);
+  $effect(() => {
+    sub3Flip = false;
+    if (!sub2) return;
+    tick().then(() => {
+      const r = menuEl?.querySelector('.sub3')?.getBoundingClientRect();
+      if (r && r.right > window.innerWidth - 8) sub3Flip = true;
+    });
+  });
+  const serverList = $derived(serverRows(codeMenu.offered, codeMenu.serversOff, pluginQuery));
+  const pluginList = $derived(pluginRows(codeMenu.offered, pluginQuery));
+  const commandList = $derived(commandGroups(codeMenu.commands));
+  /** Said where a list is empty: being looked at, Claude Code not there, or nothing yet. */
+  const offeredNote = $derived(
+    !codeMenu.loaded || codeMenu.looking ? 'Asking Claude Code what it offers here…' : codeMenu.error || (codeMenu.offered ? '' : "Claude Code's lists show here once it has answered in this workspace.")
+  );
+  async function flipServer(s) {
+    const r = await codeMenu.setServer(s.name, !s.on);
+    if (!r.ok) toast({ title: `Couldn't switch ${s.label} for this chat`, description: r.why, variant: 'destructive' });
+  }
+  /** Add folder: a folder on this PC Claude Code may use in this chat too (`--add-dir`), shown in the summary panel. */
+  async function addFolder() {
+    chat.plusOpen = false;
+    const r = await codeMenu.addFolder();
+    if (!r.ok) toast({ title: "Couldn't add that folder", description: r.why, variant: 'destructive' });
+    else if (r.added) {
+      const f = codeMenu.folders.at(-1);
+      toast({ title: `Claude Code can use ${f?.name || 'that folder'} in this chat too`, description: 'It shows in the summary panel, where you can take it off.' });
+    }
+    chat.inputEl?.focus();
+  }
+  function managePlugins() {
+    chat.plusOpen = false;
+    onopensettings?.('yap-code#yap-code-plugins');
+  }
   let menuDown = $state(false);
   /** Opened from the keyboard: which row takes the focus ('first' | 'last'), or null (a click). */
   let focusOnOpen = null;
@@ -307,24 +383,28 @@
 
   function plusClick(e) {
     // (Enter or Space on the button: a click with no pointer.)
-    focusOnOpen = plain && !chat.plusOpen && e.detail === 0 ? 'first' : null;
+    focusOnOpen = !chat.plusOpen && e.detail === 0 ? 'first' : null;
     chat.plusOpen = !chat.plusOpen;
   }
   function plusKey(e) {
-    if (!plain || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     e.preventDefault();
     focusOnOpen = e.key === 'ArrowDown' ? 'first' : 'last';
     if (chat.plusOpen) focusMenu(focusOnOpen);
     else chat.plusOpen = true;
   }
   // Opened: downwards on the start screen when there's room; its first (or last) row focused when the keyboard opened it.
+  // (A Code chat's: upwards, its lists read again — what its Claude Code offers, the chat's folders and servers.)
   $effect(() => {
-    if (!chat.plusOpen || !plain) {
+    if (!chat.plusOpen) {
       sub = null;
+      sub2 = null;
+      pluginQuery = '';
       return;
     }
     untrack(() => {
-      menuDown = chat.messages.length === 0;
+      if (!plain && code?.current) codeMenu.load();
+      menuDown = plain && chat.messages.length === 0;
       tick().then(() => {
         if (menuDown && menuEl && menuEl.getBoundingClientRect().bottom > window.innerHeight - 8) menuDown = false;
         if (focusOnOpen) focusMenu(focusOnOpen);
@@ -348,6 +428,20 @@
   function closeSub() {
     const row = menuEl?.querySelector(`[data-sub="${sub}"]`);
     sub = null;
+    sub2 = null;
+    row?.focus();
+  }
+  /** A plugin's skills (a Code chat's Plugins ›): open beside the list; `focus`: its first row (the keyboard's →). */
+  async function openSub2(name, focus = false) {
+    sub2 = name;
+    if (focus) {
+      await tick();
+      menuEl?.querySelector('.sub3 [data-mi="sub3"]')?.focus();
+    }
+  }
+  function closeSub2() {
+    const row = [...(menuEl?.querySelectorAll('[data-sub2]') ?? [])].find((r) => r.dataset.sub2 === sub2);
+    sub2 = null;
     row?.focus();
   }
   function closeMenu() {
@@ -355,27 +449,40 @@
     plusBtn?.focus();
   }
   function menuKey(e) {
-    const inSub = e.target?.closest?.('.subpop');
+    const inSub3 = e.target?.closest?.('.sub3');
+    const inSub = inSub3 ? null : e.target?.closest?.('.subpop');
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
-      if (inSub && sub) closeSub();
+      if (inSub3 && sub2) closeSub2();
+      else if ((inSub || inSub3) && sub) closeSub();
       else closeMenu();
       return;
     }
-    // (The volume slider keeps its own arrows.)
+    // (The volume slider keeps its own arrows; the plugins' search box its caret's.)
     if (e.target?.matches?.('input[type="range"]')) return;
+    if (e.target?.matches?.('input[type="search"]') && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    if (e.key === 'ArrowLeft' && inSub3) {
+      e.preventDefault();
+      closeSub2();
+      return;
+    }
     if (e.key === 'ArrowLeft' && inSub) {
       e.preventDefault();
       closeSub();
       return;
     }
-    if (e.key === 'ArrowRight' && !inSub && e.target?.dataset?.sub) {
+    if (e.key === 'ArrowRight' && !inSub && !inSub3 && e.target?.dataset?.sub) {
       e.preventDefault();
       openSub(e.target.dataset.sub, true);
       return;
     }
-    const rows = inSub ? [...inSub.querySelectorAll('[data-mi="sub"]')] : topRows();
+    if (e.key === 'ArrowRight' && inSub && e.target?.dataset?.sub2) {
+      e.preventDefault();
+      openSub2(e.target.dataset.sub2, true);
+      return;
+    }
+    const rows = inSub3 ? [...inSub3.querySelectorAll('[data-mi="sub3"]')] : inSub ? [...inSub.querySelectorAll('[data-mi="sub"]')] : topRows();
     if (!rows.length) return;
     const at = rows.indexOf(document.activeElement);
     let to = null;
@@ -641,7 +748,7 @@
         aria-label="Chat options"
         aria-haspopup="dialog"
         aria-expanded={chat.plusOpen}
-        title={plain ? 'Add files, Skills, Research, Style and more' : chat.speakReplies ? `Voice replies on · ${Math.round(chat.voiceVolume * 100)}%` : 'Voice replies and volume'}
+        title={plain ? 'Add files, Skills, Research, Style and more' : code?.current ? 'Add files or a folder, slash commands, plugins and more' : chat.speakReplies ? `Voice replies on · ${Math.round(chat.voiceVolume * 100)}%` : 'Voice replies and volume'}
         onclick={plusClick}
         onkeydown={plusKey}
       >
@@ -652,97 +759,7 @@
       {#if chat.plusOpen && plain}
         {@render plainMenu()}
       {:else if chat.plusOpen}
-        <div class="pluspop" role="dialog" aria-label="Chat options">
-          <!-- Attach files (chat/attachments.rs): their text goes with the question. -->
-          <button class="optrow" aria-label="Attach files" data-testid="chat-attach-files" onclick={chat.pickFiles}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.1-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8" /></svg>
-            <span class="opttext">
-              <span class="optname">Attach files</span>
-              <span class="optdesc">Text, code, PDF, Word and spreadsheet files, read on this PC</span>
-            </span>
-          </button>
-          <!-- Snip to Chat (snip.rs): this window leaves the shot. -->
-          <button class="optrow" aria-label="Take a screenshot" onclick={takeScreenshot}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4 8.1 15.9" /><path d="M14.5 14.5 20 20" /><path d="M8.1 8.1 12 12" /></svg>
-            <span class="opttext">
-              <span class="optname">Take a screenshot</span>
-              <span class="optdesc">Drag a box over any screen{chat.snipHotkey ? ` · ${formatHotkeySpec(chat.snipHotkey)}` : ''}</span>
-            </span>
-          </button>
-          <div class="optsep"></div>
-          {#if chat.connectors.shown}
-            <!-- Connectors ▸ (connectors/chats.rs): this chat's switches, as Claude's composer has. -->
-            <div class="optsub">
-              <button
-                class="optrow"
-                aria-haspopup="true"
-                aria-expanded={connOpen}
-                aria-label="Connectors"
-                data-testid="chat-connectors-row"
-                onclick={() => (connOpen = !connOpen)}
-                onkeydown={(e) => e.key === 'ArrowRight' && (connOpen = true)}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 7V3M15 7V3" /><path d="M6 7h12v4a6 6 0 0 1-12 0z" /><path d="M12 17v4" /></svg>
-                <span class="opttext">
-                  <span class="optname">Connectors</span>
-                  <span class="optdesc">{chat.connectors.onCount} of {chat.connectors.list.length} on in this chat</span>
-                </span>
-                <svg class="optchev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
-              </button>
-              {#if connOpen}
-                <div class="pluspop subpop" role="group" aria-label="Connectors in this chat" data-testid="chat-connectors-menu">
-                  {#each chat.connectors.list as c (c.id)}
-                    <button class="optrow" aria-pressed={c.on} aria-label={c.name} title={c.on ? `${c.name} is on in this chat` : `${c.name} is off in this chat`} onclick={() => flipConnector(c)}>
-                      <ConnectorLogo logo={c.logo} name={c.name} color={c.color} size={20} />
-                      <span class="opttext"><span class="optname">{c.name}</span></span>
-                      <span class="switch" class:on={c.on} aria-hidden="true"><span></span></span>
-                    </button>
-                  {/each}
-                  <div class="optsep"></div>
-                  <button class="optlink" onclick={manageConnectors}>Manage connectors…</button>
-                </div>
-              {/if}
-            </div>
-            <div class="optsep"></div>
-          {/if}
-          <!-- Spoken replies on / off (Settings → Voice Assistant → Speak replies). -->
-          <button class="optrow" aria-pressed={chat.speakReplies} aria-label="Voice replies" title={voiceTitle} onclick={toggleVoiceReplies}>
-            {#if chat.speakReplies}
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" fill="currentColor" fill-opacity="0.15" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.4 5.6a9 9 0 0 1 0 12.8" /></svg>
-            {:else}
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="m22 9-6 6M16 9l6 6" /></svg>
-            {/if}
-            <span class="opttext">
-              <span class="optname">Voice replies</span>
-              <span class="optdesc">{chat.speakReplies ? (chat.speakWhen === 'always' ? 'Every answer is read aloud' : 'Answers to spoken questions are read aloud') : 'Answers stay quiet'}</span>
-            </span>
-            <span class="switch" class:on={chat.speakReplies} aria-hidden="true"><span></span></span>
-          </button>
-          <div class="optvol">
-            <label class="vollabel" for="chat-voice-volume">Voice volume</label>
-            <div class="volrow">
-              <input
-                id="chat-voice-volume"
-                type="range"
-                min="0"
-                max="100"
-                step="5"
-                value={Math.round(chat.voiceVolume * 100)}
-                oninput={(e) => moveVolume(Number(e.currentTarget.value) / 100)}
-                onchange={keepVolume}
-              />
-              <span class="volval">{Math.round(chat.voiceVolume * 100)}%</span>
-            </div>
-          </div>
-          <div class="optsep"></div>
-          <button
-            class="optlink"
-            onclick={() => {
-              chat.plusOpen = false;
-              onopensettings?.('voice');
-            }}>Voice settings…</button
-          >
-        </div>
+        {@render codeMenuView()}
       {/if}
     </div>
     {#if plain}
@@ -772,8 +789,9 @@
       {/if}
       <span class="rowgap" aria-hidden="true"></span>
     {/if}
-    <!-- "/": Skills, run across the meetings (chat/skills.rs). -->
+    <!-- "/": Skills, run across the meetings (chat/skills.rs); in a Code chat, its Claude Code's commands. -->
     <SkillMenu picker={chat.skills} onpick={chat.pickSkill} />
+    <CommandMenu picker={commands} onpick={pickCommand} />
     <!-- "@" in a Code chat: its workspace's files (agents/mention.rs). -->
     <MentionMenu picker={chat.mention} onpick={chat.pickMention} />
     <textarea
@@ -794,7 +812,7 @@
             : queueHint
             ? queueHint
             : code?.current
-            ? `Ask for a change in ${code.current.name}, or anything else`
+            ? 'Type / for commands'
             : code?.onCode
             ? 'Ask about your notes, or type / for Skills'
             : chat.messages.length
@@ -803,8 +821,8 @@
       aria-label="Message"
       aria-busy={chat.sending}
       aria-autocomplete="list"
-      aria-controls={chat.mention.open ? 'mention-list' : chat.skills.open ? 'skill-list' : undefined}
-      aria-activedescendant={chat.mention.open && chat.mention.items.length ? `mention-opt-${chat.mention.active}` : chat.skills.open ? `skill-opt-${chat.skills.active}` : undefined}
+      aria-controls={commands.open ? 'cmd-list' : chat.mention.open ? 'mention-list' : chat.skills.open ? 'skill-list' : undefined}
+      aria-activedescendant={commands.open && commands.items.length ? `cmd-opt-${commands.active}` : chat.mention.open && chat.mention.items.length ? `mention-opt-${chat.mention.active}` : chat.skills.open ? `skill-opt-${chat.skills.active}` : undefined}
       onkeydown={keydown}
       onkeyup={(e) => (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Home' || e.key === 'End') && chat.mentionInput()}
       onclick={() => chat.mentionInput()}
@@ -1020,62 +1038,224 @@
       {/if}
     </div>
     <div class="optsep" role="separator"></div>
-    <!-- Spoken replies on / off (Settings → Voice Assistant → Speak replies), their volume, Voice settings…. -->
-    <button class="mrow" data-mi="top" aria-pressed={chat.speakReplies} aria-label="Voice replies" title={voiceTitle} onclick={toggleVoiceReplies} onpointerenter={() => (sub = null)}>
-      {#if chat.speakReplies}
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.4 5.6a9 9 0 0 1 0 12.8" /></svg>
-      {:else}
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="m22 9-6 6M16 9l6 6" /></svg>
-      {/if}
-      <span class="mlabel">Voice replies</span>
-      {#if chat.speakReplies}{@render tick_()}{/if}
+    {@render voiceRows()}
+  </div>
+{/snippet}
+
+{#snippet voiceRows()}
+  <!-- Spoken replies on / off (Settings → Voice Assistant → Speak replies), their volume, Voice settings…. -->
+  <button class="mrow" data-mi="top" aria-pressed={chat.speakReplies} aria-label="Voice replies" title={voiceTitle} onclick={toggleVoiceReplies} onpointerenter={() => (sub = null)}>
+    {#if chat.speakReplies}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.4 5.6a9 9 0 0 1 0 12.8" /></svg>
+    {:else}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z" /><path d="m22 9-6 6M16 9l6 6" /></svg>
+    {/if}
+    <span class="mlabel">Voice replies</span>
+    {#if chat.speakReplies}{@render tick_()}{/if}
+  </button>
+  <div class="mvol">
+    <input
+      id="chat-voice-volume"
+      type="range"
+      min="0"
+      max="100"
+      step="5"
+      aria-label="Voice volume"
+      value={Math.round(chat.voiceVolume * 100)}
+      oninput={(e) => moveVolume(Number(e.currentTarget.value) / 100)}
+      onchange={keepVolume}
+    />
+    <span class="volval">{Math.round(chat.voiceVolume * 100)}%</span>
+  </div>
+  <button
+    class="mrow"
+    data-mi="top"
+    onclick={() => {
+      chat.plusOpen = false;
+      onopensettings?.('voice');
+    }}
+  >
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
+    <span class="mlabel">Voice settings…</span>
+  </button>
+{/snippet}
+
+{#snippet plugIcon()}
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 7V3M15 7V3" /><path d="M6 7h12v4a6 6 0 0 1-12 0z" /><path d="M12 17v4" /></svg>
+{/snippet}
+
+{#snippet codeMenuView()}
+  <!-- **A Code chat's + menu** (17 Nov 2026, the Claude Code app's shape, Yap's items: agents/menu.rs): Add files or
+       photos (Ctrl+U), Take a screenshot, Add folder (a folder Claude Code may use in this chat too), Slash commands ›
+       (what its Claude Code offers here: a pick goes in the box), Plugins › (Search plugins, the session's MCP servers
+       and connectors with a switch each for this chat, the plugins with their skills, Manage plugins…); then Voice
+       replies, their volume, Voice settings…. The plain chat's look and keys. -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="pluspop plainmenu" role="dialog" aria-label="Chat options" tabindex="-1" bind:this={menuEl} onkeydown={menuKey} data-testid="code-plus-menu">
+    <!-- Attach files (chat/attachments.rs): their text goes with the question; pictures to Claude Code. -->
+    <button class="mrow" data-mi="top" aria-label="Add files or photos" aria-keyshortcuts="Control+U" data-testid="chat-attach-files" onclick={uploadFiles} onpointerenter={() => (sub = null)}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.1-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8" /></svg>
+      <span class="mlabel">Add files or photos</span>
+      <kbd class="mside mkey">Ctrl+U</kbd>
     </button>
-    <div class="mvol">
-      <input
-        id="chat-voice-volume"
-        type="range"
-        min="0"
-        max="100"
-        step="5"
-        aria-label="Voice volume"
-        value={Math.round(chat.voiceVolume * 100)}
-        oninput={(e) => moveVolume(Number(e.currentTarget.value) / 100)}
-        onchange={keepVolume}
-      />
-      <span class="volval">{Math.round(chat.voiceVolume * 100)}%</span>
-    </div>
-    <button
-      class="mrow"
-      data-mi="top"
-      onclick={() => {
-        chat.plusOpen = false;
-        onopensettings?.('voice');
-      }}
-    >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
-      <span class="mlabel">Voice settings…</span>
+    <!-- Snip to Chat (snip.rs): this window leaves the shot. -->
+    <button class="mrow" data-mi="top" aria-label="Take a screenshot" onclick={takeScreenshot} onpointerenter={() => (sub = null)}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4 8.1 15.9" /><path d="M14.5 14.5 20 20" /><path d="M8.1 8.1 12 12" /></svg>
+      <span class="mlabel">Take a screenshot</span>
+      {#if chat.snipHotkey}<kbd class="mside mkey">{formatHotkeySpec(chat.snipHotkey)}</kbd>{/if}
     </button>
+    {#if code?.current}
+      <!-- Add folder (menu.rs): `--add-dir` on this chat's runs; never a system folder or Yap's own data. -->
+      <button
+        class="mrow"
+        data-mi="top"
+        aria-label="Add folder"
+        data-testid="code-add-folder"
+        title="Let Claude Code use another folder on this PC in this chat too"
+        onclick={addFolder}
+        onpointerenter={() => (sub = null)}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+        <span class="mlabel">Add folder</span>
+        {#if codeMenu.folders.length}<span class="mside mcount">{codeMenu.folders.length} added</span>{/if}
+      </button>
+      <!-- Slash commands ›: what this chat's Claude Code offers after "/" (the box's "/" list too). -->
+      <div class="optsub">
+        <button
+          class="mrow"
+          data-mi="top"
+          data-sub="commands"
+          aria-haspopup="menu"
+          aria-expanded={sub === 'commands'}
+          aria-label="Slash commands"
+          data-testid="code-plus-commands"
+          onclick={(e) => openSub('commands', e.detail === 0)}
+          onpointerenter={() => (sub = 'commands')}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="m14.5 7.5-5 9" /></svg>
+          <span class="mlabel">Slash commands</span>
+          {@render chev()}
+        </button>
+        {#if sub === 'commands'}
+          <div class="pluspop subpop skillsub" role="menu" aria-label="Slash commands" data-testid="code-plus-commands-menu">
+            {#each commandList as g (g.label)}
+              <div class="mhead" role="presentation">{g.label}</div>
+              {#each g.items as c (c.name)}
+                <button class="mrow" role="menuitem" data-mi="sub" title={c.description || c.name} onclick={() => pickCommand(c)}>
+                  <span class="mlabel"><span class="mcmd">/{c.name}</span> <span class="mquiet">{c.description}</span></span>
+                </button>
+              {/each}
+            {:else}
+              <div class="mhead mnote" role="status">{offeredNote || 'Claude Code offers no commands here.'}</div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <!-- Plugins ›: Search plugins; the session's MCP servers and connectors, a switch each for this chat; its
+           plugins with their skills; Manage plugins… (Settings → Yap Code → Plugins). Nothing installed from Yap. -->
+      <div class="optsub">
+        <button
+          class="mrow"
+          data-mi="top"
+          data-sub="plugins"
+          aria-haspopup="menu"
+          aria-expanded={sub === 'plugins'}
+          aria-label="Plugins"
+          data-testid="code-plus-plugins"
+          onclick={(e) => openSub('plugins', e.detail === 0)}
+          onpointerenter={() => (sub = 'plugins')}
+        >
+          {@render plugIcon()}
+          <span class="mlabel">Plugins</span>
+          {@render chev()}
+        </button>
+        {#if sub === 'plugins'}
+          <div class="pluspop subpop pluginsub" role="menu" aria-label="Plugins" data-testid="code-plus-plugins-menu">
+            <input class="msearch" type="search" data-mi="sub" placeholder="Search plugins" aria-label="Search plugins" bind:value={pluginQuery} oninput={() => (sub2 = null)} />
+            <div class="mscroll">
+              {#each serverList as s (s.name)}
+                <button
+                  class="mrow"
+                  role="menuitemcheckbox"
+                  aria-checked={s.on}
+                  data-mi="sub"
+                  aria-label={s.label}
+                  title={s.on ? `${s.label}: on in this chat. Click to switch its tools off here.` : `${s.label}: off in this chat`}
+                  data-testid="code-plus-server"
+                  onclick={() => flipServer(s)}
+                  onpointerenter={() => (sub2 = null)}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="17" height="6.5" rx="2" /><rect x="3.5" y="13.5" width="17" height="6.5" rx="2" /><path d="M7 7.25h.01M7 16.75h.01" /></svg>
+                  <span class="mlabel">{s.label}{#if SERVER_STATUS[s.status]}<span class="mquiet">{` · ${SERVER_STATUS[s.status]}`}</span>{/if}</span>
+                  <span class="mside switch" class:on={s.on} aria-hidden="true"><span></span></span>
+                </button>
+              {/each}
+              {#if serverList.length && pluginList.length}<div class="optsep" role="separator"></div>{/if}
+              {#each pluginList as p (p.id || p.name)}
+                {#if p.skills.length > 1}
+                  <button
+                    class="mrow two"
+                    role="menuitem"
+                    data-mi="sub"
+                    data-sub2={p.name}
+                    aria-haspopup="menu"
+                    aria-expanded={sub2 === p.name}
+                    aria-label={`${p.name}, ${p.skills.length} skills`}
+                    data-testid="code-plus-plugin"
+                    onclick={() => (sub2 === p.name ? (sub2 = null) : openSub2(p.name))}
+                    onpointerenter={() => (sub2 = p.name)}
+                  >
+                    {@render plugIcon()}
+                    <span class="mtext"><span class="mlabel">{p.name}</span><span class="mline">{p.skills.length} skills</span></span>
+                    {@render chev()}
+                  </button>
+                {:else}
+                  <button
+                    class="mrow two"
+                    role="menuitem"
+                    data-mi="sub"
+                    aria-label={p.name}
+                    title={p.line || p.name}
+                    data-testid="code-plus-plugin"
+                    onclick={() => (p.skills[0] ? pickCommand(p.skills[0]) : managePlugins())}
+                    onpointerenter={() => (sub2 = null)}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z" /><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19" /></svg>
+                    <span class="mtext"><span class="mlabel">{p.name}</span>{#if p.line}<span class="mline">{p.line}</span>{/if}</span>
+                  </button>
+                {/if}
+              {/each}
+              {#if !serverList.length && !pluginList.length}
+                <div class="mhead mnote" role="status">{pluginQuery ? `Nothing called "${pluginQuery}"` : offeredNote || 'No MCP servers or plugins here.'}</div>
+              {/if}
+            </div>
+            <div class="optsep" role="separator"></div>
+            <button class="mrow" role="menuitem" data-mi="sub" data-testid="code-manage-plugins" onclick={managePlugins} onpointerenter={() => (sub2 = null)}>
+              {@render plugIcon()}
+              <span class="mlabel">Manage plugins…</span>
+            </button>
+            {#if sub2}
+              {@const open = pluginList.find((p) => p.name === sub2)}
+              {#if open}
+                <div class="pluspop subpop skillsub sub3" class:flip={sub3Flip} role="menu" aria-label={`${open.name}'s skills`} data-testid="code-plus-plugin-skills">
+                  {#each open.skills as c (c.name)}
+                    <button class="mrow" role="menuitem" data-mi="sub3" title={c.description || c.name} onclick={() => pickCommand(c)}>
+                      <span class="mlabel"><span class="mcmd">/{c.name}</span> <span class="mquiet">{c.description}</span></span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
+    <div class="optsep" role="separator"></div>
+    {@render voiceRows()}
   </div>
 {/snippet}
 
 <style>
-  .vollabel {
-    display: block;
-    margin-bottom: 6px;
-    font-size: 11.5px;
-    font-weight: 600;
-    color: var(--yap-fg);
-  }
-  .volrow {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .volrow input {
-    flex: 1 1 auto;
-    min-width: 0;
-    accent-color: var(--yap-primary);
-  }
   .volval {
     width: 34px;
     text-align: right;
@@ -1142,9 +1322,7 @@
     background: var(--yap-s3);
     color: var(--yap-fg);
   }
-  .plusbtn:focus-visible,
-  .optrow:focus-visible,
-  .optlink:focus-visible {
+  .plusbtn:focus-visible {
     outline: 2px solid var(--yap-primary-line);
     outline-offset: 1px;
   }
@@ -1159,46 +1337,6 @@
     border-radius: 12px;
     background: var(--yap-s2);
     box-shadow: var(--yap-shadow-menu);
-  }
-  .optrow {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 8px;
-    border: none;
-    border-radius: 8px;
-    background: none;
-    color: var(--yap-fg);
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .optrow:hover {
-    background: var(--yap-s3);
-  }
-  .optrow > svg {
-    width: 16px;
-    height: 16px;
-    flex: 0 0 auto;
-    color: var(--yap-muted);
-  }
-  .optrow[aria-pressed='true'] > svg {
-    color: var(--yap-primary);
-  }
-  .opttext {
-    flex: 1 1 auto;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .optname {
-    font-size: 12.5px;
-    font-weight: 600;
-  }
-  .optdesc {
-    font-size: 11.5px;
-    color: var(--yap-muted);
   }
   .switch {
     flex: 0 0 auto;
@@ -1224,16 +1362,9 @@
   .switch.on span {
     transform: translateX(12px);
   }
-  .optvol {
-    padding: 6px 8px 8px 34px;
-  }
-  /* Connectors ▸: its flyout beside the menu, as Claude's composer opens it. */
+  /* A submenu: its flyout beside the menu, as Claude's composer opens it. */
   .optsub {
     position: relative;
-  }
-  .optrow > .optchev {
-    width: 14px;
-    height: 14px;
   }
   .subpop {
     left: calc(100% + 12px);
@@ -1242,29 +1373,76 @@
     max-height: 320px;
     overflow-y: auto;
   }
-  .subpop .optrow {
-    padding: 6px 8px;
-  }
   .optsep {
     height: 1px;
     margin: 2px 6px;
     background: var(--yap-border-subtle);
   }
-  .optlink {
-    width: 100%;
-    padding: 7px 8px;
-    border: none;
-    border-radius: 8px;
-    background: none;
-    color: var(--yap-muted);
-    font: inherit;
-    font-size: 12px;
-    text-align: left;
-    cursor: pointer;
+  /* **A Code chat's Plugins ›** (17 Nov 2026, the Claude Code app's): the search box on top, the servers and
+     plugins scrolling under it, Manage plugins… at the foot, a plugin's skills beside it (`.sub3`, outside the
+     scroller so it isn't cut). A row with a second line: a plugin's "12 skills" or its one line. */
+  .plainmenu .subpop.pluginsub {
+    width: 272px;
+    max-height: none;
+    overflow: visible;
   }
-  .optlink:hover {
-    background: var(--yap-s3);
+  .msearch {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    height: 30px;
+    margin: 0 0 4px;
+    padding: 0 8px;
+    border: none;
+    border-bottom: 1px solid var(--yap-border-subtle);
+    border-radius: 8px 8px 0 0;
+    background: transparent;
     color: var(--yap-fg);
+    font: inherit;
+    font-size: 12.5px;
+  }
+  .msearch::placeholder {
+    color: var(--yap-muted-55);
+  }
+  .msearch:focus {
+    outline: none;
+    border-bottom-color: var(--yap-primary-line);
+  }
+  .mscroll {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .mrow.two {
+    min-height: 40px;
+  }
+  .mtext {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .mtext .mlabel {
+    flex: none;
+  }
+  .mline {
+    overflow: hidden;
+    color: var(--yap-muted);
+    font-size: 11.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .plainmenu .subpop.sub3 {
+    top: -1px;
+    bottom: auto;
+    left: calc(100% + 8px);
+  }
+  .plainmenu .subpop.sub3.flip {
+    left: auto;
+    right: calc(100% + 8px);
+  }
+  .mnote {
+    font-weight: 500;
+    line-height: 1.4;
   }
   .composerfoot {
     display: flex;
