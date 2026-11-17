@@ -217,6 +217,8 @@ test('/compact: Claude Code compacts the session itself, a quiet line while it r
   expect(path.resolve(run.cwd)).toBe(path.resolve(GARDEN));
   // The chat's ring: the compacted size.
   await expect.poll(async () => (await yap.invoke('claude_plan_usage', {})).contexts?.[String(conversation)]?.used, { timeout: 10_000 }).toBe(3_000);
+  // The line goes by itself after a while (10 s).
+  await expect(line).toHaveCount(0, { timeout: 20_000 });
   // The next message carries on the same session.
   const next = await send(yap, main, 'And the herbs?');
   expect(after(next, '--resume')).toBe(after(first, '--session-id'));

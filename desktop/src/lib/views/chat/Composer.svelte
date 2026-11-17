@@ -255,6 +255,7 @@
   }
   /** /compact running or just done: a quiet line over the box (`{conv, text, done}`). */
   let compactLine = $state(null);
+  let compactSeq = 0;
   async function compactCommand(arg, opts) {
     const conv = chat.activeId;
     if (conv == null || !chat.messages.length) {
@@ -276,10 +277,11 @@
         chat.input = words;
         return chat.send(opts);
       }
-      const line = { conv, done: true, text: `Compacted: about ${roughTokens(r.before)} tokens of context down to ${roughTokens(r.after)}` };
-      compactLine = line;
+      // (By its number: the line kept is a $state proxy, never the object given.)
+      const id = ++compactSeq;
+      compactLine = { id, conv, done: true, text: `Compacted: about ${roughTokens(r.before)} tokens of context down to ${roughTokens(r.after)}` };
       setTimeout(() => {
-        if (compactLine === line) compactLine = null;
+        if (compactLine?.id === id) compactLine = null;
       }, 10_000);
     } catch (e) {
       compactLine = null;

@@ -507,6 +507,11 @@ fn describe(plugins: &mut [Plugin]) {
     }
 }
 
+/// What's known names no command, or most with no line yet. Pure.
+fn bare(o: &Offered) -> bool {
+    o.commands.is_empty() || o.commands.iter().filter(|c| c.description.is_empty()).count() * 2 > o.commands.len()
+}
+
 /// **A run's `system/init`** in `workspace`: what it offers there, kept.
 pub fn learn_init(workspace: &str, init: &Init) {
     let key = norm(workspace);
@@ -517,8 +522,9 @@ pub fn learn_init(workspace: &str, init: &Init) {
     let changed = with_store(|s| {
         let old = s.workspaces.get(&key);
         let mut fresh = from_init(init, old, now);
-        // (An init that names no commands, and none known: still looked at, so the menu isn't empty for a day.)
-        if fresh.commands.is_empty() {
+        // (An init that names no commands, or names most with no line yet — its `commands_changed` doesn't always
+        // come: Yap Lab, 17 Nov 2026 —: still looked at, so the menu isn't empty or bare for a day.)
+        if bare(&fresh) {
             fresh.at = 0;
         }
         describe(&mut fresh.plugins);
@@ -545,7 +551,11 @@ pub fn learn_commands(workspace: &str, event: &Value) {
     }
     let changed = with_store(|s| {
         let old = s.workspaces.get(&key).cloned().unwrap_or_default();
-        let fresh = with_details(old.clone(), list);
+        let mut fresh = with_details(old.clone(), list);
+        // (Its lines in now: no look needed.)
+        if fresh.at == 0 && !bare(&fresh) {
+            fresh.at = super::store::now_secs();
+        }
         if fresh == old {
             return false;
         }
