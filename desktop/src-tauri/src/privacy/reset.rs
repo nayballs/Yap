@@ -226,8 +226,8 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: crate::agents::FEATURE,
         says: "Every agent Chat sent, with its log and the backups Undo uses, each chat's Mode and your workspaces. The files the agents changed stay as they are",
-        files: &["agents.json", "agents/", "workspaces.json", "(remote_control.json)"],
-        stores: &["agents", "workspaces"],
+        files: &["agents.json", "agents/", "workspaces.json", "code_menu.json", "(remote_control.json)"],
+        stores: &["agents", "workspaces", "code_menu"],
     },
     About {
         kind: Kind::Suggestions,
@@ -598,6 +598,7 @@ const STORES: &[(&str, Rule)] = &[
     ("agents.json", Choice::agents),
     ("agents/", Choice::agents),
     ("workspaces.json", Choice::agents),
+    ("code_menu.json", Choice::agents),
     ("remote_control.json", Choice::remote_control),
     ("ai_usage.json", Choice::ai_usage),
     ("groq_usage.json", Choice::ai_usage),
@@ -625,6 +626,7 @@ const SET_ASIDE: &[(&str, Rule)] = &[
     ("connections", Choice::receipts),
     ("agents", Choice::agents),
     ("workspaces", Choice::agents),
+    ("code_menu", Choice::agents),
 ];
 
 /// Whether `file` (a name in the data folder) is a set-aside copy of one of

@@ -860,9 +860,13 @@ the right, dividers, › for a submenu, ↑ ↓ → ← Esc), in the app's order
   with each one's name, `name@marketplace`, version and folder, and
   `mcp_servers` with each one's `status` and `source`), then the
   `system/commands_changed` after it (each command's `description`,
-  `argumentHint`, `builtin`, `aliases`). Names starting `__` (its own
-  plumbing) and "(removed)" ones are left out; Claude Code's own plugins
-  (`…@builtin`) too.
+  `argumentHint`, `builtin`, `aliases`). A command is matched by its name or
+  an alias (the init names some skills `plugin:skill` where `initialize`
+  says `skill`), and the "/" list ranks an alias as the name (/review finds
+  /code-review). Names starting `__` (its own plumbing) are left out, and
+  "(removed)" ones are kept in the cache but never shown (the next init
+  names them bare); Claude Code's own plugins (`…@builtin`) too. An MCP
+  server's prompts show as Claude Code lists them (`/mcp__<server>__…`).
 - **Before a workspace's first run, a look** (`menu::probe`): Claude Code
   started in the workspace with no message and asked the Agent SDK's
   documented `initialize` (its `supportedCommands()`: the same commands with
@@ -870,8 +874,10 @@ the right, dividers, › for a submenu, ↑ ↓ → ← Esc), in the app's order
   requests, then ended — no model call, no tokens, nothing saved
   (`--no-session-persistence`). Only those two lists are read: its answer
   also names the account, which Yap never reads or keeps (Yap Lab's record
-  never keeps a `control_response`). Its plugins: `claude plugin list
-  --json` in the workspace (`plugins.rs` `enabled_in`). The person's own
+  never keeps a `control_response`). Servers still connecting are asked
+  about again (`mcp_status` up to six more times, 1.5 s apart): the first
+  answer of a young process says "pending" of most of them. Its plugins:
+  `claude plugin list --json` in the workspace (`plugins.rs` `enabled_in`). The person's own
   SessionStart hooks run, as for any session there. Looked at again a day
   later, or once a plugin is switched in Settings (`menu::stale`); a run's
   init keeps it fresh meanwhile. One look at a time a workspace; Claude Code
@@ -920,6 +926,16 @@ reaching a run's arguments and back on; Add folder refused inside the
 workspace, then added, its `--add-dir`, the summary's row and ×; Manage
 plugins… and a switch's `claude plugin disable`). Yap Lab on the real
 Claude Code: `set --folder-pick <dir>` names the folder Add folder takes.
+
+**Tried for real** (17 Nov 2026, Yap Lab on Opus, the maintainer's own
+Claude Code 2.1.296): a new Code chat's menu filled from a look before its
+first message (about 95 commands, 9 servers, 5 plugins), each plugin's
+skills beside it; a server switched off for the chat, then asked for one of
+its tools: "I don't have any tools from the … server in this session"; a
+folder added in Manual mode, Claude read a file in it with no permission
+asked, and once it was taken off in the summary panel, the same read asked
+and was refused. Plugins weren't switched in the Lab (it would change the
+person's own Claude Code).
 
 ## Dev servers
 
