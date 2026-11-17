@@ -988,7 +988,10 @@
   (`bypassConfirmed`); and `%APPDATA%/yap/agents/`, a folder per agent:
   `log.jsonl` (its `yap-agent` events: its steps, words, diffs and what its commands printed; appended line by line, at most 5,000
   lines), `pictures/` (the pictures its steps came back with, as PNGs, at
-  most 120; yap-code.md "A step's pictures"). No `backup/` since 16 Nov 2026
+  most 120; yap-code.md "A step's pictures"), `words/<n>.md` (turn `n`'s
+  final words whole when they're longer than the 8,000 characters
+  agents.json keeps, 200,000 at most; 17 Nov 2026, yap-code.md "An agent's
+  words, whole": kept when the log goes). No `backup/` since 16 Nov 2026
   (an older Yap's is deleted at start): files go back through Claude Code's
   own checkpoints (yap-code.md "Rewind's files"). An agent's log and pictures go 7 days after it ended (its record
   stays, `swept`); an agent still live when Yap starts is marked interrupted.

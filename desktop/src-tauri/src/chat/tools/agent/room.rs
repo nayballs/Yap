@@ -26,8 +26,9 @@ pub(super) const LOOK_SPARE: u64 = 300;
 
 impl Room<'_> {
     /// What the request has left beside `messages` and the pictures this
-    /// step looked at, still to go after its results (`pending`).
-    fn left(&self, messages: &[Value], pending: &[crate::chat::pictures::Look]) -> Option<u64> {
+    /// step looked at, still to go after its results (`pending`): what a
+    /// tool that reads in parts sizes its part to (`agent_status`).
+    pub(super) fn left(&self, messages: &[Value], pending: &[crate::chat::pictures::Look]) -> Option<u64> {
         let used = crate::chat::budget::request_tokens(messages, self.tools, self.provider, self.here) + pending.iter().map(|l| self.look_tokens(l)).sum::<u64>();
         self.limit.map(|limit| limit.saturating_sub(used))
     }

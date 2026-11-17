@@ -365,6 +365,8 @@ impl Loop<'_> {
                     web_seen,
                     outside,
                     live: self.live,
+                    // What the request has left: an agent's words come in parts within it.
+                    room: self.room.left(&self.messages, looks),
                 };
                 let ran = crate::chat::tools::agents::execute(name, &args, ctx).await;
                 // An agent's own words: web content from here on (the safety rule).

@@ -37,10 +37,9 @@ use crate::integrations::claude_live::Origin;
 pub const KEEP_SECS: u64 = 7 * 24 * 60 * 60;
 /// The most lines an agent's log keeps (the rest of a runaway agent isn't).
 pub const LOG_MAX_LINES: usize = 5_000;
-/// The most characters of text a log line keeps.
+/// The most characters of text a log line keeps (a turn's final words are
+/// kept whole in its record: `agents/words.rs`).
 const LOG_TEXT_MAX: usize = 4_000;
-/// The most characters of a turn's final words its note keeps.
-pub const TURN_TEXT_MAX: usize = 8_000;
 
 /// Where an agent is.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,7 +189,9 @@ pub struct Agent {
     pub commands: Vec<String>,
     /// What it wasn't allowed to do.
     pub denials: Vec<Denial>,
-    /// Its latest turn's final words (its summary, its plan, its question).
+    /// Its latest turn's final words (its summary, its plan, its question):
+    /// as that turn keeps them ([`TurnNote::text`], their start when they're
+    /// long; `words::whole` reads them whole).
     pub text: String,
     /// Claude Code's estimate of the API's price for the agent so far: on a
     /// plan what it would have cost, not a charge. Each turn's own cost
@@ -379,8 +380,19 @@ pub struct TurnNote {
     pub files: Vec<String>,
     /// What it wasn't allowed to do.
     pub denials: Vec<Denial>,
-    /// Its final words.
+    /// Its final words — their start, ending "…", when they're longer than
+    /// agents.json keeps ([`TurnNote::words`]).
     pub text: String,
+    /// **Its final words are whole in a file of their own** (17 Nov 2026,
+    /// `agents/words.rs`: past 8,000 characters, `agents/<id>/words/<n>.md`):
+    /// their length in characters; 0, `text` is all of them. Saved before,
+    /// a turn's words were cut at 8,000. A new field of the turn's own: an
+    /// older Yap drops it on its save, and the turn then reads as its start.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub words: u32,
+    /// Its words were longer than Yap keeps (`words::MAX`), and cut there.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub words_cut: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub plan: bool,
@@ -554,6 +566,10 @@ pub struct Fork {
     /// conversation as text ([`Branch::seed`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seed: Option<String>,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 impl TurnNote {
@@ -1307,14 +1323,14 @@ pub fn due_for_sweep(agents: &[Agent], now: u64) -> Vec<String> {
 }
 
 /// **Backups and logs older than 7 days go** (their agent's record stays,
-/// marked swept), and a workspace no agent names, once it's that old. How
-/// many folders went.
+/// marked swept, with its words: `agents/words.rs`), and the folder of an
+/// agent no record names, once it's that old. How many folders went.
 pub fn sweep(now: u64) -> usize {
     let (due, known): (Vec<String>, Vec<String>) = with_store(|s| (due_for_sweep(&s.agents, now), s.agents.iter().map(|j| j.id.clone()).collect()));
     let mut gone = 0;
     for id in &due {
         if let Some(d) = dir(id) {
-            if d.exists() && std::fs::remove_dir_all(&d).is_ok() {
+            if d.exists() && clear_but_words(&d) {
                 gone += 1;
             }
         }
@@ -1348,6 +1364,24 @@ pub fn sweep(now: u64) -> usize {
         tracing::info!(folders = gone, "Agents: backups and logs older than 7 days deleted");
     }
     gone
+}
+
+/// **An agent's folder emptied but for its words** (`agents/<id>/words/`:
+/// its record keeps them): whether everything else went.
+fn clear_but_words(d: &Path) -> bool {
+    if !d.join(super::words::FOLDER).is_dir() {
+        return std::fs::remove_dir_all(d).is_ok();
+    }
+    let mut all = true;
+    for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+        if e.file_name() == super::words::FOLDER {
+            continue;
+        }
+        let p = e.path();
+        let gone = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
+        all &= gone.is_ok();
+    }
+    all
 }
 
 // ---- the log ----
@@ -1593,11 +1627,18 @@ mod tests {
             std::fs::create_dir_all(dir(&j.id).unwrap().join("pictures")).unwrap();
             log_append(&j.id, &json!({ "status": "running" }));
         }
+        // The old one's long report, whole in its own file (agents/words.rs).
+        let long = "The beds are lined up with the path.\n".repeat(400);
+        let kept = super::super::words::keep("old", 1, &long);
+        assert!(kept.chars > 0);
         assert_eq!(sweep(now), 1);
-        assert!(!dir("old").unwrap().exists());
+        assert!(!log_path("old").unwrap().exists() && !dir("old").unwrap().join("pictures").exists());
         assert!(dir("new").unwrap().exists() && dir("live").unwrap().exists());
         let old = get("old").unwrap();
         assert!(old.swept, "the record stays, marked");
+        // …with its words: the report stays whole.
+        let t = TurnNote { n: 1, text: kept.text, words: kept.chars, ..Default::default() };
+        assert_eq!(super::super::words::of_turn("old", &t), long);
         assert_eq!(due_for_sweep(&list(), now), Vec::<String>::new());
     }
 

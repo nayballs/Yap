@@ -25,6 +25,9 @@
 //!   `yap-agent` events; stop, message, continue, open in terminal.
 //! - [`steps`]: each tool call in plain words (a command by its
 //!   description, else tidied); Claude Code's to-do list.
+//! - [`words`]: a turn's final words kept whole (past 8,000 characters in
+//!   `agents/<id>/words/<n>.md`, 200,000 at most), cut at a line or a word
+//!   where a cut can't be helped, read in parts (a report, `agent_status`).
 //! - [`diff`]: an edit's lines removed and added, a written file's lines,
 //!   within their caps, for the tab's "Files changed".
 //! - [`output`]: what a command printed, its start and its end, for its
@@ -96,6 +99,7 @@ pub mod steps;
 pub mod store;
 pub mod usage;
 pub mod voice;
+pub mod words;
 
 pub use store::AgentRef;
 

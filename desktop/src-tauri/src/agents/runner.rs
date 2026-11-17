@@ -2844,11 +2844,14 @@ impl Follow {
         let mut stopped_todos = None;
         // (Nothing waits any more: its process is gone.)
         set_waiting(&self.id, None);
+        // Its words whole (agents/words.rs): a long report's start in
+        // agents.json, all of it in its own file.
+        let kept = (!text.is_empty()).then(|| super::words::keep(&self.id, n, &text));
         let agent = store::update(&self.id, |j| {
             j.status = status;
             j.ended_ts = now;
-            if !text.is_empty() {
-                j.text = text.clone();
+            if let Some(k) = &kept {
+                j.text = k.text.clone();
             }
             j.error = error.clone();
             j.plan = plan;
@@ -2859,8 +2862,10 @@ impl Follow {
             if let Some(t) = j.turn_mut(n) {
                 t.status = status;
                 t.ended_ts = now;
-                if !text.is_empty() {
-                    t.text = super::steps::clip(&text, store::TURN_TEXT_MAX);
+                if let Some(k) = &kept {
+                    t.text = k.text.clone();
+                    t.words = k.chars;
+                    t.words_cut = k.cut;
                 }
                 t.error = error.clone();
                 t.plan = plan;

@@ -179,6 +179,9 @@ fn run_for(slot: &Slot, id: &str, turn: &Call, name: &str, args: Value, wait: Du
         web_seen: outside,
         outside: what,
         live: Some(Live { sink: &sink, beside: None }),
+        // (Its words in parts of `agents::SESSION_WORDS` characters: Claude
+        // Code cuts a tool's result past ~25,000 tokens.)
+        room: None,
     };
     // Run as the tool loop runs it; the turn ending (a Stop, a newer
     // question) ends a call still waiting for the person.
