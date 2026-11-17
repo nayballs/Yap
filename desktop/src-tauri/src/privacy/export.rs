@@ -781,7 +781,8 @@ fn inputs(audio: bool) -> Inputs {
         skills: serde_json::to_value(crate::chat::skills::own()).unwrap_or(Value::Null),
         routines: Some(crate::chat::routines::snapshot()).filter(|r| !r.routines.is_empty() || !r.runs.is_empty()).and_then(|r| serde_json::to_value(r).ok()),
         memory: crate::memory::items(),
-        agents: json!({ "agents": crate::agents::store::list() }),
+        // (Each turn's words whole: agents/words.rs.)
+        agents: json!({ "agents": crate::agents::store::list().into_iter().map(crate::agents::words::whole).collect::<Vec<_>>() }),
         workspaces: serde_json::to_value(crate::agents::workspaces::list()).unwrap_or(Value::Null),
         code_chat_choices: crate::agents::menu::export(),
         agent_logs: crate::agents::store::list()

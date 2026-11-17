@@ -22,8 +22,11 @@ pub struct AgentWithLog {
 
 /// An agent as the page reads it: `active` when the runner has it now (so a
 /// row whose record says it's at work, but that nothing runs, can be moved
-/// to Finished), and the background work its turn waits for (`waiting`).
-fn as_read(mut agent: Agent) -> Agent {
+/// to Finished), the background work its turn waits for (`waiting`), and
+/// every turn's words whole (17 Nov 2026, `words::whole`: a long report's
+/// Open shows all of it).
+fn as_read(agent: Agent) -> Agent {
+    let mut agent = super::words::whole(agent);
     agent.active = runner::active(&agent.id);
     agent.waiting = runner::waiting(&agent.id);
     agent
@@ -32,7 +35,8 @@ fn as_read(mut agent: Agent) -> Agent {
 /// Every agent, newest first.
 #[tauri::command]
 pub async fn agent_list() -> Vec<Agent> {
-    store::list().into_iter().map(as_read).collect()
+    // (Off the async runtime: a long report's words are read from its file.)
+    tauri::async_runtime::spawn_blocking(|| store::list().into_iter().map(as_read).collect()).await.unwrap_or_default()
 }
 
 /// An agent and its log.

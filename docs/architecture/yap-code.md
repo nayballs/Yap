@@ -1259,7 +1259,8 @@ carrying on with its context; so are agents now.
 ### The tools
 
 `chat/tools/agents.rs`: `start_agent` (folder?, brief, title?, fresh?, model?,
-effort?, sizing?, read_only?, mode?), `agent_status` (id or folder; none: this chat's latest),
+effort?, sizing?, read_only?, mode?), `agent_status` (id or folder; none: this chat's latest;
+turn?, offset?: reading its words on, [An agent's words, whole](#an-agents-words-whole)),
 `message_agent` (id or folder, text, title?, mode?, model?, effort?;
 `read_only` and `sizing` taken but not listed: the schemas are in every chat
 with agents, an 8K model's room too) and `stop_agent` (id or folder).
@@ -2981,13 +2982,78 @@ failed, or done with a question, with that turn's facts
   empty); search by meaning's passages call it the agent's ("Agent", never
   "You"). An older Yap drops `kind` on its save, and the marker then reads as
   the person's.
-- **The answer**: Chat's model, no tools, the last 10 messages and the rule:
-  one to three short sentences, what it changed, what it couldn't do, never
+- **The answer**: Chat's model, no tools, the rule and the report — the
+  agent's words as much as three quarters of the call's room holds (whole on
+  a big model; far more of them than the marker on a small one,
+  `report_messages`) — after the latest of the 10 messages before it that
+  fit: one to three short sentences, what it changed, what it couldn't do, never
   a word of backups or an Undo button (there are none: the person can ask);
   a plan summed up with "go ahead?" (a
   plan the person allowed: that it's building from it, no question); its
-  question put to the person. The model failing: the agent's own summary, as it
-  is.
+  question put to the person; words that go on past what it has, not
+  guessed. The model failing: the agent's own summary, whole.
+
+### An agent's words, whole
+
+17 Nov 2026 (`agents/words.rs`), reported by a Claude in one of the
+maintainer's chats: an agent's long report reached it cut, "…" where it
+stopped, and its last section ("What I couldn't do") never arrived — with
+no way to read the rest. Yap cut a turn's words in four places: 8,000
+characters as it saved them (`TURN_TEXT_MAX`: only Claude Code's own session
+kept the rest), 3,000 in the report's marker (one request; `words_each` of
+several), 1,500 in `agent_status`, 1,200 for the model failing — and a plan
+chat's "earlier in this chat" block cut every unseen message at 4,000,
+the report too. Now:
+
+- **Kept whole**: a turn's final words up to 200,000 characters
+  (`words::MAX`; a runaway's past that cut at a line, said in the log, the
+  report and `agent_status`); past 8,000 (`words::INLINE`) in
+  `agents/<id>/words/<n>.md`, written through `saving.rs`, and their start in
+  agents.json, ending "…" (what an older Yap reads; agents.json is written
+  whole on every change, so it stays small). A file that couldn't be
+  written: the words whole in agents.json instead. **Read whole**
+  (`words::whole`) by the page (`agent_list`, `agent_get`: the Agent panel,
+  the tab, a report card's Open show all of it), the report, `agent_status`
+  and Download your data. A turn saved before reads as it was kept —
+  whole when it's the agent's latest (agents.json kept the agent's latest
+  words whole then).
+- **The report tells it all when it fits** (`report::words_room`): half the
+  history's room a Chat turn on the chat's model has now, its fixed part
+  measured as Chat's ring measures it (`turn::ring_parts`, `budget::budget`),
+  at least ~400 tokens. Claude (200K), GPT-5 and Gemini get a long report
+  whole; the stand-in's 8K model gets its start. Several requests share the
+  room, the short ones whole (`words::shares`).
+- **When it doesn't fit, it says so and how to read the rest**: the words
+  cut at a line (else a sentence, else a word: `words::cut`, never
+  mid-word), then "[The agent's words go on: 12,345 more characters, 87% of
+  them, aren't here. Read the rest with agent_status {"id": "…", "turn": 2,
+  "offset": 1803}. Its sections there: "What I couldn't do" from offset
+  15980.]" — the rest's sections (markdown headings and all-bold lines,
+  `words::sections`, 16 at most), so a small model reads the one asked
+  about alone instead of paging to it.
+- **`agent_status` reads in parts** (`turn`, `offset`, as `browser_read`'s
+  `offset` / `next`): its words from there, as much as half of what the
+  turn's request has left holds (`Ctx::room`, the tool loop's `Room::left`,
+  less 700 tokens for the rest of the result; half, since every part stays
+  in the turn and the answer needs room; several agents share it), cut at
+  a line; a part says `words_turn`, `words_chars`, `words_from`,
+  `words_left`, `next` (the next call's arguments) and `sections_after`
+  (`{heading, offset}`), and the note "Its words go on: … To read on, call
+  agent_status again with next as its arguments, or with one of
+  sections_after's offsets…". No `turn`: the latest words; `offset` past
+  the end or a turn it never had: an error that says so. Its description
+  tells the model long words come in parts.
+- **On the Claude plan** (`integrations/claude_live/agents.rs`): the same
+  tool, its parts 50,000 characters (`agents::SESSION_WORDS`, as
+  `browser_read` there: Claude Code cuts a tool's result past ~25,000
+  tokens); the plan session's "earlier in this chat" block never cuts a
+  report (`claude_plan::sessions::earlier_block`, by `REPORT_OPENING`), and
+  cuts other messages at a word.
+- **Previews stay short**: the phone's snapshot (its `text` 3,000
+  characters, Remote Control; its turns agents.json's start) and the bar's
+  card (160), each cut at a line or a word with "…"; the log's lines (4,000,
+  `LOG_TEXT_MAX`) are what the tab replays for its steps, never where its
+  final words come from. The PC's Agent tab has the whole.
 - **Read aloud** (`agents_speak`): "voice" (the default: when that turn was asked
   out loud or dictated into Chat — its own question says, `asked_by_voice`,
   2026-11-12 — or from a phone), "always" or "never". A direct turn's own
@@ -3183,15 +3249,28 @@ saves ([config-and-data.md](./config-and-data.md)).
     out of the report). Each turn's `byCommand` (2026-11-15: the files its
     commands made or changed, `[{file, new, kept}]`, [Files a command made or
     changed](#files-a-command-made-or-changed); left out while empty; dropped
-    by an older Yap's save, the files then read as any it changed). The
-    page's copies also carry
-    `active` (the runner has it now, for Move to finished), never saved;
+    by an older Yap's save, the files then read as any it changed). Each
+    turn's `words` and `wordsCut` (17 Nov 2026, [An agent's words,
+    whole](#an-agents-words-whole): its final words' length when they're
+    whole in their own file and `text` is their start, ending "…"; they were
+    longer than Yap keeps; left out while 0 / false; dropped by an older
+    Yap's save, the turn then reads as its start). The agent's own `text` is
+    its latest turn's, as that turn keeps it. The page's copies also carry
+    `active` (the runner has it now, for Move to finished), never saved, and
+    every turn's words whole (`words::whole`);
   - `modes`: each chat's Mode (conversation id → mode);
   - `codeChats`: each Code chat's folder (conversation id → `{path, ts}`);
   - `bypassConfirmed`: the one-time OK for Bypass permissions.
 - **`agents/<id>/log.jsonl`**: every `yap-agent` event the agent sent (its steps, words, diffs and what its commands printed), one a line,
   appended as it goes (the file is never written whole again); texts over
-  4,000 characters trimmed, at most 5,000 lines. The tab replays it.
+  4,000 characters trimmed, at most 5,000 lines. The tab replays it (a
+  turn's final words in it are a preview: the tab shows the record's,
+  whole).
+- **`agents/<id>/words/<n>.md`** (17 Nov 2026, `agents/words.rs`): turn
+  `n`'s final words, whole, when they're longer than the 8,000 characters
+  agents.json keeps of them (200,000 at most); written through `saving.rs`
+  (one that couldn't be written: the whole words in agents.json instead).
+  The 7-day sweep leaves this folder: the record keeps its words.
 - **`agents/<id>/pictures/`**: the pictures its steps came back with, as
   PNGs by id, and their thumbnails in `thumbs/`
   ([A step's pictures](#a-steps-pictures)).
@@ -3206,7 +3285,8 @@ saves ([config-and-data.md](./config-and-data.md)).
   Continue picks it up.
 - **The sweep**: an agent's log and pictures go 7 days after it ended
   (`KEEP_SECS`, at start and then daily); its record stays in History, marked
-  `swept`. An `agents/<id>/` folder no agent names goes once it's as old.
+  `swept`, with its words (`words/`). An `agents/<id>/` folder no agent names
+  goes once it's as old.
 - **Delete some of your data → Yap Code** stops every agent, then deletes every agent,
   its log and pictures, each chat's Mode and Code chat folder, the Bypass OK
   and the workspaces. The files the agents changed stay as they are. **Download

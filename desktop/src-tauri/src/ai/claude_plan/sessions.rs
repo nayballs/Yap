@@ -46,6 +46,9 @@ pub const WARM_FOR: Duration = Duration::from_secs(10 * 60);
 const SWEEP_EVERY: Duration = Duration::from_secs(30);
 /// The most of one earlier message an "Earlier in this chat" block carries.
 const EARLIER_CHARS: usize = 4_000;
+/// …of an agent's report: all of it (sized when it was made), within what
+/// Yap keeps of an agent's words and the report's facts.
+const REPORT_CHARS: usize = crate::agents::words::MAX + 4_000;
 
 /// What `claude_sessions.json` keeps of one conversation's session.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -323,7 +326,11 @@ pub fn start(kept: Option<&Kept>, len: usize, cwd: &str) -> Start {
 
 /// **"Earlier in this chat"**: messages the session hasn't seen (another
 /// model's answers, or the chat before a new session), as one block before
-/// the question. `None` when there are none. Pure.
+/// the question, each cut at a word past [`EARLIER_CHARS`] — never an
+/// agent's report (17 Nov 2026: one cut here at 4,000 characters lost its
+/// last section; it was sized for the chat's model when it was made,
+/// `chat/turn/report.rs`, and says how to read any rest). `None` when there
+/// are none. Pure.
 pub fn earlier_block(history: &[(String, String)]) -> Option<String> {
     let lines: Vec<String> = history
         .iter()
@@ -331,9 +338,11 @@ pub fn earlier_block(history: &[(String, String)]) -> Option<String> {
         .map(|(role, text)| {
             let who = if role == "assistant" { "Assistant" } else { "User" };
             let text = text.trim();
-            let cut: String = text.chars().take(EARLIER_CHARS).collect();
-            let more = if cut.chars().count() < text.chars().count() { " …" } else { "" };
-            format!("{who}: {cut}{more}")
+            let most = if text.starts_with(crate::chat::turn::REPORT_OPENING) { REPORT_CHARS } else { EARLIER_CHARS };
+            let at = crate::agents::words::cut(text, most);
+            let kept = &text[..crate::agents::words::byte_at(text, at)];
+            let more = if kept.len() < text.len() { " …" } else { "" };
+            format!("{who}: {}{more}", kept.trim_end())
         })
         .collect();
     (!lines.is_empty()).then(|| {
@@ -658,7 +667,20 @@ mod tests {
         let b = earlier_block(&[("user".into(), "What's on today?".into()), ("assistant".into(), "Two meetings.".into()), ("user".into(), long)]).unwrap();
         assert!(b.starts_with("<earlier_in_this_chat>") && b.ends_with("</earlier_in_this_chat>"));
         assert!(b.contains("User: What's on today?\n\nAssistant: Two meetings."));
-        assert!(b.contains(" …\n</earlier_in_this_chat>"));
+        assert!(b.contains("word …\n</earlier_in_this_chat>"), "cut at a word");
         assert!(b.chars().count() < EARLIER_CHARS + 600);
+        // An agent's report goes whole (17 Nov 2026: cut here, a plan chat
+        // never saw its last section).
+        let mut report = String::from("Report from the agent you started (not from the person): The agent in garden-planner: it's done.\nIts own words: ");
+        for i in 0..400 {
+            report.push_str(&format!("- Step {i}: bed {i} lined up with the path.\n"));
+        }
+        report.push_str("## What I couldn't do\nThe greenhouse sensor (PELICAN) didn't answer.");
+        let b = earlier_block(&[("user".into(), report.clone()), ("assistant".into(), "Done: the beds are lined up.".into())]).unwrap();
+        assert!(report.chars().count() > EARLIER_CHARS * 3);
+        assert!(b.contains("The greenhouse sensor (PELICAN) didn't answer.\n\nAssistant: Done"));
+        // Unseen, as the person's next question finds it.
+        let untold = format!("{}{}", crate::chat::turn::AGENT_REPORT_UNTOLD_PREFIX, &report[crate::chat::turn::AGENT_REPORT_PREFIX.len()..]);
+        assert!(earlier_block(&[("user".into(), untold)]).unwrap().contains("PELICAN"));
     }
 }

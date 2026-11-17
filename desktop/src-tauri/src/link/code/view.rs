@@ -116,15 +116,18 @@ fn newest(lines: Vec<(u64, Value)>, most: usize, room: usize) -> (Vec<Logged>, b
 const EVENTS_ROOM: usize = wire::MAX_CODE_FRAME - 8 * 1024;
 
 /// **An agent's snapshot** (`agent_open`): its record (its words trimmed to
-/// fit), its last [`wire::SNAPSHOT_EVENTS`] events (each with its log line),
-/// stripped, within a frame; whether older ones were left out. Pure.
+/// fit, at a line or a word, "…": the phone's is a preview — each turn's
+/// words as agents.json keeps them, their start when they're long, and the
+/// PC's Agent panel has them whole), its last [`wire::SNAPSHOT_EVENTS`]
+/// events (each with its log line), stripped, within a frame; whether older
+/// ones were left out. Pure.
 pub fn snapshot(agent: &Agent, lines: Vec<(u64, Value)>) -> (Value, Vec<Logged>, bool) {
     let mut record = serde_json::to_value(agent).unwrap_or(Value::Null);
     if let Some(o) = record.as_object_mut() {
         for key in ["text", "brief"] {
             if let Some(Value::String(s)) = o.get_mut(key) {
                 if s.len() > 3_000 {
-                    *s = crate::agents::steps::clip(s, 3_000);
+                    *s = crate::agents::words::preview(s, 3_000);
                 }
             }
         }
@@ -284,6 +287,10 @@ mod tests {
         // A long brief is trimmed in the record.
         let (record, _, _) = snapshot(&Agent { brief: "b".repeat(5_000), ..agent() }, vec![]);
         assert!(record["brief"].as_str().unwrap().chars().count() <= 3_000);
+        // Its words: a preview, cut at a word ("…"), never mid-word.
+        let (record, _, _) = snapshot(&Agent { text: "The beds are lined up. ".repeat(200), ..agent() }, vec![]);
+        let text = record["text"].as_str().unwrap();
+        assert!(text.chars().count() <= 3_000 && text.ends_with("up.…"), "{}", &text[text.len() - 20..]);
     }
 
     #[test]
