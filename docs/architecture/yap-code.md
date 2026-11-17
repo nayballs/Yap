@@ -1016,6 +1016,19 @@ unknown name, the picker; "+1 folder" — its card, the summary; Search
 commands; a Code chat that doesn't work directly — `--add-dir` on its plan
 session). Light and dark shots.
 
+**Tried for real** (17 Nov 2026, Yap Lab on Opus and Haiku, the
+maintainer's own Claude Code 2.1.296): a Code chat that read the sandbox's
+files, then `/compact Keep the code word` — 75k tokens down to 4k in 14 s
+on Opus (3.6k in 3 s on Haiku), the code word still known after; then
+`/clear` and the same question: "unknown", the divider between; `/model
+haiku` from Opus — the next turn's init said `claude-haiku-5-5` (its effort
+kept, Medium); "+1 folder" and its card; Search commands for "review" (by
+name and line). What it found and was fixed the same day: a run's init
+named the commands with no lines (its `commands_changed` doesn't always come
+in a run), so a workspace's menu stayed bare for a day — a mostly bare
+list is now looked at again at the next menu (`menu::bare`); and the
+"Compacted" line never went away.
+
 ## Dev servers
 
 A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 Nov 2026; the maintainer, on the Claude Code app's Dev servers menu in its browser pane: "Can we add this to Yap, please? And an ability to do this"). Built from Anthropic's public docs for the app ("Configure preview servers") and the preview tools as Claude Code's own session is given them, never from the app's files (Anthropic's terms forbid taking it apart).
