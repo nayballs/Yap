@@ -47,6 +47,78 @@
 .code-edge-label:hover {
   border-color: var(--yap-code);
 }
+/* The label and "+1 folder" (17 Nov 2026) side by side on the edge: the row sits where the label did. */
+.code-edge-row {
+  position: absolute;
+  top: 0;
+  left: 14px;
+  z-index: 1;
+  max-width: calc(100% - 28px);
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.code-edge-row .code-edge-label {
+  position: static;
+  max-width: none;
+  min-width: 0;
+  transform: none;
+}
+.code-edge-more {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+}
+.code-edge-folders {
+  color: var(--yap-muted);
+  font-weight: 600;
+}
+/* Its card: the folders, on hover or keyboard focus. */
+.code-edge-card {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  width: max-content;
+  max-width: 360px;
+  padding: 8px 10px;
+  border: 1px solid var(--yap-border);
+  border-radius: var(--yap-r-lg);
+  background: var(--yap-s2);
+  box-shadow: var(--yap-shadow-menu);
+  color: var(--yap-fg);
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.code-edge-more:hover .code-edge-card,
+.code-edge-folders:focus-visible + .code-edge-card {
+  display: flex;
+}
+.code-edge-card .cec-head,
+.code-edge-card .cec-foot {
+  color: var(--yap-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.code-edge-card .cec-row {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.code-edge-card .cec-path {
+  overflow: hidden;
+  color: var(--yap-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.code-edge-card .cec-row.gone b {
+  color: var(--yap-muted);
+}
 .code-edge-label:focus-visible {
   outline: none;
   box-shadow: var(--yap-focus);

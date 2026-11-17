@@ -300,6 +300,10 @@ pub fn rewind_for_edit(conversation: u64, index: usize, files: bool) -> Result<c
 /// [`rewind`]; `keep_shots`: the message's own screenshots stay. What it did, and the message.
 fn rewind_as(conversation: u64, index: usize, files: bool, keep_shots: bool) -> Result<(Rewound, crate::chat::chats::ChatMessage), String> {
     let (agent, turn) = turn_at(conversation, index)?;
+    // (Above a /clear: Claude started afresh after it, and that session isn't the chat's any more.)
+    if super::menu::cleared(conversation, &agent.id) {
+        return Err("Rewind isn't available above a /clear: Claude started afresh after it. Fork from here still works.".into());
+    }
     if agent.status.live() || runner::queue_state(conversation) != "idle" {
         return Err("Claude is working: rewind once it's done, or stop it first.".into());
     }

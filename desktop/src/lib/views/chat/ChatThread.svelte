@@ -167,7 +167,11 @@
    * `chat`: the view's state; `code`: its Code chats (codeChats.svelte.js);
    * `onopensettings(section)`: ControlPanel's Settings.
    */
-  let { chat, code = null, onopensettings = null } = $props();
+  let { chat, code = null, codeMenu = null, onopensettings = null } = $props();
+  // **A Code chat's /clears** (agents/slash.rs, 17 Nov 2026): a divider above the message each starts at — Claude
+  // started afresh there; everything above stays for the person, unseen by Claude.
+  const clearAt = $derived(new Set(code?.current ? (codeMenu?.clears ?? []).map((c) => c.at) : []));
+  const lastClear = $derived(Math.max(0, ...clearAt));
 
   // The width a question's screenshots may take: a bubble's (78 % of the
   // messages' column). Settled a moment after a resize, so a window being
@@ -291,7 +295,9 @@
     const t = messageTurn(agents.list, chat.activeId, m.id);
     // A message no turn of Claude's started (yet): Copy, Rewind and Fork once its turn is known — the same row.
     if (!t) return { code: true };
-    return { code: true, rewind: t.rewind, fork: t.fork, onrewind: () => askRewind(m, t.files), onfork: () => chat.forkAt(m) };
+    // (Above a /clear: Claude started afresh after it — Fork from here still works.)
+    const above = lastClear > 0 && chat.messages.indexOf(m) < lastClear;
+    return { code: true, rewind: above ? 'Unavailable above a /clear' : t.rewind, fork: t.fork, onrewind: () => askRewind(m, t.files), onfork: () => chat.forkAt(m) };
   }
 
   // **Under an answer** (16 Nov 2026, the Claude app's row; 👍 / 👎 and ↻ Retry taken out): Fork from here — a new
@@ -420,6 +426,14 @@
               <span class="rule"></span>
               <span class="stext">{SUMMARY_DIVIDER} ·</span>
               <button type="button" class="showsum" bind:this={summaryBtn} onclick={() => (chat.showingSummary = true)}>Show summary</button>
+              <span class="rule"></span>
+            </div>
+          {/if}
+          {#if clearAt.has(i)}
+            <!-- /clear (agents/slash.rs): Claude starts afresh from here; what's above stays, unseen by it. -->
+            <div class="cleareddiv" role="separator" aria-label="Context cleared" title="Claude started afresh here: it doesn't see the messages above, which stay here for you." data-testid="chat-cleared">
+              <span class="rule"></span>
+              <span class="ctitle">Context cleared · Claude doesn't see what's above</span>
               <span class="rule"></span>
             </div>
           {/if}
@@ -577,6 +591,14 @@
             {/if}
           {/if}
         {/each}
+        {#if clearAt.has(chat.messages.length) && chat.messages.length}
+          <!-- Just cleared: the divider at the thread's foot, where the next message will go. -->
+          <div class="cleareddiv" role="separator" aria-label="Context cleared" title="Claude starts afresh from your next message: it won't see the messages above, which stay here for you." data-testid="chat-cleared">
+            <span class="rule"></span>
+            <span class="ctitle">Context cleared · Claude doesn't see what's above</span>
+            <span class="rule"></span>
+          </div>
+        {/if}
         {#if asks.length || answeredRemote.length}
           <!-- A running agent of this chat asks to take a step: Allow once / Deny
                (and the ones a paired phone answered, closed with who). -->
@@ -713,6 +735,28 @@
     margin-right: 4px;
   }
   .chapterdiv .ctitle {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* A /clear: quieter than a chapter, the same rules. */
+  .cleareddiv {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 16px 0 6px;
+    color: var(--yap-muted);
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+  .cleareddiv .rule {
+    flex: 1 1 16px;
+    height: 1px;
+    background: var(--yap-border-subtle);
+  }
+  .cleareddiv .ctitle {
     flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;

@@ -354,13 +354,14 @@ test('"/" at the start of the box opens the same commands: typing narrows them, 
   await expect(list).toBeVisible();
   await box(main).press('Escape');
   await expect(list).toHaveCount(0);
-  // A command typed in full goes as typed: straight to its session, never one of Yap's Skills.
+  // A command typed in full goes as typed: straight to its session, never one of Yap's Skills. (/clear, /compact and
+  // /model are Yap's own to do: code-commands.spec.js.)
   await box(main).fill('');
-  await box(main).pressSequentially('/compact');
+  await box(main).pressSequentially('/tidy-beds');
   await box(main).press('Enter');
   await expect.poll(() => argsSeen().length, { timeout: 20_000 }).toBe(1);
   const said = (await yap.invoke('chat_get', { id: (await agents(yap))[0].conversation })).messages[0].text;
-  expect(said).toBe('/compact');
+  expect(said).toBe('/tidy-beds');
   await theme(yap, main, 'dark');
   await box(main).click();
   await box(main).pressSequentially('/');

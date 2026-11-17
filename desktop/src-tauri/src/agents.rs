@@ -58,6 +58,9 @@
 //!   folders (`--add-dir`) and servers off (`--disallowedTools`).
 //! - [`plugins`]: Claude Code's installed plugins, switched on or off with
 //!   its own `claude plugin` commands (Settings → Yap Code → Plugins).
+//! - [`slash`]: a Code chat's own `/clear` (its next message starts afresh,
+//!   the thread kept under a divider) and `/compact` (Claude Code's own
+//!   compaction of its session, run headless).
 //!
 //! Chat's side: `chat/tools/agents.rs` (`start_agent`, `agent_status`,
 //! `message_agent`, `stop_agent`), `chat/turn/report.rs` (the report turn).
@@ -88,6 +91,7 @@ pub mod run_block;
 pub mod runner;
 pub mod servers;
 pub mod sizing;
+pub mod slash;
 pub mod steps;
 pub mod store;
 pub mod usage;

@@ -997,8 +997,9 @@
   `%APPDATA%/yap/code_menu.json` (`agents/menu.rs`, 17 Nov 2026) — a Code chat's +
   menu: per workspace, what Claude Code offers there (its slash commands and
   skills with their lines, its MCP servers, its plugins; from a run's init or a
-  look), and per chat the folders it added (`--add-dir`) and the servers it
-  switched off. Files of
+  look), and per chat the folders it added (`--add-dir`), the servers it
+  switched off and its `/clear`s (where the thread's divider goes, the agents
+  set aside: `agents/slash.rs`). Files of
   their own, never fields in chats.json (an older Yap drops fields it doesn't
   know). All of them go with **Yap Code** in Delete some of your data (running agents
   stopped first; the files the agents changed stay) and come in Download your

@@ -2636,6 +2636,13 @@ impl Follow {
                 }
             }
         });
+        // **How full a Code chat's own session is** (17 Nov 2026): the plan's ring says it for the chat, as for a
+        // plan chat's turn — a /compact (`slash.rs`) sets it smaller.
+        if self.direct {
+            if let (Some(c), Some(u)) = (agent.as_ref().and_then(|a| a.conversation), usage.as_ref().filter(|u| u.window > 0 && u.context > 0)) {
+                crate::ai::claude_plan::usage::note_context_now(c, crate::ai::claude_plan::usage::Fill { used: u.context, window: u.window, known: true });
+            }
+        }
         // Its words so far: this result's after any before it.
         if !text.is_empty() && self.said.last() != Some(&text) {
             // A turn of Claude Code's own on what its background work came back with: the rest of the answer, which

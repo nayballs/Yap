@@ -54,7 +54,10 @@
   import { picked, removePicked } from '../../stores/pickedElements.svelte.js';
   import ConnectorLogo from '../../settings/connectors/ConnectorLogo.svelte';
   // A Code chat's + menu and "/" list (17 Nov 2026, the Claude Code app's: agents/menu.rs).
-  import { CodeMenu, CommandPicker, commandGroups, pluginRows, serverRows, SERVER_STATUS } from './codeMenu.svelte.js';
+  import { CodeMenu, CommandPicker, commandGroups, matchCommands, pluginRows, serverRows, SERVER_STATUS, codeCommand, modelFor, roughTokens } from './codeMenu.svelte.js';
+  import { loadCatalog, modelsFor } from '../../stores/modelCatalog.svelte.js';
+  import { effortLabel, effortNow } from '../../core/effort.js';
+  import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import CommandMenu from './CommandMenu.svelte';
   // Toasts never cover the box (ui/toastClear.js).
   import { keepClear } from '../../ui/toastClear.js';
@@ -64,7 +67,7 @@
    * Settings; `onopenusage()`: Insights' AI usage card (the context ring's
    * See all). `code`: the view's Code chats (codeChats.svelte.js).
    */
-  let { chat, code = null, onopensettings = null, onopenusage = null } = $props();
+  let { chat, code = null, codeMenu: givenMenu = null, onopensettings = null, onopenusage = null } = $props();
 
   // **■ while the Code chat's own session works** (12 Nov 2026, as Claude
   // Code's own app has Stop where Send was): with nothing typed, the button
@@ -98,7 +101,7 @@
     // (Enter that confirms an IME's composition: the IME's.)
     if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229 || e.shiftKey) return;
     e.preventDefault();
-    chat.send(e.ctrlKey || e.metaKey ? { later: true } : undefined);
+    submit(e.ctrlKey || e.metaKey ? { later: true } : undefined);
   }
   /** One line's height (its padding in): an empty box never measures its placeholder. */
   const ONE_LINE = 32;
@@ -141,12 +144,149 @@
   // **A Code chat's + menu and "/" list** (17 Nov 2026, the Claude Code app's; codeMenu.svelte.js, agents/menu.rs):
   // what its Claude Code offers in the workspace (slash commands and skills, MCP servers, plugins) and the chat's own
   // folders and servers off. "/" at the start of the box opens the commands; a pick puts `/name ` in the box.
-  const codeMenu = new CodeMenu();
+  // (ChatView's, shared with the thread's /clear dividers and the edge's "+N folders"; its own without one.)
+  // (Given once, at the start: ChatView's lives as long as this box.)
+  const given = untrack(() => givenMenu);
+  const ownMenu = !given;
+  const codeMenu = given ?? new CodeMenu();
   const commands = new CommandPicker(codeMenu);
-  $effect(() => () => codeMenu.destroy());
+  $effect(() => () => {
+    if (ownMenu) codeMenu.destroy();
+  });
   $effect(() => {
     codeMenu.follow(chat.activeId ?? null, code?.current?.path ?? null);
   });
+
+  // **/clear, /compact and /model are Yap's to do** in a Code chat (17 Nov 2026, the Claude Code app's; codeMenu.svelte.js
+  // `codeCommand`, agents/slash.rs), picked from the menu or typed — in a Code chat that works directly; anywhere else,
+  // and every other "/", the words go as typed. /model switches the chat's model chip, effort kept; with no name, the
+  // picker opens.
+  /** Enter or Send. */
+  function submit(opts) {
+    const cmd = code?.current && !chat.attached.length && !chat.files.length && !chat.quote && !chat.sending ? codeCommand(chat.input) : null;
+    if (!cmd) return chat.send(opts);
+    if (cmd.name === 'model') return modelCommand(cmd.arg);
+    if (cmd.name === 'clear') return clearCommand(opts);
+    return compactCommand(cmd.arg, opts);
+  }
+  /** /model [name]: the chat's model chip switched, as picking it there, its effort kept. */
+  async function modelCommand(arg) {
+    if (!arg) {
+      chat.input = '';
+      chipRef?.openPicker?.();
+      return;
+    }
+    let status = null;
+    try {
+      status = await invoke('ai_model_status', { scope: 'chat' });
+    } catch {
+      /* said below */
+    }
+    const cur = status?.ready ? status.model : null;
+    if (!cur) {
+      toast({ title: 'No model to switch from', description: 'Pick one with /model, or in the model chip.', variant: 'destructive' });
+      return;
+    }
+    await loadCatalog();
+    const list = modelsFor(cur.provider, cur.id);
+    const row = modelFor([...(list.items ?? []), ...(list.more ?? [])], arg);
+    if (!row) {
+      toast({ title: `No model called "${arg}" on ${providerName(cur)}`, description: 'Type /model on its own to pick one.', variant: 'destructive' });
+      return;
+    }
+    chat.input = '';
+    if (row.value === cur.id) {
+      toast({ title: `${modelName(cur)} already` });
+      return;
+    }
+    const effortBefore = effortNow(status.effort);
+    try {
+      let s = await invoke('chat_set_model', { provider: cur.provider, model: row.value, baseUrl: null, file: null });
+      const now = s?.ready ? s.model : null;
+      // (Its effort as it was: the level kept where the new model has it.)
+      if (effortBefore && now && (s.effort?.levels ?? []).includes(effortBefore) && effortNow(s.effort) !== effortBefore) {
+        s = await invoke('chat_set_effort', { provider: now.provider, model: now.id, level: effortBefore });
+      }
+      chipRef?.refresh?.();
+      const kept = effortNow(s?.effort);
+      toast({ title: `${modelName(now ?? { provider: cur.provider, id: row.value })} now`, description: kept ? `Effort ${effortLabel(kept)}.` : undefined });
+    } catch (e) {
+      chat.input = `/model ${arg}`;
+      toast({ title: "Couldn't switch the model", description: String(e?.message ?? e), variant: 'destructive' });
+    }
+  }
+  /** /clear asked about while Claude works (a turn running, or an answer being written). */
+  let clearAsk = $state(false);
+  let clearBusy = $state(false);
+  function clearCommand(opts) {
+    if (chat.activeId == null || !chat.messages.length) {
+      chat.input = '';
+      toast({ title: "There's nothing to clear yet" });
+      return;
+    }
+    if (working) {
+      clearAsk = true;
+      return;
+    }
+    doClear(opts);
+  }
+  async function doClear(opts) {
+    const conv = chat.activeId;
+    clearBusy = true;
+    try {
+      // Asked first while it worked: that turn stopped, and waited for (10 s at most).
+      const w = workingDirectly(agents.list, conv);
+      if (w) {
+        await invoke('agent_stop', { id: w.id });
+        for (let i = 0; i < 40 && workingDirectly(agents.list, conv); i++) await new Promise((r) => setTimeout(r, 250));
+      }
+      const r = await invoke('code_chat_clear', { conversation: conv });
+      clearAsk = false;
+      // (Not a Code chat that works directly: the words go as typed.)
+      if (!r?.handled) return chat.send(opts);
+      chat.input = '';
+      toast({ title: 'Context cleared', description: "Claude starts afresh from your next message. What's above the line stays here for you, but Claude no longer sees it." });
+    } catch (e) {
+      clearAsk = false;
+      toast({ title: "Couldn't clear the conversation", description: String(e?.message ?? e), variant: 'destructive' });
+    } finally {
+      clearBusy = false;
+    }
+  }
+  /** /compact running or just done: a quiet line over the box (`{conv, text, done}`). */
+  let compactLine = $state(null);
+  async function compactCommand(arg, opts) {
+    const conv = chat.activeId;
+    if (conv == null || !chat.messages.length) {
+      chat.input = '';
+      toast({ title: "There's nothing to compact yet" });
+      return;
+    }
+    if (working) {
+      toast({ title: 'Claude is working', description: 'Compact once this turn is done.' });
+      return;
+    }
+    const words = chat.input;
+    chat.input = '';
+    compactLine = { conv, text: 'Compacting the conversation… Claude Code is summarising it to free up context' };
+    try {
+      const r = await invoke('code_chat_compact', { conversation: conv, instructions: arg || null });
+      if (!r?.handled) {
+        compactLine = null;
+        chat.input = words;
+        return chat.send(opts);
+      }
+      const line = { conv, done: true, text: `Compacted: about ${roughTokens(r.before)} tokens of context down to ${roughTokens(r.after)}` };
+      compactLine = line;
+      setTimeout(() => {
+        if (compactLine === line) compactLine = null;
+      }, 10_000);
+    } catch (e) {
+      compactLine = null;
+      chat.input = words;
+      toast({ title: "Couldn't compact the conversation", description: String(e?.message ?? e), variant: 'destructive' });
+    }
+  }
   $effect(() => {
     commands.setOn(!!code?.current);
     commands.update(chat.input);
@@ -320,7 +460,9 @@
   });
   const serverList = $derived(serverRows(codeMenu.offered, codeMenu.serversOff, pluginQuery));
   const pluginList = $derived(pluginRows(codeMenu.offered, pluginQuery));
-  const commandList = $derived(commandGroups(codeMenu.commands));
+  /** Slash commands ›'s search box: by name (an alias too) and line, best first; empty, the groups. */
+  let commandQuery = $state('');
+  const commandList = $derived(commandQuery.trim() ? [{ label: '', items: matchCommands(codeMenu.commands, commandQuery.trim()), start: 0 }].filter((g) => g.items.length) : commandGroups(codeMenu.commands));
   /** Said where a list is empty: being looked at, Claude Code not there, or nothing yet. */
   const offeredNote = $derived(
     !codeMenu.loaded || codeMenu.looking ? 'Asking Claude Code what it offers here…' : codeMenu.error || (codeMenu.offered ? '' : "Claude Code's lists show here once it has answered in this workspace.")
@@ -400,6 +542,7 @@
       sub = null;
       sub2 = null;
       pluginQuery = '';
+      commandQuery = '';
       return;
     }
     untrack(() => {
@@ -739,8 +882,15 @@
       </button>
     </div>
   {/if}
+  {#if compactLine && compactLine.conv === chat.activeId}
+    <!-- /compact (agents/slash.rs): quiet while Claude Code summarises the session, then what it came to. -->
+    <div class="cmdline" class:done={compactLine.done} aria-live="polite" data-testid="code-compact-line">
+      {#if !compactLine.done}<span class="cmddots" aria-hidden="true"><span></span><span></span><span></span></span>{/if}
+      <span>{compactLine.text}</span>
+    </div>
+  {/if}
   <div class="inputbar">
-    <CodeEdge {code} conversation={chat.activeId} />
+    <CodeEdge {code} conversation={chat.activeId} folders={codeMenu.folders} />
     <div class="pluswrap" bind:this={plusEl}>
       <button
         class="plusbtn"
@@ -858,7 +1008,7 @@
       <button
         class="sendbtn"
         disabled={chat.sending || chat.visionBlocked || chat.inputTooLong}
-        onclick={chat.send}
+        onclick={() => submit()}
         aria-label="Send"
         title={chat.visionBlocked ? "This model can't read images" : chat.inputTooLong ? 'Too long for this model' : working ? 'Send (Enter) · Ctrl+Enter queues it for later' : 'Send (Enter)'}
       >
@@ -881,6 +1031,16 @@
     <ContextRing conversationId={chat.activeId} stamp={chat.contextStamp} onnewchat={() => chat.newChat()} onseeall={() => onopenusage?.()} />
   </div>
 </div>
+
+<ConfirmDialog
+  bind:open={clearAsk}
+  title="Clear the conversation?"
+  body="Claude is working on a turn now: clearing stops it, and Claude starts afresh from your next message. The messages stay in the thread above a line, but Claude no longer sees them."
+  confirmLabel="Stop and clear"
+  busyLabel="Clearing…"
+  busy={clearBusy}
+  onconfirm={() => doClear()}
+/>
 
 {#if StylesDialog && stylesOpen}
   <StylesDialog onclose={stylesClosed} onpick={(id) => style.pick(id)} />
@@ -1137,17 +1297,35 @@
           {@render chev()}
         </button>
         {#if sub === 'commands'}
-          <div class="pluspop subpop skillsub" role="menu" aria-label="Slash commands" data-testid="code-plus-commands-menu">
-            {#each commandList as g (g.label)}
-              <div class="mhead" role="presentation">{g.label}</div>
-              {#each g.items as c (c.name)}
-                <button class="mrow" role="menuitem" data-mi="sub" title={c.description || c.name} onclick={() => pickCommand(c)}>
-                  <span class="mlabel"><span class="mcmd">/{c.name}</span> <span class="mquiet">{c.description}</span></span>
-                </button>
+          <div class="pluspop subpop skillsub searchsub" role="menu" aria-label="Slash commands" data-testid="code-plus-commands-menu">
+            <!-- Search commands (17 Nov 2026, as Plugins has): by name and line; ↓ to the list, Enter the first. -->
+            <input
+              class="msearch"
+              type="search"
+              data-mi="sub"
+              placeholder="Search commands"
+              aria-label="Search commands"
+              bind:value={commandQuery}
+              onkeydown={(e) => {
+                if (e.key === 'Enter' && !e.isComposing) {
+                  e.preventDefault();
+                  const first = commandList.find((g) => g.items.length)?.items[0];
+                  if (first) pickCommand(first);
+                }
+              }}
+            />
+            <div class="mscroll">
+              {#each commandList as g, gi (g.label || gi)}
+                {#if g.label}<div class="mhead" role="presentation">{g.label}</div>{/if}
+                {#each g.items as c (c.name)}
+                  <button class="mrow" role="menuitem" data-mi="sub" title={c.description || c.name} onclick={() => pickCommand(c)}>
+                    <span class="mlabel"><span class="mcmd">/{c.name}</span> <span class="mquiet">{c.description}</span></span>
+                  </button>
+                {/each}
+              {:else}
+                <div class="mhead mnote" role="status">{commandQuery ? `No command holds "${commandQuery}"` : offeredNote || 'Claude Code offers no commands here.'}</div>
               {/each}
-            {:else}
-              <div class="mhead mnote" role="status">{offeredNote || 'Claude Code offers no commands here.'}</div>
-            {/each}
+            </div>
           </div>
         {/if}
       </div>
@@ -1383,6 +1561,10 @@
      scroller so it isn't cut). A row with a second line: a plugin's "12 skills" or its one line. */
   .plainmenu .subpop.pluginsub {
     width: 272px;
+  }
+  /* (Slash commands › too, since 17 Nov 2026: a search box over a list that scrolls.) */
+  .plainmenu .subpop.pluginsub,
+  .plainmenu .subpop.searchsub {
     max-height: none;
     overflow: visible;
   }
@@ -1929,6 +2111,51 @@
     margin-top: 6px;
     font-size: 11.5px;
     color: var(--yap-muted);
+  }
+  /* /compact's quiet line over the box: three soft dots while it runs. */
+  .cmdline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    font-size: 12px;
+    color: var(--yap-muted);
+  }
+  .cmdline.done {
+    color: var(--yap-fg-80);
+  }
+  .cmddots {
+    display: inline-flex;
+    gap: 3px;
+  }
+  .cmddots span {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: cmddot 1.2s ease-in-out infinite;
+  }
+  .cmddots span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .cmddots span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  @keyframes cmddot {
+    0%,
+    80%,
+    100% {
+      opacity: 0.25;
+    }
+    40% {
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cmddots span {
+      animation: none;
+      opacity: 0.6;
+    }
   }
   /* ✕: a small round button out over the tile's corner, on hover or
      keyboard focus (always on a touch screen), as the Claude app's. */

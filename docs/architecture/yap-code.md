@@ -837,7 +837,10 @@ the right, dividers, › for a submenu, ↑ ↓ → ← Esc), in the app's order
   in full, Enter sends it as typed). The box says "Type / for commands". `@`
   stays the workspace's files. In a Code chat "/" is never one of Yap's own
   Skills (`chatState` `skillOf`): the words go to Claude Code as typed, which
-  runs them.
+  runs them — but `/clear`, `/compact` and `/model`, which are Yap's to do
+  ([below](#clear-compact-and-model-in-a-code-chat-2026-11-17)). **Search
+  commands** on top of the submenu (17 Nov 2026, as Plugins has): by name,
+  an alias or the line, best first; ↓ into the list, Enter the first.
 - **Plugins ›**: **Search plugins** (filters what's under it); the
   session's **MCP servers and connectors** (claude.ai's without "claude.ai ",
   a plugin's by its own name, its state when it isn't connected: "Needs
@@ -903,8 +906,17 @@ without them):
   `menu::adopt_new`), typed or asked out loud. A chat deleted loses them
   (`code_chat::chat_deleted`); **Fork from here** copies them
   (`rewind.rs`). Reset's "agents" takes the file too.
-- Not on the plan path that doesn't work directly (`chat/turn/plan.rs`, a
-  read-only session kept warm): the agents it sends get them.
+- **Its folders on every run of the chat** (17 Nov 2026): a Code chat that
+  works directly (its own session) and the agents sent from any Code chat,
+  and — one that doesn't, on the plan — Chat's own read-only session there
+  too (`chat/turn/plan.rs`: `--add-dir`, so `blockReadsOutsideWorkingDirectories`
+  lets them through; the folders are in the warm session's fingerprint, so
+  a change starts it again on the same kept session). Servers off don't
+  apply there: that session runs Yap's endpoint only.
+- **"+1 folder" on the box's edge** (`CodeEdge.svelte`, 17 Nov 2026) beside
+  "Code · garden-planner" once a folder is added: hovered or focused, a card
+  lists them (a gone one says so); clicked, the summary panel opens on its
+  Environment (`stores/chatSummary.svelte.js`; open already, it stays).
 
 **Settings → Yap Code → Plugins** (`settings/ClaudePlugins.svelte`,
 `agents/plugins.rs`): every installed plugin from `claude plugin list
@@ -936,6 +948,73 @@ folder added in Manual mode, Claude read a file in it with no permission
 asked, and once it was taken off in the summary panel, the same read asked
 and was refused. Plugins weren't switched in the Lab (it would change the
 person's own Claude Code).
+
+## /clear, /compact and /model in a Code chat (2026-11-17)
+
+The maintainer said yes to wiring three of Claude Code's own commands to
+Yap's actions, as the Claude Code app does. Picked from Slash commands › or
+typed, then Enter (`Composer.svelte` `submit`, `codeMenu.svelte.js`
+`codeCommand`; never with a screenshot, a file or a passage in the box).
+`/clear` and `/compact` are Yap's only in a Code chat that **works
+directly** (`agents/slash.rs`, `chat/turn.rs` `goes_to_session`): anywhere
+else Rust says it isn't its to do and the words go as typed, as does every
+other "/" ("/clear the cache" too: words for Claude).
+
+- **`/clear`** (`slash::code_chat_clear`): Claude starts afresh, as the
+  app's does. The chat's agents then are set aside in `code_menu.json`
+  (`menu::add_clear`, the chat's `clears`: `{at, ts, agents}`), so
+  `chats_agent_in` never carries them on and the next message starts a new
+  agent and session. Nothing is deleted: the thread keeps every message,
+  with **"Context cleared · Claude doesn't see what's above"** as a divider
+  above the next one (`ChatThread.svelte`, `chat-cleared`), and the toast
+  says the same. Their sessions stay on this PC: **Fork from here** above a
+  divider still works; **Rewind to here** there says "Unavailable above a
+  /clear" (`rewind.rs` refuses it too). While a turn works the page asks
+  first ("Clear the conversation?", Stop and clear: `agent_stop`, then the
+  clear once it's over); Rust refuses while anything of the chat's works.
+  The plan's ring for the chat is emptied. (Sent to Claude Code itself,
+  2.1.296 answers with `conversation_reset`, a new session's init and an
+  empty result: Yap does the same on its side with no process.) A fork
+  never copies a chat's clears.
+- **`/compact [instructions]`** (`slash::code_chat_compact`): Claude Code's
+  own compaction of the chat's session, run headless as `/context` is —
+  `claude -p "/compact …" --resume <session> --output-format stream-json
+  --verbose --model <the chat's>` in the workspace, paid as the chat is,
+  **saved into the session** (no `--no-session-persistence`). Checked on
+  2.1.296: `system/status` "compacting", `compact_result: "success"`, a new
+  init with the same session id, `compact_boundary` with `compact_metadata`
+  (`pre_tokens`, `post_tokens`, `duration_ms`, `trigger: "manual"`), the
+  summary as a synthetic message and an empty result; the next turn resumes
+  from the summary. A failure's `compact_error` (or an error result's
+  words) is said. While it runs a quiet line over the box ("Compacting the
+  conversation…", three soft dots, still with reduced motion), then
+  "Compacted: about 54k tokens of context down to 3k" for 10 seconds
+  (`code-compact-line`; `yap-code-compact` tells every window). After it the
+  chat's latest turn's context is the compacted size (the summary panel,
+  the Agent panel) and so is the plan ring's "This chat · N% of context"
+  (`claude_plan::usage::note_context_now`; a direct turn now notes its own
+  fill there too, as a plan chat's turn does). Refused while Claude works,
+  before a session, with a Rewind waiting, or while one runs. The person's
+  own hooks run, as for any compaction.
+- **`/model [name]`** (the page's): the chat's model chip switched as
+  picking it there (`chat_set_model` on the same provider), **its effort
+  kept** where the new model has that level (`chat_set_effort`), said in a
+  toast ("Claude Sonnet 5.5 now · Effort High."). The name is matched
+  against the provider's list (`modelFor`: its id in full, else the first,
+  newest first, whose id or name holds every word: "haiku", "sonnet 5",
+  "Haiku 4.5"). No such model: said, the words left in the box. `/model`
+  alone opens the model picker. Works in any Code chat (it's Chat's chip).
+
+**Tests**: `slash.rs`'s (a compaction's sizes and failure read; its
+arguments on the chat's session and model, saved), `menu/tests.rs`' (a
+clear's agents set aside, two in order, never with a fork) and
+`code-commands.spec.js` (Yap's stand-in, its `_compact`: /clear — no
+process, the divider, the next message a new session, asked first while a
+turn works; /compact — the line, Claude Code's own command on the session,
+the ring's fill, the next turn resumes; /model — switched, effort kept, an
+unknown name, the picker; "+1 folder" — its card, the summary; Search
+commands; a Code chat that doesn't work directly — `--add-dir` on its plan
+session). Light and dark shots.
 
 ## Dev servers
 
@@ -3326,7 +3405,8 @@ Rust (`desktop/src-tauri/src/`):
   view, Open in editor, the Environment) · `run_block.rs` (▶ Run) · `menu.rs`
   (a Code chat's + menu: what Claude Code offers in a workspace, the chat's
   folders and servers off; `code_menu.json`) · `plugins.rs` (Claude Code's
-  plugins listed and switched) · `commands.rs`.
+  plugins listed and switched) · `slash.rs` (a Code chat's `/clear` and
+  `/compact`) · `commands.rs`.
 - `link/code.rs` (+ `code/`) — Remote Control's side of Yap Link: the phone's
   Code messages through their gates ([link.md](./link.md)).
 - `chat/tools/agents.rs` — the four tools, for the tool loop and a plan chat.
@@ -3361,7 +3441,8 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 | `yap-agent-mode` | `{conversation, mode}` — a chat's Mode changed (the chip, or a phone) |
 | `yap-code-run` | `{id, conversation, text?, run?}`: a ▶ Run's news (`agents/run_block.rs`): `run` when it starts and ends (`{id, conversation, command, shell, ranIn, note?, state, code?, startedMs, endedMs, cut}`, state running \| done \| failed \| stopped), `text` its new output |
 | `yap-code-chat` | `{conversations, folder, removed?}` — those chats are Code chats in `folder` now (`null`: plain); `removed`: a workspace removed in Settings, its name; no conversations: the workspaces changed |
-| `yap-code-menu` | `{workspace?, conversation?}` — what Claude Code offers in that workspace was read again (a run's init, a look), or that chat's folders or servers off changed (`agents/menu.rs`) |
+| `yap-code-menu` | `{workspace?, conversation?}` — what Claude Code offers in that workspace was read again (a run's init, a look), or that chat's folders, servers off or /clears changed (`agents/menu.rs`) |
+| `yap-code-compact` | `{conversation, phase: "start"\|"done"\|"failed", before?, after?}` — a Code chat's /compact (`agents/slash.rs`) |
 
 **Chat's stream**: `{kind: "agent", agent: {id, folder, status, mode, conversation?, turn?}}`
 when a turn starts one, or carries a Code chat's agent on (`stream::Event::Agent`, an
