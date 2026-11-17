@@ -657,7 +657,13 @@ on an element that also has a `settings.css` class (`set-note`,
   a cap, Remove — its Code chats plain again, the toast says so —; **Add
   workspace…**, the folder picker; "A workspace's own Claude settings and MCP
   servers also run."; the Bypass warning on a folder with no cap once Bypass
-  is confirmed; "No workspaces yet…"; **Animate Code chats**, `agentsAnimate`,
+  is confirmed; "No workspaces yet…"; **Plugins** (2026-11-17,
+  `ClaudePlugins.svelte`, `agents/plugins.rs`, the Code chat + menu's Manage
+  plugins… lands here: each installed Claude Code plugin with its manifest's
+  line, scope and version, a switch running `claude plugin enable|disable`;
+  none for a synced or managed one; with Yap Code off, one line and Claude
+  Code isn't asked: [yap-code.md](./yap-code.md#a-code-chats--menu-2026-11-17));
+  **Animate Code chats**, `agentsAnimate`,
   yap-code.md "Code chats"); **Ask before sending an agent** (`agentsAsk`: When it
   matters, the default — a workspace agents haven't used yet, or after the chat
   read the web —, Always, Never) and **Read agent reports aloud** (`agentsSpeak`); the limits ("One agent at a time per

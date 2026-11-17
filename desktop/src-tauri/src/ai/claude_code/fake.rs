@@ -83,6 +83,19 @@
 //!   answered with this body (`control_response` / `success` / `response`:
 //!   it, as 2.1.296 answers; `claude_code/usage.rs`). `{"_usage":null}`:
 //!   refused again, as before any `_usage` (an older Claude Code).
+//! - `{"_offers":{"commands":[…],"mcpServers":[…],"dump":"<file>"}}`
+//!   (anywhere in the script): **a look** (a Code chat's + menu,
+//!   `agents/menu.rs`: started with `YAP_CLAUDE_PROBE=1`) plays nothing of
+//!   the script and answers the `initialize` control request with
+//!   `{"commands": …}` and `mcp_status` with `{"mcpServers": …}`, as 2.1.296
+//!   answers them, until stdin closes; `dump`: a line appended there with its
+//!   arguments and folder. Without `_offers`, both are refused.
+//! - `{"_plugins":{"list":[…],"state":"<file>","dump":"<file>"}}` (anywhere
+//!   in the script): **`plugin list --json`** prints `list` (or, once a switch
+//!   wrote it, `state`'s), as `claude plugin list --json` does; **`plugin
+//!   enable|disable <id> [--scope s]`** flips that plugin's `enabled` in
+//!   `state` and appends its arguments to `dump`. Without `_plugins`: an
+//!   empty list.
 //!
 //! **stdin** is read the whole time: user messages queue for `_wait_user`.
 //! **One that comes while a turn works is taken into that turn at its next
@@ -185,6 +198,14 @@ pub fn main(args: Vec<String>) -> i32 {
     if claude_args.iter().any(|a| a == "/context") {
         return context_answer(&script, claude_args);
     }
+    // `plugin list --json`, `plugin enable|disable <id>` (`_plugins`).
+    if claude_args.first().is_some_and(|a| a == "plugin" || a == "plugins") {
+        return plugin_command(&script, &claude_args[1..]);
+    }
+    // A Code chat's + menu looking at what's offered (`_offers`): no turn.
+    if std::env::var(crate::agents::menu::PROBE_VAR).is_ok_and(|v| v.trim() == "1") {
+        return offers_answer(&script, claude_args);
+    }
     // `--rewind-files <uuid>`: the session's files back to before that message, no turn.
     if let Some(at) = claude_args.iter().position(|a| a == "--rewind-files").and_then(|i| claude_args.get(i + 1)) {
         return rewind_files(claude_args, at);
@@ -267,6 +288,93 @@ fn context_answer(script: &str, args: &[String]) -> i32 {
     }
     let _ = out.flush();
     0
+}
+
+/// The script's first `key` instruction, anywhere in it.
+fn rule_of(script: &str, key: &str) -> Value {
+    script.lines().filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok()).find_map(|v| v.get(key).cloned()).unwrap_or(Value::Null)
+}
+
+/// A line appended to `file` (a spec's dump).
+fn dump_line(file: Option<&str>, line: &Value) {
+    let Some(file) = file.filter(|f| !f.is_empty()) else { return };
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+/// **A look** (`YAP_CLAUDE_PROBE=1`, a Code chat's + menu): `initialize`
+/// and `mcp_status` answered from the script's `_offers`, nothing played,
+/// until stdin closes.
+fn offers_answer(script: &str, args: &[String]) -> i32 {
+    let rule = rule_of(script, "_offers");
+    let ctx = Ctx::from_args(args).unwrap_or_default();
+    dump_line(rule.get("dump").and_then(Value::as_str), &json!({"args": args, "cwd": ctx.cwd}));
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines().map_while(Result::ok) {
+        let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { continue };
+        if v["type"] != "control_request" {
+            continue;
+        }
+        let id = v["request_id"].clone();
+        let body = match (v["request"]["subtype"].as_str(), rule.is_null()) {
+            (Some("initialize"), false) => Some(json!({"commands": rule.get("commands").cloned().unwrap_or(json!([])), "output_style": "default"})),
+            (Some("mcp_status"), false) => Some(json!({"mcpServers": rule.get("mcpServers").cloned().unwrap_or(json!([]))})),
+            _ => None,
+        };
+        let answer = match body {
+            Some(b) => json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":b}}),
+            None => json!({"type":"control_response","response":{"subtype":"error","request_id":id,"error":"fake-claude doesn't do this control request"}}),
+        };
+        if writeln!(out, "{answer}").and_then(|_| out.flush()).is_err() {
+            break;
+        }
+    }
+    0
+}
+
+/// **`plugin …`** from the script's `_plugins`: `list --json` prints the
+/// list; `enable|disable <id>` flips it in `state` and dumps its arguments.
+fn plugin_command(script: &str, args: &[String]) -> i32 {
+    let rule = rule_of(script, "_plugins");
+    let state = rule.get("state").and_then(Value::as_str).filter(|s| !s.is_empty()).map(std::path::PathBuf::from);
+    let list = || -> Vec<Value> {
+        state
+            .as_ref()
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok())
+            .unwrap_or_else(|| rule.get("list").and_then(Value::as_array).cloned().unwrap_or_default())
+    };
+    match args.first().map(String::as_str) {
+        Some("list") => {
+            println!("{}", serde_json::to_string_pretty(&Value::Array(list())).unwrap_or_else(|_| "[]".into()));
+            0
+        }
+        Some(how @ ("enable" | "disable")) => {
+            dump_line(rule.get("dump").and_then(Value::as_str), &json!({"args": args}));
+            let Some(id) = args.get(1) else {
+                eprintln!("error: missing required argument 'plugin'");
+                return 1;
+            };
+            let mut all = list();
+            let Some(p) = all.iter_mut().find(|p| p["id"].as_str() == Some(id.as_str())) else {
+                eprintln!("Plugin \"{id}\" not found");
+                return 1;
+            };
+            p["enabled"] = json!(how == "enable");
+            if let Some(f) = &state {
+                let _ = std::fs::write(f, serde_json::to_string(&all).unwrap_or_default());
+            }
+            println!("{}", json!({"ok": true, "plugin": id, "enabled": how == "enable"}));
+            0
+        }
+        _ => {
+            eprintln!("fake-claude: unknown plugin command");
+            2
+        }
+    }
 }
 
 /// What the fake was started with.
@@ -653,6 +761,8 @@ impl Player<'_> {
             }
             "_exit" => return Ok(Some(arg.as_i64().unwrap_or(0) as i32)),
             "_usage" => self.usage = Some(arg.clone()).filter(|a| !a.is_null()),
+            // (Read before anything plays: a look's answers, `plugin …`'s list.)
+            "_offers" | "_plugins" | "_context" | "_exit_if_arg" => {}
             other => eprintln!("fake-claude: unknown instruction {other}"),
         }
         Ok(None)

@@ -373,6 +373,8 @@ pub fn fork(conversation: u64, index: usize) -> Result<u64, String> {
     // The same workspace and Mode; its first turn branches the session.
     let folder = code_chat::folder_of(Some(conversation)).or_else(|| code_chat::folder_at(&agent.path));
     code_chat::set(new.id, folder.as_ref());
+    // Its + menu's folders and servers off too (menu.rs).
+    super::menu::forked(conversation, new.id);
     if let Some(mode) = store::modes_of(conversation) {
         store::set_mode(new.id, &mode);
     }

@@ -122,6 +122,8 @@ pub fn became(conversation: u64, path: &str) {
 /// reports: its agents keep no chat (`store::detach`).
 pub fn chat_deleted(conversation: u64) {
     set(conversation, None);
+    // (Nor keep its + menu's folders and servers off.)
+    super::menu::chat_deleted(conversation);
     let detached = store::detach(conversation);
     if detached > 0 {
         tracing::info!(agents = detached, "Agents: a chat deleted, its agents keep no chat");
@@ -241,6 +243,8 @@ pub async fn with_new<F: std::future::Future>(folder: Option<String>, f: F) -> F
 pub fn adopt_new(conversation: u64) -> Option<Folder> {
     let folder = new_chat_folder()?;
     set(conversation, Some(&folder));
+    // What its + menu chose before it was made (its folders, servers off: menu.rs).
+    super::menu::adopt_new(conversation, &folder.path);
     Some(folder)
 }
 

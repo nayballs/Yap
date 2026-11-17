@@ -1462,6 +1462,9 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     if read_only {
         tracing::info!(id, turn = n, "Agents: a read-only turn (its editing tools off)");
     }
+    // **Its Code chat's + menu choices** (menu.rs): the folders it may use too
+    // (`--add-dir`), the servers switched off for it (`--disallowedTools`).
+    super::menu::apply(&mut spec, agent.conversation);
     // (Read before Claude Code starts: none of its commands can have run yet.)
     let before = match scan.await {
         Ok(Ok(b)) => Some(b),
@@ -2324,6 +2327,8 @@ impl Follow {
                     });
                 }
                 self.meter.model(&init.model);
+                // What the session offers here, for the workspace's + menu (menu.rs).
+                super::menu::learn_init(&self.folder.to_string_lossy(), &init);
             }
             Event::Assistant(a) => {
                 // What its call used (a helper's too: it's spent), first.
@@ -2438,6 +2443,10 @@ impl Follow {
                 }
             }
             Event::Result(r) => self.on_result(&r, session),
+            // Each command's line and hint, for the workspace's + menu (menu.rs).
+            Event::Other(v) if v.get("type").and_then(serde_json::Value::as_str) == Some("system") && v.get("subtype").and_then(serde_json::Value::as_str) == Some("commands_changed") => {
+                super::menu::learn_commands(&self.folder.to_string_lossy(), &v);
+            }
             _ => {}
         }
     }

@@ -42,6 +42,7 @@
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { toast } from '../ui/toast.svelte.js';
   import ClaudeCodeStatus from './ClaudeCodeStatus.svelte';
+  import ClaudePlugins from './ClaudePlugins.svelte';
   import CleanSpeech from './CleanSpeech.svelte';
   import { sharedKey } from '../core/providers.js';
   import { EFFORT_LABELS } from '../core/effort.js';
@@ -343,6 +344,9 @@
     <Toggle bind:checked={cfg.agentsAnimate} label="Animate {CODE_NAME} chats" desc="A slow light moves along a {CODE_NAME} chat's message box while its agent runs. Never with reduced motion." />
   </Row>
 </Group>
+
+<!-- Claude Code's plugins (agents/plugins.rs): the + menu's Manage plugins… comes here. -->
+<ClaudePlugins enabled={!!cfg.agentsEnabled} />
 
 <Group title="Asking and reports" id="settings-yap-code-asking">
   <Row label="Ask before sending an agent" desc="A card in Chat, or a question out loud, before an agent starts. When it matters: in a workspace no agent has used yet, or after the chat read the web. Never in Bypass permissions." setting="yap-code-ask" stack>
