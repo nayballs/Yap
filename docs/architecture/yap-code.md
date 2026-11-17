@@ -3039,7 +3039,8 @@ the report too. Now:
   turn's request has left holds (`Ctx::room`, the tool loop's `Room::left`,
   less 700 tokens for the rest of the result; half, since every part stays
   in the turn and the answer needs room; several agents share it), cut at
-  a line; a part says `words_turn`, `words_chars`, `words_from`,
+  a line; every result says `words_turn` and `words_chars` (their length:
+  asked, Opus in the Lab had to guess it), a part also `words_from`,
   `words_left`, `next` (the next call's arguments) and `sections_after`
   (`{heading, offset}`), and the note "Its words go on: … To read on, call
   agent_status again with next as its arguments, or with one of

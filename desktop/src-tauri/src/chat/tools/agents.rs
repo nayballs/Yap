@@ -904,12 +904,14 @@ fn status_of(j: &Agent, (n, words, cut): (u32, String, bool), offset: usize, tok
         "asks_you": j.asks,
         "error": j.error,
     });
+    // Which turn's words, and how long they are (Opus on the plan, Lab 17 Nov
+    // 2026: asked how long a whole report was, it had to guess).
     if p.total > 0 {
         v["words_turn"] = json!(n);
+        v["words_chars"] = json!(p.total);
     }
     // A part: where it is in them, what's left, and the next part's arguments.
     if p.from > 0 || p.next.is_some() {
-        v["words_chars"] = json!(p.total);
         v["words_from"] = json!(p.from);
         if let Some(next) = p.next {
             v["words_left"] = json!(p.left());
@@ -1269,8 +1271,8 @@ mod tests {
         let ran = agent_status(&json!({ "id": "dd44" }), Some(9), None);
         let a = agent_of(&ran);
         assert_eq!(a["its_words"], words);
-        assert_eq!(a["words_turn"], 2);
-        assert!(a.get("next").is_none() && a.get("words_left").is_none());
+        assert_eq!((a["words_turn"].as_u64(), a["words_chars"].as_u64()), (Some(2), Some(words.chars().count() as u64)));
+        assert!(a.get("next").is_none() && a.get("words_left").is_none() && a.get("words_from").is_none());
         assert!(!ran.result["data"]["note"].as_str().unwrap().contains("go on"));
         // A small model's room: in parts, each within it, each saying where to
         // go on, until the last section.
