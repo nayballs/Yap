@@ -15,6 +15,8 @@
 //   Start), its tab opening from the plan turn's stream, the agent running in the named folder,
 //   reported in that conversation on the plan; the conversation's session reads the report
 //   with its next question.
+// - A long report (17 Nov 2026): told whole on the plan, and the next question's session
+//   reads it whole (its "earlier in this chat" block never cuts a report).
 // - By voice: asked out loud, the spoken yes starts it, the report is spoken.
 // - Refused: the person's words don't ask for it; the Mode can't be raised. After a
 //   WebSearch in the same turn the call is held while the agent's card asks (Don't: nothing
@@ -286,6 +288,39 @@ test('typed on the plan: asked first in the thread, the agent runs in the named 
   // Its warm session works in the workspace, and Windows keeps a folder a
   // process works in: the chat deleted ends it, so the next test's fresh
   // folder can go.
+  await yap.invoke('chat_delete', { id: agent.conversation });
+});
+
+test('a long report reaches the plan chat whole, its last section too, and its session reads it whole', async ({ yap, main }) => {
+  // (17 Nov 2026: a plan chat's report was cut at 3,000 characters, then at
+  // 4,000 in the session's "earlier in this chat" block, and its last
+  // section never arrived: agents/words.rs, chat/turn/report.rs.)
+  await setConfig(yap, main, { agentsAsk: 'never' });
+  let LONG = '## What I did\n\n';
+  for (let i = 0; i < 200; i++) LONG += `- Step ${i}: I lined up bed ${i} with the path and checked its watering schedule.\n`;
+  const LAST = "The greenhouse sensor (PELICAN) didn't answer, so its readings are still missing.";
+  LONG += `\n## What I couldn't do\n\n${LAST}`;
+  const longAgent = [AGENT[0], AGENT[1], AGENT[2], whole('j1', [{ type: 'text', text: LONG }], 'end_turn'), result(LONG, { total_cost_usd: 0.02 }), { _wait_user: true }];
+  const brief = { folder: 'garden-planner', brief: 'Line the beds up with the path and check the greenhouse sensor.' };
+  await play(yap, 'long', [turn(yapCall('m1', 'toolu_agent', 'start_agent', brief), answers('m2', STARTED))], longAgent);
+  const before = (await agents(yap)).length;
+  await freshChat(main);
+  await send(main, 'Send an agent to garden-planner: line the beds up with the path and check the greenhouse sensor.');
+  const agent = await ended(yap, (await newAgent(yap, before)).id);
+  expect(agent.text).toBe(LONG);
+  // The plan's Claude (200K) is told it whole: no "go on".
+  const messages = await messagesOf(yap, agent.conversation, 4);
+  expect(messages[2].text).toContain(`Its own words: ${LONG}`);
+  expect(messages[2].text).not.toContain('words go on');
+  // Its next question's session reads the report whole, never cut at 4,000.
+  await play(yap, 'long-next', [turn(yapCall('m3', 'toolu_status', 'agent_status', { id: agent.id }), answers('m4', 'Got: {{user_text}}'))]);
+  await send(main, "What couldn't the agent do?");
+  await expect(lastAnswer(main)).toContainText('Got:', { timeout: 20_000 });
+  const after = await messagesOf(yap, agent.conversation, 6);
+  expect(after[5].text).toContain(`Its own words: ${LONG}`);
+  expect(after[5].text).toContain("What couldn't the agent do?");
+  // agent_status over the run endpoint, as the plan's Claude reads on (its parts 50,000 characters there).
+  expect(after[5].tools).toEqual(['Checked the agent in garden-planner']);
   await yap.invoke('chat_delete', { id: agent.conversation });
 });
 

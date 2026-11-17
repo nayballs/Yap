@@ -85,10 +85,12 @@ const GOES_ON_LINE: u64 = 80;
 
 /// **How much of an agent's words a report tells**, in tokens, from the
 /// history's room a Chat turn on the chat's model has (`history`, tokens):
-/// half of it — the rest of the chat and the next question keep the other
-/// half —, at least [`WORDS_LEAST`]. Pure.
+/// a third of it — the rest of the chat and the next questions keep the
+/// rest, and a chat whose history fills half its room on a small model is
+/// summarised (`budget::due`: seen in the e2e run at a half) —, at least
+/// [`WORDS_LEAST`]. Pure.
 pub fn words_room_of(history: u64) -> u64 {
-    (history / 2).max(WORDS_LEAST)
+    (history / 3).max(WORDS_LEAST)
 }
 
 /// **How much of the agent's words its report tells the chat's model**, in

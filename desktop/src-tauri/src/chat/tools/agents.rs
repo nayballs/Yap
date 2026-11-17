@@ -157,13 +157,16 @@ pub fn definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "agent_status",
-                "description": "How an agent is going: its status, what it's doing, the files it changed, its words (its report). Without an id, this chat's latest agents. Long words come in parts: when they go on, the result's next has the arguments for the next part (as a report that goes on does), and sections_after where each later section starts: call it again with them to read on.",
+                // (No longer than before `turn` and `offset` (17 Nov 2026): every chat
+                // with agents carries it, an 8K model's too — its result and a
+                // report that goes on say the rest.)
+                "description": "An agent's status, step, changed files and words; no id: this chat's latest. Long words: read on with a result's next.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "id": { "type": "string", "description": "The agent's id (from start_agent), or its folder's name" },
-                        "turn": { "type": "integer", "description": "Which of its turns' words (from next); leave it out for its latest" },
-                        "offset": { "type": "integer", "description": "Where in its words to read from (from next)" }
+                        "id": { "type": "string", "description": "Its id or folder" },
+                        "turn": { "type": "integer" },
+                        "offset": { "type": "integer" }
                     },
                     "additionalProperties": false
                 }
@@ -869,7 +872,7 @@ pub fn words_of(j: &Agent, turn: Option<u32>) -> Result<(u32, String, bool), Str
         return Ok((t.n, t.text, t.words_cut));
     }
     match j.turn_list.iter().rev().find(|t| !t.text.is_empty()) {
-        Some(t) => Ok((t.n, j.text.clone(), t.words_cut)),
+        Some(t) => Ok((t.n, t.text.clone(), t.words_cut)),
         None => Ok((j.turn_list.last().map_or(1, |t| t.n), j.text.clone(), false)),
     }
 }
@@ -986,7 +989,7 @@ fn agent_status(args: &Value, conversation: Option<u64>, room: Option<u64>) -> R
     // rest: each part stays in the turn), shared among the agents listed.
     let each = room.map(|r| (r.saturating_sub(STATUS_SPARE) / 2 / agents.len() as u64).max(STATUS_LEAST));
     let display = match agents.as_slice() {
-        [one] if offset > 0 => format!("Read more of the agent in {}", one.folder),
+        [one] if offset > 0 => format!("Checked more of the agent in {}", one.folder),
         [one] => format!("Checked the agent in {}", one.folder),
         _ => "Checked your agents".to_string(),
     };
@@ -1295,7 +1298,7 @@ mod tests {
                 assert!(a.get("sections_after").is_none(), "none after it");
             }
             if parts.len() > 1 {
-                assert!(ran.result["displayText"].as_str().unwrap().starts_with("Read more of the agent in seed-tracker"));
+                assert!(ran.result["displayText"].as_str().unwrap().starts_with("Checked more of the agent in seed-tracker"));
             }
             args = next;
         }

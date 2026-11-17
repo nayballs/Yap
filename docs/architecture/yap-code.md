@@ -3017,12 +3017,15 @@ the report too. Now:
   and Download your data. A turn saved before reads as it was kept —
   whole when it's the agent's latest (agents.json kept the agent's latest
   words whole then).
-- **The report tells it all when it fits** (`report::words_room`): half the
-  history's room a Chat turn on the chat's model has now, its fixed part
-  measured as Chat's ring measures it (`turn::ring_parts`, `budget::budget`),
-  at least ~400 tokens. Claude (200K), GPT-5 and Gemini get a long report
-  whole; the stand-in's 8K model gets its start. Several requests share the
-  room, the short ones whole (`words::shares`).
+- **The report tells it all when it fits** (`report::words_room`): a third
+  of the history's room a Chat turn on the chat's model has now, its fixed
+  part measured as Chat's ring measures it (`turn::ring_parts`,
+  `budget::budget`), at least ~400 tokens. Claude (200K, ~46K tokens of
+  words), GPT-5 and Gemini get a long report whole; the stand-in's 8K model
+  gets its start. A third, not a half: at a half, the 8K model's chat was
+  summarised right after the report (`budget::due`: half the room filled
+  with its context mostly used). Several requests share the room, the
+  short ones whole (`words::shares`).
 - **When it doesn't fit, it says so and how to read the rest**: the words
   cut at a line (else a sentence, else a word: `words::cut`, never
   mid-word), then "[The agent's words go on: 12,345 more characters, 87% of

@@ -269,7 +269,7 @@ test('a long report is kept whole; on a small model the chat reads the rest in p
   expect(s.its_words.startsWith("## What I couldn't do")).toBe(true);
   expect(s.its_words.endsWith(LAST)).toBe(true);
   expect(s.next).toBeUndefined();
-  await expect(thread(main).locator('.toolchips').last().locator('.toolchip')).toHaveText(['Read more of the agent in garden-planner', 'Read more of the agent in garden-planner']);
+  await expect(thread(main).locator('.toolchips').last().locator('.toolchip')).toHaveText(['Checked more of the agent in garden-planner', 'Checked more of the agent in garden-planner']);
   await shot(main, 'read-on-in-parts');
 
   // The agent's view (its tab, at that turn): the whole report.
