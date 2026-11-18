@@ -1082,6 +1082,14 @@ sent to Claude Code; a plain chat with none, then with an agent Chat sent
 `code-plus-menu.spec.js`' Slash commands › list has it among the built-in
 ones.
 
+**Tried for real** (18 Nov 2026, Yap Lab on Opus, the maintainer's own
+Claude Code 2.1.296): a Code chat on the sandbox whose Chat sent an agent
+to list its files; then `/agents` typed — the "/" list had Yap's first,
+with its line, the person's own commands that hold the word after it, the
+foot "open the Agent panel" — and Enter opened the Agent panel beside the
+chat on that agent's row (its crew character, cost, tokens, time), nothing
+sent; with the summary in front, `/agents` brought the Agent tab forward.
+
 ## Dev servers
 
 A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 Nov 2026; the maintainer, on the Claude Code app's Dev servers menu in its browser pane: "Can we add this to Yap, please? And an ability to do this"). Built from Anthropic's public docs for the app ("Configure preview servers") and the preview tools as Claude Code's own session is given them, never from the app's files (Anthropic's terms forbid taking it apart).
