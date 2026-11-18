@@ -17,9 +17,9 @@
   //     ConsentLine while recording (ConsentMessage), and AskTray — Stop /
   //     Resume and "Ask anything", the sheet chat about the meeting;
   //   - DeleteMeetingDialog.
-  // Like every Yap window you can type in, it catches the dictation key and
-  // the meeting shortcut in-page (a focused WebView2 window never reaches the
-  // global hook).
+  // Like every Yap window you can type in, it catches the dictation key, the
+  // meeting shortcut and the rest of Yap's shortcuts in-page (a focused
+  // WebView2 window never reaches the global hook).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -32,7 +32,8 @@
   import { askSelectionKey, initSpeech, readPageSelection } from '../stores/speech.svelte.js';
   import { summaries, initMeetingSummary, loadSummary, summarise, askStartedByMistake } from '../stores/meetingSummary.svelte.js';
   import { initMeetingAudio, refreshAudio, stopLine } from '../stores/meetingAudio.svelte.js';
-  import { actionMatchesKeydown, actionMatchesKeyup } from '../core/hotkeys.js';
+  import { actionMatchesKeydown, actionMatchesKeyup, hotkeyMatchesKeydown, hotkeyMatchesKeyup } from '../core/hotkeys.js';
+  import { languageShortcuts } from '../settings/languages.svelte.js';
   import { withLineSpeakers, withLineSplice, hasLine, withLineEdit } from '../core/notepadText.js';
   import { askReplaceSummary } from '../core/noteEdits.js';
   import { saveDelay } from '../core/typingSave.js';
@@ -565,6 +566,7 @@
   // without speaking).
   function onKeyDown(e) {
     if (e.repeat || !cfg) return;
+    const lang = languageShortcuts(cfg).find((s) => hotkeyMatchesKeydown(e, s.hotkey));
     // (Each action's more keys too: "+ Add another".)
     if (actionMatchesKeydown(e, cfg, 'meetingHotkey')) {
       e.preventDefault();
@@ -587,6 +589,17 @@
       e.preventDefault();
       e.stopPropagation();
       readPageSelection();
+    } else if (actionMatchesKeydown(e, cfg, 'snipHotkey')) {
+      // Snip to Chat (snip.rs). (18 Nov 2026: missing here, so with the
+      // notepad in front its shortcut, Copy last's and the language
+      // shortcuts did nothing, as the quick note's and a Markdown file's do.)
+      e.preventDefault();
+      e.stopPropagation();
+      invoke('snip_start', { origin: 'shortcut' }).catch(() => {});
+    } else if (actionMatchesKeydown(e, cfg, 'copyLastHotkey')) {
+      e.preventDefault();
+      e.stopPropagation();
+      invoke('copy_last_transcript').catch(() => {});
     } else if (actionMatchesKeydown(e, cfg, 'quickNoteHotkey')) {
       // The quick note (notes/quick_note/key.rs) comes up in front; held,
       // a dictation into it.
@@ -594,6 +607,11 @@
       e.stopPropagation();
       flushSave();
       invoke('quick_note_key', { pressed: true }).catch(() => {});
+    } else if (lang) {
+      // A language shortcut (My languages): a dictation in its language, into the note.
+      e.preventDefault();
+      e.stopPropagation();
+      invoke('language_key', { id: lang.id, pressed: true }).catch(() => {});
     } else if (actionMatchesKeydown(e, cfg, 'hotkey')) {
       e.preventDefault();
       e.stopPropagation();
@@ -603,6 +621,7 @@
   // The key coming up: push-to-talk's release (Rust decides by the mode).
   function onKeyUp(e) {
     if (!cfg) return;
+    const lang = languageShortcuts(cfg).find((s) => hotkeyMatchesKeyup(e, s.hotkey));
     // The quick note's key has a hold of its own (quick_note/key.rs), the
     // others share the dictation's: a key up ending both (a modifier in
     // each) goes to both, or push-to-talk keeps recording.
@@ -616,6 +635,9 @@
     } else if (actionMatchesKeyup(e, cfg, 'askHotkey')) {
       e.preventDefault();
       askSelectionKey(false);
+    } else if (lang) {
+      e.preventDefault();
+      invoke('language_key', { id: lang.id, pressed: false }).catch(() => {});
     } else if (actionMatchesKeyup(e, cfg, 'hotkey')) {
       e.preventDefault();
       invoke('dictation_key', { pressed: false }).catch(() => {});

@@ -289,6 +289,29 @@ test('a provider error mid-stream: asked again whole, the streamed text replaced
   expect(asked.map((r) => r.stream)).toEqual([true, false]);
 });
 
+test("an answer that fails gives its question back to the box, before what's been typed there since", async ({ main, fakeLlm }) => {
+  // 18 Nov 2026: the box stays open while an answer is on its way, and the
+  // next words are often typed then. A failed answer gave its question back
+  // by putting it in the box in place of what was there: those words went.
+  await freshChat(main);
+  // (The first request held a while, so the next words go in before it fails; any asked again fail at once.)
+  fakeLlm.delay('other', 4000);
+  fakeLlm.failNext('other', 6, 400, { error: { message: 'fake failure: no answer today' } });
+  try {
+    const before = fakeLlm.requests.length;
+    await send(main, 'Which train do I take?');
+    await expect.poll(() => fakeLlm.requests.slice(before).some((r) => r.kind === 'other')).toBe(true);
+    fakeLlm.delay('other', 0);
+    await box(main).fill('And is there a bus?');
+    await expect(main.getByText("Couldn't send")).toBeVisible({ timeout: 30_000 });
+    await expect(box(main)).toHaveValue('Which train do I take?\n\nAnd is there a bus?');
+  } finally {
+    fakeLlm.delay('other', 0);
+    fakeLlm.failNext('other', 0);
+    await box(main).fill('');
+  }
+});
+
 test('the checked answer replaces what streamed: no claimed search, no citation with nothing behind it', async ({
   main,
   fakeLlm,

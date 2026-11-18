@@ -216,6 +216,50 @@ test('a project: made, its instructions and files, a chat in it carrying them, a
   expect((await yap.invoke('chats_list')).map((c) => c.title)).toEqual(expect.arrayContaining(['Greenhouse heater', 'When do the broad beans go in?']));
 });
 
+test('instructions typed while a save is on its way are saved too', async ({ yap, main }) => {
+  // 18 Nov 2026: a save that came back marked the instructions saved
+  // whatever was typed while it was on its way; that typing's own save then
+  // found nothing to do, and it never reached projects.json. The save is
+  // held here (the page's IPC request, as a busy PC holds it).
+  await openView(main, 'Chat');
+  await main.getByRole('button', { name: 'Projects', exact: true }).click();
+  await main.getByRole('button', { name: 'New project' }).click();
+  await main.getByRole('textbox', { name: 'Name' }).fill('Orchard 2027');
+  await main.getByRole('button', { name: 'Create project' }).click();
+  await expect(page(main).getByRole('heading', { name: 'Orchard 2027' })).toBeVisible();
+  const p = yap.readJson('projects.json').projects.find((x) => x.name === 'Orchard 2027');
+  await main.evaluate(() => {
+    const real = window.fetch;
+    window.__held = { real, hold: 'project_update', waiting: [] };
+    window.fetch = function (input, init) {
+      const h = window.__held;
+      if (h?.hold && String(input?.url ?? input).includes(h.hold)) return new Promise((go) => h.waiting.push(go)).then(() => real.call(this, input, init));
+      return real.call(this, input, init);
+    };
+  });
+  try {
+    const instructions = page(main).getByRole('textbox', { name: 'Instructions' });
+    await instructions.fill('Prune in winter.');
+    await expect.poll(() => main.evaluate(() => window.__held.waiting.length)).toBe(1);
+    // More typed while that save is on its way, then the save comes back.
+    await main.evaluate(() => (window.__held.hold = null));
+    await main.keyboard.insertText(' Mulch in spring.');
+    await main.evaluate(() => window.__held.waiting.splice(0).forEach((go) => go()));
+    await expect
+      .poll(() => yap.readJson('projects.json').projects.find((x) => x.id === p.id)?.instructions, { timeout: 5_000 })
+      .toBe('Prune in winter. Mulch in spring.');
+    await expect(page(main).getByText('Saved')).toBeVisible();
+  } finally {
+    await main.evaluate(() => {
+      if (window.__held) window.fetch = window.__held.real;
+      window.__held?.waiting.splice(0).forEach((go) => go());
+      window.__held = null;
+    });
+    await yap.invoke('project_delete', { id: p.id });
+    await main.getByRole('button', { name: 'Projects', exact: true }).click();
+  }
+});
+
 test("a big project's steps fold into one line, and its page's line says how the files are read", () => {
   const used = 'Used from the project: staff-handbook.md, part 5, “3. Annual leave”';
   expect(stepsSummary([used])).toBe("Used a part of the project's files");

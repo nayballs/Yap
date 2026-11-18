@@ -457,6 +457,32 @@ test("the bar's ✂, Chat's + and Win+Alt+S in Yap's own window start a snip", a
   await expect.poll(async () => (await last(yap))?.outcome).toBe('cancelled');
 });
 
+test('Win+Alt+S with the meeting notepad in front starts a snip too (its in-page fallback)', async ({ yap }) => {
+  // 18 Nov 2026: the notepad's fallback had dictation and the meeting
+  // shortcut but not Snip (nor Copy last or the language shortcuts), so with
+  // the notepad in front Win+Alt+S did nothing: the global hook never sees
+  // keys while a Yap window has the focus.
+  const note = await yap.invoke('note_create', { title: 'Design review', folder: 'Meetings' });
+  await yap.invoke('notepad_open', { noteId: note.id });
+  await expect.poll(() => yap.invoke('plugin:window|is_visible', { label: 'notepad' })).toBe(true);
+  const pad = yap.notepad;
+  await expect(pad.getByRole('textbox', { name: 'Meeting title' })).toHaveValue('Design review');
+  await yap.invoke('e2e_snip', { monitors: MONITORS, start: false });
+  const cdp = await pad.context().newCDPSession(pad);
+  try {
+    const ev = { key: 's', code: 'KeyS', windowsVirtualKeyCode: 83, nativeVirtualKeyCode: 83, modifiers: 1 | 4 };
+    await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...ev });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...ev });
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
+  await expect.poll(async () => (await last(yap))?.outcome).toBe('selecting');
+  await yap.invoke('e2e_snip_input', { screen: 0, events: [{ kind: 'esc' }] });
+  await expect.poll(async () => (await last(yap))?.outcome).toBe('cancelled');
+  await pad.getByRole('button', { name: 'Close notepad' }).click();
+  await expect.poll(() => yap.invoke('plugin:window|is_visible', { label: 'notepad' })).toBe(false);
+});
+
 test('screenshots are kept their time: removed after 7 days, and with their conversation', async ({ yap, main, shot }) => {
   // Two conversations with a screenshot each.
   for (const question of ['Keep this one?', 'And this one?']) {
