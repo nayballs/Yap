@@ -221,6 +221,8 @@ pub fn delete(ids: &[String]) -> usize {
     if gone > 0 {
         tracing::debug!(images = gone, "snip: chat screenshots deleted");
     }
+    // …and their copies a Code chat's Claude could read (agents/shots.rs).
+    crate::agents::shots::forget(ids);
     gone
 }
 
@@ -293,6 +295,8 @@ pub fn sweep(keep_days: u32) -> usize {
     if gone > 0 {
         tracing::info!(images = gone, keep_days, "snip: old chat screenshots removed");
     }
+    // A Code chat's copies of them as files go with them (agents/shots.rs).
+    crate::agents::shots::sweep();
     gone
 }
 

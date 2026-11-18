@@ -160,6 +160,8 @@ const valuesOf = (args, flag) => {
   for (let j = i + 1; j < args.length && !args[j].startsWith('--'); j++) out.push(args[j]);
   return out;
 };
+/** The chat's added folders on a run: its `--add-dir`s but its own screenshots' folder (agents/shots.rs, every run of its session). */
+const addedFolders = (args) => valuesOf(args, '--add-dir').filter((p) => !/[\\/]code-shots[\\/]\d+-\d+$/.test(p));
 async function theme(yap, main, which) {
   await setConfig(yap, main, { theme: which });
   await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe(which);
@@ -430,7 +432,7 @@ test('Add folder gives the chat\'s Claude Code another folder (--add-dir), shown
   await expect(menu(main).getByRole('button', { name: 'Add folder' })).toContainText('1 added');
   await main.keyboard.press('Escape');
   const first = await send(yap, main, 'What seeds are in the catalogue?');
-  expect(valuesOf(first, '--add-dir').map((p) => path.resolve(p))).toEqual([path.resolve(SEEDS)]);
+  expect(addedFolders(first).map((p) => path.resolve(p))).toEqual([path.resolve(SEEDS)]);
   const conversation = (await agents(yap))[0].conversation;
 
   // The summary panel's Environment: the workspace, then the folder with its ×.
@@ -448,7 +450,7 @@ test('Add folder gives the chat\'s Claude Code another folder (--add-dir), shown
   await expect(row).toHaveCount(0);
   expect((await yap.invoke('code_menu', { conversation })).folders).toEqual([]);
   const second = await send(yap, main, 'And now?');
-  expect(second).not.toContain('--add-dir');
+  expect(addedFolders(second)).toEqual([]);
   // Added again after the first message: the panel follows.
   await yap.invoke('e2e_workspace', { path: SEEDS });
   await plus(main).click();

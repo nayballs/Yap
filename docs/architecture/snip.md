@@ -797,7 +797,12 @@ doesn't show it (a screenshot never goes there).
   picture Chat showed from the web** (`chat/pictures.rs`, 2026-10-31) is
   stored the same way (`attach::keep`, source "web") and referred to by its
   answer's `pictures` (`chats::image_ids` counts those too), so it's kept,
-  swept and deleted with its chat like a screenshot.
+  swept and deleted with its chat like a screenshot. **A Code chat's
+  screenshots are also files** its Claude can read or hand to a helper
+  (18 Nov 2026, `agents/shots.rs`: `code-shots/<chat>-<createdTs>/shot-<n>.png`,
+  given to its runs with `--add-dir`): copies, gone when their picture here
+  goes (`images::delete` and the sweep take them), the chat's folder with
+  the chat, every one with Delete all… ([yap-code.md](./yap-code.md)).
 - **Settings → Privacy & data → Chat screenshots** (2026-10-25) says where
   they are — Yap's own folder, never Pictures (a snip goes elsewhere only
   when it's saved: Shift, Save image) — with **Open folder**
