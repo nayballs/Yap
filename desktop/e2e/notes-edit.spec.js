@@ -436,6 +436,58 @@ aiTest.describe('with the fake AI', () => {
     await shot(pad, '11-replaced-ticks-kept');
   });
 
+  test('a summary typed on without a pause is saved as it goes, in Notes and in the notepad', async ({ yap, main }) => {
+    // Saved only 600 ms after the last key, a summary typed on without a
+    // pause reached the disk only once the typing stopped: a crash meanwhile
+    // lost all of it. Now at most the last two seconds (core/typingSave.js),
+    // as My thoughts. A key every 200 ms for four seconds, in each editor.
+    const keys = 'abcdefghijklmnopqrst';
+    const note = await yap.invoke('note_create', { title: 'Seed order', folder: 'Personal' });
+    await yap.invoke('note_summary_update', { id: note.id, text: '## Summary\nOrder seeds', origin: 'e2e' });
+    // (A read as Yap replaces the file can fail: not saved yet, as far as this knows.)
+    const onDisk = () => {
+      try {
+        return noteOf(yap, note.id)?.enhancedContent || '';
+      } catch {
+        return '';
+      }
+    };
+    async function typeOn(page, editor, before) {
+      await editor.evaluate((el) => {
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      });
+      let savedAt = -1;
+      for (const [i, k] of [...keys].entries()) {
+        await page.keyboard.insertText(k);
+        await page.waitForTimeout(200);
+        if (savedAt < 0 && onDisk().startsWith(`${before}a`)) savedAt = i;
+      }
+      expect(savedAt, 'saved while the typing went on').toBeGreaterThanOrEqual(0);
+      expect(savedAt).toBeLessThan(keys.length - 3);
+      await expectStore(yap, 'notes.json', (s) => s.notes.find((n) => n.id === note.id)?.enhancedContent === `${before}${keys}`);
+    }
+
+    // The Notes view's summary.
+    await openView(main, 'Notes');
+    await main.locator('.folder').filter({ hasText: 'Personal' }).click();
+    await main.locator('.item').filter({ hasText: 'Seed order' }).click();
+    await main.locator('.tabs .tab').filter({ hasText: 'Summary' }).click();
+    await main.getByRole('button', { name: 'Edit summary' }).click();
+    await typeOn(main, main.getByRole('textbox', { name: 'Edit the summary (Markdown)' }), '## Summary\nOrder seeds');
+    await main.getByRole('button', { name: 'Done' }).click();
+
+    // The meeting notepad's.
+    await yap.invoke('notepad_open', { noteId: note.id });
+    await expect.poll(() => visible(yap, 'notepad')).toBe(true);
+    const pad = yap.notepad;
+    await pad.getByRole('tab', { name: 'Summary' }).click();
+    const summary = pad.getByRole('region', { name: 'Summary' });
+    await summary.getByRole('button', { name: 'Edit', exact: true }).click();
+    await typeOn(pad, pad.getByRole('textbox', { name: 'Edit the summary (Markdown)' }), `## Summary\nOrder seeds${keys}`);
+    await summary.getByRole('button', { name: 'Done' }).click();
+  });
+
   // Until 2026-10-30 New note kept the summary editor open: its save, still
   // due, went to the new note (the words left the note they were typed in).
   test('a summary being edited in Notes stays with its note when New note opens another', async ({ yap, main, shot }) => {

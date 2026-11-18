@@ -252,7 +252,14 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   `meetings::end::start_summary`). Audio not kept ("Keep meeting audio" off)
   is **held** after a meeting with failed chunks or a refine due
   (`Recorder::finish(hold)`) and goes once it's done (`release`, when no
-  failed stretch is left), a day at most (`to_drop`'s `held`, `HELD_MS`);
+  failed stretch is left), a day at most (`to_drop`'s `held`, `HELD_MS`).
+  **Never ahead of notes.json** (2026-11-18, `lines_on_disk`: the notes
+  store's last save worked): while notes.json can't be saved (a full disk,
+  another program holding it), `Recorder::progress` doesn't move a
+  recording's `you_done`/`them_done` on (a crash recovers from the last
+  lines saved), and audio not kept is held rather than deleted
+  (`finish`, `release`, a recovery, a crash's leftover): it's the only copy
+  on disk of those lines;
   each recording's `.json` names its live model (`Meta::model`);
   debug-only `e2e_meeting_recovery_offer`; events `yap-meeting-audio
   {noteId}` and `yap-meeting-redo`. Logs: ids, counts, lengths only.

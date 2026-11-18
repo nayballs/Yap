@@ -569,7 +569,9 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   transcript; stop marks after it move up; digests from the one that read it
   dropped, `drop_digests_from`; its place to `meetings::audio::set_cut` so
   Transcribe again and the refine never bring it back; kept in memory for
-  Undo, `Removed`) and `transcript_line_restore` (`restore_line`: where it
+  Undo, `Removed`, forgotten with its note — `forget`, from
+  `notes::forget_own`, Reset app and the transcript's days — so a new note
+  given its id never gets it back) and `transcript_line_restore` (`restore_line`: where it
   was when nothing changed since, its stops as they were, else by time),
   `transcript_line_split` (`split_line` at word `at`: each part its side,
   voice, lock and stretch — the words' times, else shared by length; on an
@@ -660,7 +662,10 @@ local API and search see the same text.
   the notepad, 400 ms in the quick note, and at least every 2 s while typing
   goes on without a pause (`core/typingSave.js`, 2026-11-16: only a pause
   saved, so a crash while someone typed on lost everything since the last
-  one; now at most the last two seconds). Version history's kinds as before
+  one; now at most the last two seconds). The summary's Markdown box in
+  Notes and the notepad (`notesState` `queueSummarySave`,
+  `notepad/summaryEditor.svelte.js`) and a Markdown file's window save the
+  same way since 2026-11-18 (they still waited for a pause). Version history's kinds as before
   (notes/versions.rs): a paste within 15 s of a dictation (`yap-transcript`) is
   "Dictated", any other change "Typed". Another window's change, a transform, a
   restore, Chat's edit come in by the blocks that differ (`load`), the caret
@@ -769,7 +774,8 @@ file: it's never copied into notes.json.
   `\n` (a file with both: the more common one, ties to `\r\n`; none: `\n`).
   Anything else is shown (`from_utf8_lossy`) but opens **read-only**, as does
   a read-only file. The footer says how it's written ("UTF-8 · CRLF").
-- **Saving** (the page, `doc/docFile.js`): 600 ms after the last change, and
+- **Saving** (the page, `doc/docFile.js`): 600 ms after the last change, at
+  least every 2 s while typing goes on (`core/typingSave.js`, 2026-11-18), and
   on blur, close and Ctrl+S, one save at a time. Rust writes atomically
   (`config::atomic_write_bytes`) **only if the file is still what the page
   last read or wrote** (its stamp: modified time and size). Otherwise the
@@ -800,7 +806,7 @@ file: it's never copied into notes.json.
   Settings → General → Markdown files) and `md-file-launch.spec.js` (a file
   given at launch: [`docs/e2e-tests.md`](../e2e-tests.md)).
 - **Not yet done**: "Ask about this" on the page; quitting from the tray can
-  lose the last 600 ms of typing; a file with mixed line endings gets the
+  lose the last moments of typing (at most 2 s); a file with mixed line endings gets the
   more common one; the atomic replace drops the file's attributes
   (`ReplaceFileW` would keep them); the installer's registration is
   untried until a nightly is installed.

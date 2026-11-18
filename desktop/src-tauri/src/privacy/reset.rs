@@ -915,6 +915,8 @@ fn clear_stores(c: &Choice, done: &mut Done) -> Gone {
             for id in &gone.notes {
                 crate::meetings::end::forget(*id);
             }
+            // Lines deleted in this run, kept for Undo.
+            crate::notes::transcript_edits::forget(&gone.notes);
             // The meetings' companies the folder rules kept (the rules stay).
             crate::calendar::filing::forget_notes();
         }

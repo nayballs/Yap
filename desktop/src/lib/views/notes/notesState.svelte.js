@@ -801,11 +801,16 @@ export function createNotesState() {
     summaryEl.style.height = 'auto';
     summaryEl.style.height = `${summaryEl.scrollHeight + 2}px`;
   }
+  // When the first summary change not saved yet was made: saved once the
+  // typing pauses, and at least every two seconds while it goes on, as My
+  // thoughts is (core/typingSave.js) — a crash mid-paragraph loses at most that.
+  let summarySince = 0;
   function queueSummarySave() {
     summaryDirty = true;
     fitSummary();
+    if (summaryTimer === null) summarySince = Date.now();
     clearTimeout(summaryTimer);
-    summaryTimer = setTimeout(flushSummary, 600);
+    summaryTimer = setTimeout(flushSummary, saveDelay(summarySince));
   }
   async function flushSummary() {
     clearTimeout(summaryTimer);

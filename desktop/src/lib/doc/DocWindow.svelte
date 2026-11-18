@@ -44,6 +44,7 @@
   import { askSelectionKey, initSpeech, readAloud, readPageSelection, speech } from '../stores/speech.svelte.js';
   import { askConfirm, menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
   import { afterRead, statusLine, formLine, POLL_MS, SAVE_MS } from './docFile.js';
+  import { saveDelay } from '../core/typingSave.js';
 
   const appWindow = getCurrentWindow();
   const LABEL = appWindow.label;
@@ -86,6 +87,10 @@
   // Typed since the last save went out.
   let dirty = false;
   let timer = null;
+  // When the first change not saved yet was made: saved once the typing
+  // pauses, and at least every two seconds while it goes on
+  // (core/typingSave.js) — a crash mid-paragraph loses at most that.
+  let unsavedSince = 0;
   // The saves, one after another.
   let chain = Promise.resolve();
   // Reads and saves in flight: the look at the file waits for them.
@@ -226,8 +231,9 @@
     text = md;
     dirty = true;
     saveState = 'saving';
+    if (timer === null) unsavedSince = Date.now();
     clearTimeout(timer);
-    timer = setTimeout(flush, SAVE_MS);
+    timer = setTimeout(flush, saveDelay(unsavedSince, Date.now(), SAVE_MS));
   }
 
   /** Save what's typed now (after any save on its way); resolves once it's saved. */
