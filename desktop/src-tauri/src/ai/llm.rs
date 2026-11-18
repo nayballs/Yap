@@ -48,6 +48,8 @@ pub(crate) fn chat_timeout(base_url: &str) -> Duration {
 
 /// How a rejected tool call's error starts ([`rejected_tool_call`]).
 pub(crate) const TOOL_CALL_REJECTED: &str = "The model's tool call didn't go through: ";
+/// Why, when a call's arguments weren't whole JSON (cut off part-way).
+pub(crate) const BROKEN_ARGUMENTS: &str = "its arguments weren't complete JSON. Call the tool again with short, valid JSON arguments";
 
 /// The provider refused a call because of the **model's own tool call**:
 /// Groq's HTTP 400 `tool_use_failed` (gpt-oss left out a required argument,
@@ -81,7 +83,7 @@ fn tool_call_rejection(status: u16, body: &str) -> Option<String> {
     // llama.cpp's 500 for a call whose arguments aren't JSON (Qwen3.5-4B cut
     // one off mid-string, the model evaluations of 2026-10-21).
     if status >= 500 && message.starts_with("Failed to parse tool call arguments") {
-        return Some("its arguments weren't complete JSON. Call the tool again with short, valid JSON arguments".to_string());
+        return Some(BROKEN_ARGUMENTS.to_string());
     }
     None
 }
@@ -1964,9 +1966,7 @@ async fn post_chat_request(
                         Ok(m) => m,
                         Err(crate::chat::stream::Unusable::BadArguments(name)) => {
                             tracing::info!(tool = %name, "A streamed tool call's arguments weren't JSON");
-                            return Err(call.failed(format!(
-                                "{TOOL_CALL_REJECTED}its arguments weren't complete JSON. Call the tool again with short, valid JSON arguments"
-                            )));
+                            return Err(call.failed(format!("{TOOL_CALL_REJECTED}{BROKEN_ARGUMENTS}")));
                         }
                     };
                     let message = crate::chat::think::tidy_message(message);

@@ -95,8 +95,21 @@ use crate::ai::claude_plan::map::{self, Fed, Mapper};
 use crate::ai::claude_plan::{self as plan, oneshot, sessions};
 use crate::chat::stream::{Halt, Sink, Step};
 
-/// The longest a turn may take (a long search and read included).
-const TURN_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// **How long a turn may take** ([`read_turn`]): `idle`, the longest it may
+/// go with nothing from Claude Code or Yap's tools (stuck) — a long search
+/// and read, a card the person takes their time over, Claude Code's word
+/// every 30 s that a tool still runs, all keep it going; `most`, however
+/// busy. (18 Nov 2026: the 15 minutes were the whole turn's, a document's
+/// outline card left 10 minutes for the person counted in them, and the
+/// writing after it was cut off as "took too long".)
+#[derive(Clone, Copy)]
+struct Clock {
+    idle: Duration,
+    most: Duration,
+}
+
+/// A turn's [`Clock`].
+const TURN: Clock = Clock { idle: Duration::from_secs(15 * 60), most: Duration::from_secs(60 * 60) };
 /// How long a stopped turn gets to end before its process is ended.
 const DRAIN: Duration = Duration::from_secs(10);
 
@@ -805,18 +818,23 @@ async fn read_turn(
     stop: &crate::chat::stream::Stoppable,
     mut calls: Option<&mut tokio::sync::mpsc::UnboundedReceiver<crate::chat::stream::Event>>,
     research: Option<crate::chat::research::Budget>,
+    clock: Clock,
 ) -> Ended {
     let mut started = false;
-    let deadline = tokio::time::sleep(TURN_TIMEOUT);
+    // Nothing heard this long: stuck. Its clock starts again at each event.
+    let idle = tokio::time::sleep(clock.idle);
+    tokio::pin!(idle);
+    let deadline = tokio::time::sleep(clock.most);
     tokio::pin!(deadline);
     // A research's own time (chat/research.rs): its report asked for then.
-    let research_time = tokio::time::sleep(research.map_or(TURN_TIMEOUT, |b| b.caps.time.saturating_sub(b.elapsed())));
+    let research_time = tokio::time::sleep(research.map_or(clock.most, |b| b.caps.time.saturating_sub(b.elapsed())));
     tokio::pin!(research_time);
     let mut calls_open = calls.is_some();
     loop {
         tokio::select! {
             ev = rx.recv() => {
                 let Some(ev) = ev else { return Ended::Gone { started } };
+                idle.as_mut().reset(tokio::time::Instant::now() + clock.idle);
                 match &ev {
                     Event::Init(_) => started = true,
                     // Where the plan's limits stand, live on the usage ring.
@@ -843,10 +861,14 @@ async fn read_turn(
                 }
             }
             shown = next_shown(&mut calls), if calls_open => match shown {
-                Some(ev) => out.event(ev),
+                Some(ev) => {
+                    idle.as_mut().reset(tokio::time::Instant::now() + clock.idle);
+                    out.event(ev);
+                }
                 None => calls_open = false,
             },
             why = stop.halted() => return Ended::Halted(why),
+            _ = &mut idle => return Ended::TimedOut,
             _ = &mut deadline => return Ended::TimedOut,
             _ = &mut research_time, if research.is_some() => return Ended::Capped(crate::chat::research::Spent::Time),
         }
@@ -1073,7 +1095,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
             None => watch.map(|w| w as &dyn Sink),
         };
         let mut out = ToChat::new(sink, run_turn.as_ref().map(|r| r.marks()), built.project_chips.clone()).with_project(built.project.clone());
-        let mut ended = read_turn(&mut rx, &mut mapper, &mut out, t.stop, run_turn.as_mut().map(|r| &mut r.events), research).await;
+        let mut ended = read_turn(&mut rx, &mut mapper, &mut out, t.stop, run_turn.as_mut().map(|r| &mut r.events), research, TURN).await;
         // A research past a cap: its turn stopped, its usage counted, and the
         // report asked for on the same session (no cap: it may only write).
         if let (Ended::Capped(why), Some(b)) = (&ended, research) {
@@ -1089,7 +1111,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
                     let counted = crate::ai::usage::Call { provider: plan::PROVIDER, model: answered, base_url: plan::BASE_URL, turn: true, feature: None };
                     crate::ai::usage::record_response(&counted, &oneshot::usage_value(&first.usage, own), None, None);
                     ended = match w.session.send_user(&crate::chat::research::write_now_after(why, &b.caps), &[]) {
-                        Ok(()) => read_turn(&mut rx, &mut mapper, &mut out, t.stop, run_turn.as_mut().map(|r| &mut r.events), None).await,
+                        Ok(()) => read_turn(&mut rx, &mut mapper, &mut out, t.stop, run_turn.as_mut().map(|r| &mut r.events), None, TURN).await,
                         Err(_) => Ended::Gone { started: true },
                     };
                 }
@@ -1113,7 +1135,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
             let counted = crate::ai::usage::Call { provider: plan::PROVIDER, model: answered, base_url: plan::BASE_URL, turn: true, feature: None };
             crate::ai::usage::record_response(&counted, &oneshot::usage_value(&first.usage, own), None, None);
             ended = match w.session.send_user(&finish_line(&title, &left), &[]) {
-                Ok(()) => read_turn(&mut rx, &mut mapper, &mut out, t.stop, run_turn.as_mut().map(|r| &mut r.events), None).await,
+                Ok(()) => read_turn(&mut rx, &mut mapper, &mut out, t.stop, run_turn.as_mut().map(|r| &mut r.events), None, TURN).await,
                 Err(_) => Ended::Gone { started: true },
             };
         }
@@ -1299,6 +1321,54 @@ mod tests {
         let lines = across_lines(true, Some(&turn));
         assert_eq!(lines.len(), 2);
         assert!(lines[1].contains("(/meeting-points)") && lines[1].contains("List who agreed to do what, in two bullets."), "{lines:?}");
+    }
+
+    /// **A busy turn is never cut** (18 Nov 2026): the clock is the time
+    /// with nothing from Claude Code, started again at each event — a
+    /// document's outline card the person took their time over, then its
+    /// sections, went past the 15 minutes the whole turn had and was cut off
+    /// as "took too long". Stuck (nothing at all) or past `most`: timed out.
+    #[tokio::test]
+    async fn a_busy_turn_is_never_cut_only_a_stuck_one() {
+        use crate::ai::claude_code::events::parse_line;
+        let status = || parse_line(r#"{"type":"system","subtype":"status","status":"requesting","session_id":"s"}"#).unwrap();
+        let result = || parse_line(r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Written.","session_id":"s"}"#).unwrap();
+        let read = |rx: tokio::sync::mpsc::UnboundedReceiver<Event>, clock: Clock| async move {
+            let mut rx = rx;
+            let (mut mapper, mut out, stop) = (Mapper::new(), ToChat::new(None, None, Vec::new()), crate::chat::stream::Stoppable::new(None));
+            let started = std::time::Instant::now();
+            let ended = read_turn(&mut rx, &mut mapper, &mut out, &stop, None, None, clock).await;
+            (ended, started.elapsed())
+        };
+        let clock = Clock { idle: Duration::from_millis(300), most: Duration::from_secs(5) };
+        // Busy for well past `idle` (an event every 100 ms), then its result: answered.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            for _ in 0..10 {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                let _ = tx.send(status());
+            }
+            let _ = tx.send(result());
+        });
+        let (ended, took) = read(rx, clock).await;
+        assert!(matches!(ended, Ended::Done(_)), "a busy turn answered");
+        assert!(took >= Duration::from_millis(900), "{took:?}");
+        // Nothing at all: stuck, after `idle`.
+        let (_quiet, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (ended, took) = read(rx, clock).await;
+        assert!(matches!(ended, Ended::TimedOut) && took < Duration::from_secs(2), "{took:?}");
+        // Busy and never done: `most`.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            for _ in 0..50 {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                if tx.send(status()).is_err() {
+                    return;
+                }
+            }
+        });
+        let (ended, took) = read(rx, Clock { idle: Duration::from_millis(300), most: Duration::from_secs(1) }).await;
+        assert!(matches!(ended, Ended::TimedOut) && took >= Duration::from_secs(1) && took < Duration::from_secs(3), "{took:?}");
     }
 
     #[test]
