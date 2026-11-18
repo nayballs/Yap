@@ -671,8 +671,13 @@ pub async fn refresh(id: &str, fresh: bool) -> Result<Diff, String> {
 
 /// Connector `c`'s connection for a call: up already, or started — and
 /// then listed again first (a changed tool drops back to Ask first before
-/// any call: the rug-pull check).
+/// any call: the rug-pull check). Never with the preview switched off,
+/// even mid-turn (its tools were offered while it was on): nothing
+/// started or sent.
 pub async fn ensure(c: &Connector) -> Result<Peer<RoleClient>, String> {
+    if !enabled() {
+        return Err(OFF.into());
+    }
     let m = manager();
     if m.is_up(&c.id) {
         let (peer, _) = m.peer(c).await?;
@@ -1286,7 +1291,8 @@ impl Drop for Calling<'_> {
 async fn call_logged(c: &Connector, peer: &Peer<RoleClient>, tool: &str, args: &Value, timeout: Duration) -> Result<results::Shaped, String> {
     let signed = oauth::state_of(c, &manager().status(&c.id));
     let mut calling = Calling { id: &c.id, tool, started: std::time::Instant::now(), done: false };
-    let out = call::call(peer, tool, args, timeout, &call::Stop::new()).await;
+    // Kept up while it runs: the idle sweep never cuts a call off.
+    let out = manager().using(&c.id, call::call(peer, tool, args, timeout, &call::Stop::new())).await;
     calling.done = true;
     let ms = calling.started.elapsed().as_millis() as u64;
     // Settings' "Last used" (told when it changed: at most once a minute).

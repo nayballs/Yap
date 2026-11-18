@@ -488,8 +488,10 @@ pub fn run_tool(bridge: &dyn Bridge, name: &str, args: &JsonObject) -> Result<St
     match name {
         "list_meetings" => {
             let limit = arg_u64(args, "limit").unwrap_or(20).clamp(1, 100);
-            let v = get(bridge, format!("/v1/meetings/list?limit={limit}")).map_err(fail)?;
-            Ok(render_meeting_list(&v["data"]))
+            // One more than asked: whether there are more is said.
+            let v = get(bridge, format!("/v1/meetings/list?limit={}", limit + 1)).map_err(fail)?;
+            let (items, more) = at_most(&v["data"], limit);
+            Ok(render_meeting_list(&items, more.then_some(limit)))
         }
         "search_meetings" => {
             let query = arg_str(args, "query").unwrap_or("");
@@ -530,8 +532,9 @@ pub fn run_tool(bridge: &dyn Bridge, name: &str, args: &JsonObject) -> Result<St
                 _ => return Err("status is \"open\", \"done\" or \"all\".".to_string()),
             };
             let limit = arg_u64(args, "limit").unwrap_or(50).clamp(1, 200);
-            let v = get(bridge, format!("/v1/tasks/list?status={status}&limit={limit}")).map_err(fail)?;
-            Ok(render_tasks(status, &v["data"]))
+            let v = get(bridge, format!("/v1/tasks/list?status={status}&limit={}", limit + 1)).map_err(fail)?;
+            let (items, more) = at_most(&v["data"], limit);
+            Ok(render_tasks(status, &items, more.then_some(limit)))
         }
         "list_folders" => {
             let folders = get(bridge, "/v1/folders/list".to_string()).map_err(fail)?;
@@ -863,27 +866,44 @@ fn meeting_line(m: &Value) -> String {
     format!("- {}", parts.join(" · "))
 }
 
-fn render_meeting_list(data: &Value) -> String {
-    let items = data.as_array().cloned().unwrap_or_default();
+/// A list's first `limit` items, and whether there were more (the bridge
+/// asked for one more than `limit`). Pure.
+fn at_most(data: &Value, limit: u64) -> (Vec<Value>, bool) {
+    let mut items = data.as_array().cloned().unwrap_or_default();
+    let more = items.len() as u64 > limit;
+    items.truncate(limit as usize);
+    (items, more)
+}
+
+/// `cut`: the list was cut at that many, and there are more — said, with
+/// how to see them, so a model never takes the first page for all of them.
+fn render_meeting_list(items: &[Value], cut: Option<u64>) -> String {
     if items.is_empty() {
         return "No meetings recorded in Yap yet.".to_string();
     }
-    let mut out = format!(
-        "{} meeting{} in Yap, newest first:\n",
-        items.len(),
-        if items.len() == 1 { "" } else { "s" }
-    );
-    for m in &items {
+    let mut out = match cut {
+        Some(1) => "The newest meeting in Yap (there are more):\n".to_string(),
+        Some(n) => format!("The {n} newest meetings in Yap (there are more), newest first:\n"),
+        None => format!("{} meeting{} in Yap, newest first:\n", items.len(), if items.len() == 1 { "" } else { "s" }),
+    };
+    for m in items {
         out.push_str(&meeting_line(m));
         out.push('\n');
+    }
+    if let Some(n) = cut {
+        out.push_str(&if n < 100 {
+            format!("\nThere are more than {n}: list_meetings with a bigger limit (up to 100) shows more, and search_meetings finds older ones by topic or name.")
+        } else {
+            "\nThere are more than 100: search_meetings finds older ones by topic or name.".to_string()
+        });
     }
     out.push_str("\nRead one with get_meeting and its id.");
     out
 }
 
-/// Tasks from the bridge, grouped by meeting: "- [ ] Priya: send the budget (due: Friday)".
-fn render_tasks(status: &str, data: &Value) -> String {
-    let items = data.as_array().cloned().unwrap_or_default();
+/// Tasks from the bridge, grouped by meeting: "- [ ] Priya: send the budget
+/// (due: Friday)". `cut`: as [`render_meeting_list`]'s.
+fn render_tasks(status: &str, items: &[Value], cut: Option<u64>) -> String {
     let kind = match status {
         "done" => "done ",
         "all" => "",
@@ -892,13 +912,16 @@ fn render_tasks(status: &str, data: &Value) -> String {
     if items.is_empty() {
         return format!("No {kind}tasks in Yap's meeting notes.");
     }
-    let mut out = format!(
-        "{} {kind}task{} from Yap's meeting notes, newest meeting first ([x] = ticked done by the user):\n",
-        items.len(),
-        if items.len() == 1 { "" } else { "s" }
-    );
+    let mut out = match cut {
+        Some(n) => format!("The first {n} {kind}tasks from Yap's meeting notes (there are more), newest meeting first ([x] = ticked done by the user):\n"),
+        None => format!(
+            "{} {kind}task{} from Yap's meeting notes, newest meeting first ([x] = ticked done by the user):\n",
+            items.len(),
+            if items.len() == 1 { "" } else { "s" }
+        ),
+    };
     let mut note = None;
-    for t in &items {
+    for t in items {
         if note != Some(t["noteId"].as_u64()) {
             note = Some(t["noteId"].as_u64());
             out.push_str(&format!(
@@ -921,6 +944,13 @@ fn render_tasks(status: &str, data: &Value) -> String {
             out.push_str(&format!(" · said at {}", clock(secs)));
         }
         out.push('\n');
+    }
+    if let Some(n) = cut {
+        out.push_str(&if n < 200 {
+            format!("\nThere are more than {n}: list_tasks with a bigger limit (up to 200) shows more.")
+        } else {
+            "\nThere are more than 200: the newest meetings' come first.".to_string()
+        });
     }
     out.push_str("\nRead a meeting with get_meeting and its id.");
     out
@@ -1576,6 +1606,14 @@ mod tests {
         assert!(text.starts_with("2 meetings in Yap, newest first:"));
         assert!(text.contains("**Q3 planning sync**"));
         assert!(text.contains("with Priya, Tom"));
+        assert!(!text.contains("there are more") && !text.contains("There are more"), "all of them: {text}");
+        // Cut at the limit: said, with how to see the rest — never "1
+        // meeting in Yap" as if it were all.
+        let (err, text) = s.tool("list_meetings", json!({ "limit": 1 })).await;
+        assert!(!err);
+        assert!(text.starts_with("The newest meeting in Yap (there are more):"), "{text}");
+        assert!(text.contains("There are more than 1: list_meetings with a bigger limit (up to 100)"), "{text}");
+        assert_eq!(text.matches("\n- ").count(), 1, "{text}");
 
         let (err, text) = s.tool("get_meeting", json!({ "id": "1" })).await;
         assert!(!err, "{text}");
@@ -1662,7 +1700,8 @@ mod tests {
             .request("tools/call", json!({ "_meta": meta, "name": "list_meetings", "arguments": { "limit": 1 } }))
             .await;
         assert_eq!(r["result"]["resultType"], "complete");
-        assert!(r["result"]["content"][0]["text"].as_str().unwrap().starts_with("1 meeting in Yap"));
+        // (Two meetings: this said "1 meeting in Yap" until 18 Nov 2026.)
+        assert!(r["result"]["content"][0]["text"].as_str().unwrap().starts_with("The newest meeting in Yap (there are more)"));
         // A version nobody knows is refused with the ones that work.
         let mut old = meta.clone();
         old["io.modelcontextprotocol/protocolVersion"] = json!("2099-01-01");

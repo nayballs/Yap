@@ -487,6 +487,14 @@ pub fn phone_connected(device: &str) -> bool {
     hub().is_some_and(|h| locked(&h.live).values().any(|l| l.device == device))
 }
 
+/// **Phone `device`'s newest session** of `sessions` (session, device): the
+/// one it connected last. A phone that came back (another Wi-Fi, a tab
+/// reloaded) can still have its old socket here until Windows notices it's
+/// gone; a report said there would be heard by nobody. Pure.
+fn newest_session<'a>(sessions: impl Iterator<Item = (u64, &'a str)>, device: &str) -> Option<u64> {
+    sessions.filter(|(_, d)| *d == device).map(|(s, _)| s).max()
+}
+
 /// How long an agent's report waits to be said on its phone.
 const REPORT_WAIT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
@@ -501,7 +509,10 @@ pub async fn say_report(device: &str, text: &str, message_id: &str) -> bool {
             tracing::info!("Remote Control: a report not said on the phone (a meeting or a call)");
             return false;
         }
-        let Some(cmd) = hub().and_then(|h| locked(&h.live).values().find(|l| l.device == device).map(|l| l.cmd.clone())) else {
+        let Some(cmd) = hub().and_then(|h| {
+            let live = locked(&h.live);
+            newest_session(live.iter().map(|(s, l)| (*s, l.device.as_str())), device).and_then(|s| live.get(&s)).map(|l| l.cmd.clone())
+        }) else {
             tracing::info!("Remote Control: a report not said (its phone isn't connected)");
             return false;
         };
@@ -778,6 +789,18 @@ pub fn link_remove(app: AppHandle, id: String) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_report_goes_to_the_phones_newest_connection() {
+        // The kitchen tablet came back on another Wi-Fi (session 9) before
+        // its old socket (session 4) was noticed gone; another phone between.
+        let live = [(4, "p-kitchen"), (7, "p-office"), (9, "p-kitchen")];
+        for order in [live, [live[2], live[0], live[1]], [live[1], live[2], live[0]]] {
+            assert_eq!(newest_session(order.iter().map(|(s, d)| (*s, *d)), "p-kitchen"), Some(9), "{order:?}");
+        }
+        assert_eq!(newest_session(live.iter().map(|(s, d)| (*s, *d)), "p-office"), Some(7));
+        assert_eq!(newest_session(live.iter().map(|(s, d)| (*s, *d)), "p-gone"), None);
+    }
 
     #[test]
     fn a_phone_reads_aloud_only_the_answers_it_was_given() {

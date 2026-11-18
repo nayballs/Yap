@@ -284,6 +284,29 @@ fn code_new(cx: &Ctx<'_>, g: &Gate, name: &str) {
     say(cx.tx, Out::Thread { id: None, title: String::new(), messages: Vec::new(), more: false, code: Some(thread_code(&folder, None)), agents: Vec::new(), cards: Vec::new() });
 }
 
+/// **A new Code chat's workspace, as the phone's question takes it**
+/// (`code_new` kept its `path`): through the gates again, as they are now
+/// — Remote Control may have gone off, this phone been unticked or the
+/// workspace switched off since `code_new`, and none of those cuts the
+/// phone off. `None`: not any more (the question makes a plain chat).
+pub fn new_code_taken(device: &str, path: &str) -> Option<String> {
+    new_code_allowed(&gate(device), path, workspace)
+}
+
+/// [`new_code_taken`]'s decision: workspace `path` (one of this PC's
+/// workspaces) through every gate (`ws`: a workspace as the gates read
+/// it, by name). Pure but for the workspaces' list.
+fn new_code_allowed(g: &Gate, path: &str, ws: impl Fn(&str) -> gates::Workspace) -> Option<String> {
+    let folder = code_chat::find(path).filter(|f| crate::agents::workspaces::norm(&f.path) == crate::agents::workspaces::norm(path))?;
+    match gates::allows(g, Some(&ws(&folder.name)), Action::Act) {
+        Ok(()) => Some(folder.path),
+        Err(r) => {
+            tracing::info!(why = r.kind(), "Remote Control: a phone's new Code chat refused as its question came");
+            None
+        }
+    }
+}
+
 /// **A Code chat's part of its thread** (`folder`: its workspace).
 pub fn thread_code(folder: &crate::agents::workspaces::Folder, conversation: Option<u64>) -> ThreadCode {
     let cfg_mode = crate::config::load().agents_mode;
@@ -670,6 +693,8 @@ pub fn ready_all(hub: &Hub) {
             welcome(hub, &tx, &device);
         } else if !on {
             tx.lane().with(|l| l.unwatch());
+            // A new Code chat waiting for its question goes too.
+            locked(&code.new_code).take();
         }
     }
 }
@@ -891,6 +916,26 @@ impl crate::chat::stream::Sink for ConfirmTee<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `code_new` passed the gates; by the phone's first question Remote
+    /// Control went off, the phone was unticked or the workspace switched
+    /// off (none of them cuts the phone off): no Code chat, no Claude Code
+    /// started there.
+    #[test]
+    fn a_new_code_chat_goes_through_the_gates_again_when_its_question_comes() {
+        let dir = std::env::temp_dir().join(format!("yap-unit-new-code-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let folder = crate::agents::workspaces::add(&dir.to_string_lossy(), Some("garden-planner"), None).unwrap();
+        let on = Gate { master: true, yap_code: true, claude: true, ticked: true };
+        let ws = |allowed: bool| move |name: &str| gates::Workspace { name: name.to_string(), allowed, cap: None };
+        assert_eq!(new_code_allowed(&on, &folder.path, ws(true)), Some(folder.path.clone()));
+        assert_eq!(new_code_allowed(&Gate { master: false, ..on }, &folder.path, ws(true)), None, "Remote Control off");
+        assert_eq!(new_code_allowed(&Gate { ticked: false, ..on }, &folder.path, ws(true)), None, "the phone unticked");
+        assert_eq!(new_code_allowed(&Gate { yap_code: false, ..on }, &folder.path, ws(true)), None, "Yap Code off");
+        assert_eq!(new_code_allowed(&on, &folder.path, ws(false)), None, "the workspace off");
+        assert_eq!(new_code_allowed(&on, r"D:\Gone\recipe-box", ws(true)), None, "a workspace no longer there");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_cards_end_says_you_another_phone_or_the_pc() {

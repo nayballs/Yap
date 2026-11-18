@@ -274,7 +274,10 @@ impl crate::chat::assistant::Phone for Turn {
         if self.chat != ChatRef::New {
             return None;
         }
-        self.new_code.lock().unwrap_or_else(|p| p.into_inner()).take()
+        // Through Remote Control's gates again: they may have closed since
+        // `code_new` (switched off, this phone unticked, the workspace off).
+        let path = self.new_code.lock().unwrap_or_else(|p| p.into_inner()).take()?;
+        crate::link::code::new_code_taken(&self.device, &path)
     }
 
     fn pictures(&self) -> (Vec<String>, bool) {
