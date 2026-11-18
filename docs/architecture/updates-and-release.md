@@ -41,11 +41,17 @@ How a running Yap finds and installs updates, the installer, the stable and nigh
   (`request_install`, from toast/About/tray/notification): never mid-dictation
   (deferred until the pipeline goes idle + 2.5 s, via the `yap-state` hook),
   refused with a message during a meeting recording or model download
-  (`yap-update-blocked`); the updater's `on_before_exit` runs
+  (`yap-update-blocked`); asked while a check runs with an update already
+  found (the scheduled one, or the window coming back: `restart_step`'s
+  `AfterCheck`), it waits for the check's end and goes ahead with what that
+  leaves — before 18 Nov 2026 it was refused ("There's no update ready to
+  install."), and a restart waiting for a dictation was lost; the updater's `on_before_exit` runs
   `shutdown_cleanup` + saves window state, because on Windows `Update::install`
   launches the installer (passive, `/R` relaunch) and `std::process::exit`s
   without the Exit handler. A restart marker lets the relaunched Yap reopen the
-  window if it was open and toast "Updated to X". Deliberately **no
+  window if it was open and toast "Updated to X"; a launch of the same
+  version within the hour (the installer never ran: UAC said no) is an
+  ordinary launch, its window shown (`is_update_relaunch`). Deliberately **no
   install-on-quit**: the passive installer's `/R` would relaunch a Yap the
   user just quit, so a downloaded update stays one click away (and the next
   launch re-finds it). Nightly and stable announce alike (once per episode;

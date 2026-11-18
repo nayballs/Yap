@@ -38,7 +38,12 @@ Optional Yap accounts: sign-in routes (email codes, Google/GitHub/Discord, your 
   `shell/credentials.rs`: [config-and-data.md](./config-and-data.md#secrets-in-credential-manager-shellcredentialsrs)).
   Signed in, startup + every 24 h
   `refresh` re-validates via `get-session` (server says no → signed out;
-  unreachable → keep, flagged `offline`). `auth_sign_out` revokes best-effort
+  unreachable → keep, flagged `offline`; a 2xx whose body isn't the
+  service's JSON — a hotel Wi-Fi's sign-in page, a body cut off — is
+  unreachable too, never "no": `api_reply`, 18 Nov 2026). The vault is read
+  once a run, at the first check (`session_to_check`): signed out since,
+  there's nothing to check even when the vault's delete failed, so a
+  signed-out Yap never sends its old token. `auth_sign_out` revokes best-effort
   then forgets locally; `auth_delete_account` returns `"reauth"` when the
   server wants a fresh sign-in (sessions > 1 day old). A phone sign-in under
   a day old can't delete the account or sign devices out (403

@@ -660,18 +660,36 @@ async fn scheduler(app: AppHandle) {
             }
             !s.store.connections.is_empty() && !s.syncing && now >= s.next_sync
         };
-        if due {
-            sync_all(&app).await;
-        }
-        tick_card(&app);
-        tick_briefs(&app);
-        tick_tray(&app);
+        let sync = due.then(|| {
+            let app = app.clone();
+            async move { sync_all(&app).await }
+        });
+        turn(sync, || {
+            tick_card(&app);
+            tick_briefs(&app);
+            tick_tray(&app);
+        });
         let wait = next_wake(now_secs());
         tokio::select! {
             _ = WAKE.notified() => {}
             _ = tokio::time::sleep(Duration::from_secs(wait)) => {}
         }
     }
+}
+
+/// **One turn of the scheduler**: a due sync started on its own task, then
+/// the ticks at once. A sync can take a while (each calendar one after the
+/// other, a slow one up to 30 s: the PC just woken on a network still
+/// coming back), and a reminder, a brief or the tray never waits for it;
+/// its end wakes the scheduler with the new meetings.
+fn turn<S>(sync: Option<S>, ticks: impl FnOnce())
+where
+    S: std::future::Future<Output = ()> + Send + 'static,
+{
+    if let Some(sync) = sync {
+        tauri::async_runtime::spawn(sync);
+    }
+    ticks();
 }
 
 /// Seconds until the scheduler has something to do: a sync, a reminder
@@ -681,7 +699,8 @@ fn next_wake(now: i64) -> u64 {
     let lead = reminder_lead(&cfg.meeting_reminder);
     let s = lock();
     let mut next = now + MAX_SLEEP as i64;
-    if !s.store.connections.is_empty() {
+    // (A sync under way wakes it when it ends.)
+    if !s.store.connections.is_empty() && !s.syncing {
         next = next.min(s.next_sync);
     }
     if let Some(t) = lead.and_then(|lead| model::next_reminder_at(&s.store.events, now, lead, &s.snoozed)) {
@@ -2999,6 +3018,29 @@ mod native {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A calendar that answers slowly (or the PC just woken, its network
+    /// coming back: 30 s a calendar) never holds a reminder back: the
+    /// scheduler's ticks run while its sync is still under way.
+    #[tokio::test]
+    async fn a_slow_sync_never_holds_the_reminders_back() {
+        let (ended_tx, ended) = tokio::sync::oneshot::channel::<()>();
+        let slow = async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let _ = ended_tx.send(());
+        };
+        let ticked = std::sync::atomic::AtomicBool::new(false);
+        let started = std::time::Instant::now();
+        turn(Some(slow), || ticked.store(true, std::sync::atomic::Ordering::SeqCst));
+        assert!(ticked.load(std::sync::atomic::Ordering::SeqCst), "the ticks ran");
+        assert!(started.elapsed() < Duration::from_millis(250), "without waiting for the sync");
+        // The sync still runs to its end, on its own.
+        tokio::time::timeout(Duration::from_secs(5), ended).await.expect("the sync ended").unwrap();
+        // Nothing due: only the ticks.
+        let ticked = std::sync::atomic::AtomicBool::new(false);
+        turn(None::<std::future::Ready<()>>, || ticked.store(true, std::sync::atomic::Ordering::SeqCst));
+        assert!(ticked.load(std::sync::atomic::Ordering::SeqCst));
+    }
 
     #[test]
     fn links_are_https_or_webcal() {

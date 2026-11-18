@@ -29,7 +29,9 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   keeps connections' names, meetings from 12 h back to 7 days ahead, reminder
   answers (2 days) and the nudge. **Sync** (a tokio scheduler waking ≤ 30 s;
   a wall-clock jump = the PC slept → sync now): every 12 min, on wake, on
-  Sync, after a connect; a failure keeps the old meetings and shows why;
+  Sync, after a connect, each on a task of its own (`turn`: a slow calendar,
+  30 s a fetch at most, never holds a reminder card back — 18 Nov 2026); a
+  failure keeps the old meetings and shows why;
   `invalid_grant` → "Connect again". **Parsing** (`calendar/ics.rs`, Yap's own,
   lenient: byte-wise unfolding, RFC 6868, bad lines skipped) + recurrence via
   `rrule` on wall-clock time then the event's zone (EXDATE/RDATE/

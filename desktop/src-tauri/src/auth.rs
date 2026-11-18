@@ -185,6 +185,10 @@ struct Inner {
     providers: Vec<String>,
     offline: bool,
     methods: Option<Methods>,
+    /// The vault was read this run (the first session check) or the
+    /// session it held was let go: it's never read again, so a sign-out
+    /// whose delete failed can't bring the old session back.
+    vault_read: bool,
 }
 
 static STATE: Mutex<Inner> = Mutex::new(Inner {
@@ -193,6 +197,7 @@ static STATE: Mutex<Inner> = Mutex::new(Inner {
     providers: Vec::new(),
     offline: false,
     methods: None,
+    vault_read: false,
 });
 
 fn lock() -> MutexGuard<'static, Inner> {
@@ -304,14 +309,7 @@ async fn refresh_methods(app: &AppHandle) {
 /// the server no longer knows (expired, revoked, account deleted) signs Yap
 /// out; an unreachable server keeps the stored copy, flagged offline.
 async fn refresh(app: &AppHandle) {
-    let token = {
-        let mut inner = lock();
-        if inner.session.is_none() {
-            inner.session = vault::load();
-            inner.offline = inner.session.is_some();
-        }
-        inner.session.as_ref().map(|s| s.token.clone())
-    };
+    let token = session_to_check(&mut lock(), vault::load);
     let Some(token) = token else {
         return;
     };
@@ -344,6 +342,19 @@ async fn refresh(app: &AppHandle) {
         Err(e) => tracing::info!("auth: session check failed (keeping stored session): {}", e.code),
     }
     emit_status(app);
+}
+
+/// **The session a check confirms**: the one in memory, else the vault's —
+/// read once a run, at the first check. Signed out since (the session let
+/// go), there's nothing to check even when the vault's delete failed: a
+/// signed-out Yap never contacts the account service.
+fn session_to_check(inner: &mut Inner, load: impl FnOnce() -> Option<Stored>) -> Option<String> {
+    if inner.session.is_none() && !inner.vault_read {
+        inner.session = load();
+        inner.offline = inner.session.is_some();
+    }
+    inner.vault_read = true;
+    inner.session.as_ref().map(|s| s.token.clone())
 }
 
 // ---- browser sign-in (Google / GitHub / Discord) ----
@@ -1459,6 +1470,7 @@ fn forget_session(app: &AppHandle) {
         inner.session = None;
         inner.providers.clear();
         inner.offline = false;
+        inner.vault_read = true;
     }
     vault::clear();
     emit_status(app);
@@ -1824,12 +1836,26 @@ async fn read_api(resp: reqwest::Response) -> Result<Value, ApiError> {
         .or_else(|| resp.headers().get("retry-after"))
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.trim().parse().ok());
-    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    let text = resp.text().await.ok();
+    api_reply(status, text.as_deref(), retry_after)
+}
+
+/// **A reply as [`read_api`] reads it** (`text`: its body, `None` when it
+/// didn't arrive whole). A 2xx whose body isn't JSON — a hotel Wi-Fi's
+/// sign-in page, a body cut off — is no answer from the service: read as
+/// unreachable, never as "this session isn't known" (which signs Yap out
+/// and deletes the stored session). An empty one is JSON's `null`. Pure.
+fn api_reply(status: u16, text: Option<&str>, retry_after: Option<u64>) -> Result<Value, ApiError> {
+    let body: Option<Value> = text.and_then(|t| if t.trim().is_empty() { Some(Value::Null) } else { serde_json::from_str(t).ok() });
     if (200..300).contains(&status) {
-        return Ok(body);
+        return body.ok_or_else(|| {
+            tracing::warn!("auth: service replied {} with a body that isn't its JSON", status);
+            ApiError::network()
+        });
     }
     let code = body
-        .get("code")
+        .as_ref()
+        .and_then(|b| b.get("code"))
         .and_then(|c| c.as_str())
         .unwrap_or_default()
         .to_string();
@@ -1936,6 +1962,44 @@ mod vault {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reply_that_isnt_the_services_json_is_unreachable_never_a_sign_out() {
+        // A captive portal's page, or a body cut off: not "unknown session".
+        let portal = api_reply(200, Some("<html><body>Sign in to the hotel Wi-Fi</body></html>"), None).unwrap_err();
+        assert_eq!(portal.code, "NETWORK");
+        assert_eq!(api_reply(200, None, None).unwrap_err().code, "NETWORK");
+        // Better Auth's own answers.
+        assert_eq!(api_reply(200, Some("null"), None).unwrap(), Value::Null, "an unknown session");
+        assert_eq!(api_reply(200, Some(""), None).unwrap(), Value::Null);
+        assert_eq!(api_reply(200, Some(r#"{"user":{"id":"u1"}}"#), None).unwrap()["user"]["id"], "u1");
+        let refused = api_reply(401, Some(r#"{"code":"SESSION_EXPIRED"}"#), None).unwrap_err();
+        assert_eq!((refused.status, refused.code.as_str()), (401, "SESSION_EXPIRED"));
+        let busy = api_reply(429, Some("Too Many Requests"), Some(30)).unwrap_err();
+        assert_eq!((busy.status, busy.code.as_str(), busy.retry_after), (429, "", Some(30)));
+    }
+
+    #[test]
+    fn after_signing_out_the_vault_is_never_read_again() {
+        let stored = || Stored {
+            token: "tok-FAKE".into(),
+            user: Profile { id: "u1".into(), email: "sam@example.com".into(), name: "Sam".into(), image: None },
+            signed_in_at: 0,
+        };
+        let empty = || Inner { pending: None, session: None, providers: Vec::new(), offline: false, methods: None, vault_read: false };
+        let mut inner = empty();
+        // The first check reads the vault.
+        assert_eq!(session_to_check(&mut inner, || Some(stored())).as_deref(), Some("tok-FAKE"));
+        assert!(inner.offline, "unconfirmed until the service answers");
+        // Signed out, the vault's delete failed (the session still in it):
+        // the daily check finds nothing to check, and contacts nobody.
+        inner.session = None;
+        assert_eq!(session_to_check(&mut inner, || Some(stored())), None);
+        // Never signed in: the vault is read once, and that's all.
+        let mut fresh = empty();
+        assert_eq!(session_to_check(&mut fresh, || None), None);
+        assert_eq!(session_to_check(&mut fresh, || Some(stored())), None);
+    }
 
     fn code_for(identifier: &str, state: &str) -> String {
         URL_SAFE_NO_PAD.encode(json!({ "identifier": identifier, "state": state }).to_string())
