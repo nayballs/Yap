@@ -742,6 +742,8 @@ pub fn chat_images_delete_all(app: AppHandle) -> usize {
         .unwrap_or_default();
     let gone = images::delete(&ids);
     thumbs::sweep_in(&images::dir());
+    // (Every Code chat's copies as files too, and anything in their folders: agents/shots.rs.)
+    crate::agents::shots::reset();
     waiting::chat_waiting_clear(app.clone());
     let _ = app.emit("yap-chat-images-deleted", serde_json::json!({ "count": gone }));
     tracing::info!(images = gone, "snip: every chat screenshot deleted (Settings)");

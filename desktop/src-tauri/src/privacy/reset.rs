@@ -181,7 +181,7 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: "Chats",
         says: "Every chat, archived ones too, with its screenshots and the files attached to it. Documents Chat wrote stay in Notes",
-        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "(chat_branches.json)", "(chat_feedback.json)", "chat-images/", "chat-files/", "chat-made/", "claude_sessions.json", "connector_chats.json", "(chat_styles.json)", "(projects.json)", "(routines.json)", "(memory.json)", "(search-index/)"],
+        files: &["(chats.json)", "(chat_files.json)", "(chat_attachments.json)", "(chat_branches.json)", "(chat_feedback.json)", "chat-images/", "code-shots/", "chat-files/", "chat-made/", "claude_sessions.json", "connector_chats.json", "(chat_styles.json)", "(projects.json)", "(routines.json)", "(memory.json)", "(search-index/)"],
         stores: &["chats", "claudeSessions", "memory"],
     },
     About {
@@ -580,6 +580,8 @@ const STORES: &[(&str, Rule)] = &[
     // (And the answers' 👍 / 👎 the day they were there, 16 Nov 2026: never written since, still the person's.)
     ("chat_feedback.json", Choice::chats),
     ("chat-images/", Choice::chat_images),
+    // (A Code chat's screenshots as files for its Claude: copies of chat-images/'s, agents/shots.rs.)
+    ("code-shots/", Choice::chat_images),
     // (Files attached to Chat's questions: Chat's alone, as its screenshots are.)
     ("chat-files/", Choice::chat_images),
     // What chats made (chat/made.rs): every visual is a chat's (Ask threads make none).

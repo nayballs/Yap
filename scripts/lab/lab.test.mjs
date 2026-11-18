@@ -16,8 +16,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO, buildFresh, inWorktree, labConfig, minutesFrom, onOff, parseArgs, parseModel, parseSize, targetDir } from './options.mjs';
-import { coloursIn, drawPng, meanLuma, pngSize, readPng, stitch } from './png.mjs';
-import { checkTurn, kindOf, probePasses, resultObject, screenChecks, valueHolds } from './script.mjs';
+import { coloursIn, drawPng, inWord, meanLuma, pngSize, readPng, stitch } from './png.mjs';
+import { checkTurn, kindOf, probePasses, resultObject, screenChecks, sessionCallsOf, valueHolds } from './script.mjs';
 import { pageCuts, PAGE_MAX } from './sheet.mjs';
 
 describe('a tall sheet in pages', () => {
@@ -292,6 +292,11 @@ describe('shots, the sheet and scripts', () => {
     assert.deepEqual([...both.data.subarray((69 * 40) * 4, (69 * 40) * 4 + 3)], [0, 0, 255]);
     const circle = readPng(drawPng({ width: 100, height: 60 }));
     assert.ok(coloursIn(circle) === 2 && meanLuma(circle) > 0);
+    // A word across its middle (18 Nov 2026, the shots-as-files script): a third colour there, none at the edges.
+    const worded = readPng(drawPng({ width: 640, height: 360, word: 'Lantern', wordColor: '#000000' }));
+    assert.equal(coloursIn(worded), 3);
+    assert.ok(inWord('LANTERN', 320 - 82, 180 - 14, 640, 360, 201.6), 'the L’s top-left corner is ink');
+    assert.ok(!inWord('LANTERN', 5, 5, 640, 360, 201.6) && !inWord('', 320, 180, 640, 360, 201.6));
   });
 
   test('the sheet: a column at its CSS size at most, a tall shot in even pieces, light beside dark', () => {
@@ -326,6 +331,11 @@ describe('shots, the sheet and scripts', () => {
     assert.deepEqual(missed.map((c) => c.check), ['used browser_find', 'pictures 2']);
     assert.match(missed[0].detail, /called: browser_scroll, browser_click/);
     assert.equal(checkTurn({ used: 'x' }, { result: null })[0].detail, 'no turn yet: ask first');
+    // A Code chat's own session's calls (`session: true`): its helper's Read of a screenshot's file among them.
+    const direct = { tools: [{ via: 'session', name: 'Agent', args: '{"prompt":"Open C:\\\\d\\\\code-shots\\\\1-2\\\\shot-1.png"}' }, { via: 'session', name: 'Read', args: '{"file_path":"C:\\\\d\\\\code-shots\\\\1-2\\\\shot-1.png"}' }, { via: 'yap', name: 'web_search', args: '{}' }] };
+    assert.deepEqual(sessionCallsOf(direct).map((c) => c.name), ['Agent', 'Read']);
+    assert.ok(checkTurn({ used: 'Agent', tool: { name: 'Read', args: { file_path: '/code-shots[\\\\/]\\d+-\\d+[\\\\/]shot-1\\.png$/' } } }, { result: direct, calls: sessionCallsOf(direct) }).every((c) => c.pass));
+    assert.deepEqual(sessionCallsOf(null), []);
     const agents = { agents: [{ id: 'a1', status: 'done', files: ['notes.md'] }] };
     assert.ok(checkTurn({ agent: { status: 'done', files: { min: 1 } } }, { result: null, agents }).every((c) => c.pass));
     // An agent's mode, plan and read-only turn (agent-panel's Bypass catch-up).
