@@ -1526,7 +1526,10 @@ pub fn answer(note: &mut Note, id: &str, reply: &str) -> Result<bool, String> {
 }
 
 /// After the person put a name on a voice whose lines said "Speaker 2" in a
-/// summary already written: the summary and the digests say the name.
+/// summary already written: the summary and the digests say the name — and
+/// so does Yap's own version kept beside an edited summary (`summary_ai`),
+/// so "Back to Yap's summary" never takes the name away again (nor the
+/// ticks of that person's tasks, matched by their owner).
 pub fn rename_in_summary(note: &mut Note, old_label: &str, new_name: &str) -> bool {
     if old_label == new_name || !old_label.starts_with("Speaker ") || new_name.trim().is_empty() {
         return false;
@@ -1540,6 +1543,10 @@ pub fn rename_in_summary(note: &mut Note, old_label: &str, new_name: &str) -> bo
         if hash_was_fresh {
             note.enhanced_at_hash = crate::notes::content_hash(&note.content);
         }
+        changed = true;
+    }
+    if re.is_match(&note.summary_ai) {
+        note.summary_ai = re.replace_all(&note.summary_ai, new_name).into_owned();
         changed = true;
     }
     for d in &mut note.digests {
@@ -2232,6 +2239,33 @@ mod tests {
         assert_eq!(n.enhanced_content, "## Priya\n- Send the deck\n## Speaker 12\n- x");
         assert_eq!(n.digests[0].actions[0].owner, "Priya");
         assert!(!rename_in_summary(&mut n, "Them", "Priya"));
+    }
+
+    /// A voice named after Yap wrote its summary, which the person then
+    /// edited: "Back to Yap's summary" keeps the name, and the ticks of
+    /// that person's tasks (matched by their owner). Until 2026-11-18 Yap's
+    /// own version kept "Speaker 2": going back to it took the name away and
+    /// unticked their tasks.
+    #[test]
+    fn going_back_to_yaps_summary_keeps_a_name_put_on_a_voice() {
+        let mut n = meeting(&[("them-1", "hi")]);
+        let yaps = "## Action plan\n### Speaker 2\n- [ ] Send the deck\n### You\n- [ ] Book the room";
+        // As `edits::write_summary` leaves it: Yap's, its own copy beside it.
+        n.enhanced_content = yaps.into();
+        n.summary_ai = yaps.into();
+        assert!(rename_in_summary(&mut n, "Speaker 2", "Priya"));
+        // The person ticks Priya's task and fixes a word of their own.
+        let theirs = "## Action plan\n### Priya\n- [x] Send the deck\n### You\n- [ ] Book the big room";
+        assert!(crate::notes::edits::apply_summary_edit(&mut n, theirs, 1_000));
+        assert!(crate::notes::edits::can_restore(&n));
+        let previous = crate::notes::edits::restore_ai_summary(&mut n).unwrap();
+        assert_eq!(previous, theirs);
+        assert_eq!(n.enhanced_content, "## Action plan\n### Priya\n- [x] Send the deck\n### You\n- [ ] Book the room");
+        // Their words back to Yap's (the name in them): Yap's again.
+        assert!(crate::notes::edits::apply_summary_edit(&mut n, theirs, 2_000));
+        assert_ne!(n.summary_edited_ms, 0);
+        assert!(crate::notes::edits::apply_summary_edit(&mut n, "## Action plan\n### Priya\n- [ ] Send the deck\n### You\n- [ ] Book the room", 3_000));
+        assert_eq!(n.summary_edited_ms, 0, "Yap's own words, the name it was given in them");
     }
 
     #[test]

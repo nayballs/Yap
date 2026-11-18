@@ -665,6 +665,13 @@ pub(crate) fn claim_for_test(note_id: u64) -> impl Drop {
     Claim::take(note_id).expect("the recorder's slot is free")
 }
 
+/// A side's buffer as a recording makes it ("Them": no dictation gate), for
+/// other modules' tests (`audio.rs`'s writer).
+#[cfg(test)]
+pub(crate) fn side_for_test() -> AudioBuf {
+    Captured::call()
+}
+
 /// **Delete a note** — every way one is deleted while Yap may be recording
 /// (the Notes view, the local API, "Started by mistake?"'s Discard): never
 /// the note a meeting records into, or is starting to. Under the recorder's

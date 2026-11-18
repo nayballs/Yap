@@ -569,7 +569,9 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   transcript; stop marks after it move up; digests from the one that read it
   dropped, `drop_digests_from`; its place to `meetings::audio::set_cut` so
   Transcribe again and the refine never bring it back; kept in memory for
-  Undo, `Removed`) and `transcript_line_restore` (`restore_line`: where it
+  Undo, `Removed`, forgotten with its note — `forget`, from
+  `notes::forget_own`, Reset app and the transcript's days — so a new note
+  given its id never gets it back) and `transcript_line_restore` (`restore_line`: where it
   was when nothing changed since, its stops as they were, else by time),
   `transcript_line_split` (`split_line` at word `at`: each part its side,
   voice, lock and stretch — the words' times, else shared by length; on an

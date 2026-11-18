@@ -1681,6 +1681,8 @@ pub fn forget_own(ids: &[u64]) {
         crate::calendar::filing::forget_note(id);
     }
     pins::forget_many(ids);
+    // Its lines deleted in this run, kept for Undo (`transcript_edits.rs`).
+    transcript_edits::forget(ids);
 }
 
 #[cfg(test)]
