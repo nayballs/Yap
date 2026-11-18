@@ -370,6 +370,32 @@ test("a meeting's Ask thread in Notes: the next question carries the thread's su
   fakeLlm.reply('other', () => 'OK');
 });
 
+test("a question about a note that gets no answer comes back to its box, before what's been typed since", async ({ main, fakeLlm }) => {
+  // 18 Nov 2026: the box stays open while a question is answered; a failed
+  // answer gave the question back in place of what was typed meanwhile.
+  await openView(main, 'Notes');
+  await main.getByRole('complementary').getByRole('button', { name: /^Meetings\b/ }).first().click();
+  await main.locator('.items .item').filter({ hasText: 'Supplier call' }).click();
+  const ask = main.getByPlaceholder('Ask anything…');
+  // (The first request held a while, so the next words go in before it fails; any asked again fail at once.)
+  fakeLlm.delay('other', 4000);
+  fakeLlm.failNext('other', 6, 400, { error: { message: 'fake failure: no answer today' } });
+  try {
+    const before = fakeLlm.requests.length;
+    await ask.fill('Who pays for shipping?');
+    await ask.press('Enter');
+    await expect.poll(() => fakeLlm.requests.slice(before).some((r) => textOf(r.user).includes('Who pays for shipping?'))).toBe(true);
+    fakeLlm.delay('other', 0);
+    await ask.fill('And the insurance?');
+    await expect(main.getByText("Couldn't answer")).toBeVisible({ timeout: 30_000 });
+    await expect(ask).toHaveValue('Who pays for shipping? And the insurance?');
+  } finally {
+    fakeLlm.delay('other', 0);
+    fakeLlm.failNext('other', 0);
+    await ask.fill('');
+  }
+});
+
 test('a long chat on Claude Haiku 5.5 stays under its 100K price line: the latest messages, never the whole chat', async ({ yap, main, fakeLlm, shot }) => {
   // Haiku 5.5 as Anthropic lists it: a million tokens of context.
   fakeLlm.listModels('anthropic', [

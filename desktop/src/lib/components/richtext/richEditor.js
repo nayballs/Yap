@@ -396,9 +396,16 @@ export function createRichEditor({
     setEditable(on) {
       if (!editor.isDestroyed && editor.isEditable !== on) editor.setEditable(on, false);
     },
-    /** The caret into the page (`at`: 'end', 'start', or where it was). */
+    /**
+     * The caret into the page (`at`: 'end', 'start', or where it was), and the keyboard with it at once (`focusNow`'s
+     * reason: TipTap's own focus waits for the next frame). A new page in front — the quick note's new tab, a click
+     * under the last block — took the next keys nowhere until then (18 Nov 2026). TipTap's focus still moves the caret
+     * now and brings it into view on that frame.
+     */
     focus(at = null) {
-      if (!editor.isDestroyed) editor.commands.focus(at);
+      if (editor.isDestroyed) return;
+      editor.view.focus();
+      editor.commands.focus(at);
     },
     /**
      * The keyboard on the page at once. TipTap's `focus` waits for the next

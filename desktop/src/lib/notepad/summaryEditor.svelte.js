@@ -1,7 +1,6 @@
 // The meeting's summary, edited in place (notes/edits.rs): Edit turns it into
-// its markdown, saved 600 ms after typing stops and at least every two
-// seconds while it goes on (core/typingSave.js: a crash mid-paragraph loses
-// at most that); Done (or Esc, another note, Generate summary) saves what's
+// its markdown, saved 600 ms after typing stops (and at least every 2 s while
+// it goes on); Done (or Esc, another note, Generate summary) saves what's
 // left. Kept while another tab is up, and read by the notepad's loads: words
 // typed and not yet saved are never replaced by an older copy (`dirty`).
 import { saveSummary, offerSummaryWords } from '../core/noteEdits.js';
@@ -15,8 +14,6 @@ export class SummaryEditor {
   /** Typed and not yet saved: an event or a read never puts older words back. */
   dirty = false;
   #timer = null;
-  /** When the first change not saved yet was made. */
-  #since = 0;
   #note;
   #changing;
 
@@ -39,12 +36,18 @@ export class SummaryEditor {
   /** The summary at Edit: a word swapped by Done is offered for the dictionary. */
   #before = '';
 
-  /** A keystroke: saved once typing stops, or two seconds after the first change not saved yet. */
+  /** When the first edit not saved yet was made (core/typingSave.js). */
+  #unsavedSince = 0;
+
+  /**
+   * A keystroke: saved once typing pauses, and at least every two seconds while it goes on (core/typingSave.js; only
+   * a pause saved, so a crash while someone typed on lost everything since the last one: 18 Nov 2026).
+   */
   queueSave() {
     this.dirty = true;
-    if (this.#timer === null) this.#since = Date.now();
+    if (this.#timer === null) this.#unsavedSince = Date.now();
     clearTimeout(this.#timer);
-    this.#timer = setTimeout(() => this.flush(), saveDelay(this.#since));
+    this.#timer = setTimeout(() => this.flush(), saveDelay(this.#unsavedSince));
   }
 
   async flush() {

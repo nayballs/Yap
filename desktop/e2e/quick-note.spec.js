@@ -578,6 +578,44 @@ test('tabs: new, switch and close with the buttons and Ctrl+T, Ctrl+Tab and Ctrl
   await expectText(note(yap), '');
 });
 
+test('a new tab takes the very next key: words typed straight after Ctrl+T or + are never lost', async ({ yap }) => {
+  // 18 Nov 2026: a new tab is a new page (one editor per tab), and the page
+  // took the keyboard only on the next frame (TipTap's own focus waits for
+  // one). A window just shown, or a busy PC, can draw none for a while: the
+  // keys typed meanwhile went to no box at all. Frames held here, as a busy
+  // PC's are; the words go in at once.
+  await openIt(yap);
+  await yap.quickNote.getByRole('button', { name: 'New note' }).click();
+  await note(yap).pressSequentially('Water the plants');
+  const frames = (on) =>
+    yap.quickNote.evaluate((on) => {
+      if (on) {
+        if (window.__heldRaf) window.requestAnimationFrame = window.__heldRaf;
+        window.__heldRaf = null;
+      } else {
+        window.__heldRaf = window.requestAnimationFrame;
+        window.requestAnimationFrame = () => 0;
+      }
+    }, on);
+  try {
+    await frames(false);
+    await note(yap).press('Control+t');
+    await yap.quickNote.keyboard.insertText('Call the vet');
+    await frames(true);
+    await expectText(note(yap), 'Call the vet');
+    await expect(note(yap)).toBeFocused();
+    // The + button too (it had the focus as it was clicked).
+    await frames(false);
+    await yap.quickNote.getByRole('button', { name: 'New note' }).click();
+    await yap.quickNote.keyboard.insertText('Buy stamps');
+    await frames(true);
+    await expectText(note(yap), 'Buy stamps');
+    await expectStore(yap, 'notes.json', (s) => ['Water the plants', 'Call the vet', 'Buy stamps'].every((t) => s.notes.some((n) => n.content === t)));
+  } finally {
+    await frames(true).catch(() => {});
+  }
+});
+
 test('Send to the app it came up over: the note, or its selection, pasted there; it steps aside', async ({ yap, shot }) => {
   await putAway(yap);
   // A stand-in for the app in front (a test run reads and pastes into no real window).

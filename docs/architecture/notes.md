@@ -645,7 +645,11 @@ local API and search see the same text.
   2026-11-16: TipTap's own `focus` waits for the next frame, and a busy PC
   can draw none for seconds, so words typed as the page came in went to no
   box: meeting-crash's note, now and then; notes-rich-text's "typing as the
-  page comes in" holds the chunk and the frames to check it). The Yap bar's
+  page comes in" holds the chunk and the frames to check it). Every `focus`
+  of the page's (`richEditor.js`) gives it the keyboard at once too
+  (2026-11-18: the quick note's new tab took the keys typed right after
+  Ctrl+T or + nowhere; quick-note.spec's "a new tab takes the very next
+  key"). The Yap bar's
   and the main window's first paint never carry the editor (frontend.md, the
   main window's chunk).
 - **Where it is.** Notes' My thoughts (`views/notes/NoteThoughts.svelte` in
@@ -662,10 +666,7 @@ local API and search see the same text.
   the notepad, 400 ms in the quick note, and at least every 2 s while typing
   goes on without a pause (`core/typingSave.js`, 2026-11-16: only a pause
   saved, so a crash while someone typed on lost everything since the last
-  one; now at most the last two seconds). The summary's Markdown box in
-  Notes and the notepad (`notesState` `queueSummarySave`,
-  `notepad/summaryEditor.svelte.js`) and a Markdown file's window save the
-  same way since 2026-11-18 (they still waited for a pause). Version history's kinds as before
+  one; now at most the last two seconds). Version history's kinds as before
   (notes/versions.rs): a paste within 15 s of a dictation (`yap-transcript`) is
   "Dictated", any other change "Typed". Another window's change, a transform, a
   restore, Chat's edit come in by the blocks that differ (`load`), the caret
@@ -775,8 +776,9 @@ file: it's never copied into notes.json.
   Anything else is shown (`from_utf8_lossy`) but opens **read-only**, as does
   a read-only file. The footer says how it's written ("UTF-8 · CRLF").
 - **Saving** (the page, `doc/docFile.js`): 600 ms after the last change, at
-  least every 2 s while typing goes on (`core/typingSave.js`, 2026-11-18), and
-  on blur, close and Ctrl+S, one save at a time. Rust writes atomically
+  least every 2 s while typing goes on (`core/typingSave.js`, 2026-11-18:
+  only a pause saved, so a crash while someone typed on lost everything
+  since the last one), and on blur, close and Ctrl+S, one save at a time. Rust writes atomically
   (`config::atomic_write_bytes`) **only if the file is still what the page
   last read or wrote** (its stamp: modified time and size). Otherwise the
   page is told (`conflict`) and asks.
@@ -906,7 +908,8 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   names for the same two fields since 2026-10-22, also the list's "summary"
   tag and "## My thoughts" in an export; until then Raw / Enhanced) **+
   staleness dot**; on Summary, **Edit summary** / Done (its Markdown in a
-  box, saved as typed; Escape ends it), "Edited" once it's the person's,
+  box, saved as typed — once it pauses and at least every 2 s while it goes
+  on, `core/typingSave.js`, 2026-11-18; Escape ends it), "Edited" once it's the person's,
   "2 new lines since this summary · **Update**", tasks ticked in place, and
   every rewrite of an edited summary (Action plan, an action, Update) asked
   first (`askReplaceSummary`); since 2026-10-25 "Edited · **Back to Yap's

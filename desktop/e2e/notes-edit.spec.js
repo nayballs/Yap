@@ -436,58 +436,6 @@ aiTest.describe('with the fake AI', () => {
     await shot(pad, '11-replaced-ticks-kept');
   });
 
-  test('a summary typed on without a pause is saved as it goes, in Notes and in the notepad', async ({ yap, main }) => {
-    // Saved only 600 ms after the last key, a summary typed on without a
-    // pause reached the disk only once the typing stopped: a crash meanwhile
-    // lost all of it. Now at most the last two seconds (core/typingSave.js),
-    // as My thoughts. A key every 200 ms for four seconds, in each editor.
-    const keys = 'abcdefghijklmnopqrst';
-    const note = await yap.invoke('note_create', { title: 'Seed order', folder: 'Personal' });
-    await yap.invoke('note_summary_update', { id: note.id, text: '## Summary\nOrder seeds', origin: 'e2e' });
-    // (A read as Yap replaces the file can fail: not saved yet, as far as this knows.)
-    const onDisk = () => {
-      try {
-        return noteOf(yap, note.id)?.enhancedContent || '';
-      } catch {
-        return '';
-      }
-    };
-    async function typeOn(page, editor, before) {
-      await editor.evaluate((el) => {
-        el.focus();
-        el.setSelectionRange(el.value.length, el.value.length);
-      });
-      let savedAt = -1;
-      for (const [i, k] of [...keys].entries()) {
-        await page.keyboard.insertText(k);
-        await page.waitForTimeout(200);
-        if (savedAt < 0 && onDisk().startsWith(`${before}a`)) savedAt = i;
-      }
-      expect(savedAt, 'saved while the typing went on').toBeGreaterThanOrEqual(0);
-      expect(savedAt).toBeLessThan(keys.length - 3);
-      await expectStore(yap, 'notes.json', (s) => s.notes.find((n) => n.id === note.id)?.enhancedContent === `${before}${keys}`);
-    }
-
-    // The Notes view's summary.
-    await openView(main, 'Notes');
-    await main.locator('.folder').filter({ hasText: 'Personal' }).click();
-    await main.locator('.item').filter({ hasText: 'Seed order' }).click();
-    await main.locator('.tabs .tab').filter({ hasText: 'Summary' }).click();
-    await main.getByRole('button', { name: 'Edit summary' }).click();
-    await typeOn(main, main.getByRole('textbox', { name: 'Edit the summary (Markdown)' }), '## Summary\nOrder seeds');
-    await main.getByRole('button', { name: 'Done' }).click();
-
-    // The meeting notepad's.
-    await yap.invoke('notepad_open', { noteId: note.id });
-    await expect.poll(() => visible(yap, 'notepad')).toBe(true);
-    const pad = yap.notepad;
-    await pad.getByRole('tab', { name: 'Summary' }).click();
-    const summary = pad.getByRole('region', { name: 'Summary' });
-    await summary.getByRole('button', { name: 'Edit', exact: true }).click();
-    await typeOn(pad, pad.getByRole('textbox', { name: 'Edit the summary (Markdown)' }), `## Summary\nOrder seeds${keys}`);
-    await summary.getByRole('button', { name: 'Done' }).click();
-  });
-
   // Until 2026-10-30 New note kept the summary editor open: its save, still
   // due, went to the new note (the words left the note they were typed in).
   test('a summary being edited in Notes stays with its note when New note opens another', async ({ yap, main, shot }) => {
@@ -512,7 +460,66 @@ aiTest.describe('with the fake AI', () => {
     expect(fresh.summaryEditedMs || 0).toBe(0);
     await shot(main, '12-new-note-after-a-summary-edit');
   });
+
+  // 18 Nov 2026: a summary being edited was saved only once the typing
+  // paused, as notes were before 16 Nov (core/typingSave.js): a crash while
+  // someone typed on lost everything since the last pause. Now at most the
+  // last two seconds, in Notes and in the notepad.
+  test('a summary typed on without a pause is saved as it goes, in Notes and in the notepad', async ({ yap, main }) => {
+    const note = await yap.invoke('note_create', { title: 'Courier review', folder: 'Meetings' });
+    await yap.invoke('note_summary_update', { id: note.id, text: '## Summary\nThe quote is fine.', origin: 'e2e' });
+    const summaryOf = () => {
+      try {
+        return noteOf(yap, note.id)?.enhancedContent || '';
+      } catch {
+        return '';
+      }
+    };
+    await openView(main, 'Notes');
+    await main.locator('.folder').filter({ hasText: 'Meetings' }).click();
+    await main.locator('.item').filter({ hasText: 'Courier review' }).click();
+    await main.locator('.tabs .tab').filter({ hasText: 'Summary' }).click();
+    await main.getByRole('button', { name: 'Edit summary' }).click();
+    const editor = main.getByRole('textbox', { name: 'Edit the summary (Markdown)' });
+    await editor.press('Control+End');
+    const keys = 'abcdefghijklmnopqrst';
+    const at = await typedOn(main, keys, () => summaryOf().includes('The quote is fine.a'));
+    expect(at, 'saved while the typing went on').toBeGreaterThanOrEqual(0);
+    expect(at).toBeLessThan(keys.length - 3);
+    await expect.poll(summaryOf).toBe(`## Summary\nThe quote is fine.${keys}`);
+    await main.getByRole('button', { name: 'Done' }).click();
+
+    // The notepad's Summary tab.
+    await yap.invoke('notepad_open', { noteId: note.id });
+    await expect.poll(() => visible(yap, 'notepad')).toBe(true);
+    const pad = yap.notepad;
+    await pad.getByRole('tab', { name: 'Summary' }).click();
+    const summary = pad.getByRole('region', { name: 'Summary' });
+    await summary.getByRole('button', { name: 'Edit', exact: true }).click();
+    const padEditor = pad.getByRole('textbox', { name: 'Edit the summary (Markdown)' });
+    await padEditor.press('Control+End');
+    const more = 'ABCDEFGHIJKLMNOPQRST';
+    const padAt = await typedOn(pad, more, () => summaryOf().includes(`${keys}A`));
+    expect(padAt, 'saved while the typing went on').toBeGreaterThanOrEqual(0);
+    expect(padAt).toBeLessThan(more.length - 3);
+    await expect.poll(summaryOf).toBe(`## Summary\nThe quote is fine.${keys}${more}`);
+    await summary.getByRole('button', { name: 'Done' }).click();
+  });
 });
+
+/**
+ * `keys` typed one every 200 ms, as someone typing on without a pause; the
+ * index of the key after which `saved()` first held (-1: never while typing).
+ */
+async function typedOn(page, keys, saved) {
+  let at = -1;
+  for (const [i, k] of [...keys].entries()) {
+    await page.keyboard.insertText(k);
+    await page.waitForTimeout(200);
+    if (at < 0 && saved()) at = i;
+  }
+  return at;
+}
 
 /** The main window's current sidebar view. */
 function sidebarCurrent(main) {

@@ -9,7 +9,8 @@
   //   it. **Source**: its Markdown, coloured (core/markdownSource.js, a copy
   //   under a clear text box, as Chat's document panel has it) and editable,
   //   Ctrl+F too. The choice is remembered (`yap.doc.view`).
-  // - **Saved back to the file** 600 ms after the last change (and on the
+  // - **Saved back to the file** 600 ms after the last change, and at least
+  //   every 2 s while typing goes on (core/typingSave.js; and on the
   //   way out: blur, close, Ctrl+S), one save at a time, each only while the
   //   file is still what the page last read or wrote (`expect`, its stamp:
   //   modified time and size); Rust keeps its encoding and line endings.
@@ -87,10 +88,6 @@
   // Typed since the last save went out.
   let dirty = false;
   let timer = null;
-  // When the first change not saved yet was made: saved once the typing
-  // pauses, and at least every two seconds while it goes on
-  // (core/typingSave.js) — a crash mid-paragraph loses at most that.
-  let unsavedSince = 0;
   // The saves, one after another.
   let chain = Promise.resolve();
   // Reads and saves in flight: the look at the file waits for them.
@@ -226,11 +223,15 @@
 
   // ---- saving --------------------------------------------------------------------------
 
+  // When the first change not saved yet was made (core/typingSave.js).
+  let unsavedSince = 0;
   function onChange(md) {
     if (readOnly || md === text) return;
     text = md;
     dirty = true;
     saveState = 'saving';
+    // Once the typing pauses, and at least every two seconds while it goes on: only a pause saved, so a crash
+    // while someone typed on lost everything since the last one (18 Nov 2026, as notes' on 16 Nov).
     if (timer === null) unsavedSince = Date.now();
     clearTimeout(timer);
     timer = setTimeout(flush, saveDelay(unsavedSince, Date.now(), SAVE_MS));

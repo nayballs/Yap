@@ -3,7 +3,7 @@
 
 /** How often the page looks at the file on disk (its modified time and size). */
 export const POLL_MS = 1500;
-/** Saved this long after the last change (and two seconds after the first one not saved yet, at the latest: core/typingSave.js). */
+/** Saved this long after the last change. */
 export const SAVE_MS = 600;
 
 /**

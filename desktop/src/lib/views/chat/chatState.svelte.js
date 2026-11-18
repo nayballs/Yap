@@ -1853,6 +1853,17 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   }
   function cancelEdit() {
     editing = null;
+    keyboardBack();
+  }
+  /**
+   * The edit box gone (Esc, Cancel, Save and send) took the keyboard with it, to nothing (18 Nov 2026): back in the
+   * message box, unless something else has it now.
+   */
+  function keyboardBack() {
+    tick().then(() => {
+      const at = document.activeElement;
+      if (!at || at === document.body) inputEl?.focus();
+    });
   }
 
   /**
@@ -1864,6 +1875,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const words = String(text ?? '').trim();
     if (activeId == null || sending || !Number.isInteger(index) || !words) return false;
     editing = null;
+    keyboardBack();
     send({ text: words, edit: index, from: m, elements: splitElements(m.text || '').elements });
     return true;
   }
@@ -2470,13 +2482,16 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         return;
       }
       if (qi >= 0) messages = messages.slice(0, qi);
-      input = text; // give the message back
-      quote = about; // …and the passage it was about
+      // Give the message back — before what's been typed in the box since it went, never in its place (the box stays
+      // open while an answer is on its way, and the next words are often typed then: 18 Nov 2026, they were lost).
+      const typedSince = input.trim() ? input : '';
+      input = typedSince ? `${text}\n\n${typedSince}` : text;
+      quote = quote ?? about; // …and the passage it was about (one picked since stays)
       if (thinkIt) think.on = true; // …thought through, as it was asked
-      // …and its screenshots (Rust puts them back too, yap-chat-waiting), and its files.
-      waitingShots.list = shots;
+      // …and its screenshots (Rust puts them back too, yap-chat-waiting) and its files, with any added since.
+      waitingShots.list = [...shots, ...waitingShots.list.filter((s) => !shots.some((x) => x.id === s.id))];
       if (sentFiles.length) files = [...sentFiles, ...files.filter((f) => !sentFiles.some((x) => x.id === f.id))];
-      byVoice = voice;
+      byVoice = voice && !typedSince;
       // Too long for the model (Rust's plain sentence, never the provider's
       // JSON): said over the box with what helps — New chat, more room for
       // the on-device model, shortening the message.

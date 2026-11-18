@@ -110,10 +110,14 @@
   async function saveInstructions() {
     clearTimeout(saveTimer);
     if (!current || instructionsSaved) return;
+    const id = current.project.id;
+    const sent = instructions;
     try {
-      const p = await invoke('project_update', { id: current.project.id, instructions });
-      current = { ...current, project: p };
-      instructionsSaved = true;
+      const p = await invoke('project_update', { id, instructions: sent });
+      if (current?.project?.id === id) current = { ...current, project: p };
+      // Saved: what was sent. Words typed while it was on its way are their own save's (18 Nov 2026: marked saved
+      // here, that save found nothing to do, and they never reached projects.json).
+      if (instructions === sent) instructionsSaved = true;
     } catch (e) {
       toast({ title: "Couldn't save the instructions", description: String(e), variant: 'destructive' });
     }
