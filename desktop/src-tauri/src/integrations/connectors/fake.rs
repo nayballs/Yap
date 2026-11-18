@@ -274,7 +274,7 @@ fn answer(msg: &Value) -> Option<Value> {
             "serverInfo": { "name": "fake-http", "version": "1.0" }
         }),
         "tools/list" => json!({ "tools": [
-            { "name": "list_lights", "description": "List the lights.", "inputSchema": { "type": "object" }, "annotations": { "readOnlyHint": true } },
+            { "name": "list_lights", "description": "List the lights.", "inputSchema": { "type": "object", "properties": { "area": { "type": "string" } } }, "annotations": { "readOnlyHint": true } },
             { "name": "turn_off", "description": "Turn a light off.", "inputSchema": { "type": "object", "properties": { "area": { "type": "string" } } }, "annotations": { "destructiveHint": false } }
         ] }),
         "tools/call" => {
