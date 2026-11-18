@@ -64,6 +64,9 @@
 //! - [`slash`]: a Code chat's own `/clear` (its next message starts afresh,
 //!   the thread kept under a divider) and `/compact` (Claude Code's own
 //!   compaction of its session, run headless).
+//! - [`shots`]: a Code chat's screenshots also as files Claude can read or
+//!   hand to a helper (`code-shots/<chat>-<made>/shot-<n>.png`, the chat's
+//!   folder on its runs as `--add-dir`), kept as long as the pictures.
 //!
 //! Chat's side: `chat/tools/agents.rs` (`start_agent`, `agent_status`,
 //! `message_agent`, `stop_agent`), `chat/turn/report.rs` (the report turn).
@@ -93,6 +96,7 @@ pub mod rewind;
 pub mod run_block;
 pub mod runner;
 pub mod servers;
+pub mod shots;
 pub mod sizing;
 pub mod slash;
 pub mod steps;

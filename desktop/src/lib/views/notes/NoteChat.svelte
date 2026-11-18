@@ -80,7 +80,10 @@
     } catch (e) {
       if (notes.selected?.id === id) {
         notes.chatThread = notes.chatThread.slice(0, -1);
-        notes.chatInput = q; // give the question back
+        // Give the question back, before what's been typed since it went — never in its place (the box stays open
+        // while it's answered: 18 Nov 2026, those words were lost).
+        const typedSince = notes.chatInput.trim();
+        notes.chatInput = typedSince ? `${q} ${typedSince}` : q;
       }
       toast({ title: "Couldn't answer", description: String(e), variant: 'destructive' });
     } finally {
