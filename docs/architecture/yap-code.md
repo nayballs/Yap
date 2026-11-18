@@ -3536,8 +3536,11 @@ the Claude app), and the person asks Claude to.
   scan's sight) is changed, never new; with no birth time, never new
   either. With Git, `HEAD` moving (Claude committed) adds the files between
   the two commits (`git diff --name-only`), and a file the commit had at the
-  start (`git cat-file --batch-check`) is changed, never new. At most 500
-  files; past that nothing is noted (logged).
+  start (`git cat-file --batch-check`) is changed, never new; one Git listed
+  at the start that wasn't there (deleted) and a command wrote is new,
+  whatever its birth time says (18 Nov 2026: NTFS gives a file the creation
+  time of one of the same name deleted there within 15 s, "tunnelling", so it
+  read as changed). At most 500 files; past that nothing is noted (logged).
 - **Kept** in the turn's `files`, `byCommand` (`[{file, new}]`,
   `store::CommandFile`) and `created` (its new files, with its Write's), so
   Outputs ("New" for one it made), the summary, the file view (a
