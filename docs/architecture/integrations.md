@@ -456,9 +456,15 @@ each call through `consent.rs` and, when it asks, a card in the thread.
   nothing in Chat's own budget until found (`budget::loaded_tools`).
 - **Consent** (`consent::decide`, pure; the 3 Nov plan's table): Off is
   refused; Always allow runs a read (after outside content only with the
-  person's own words: `consent::own_words` — every string and every number
-  of 3+ digits in what they said in the conversation, `enum` values and
-  small numbers free) and a write (a risky name — sends, pays, deletes,
+  person's own words: `consent::own_words` — every string, every key the
+  schema doesn't declare in `properties` (a free-form object's) and every
+  number of 3+ digits in what they said in the conversation; `enum`
+  values, punctuation-only strings of 3 characters or fewer ("-", "*") and
+  the first 4 small numbers of a call (a page, a count; one the person
+  said doesn't count) free — since 18 Nov 2026 a longer run of
+  punctuation, more small numbers or an undeclared key needs their words
+  too, as each could carry a result's words (Morse code, character codes,
+  a key): the cost is an Ask card, never a looser rule) and a write (a risky name — sends, pays, deletes,
   signs in in Yap's seven languages, `act/words.rs`, or a home's unlock,
   disarm, door, gate, valve — asks; **after outside content every write
   asks**, Always allow or not); Ask first asks; a tool that can delete

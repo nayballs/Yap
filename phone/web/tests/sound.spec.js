@@ -103,17 +103,18 @@ test('Web Audio (the fallback): playback starts once about 250 ms is waiting, no
   expect(p.played).toBe(0);
   expect(p.level).toBe(0);
   await expect(page.getByTestId('phase')).toHaveText('Speaking');
-  // 60 ms more (260 ms): it starts, with what was waiting.
+  // 60 ms more (260 ms), the last, and the answer's end with it: it starts
+  // with what was waiting. (The end with it, as a PC sends it: sent after
+  // checks taking longer than 260 ms on a busy PC, the sound ran dry
+  // waiting for it — an underrun counted, 18 Nov 2026.)
   pc.sendBinary(downFrame(4, voice(24000, 60)));
-  await expect.poll(async () => (await player(page)).state).toBe('playing');
-  p = await player(page);
-  expect(p.startBufferedMs).toBeGreaterThanOrEqual(250);
-  expect(p.startBufferedMs).toBeLessThan(270);
-  expect(p.startDelayMs).toBeGreaterThan(400); // from the first frame's arrival
   pc.send({ type: 'speak_end' });
   pc.send({ type: 'state', phase: 'idle' });
   await expect.poll(async () => (await player(page)).active, { timeout: 4000 }).toBe(false);
   p = await player(page);
+  expect(p.startBufferedMs).toBeGreaterThanOrEqual(250);
+  expect(p.startBufferedMs).toBeLessThan(270);
+  expect(p.startDelayMs).toBeGreaterThan(400); // from the first frame's arrival
   expect(p.played).toBeCloseTo(0.26, 3);
   expect(p.underruns).toBe(0);
 });
@@ -138,16 +139,17 @@ test('Web Audio (the fallback), a late frame: one underrun, faded out and back i
   await ready(page, pc);
   await ask(page, pc);
   speak(pc, 3, 100, false);
-  await expect.poll(async () => (await player(page)).state).toBe('playing');
-  // 300 ms play out; the next frame is late: the sound runs dry.
+  // 300 ms play out; the next frame is late: the sound runs dry. (Not
+  // looked for while it plays: 300 ms can pass in one look on a busy PC.)
   await expect.poll(async () => (await player(page)).state, { timeout: 3000 }).toBe('starved');
   let p = await player(page);
   expect(p.underruns).toBe(1);
   expect(p.played).toBeCloseTo(0.3, 2);
   await expect(page.getByTestId('phase')).toHaveText('Speaking');
-  // 200 ms more (over the 150 ms it waits for): back, faded in.
+  // 200 ms more (over the 150 ms it waits for), and the end with it: back,
+  // faded in, and played out — never dry again waiting for an end sent
+  // after a look that outlasted those 200 ms (18 Nov 2026).
   for (let i = 3; i < 5; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
-  await expect.poll(async () => (await player(page)).state).toBe('playing');
   pc.send({ type: 'speak_end' });
   pc.send({ type: 'state', phase: 'idle' });
   await expect.poll(async () => (await player(page)).active, { timeout: 4000 }).toBe(false);

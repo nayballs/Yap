@@ -26,10 +26,16 @@ async function openChat12(page) {
 const card = (page, id) => page.locator(`[data-testid="code-card"][data-id="${id}"]`).first();
 
 test('a permission card: the banner, the card in its thread, asleep at first (an early tap does nothing), then Allow once → Allowing… → Allowed', async ({ page }) => {
+  // The page's clock is held from the card's arrival until its buttons have
+  // been seen asleep: on a PC busy with builds the checks before that took
+  // longer than the MIN_SHOWN_MS they sleep (18 Nov 2026: seen failing
+  // only under load, reproduced with the CPU slowed 8×), so they woke first.
+  await page.clock.install();
   const pc = await mockCodePc(page, { auto: { approve: false } });
   await open(page);
   await ready(page, pc);
   await openChat12(page);
+  await page.clock.pauseAt(Date.now() + 1000);
   pc.send(approveCard());
   const c = card(page, 7);
   await expect(c).toBeVisible();
@@ -48,8 +54,10 @@ test('a permission card: the banner, the card in its thread, asleep at first (an
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await page.waitForTimeout(80);
   expect(pc.of('approve')).toEqual([]);
-  // Awake once it's been shown long enough.
-  await expect(yes).toBeEnabled({ timeout: MIN_SHOWN_MS + 2000 });
+  // Awake once it's been shown long enough (the page's time, then on as usual).
+  await page.clock.runFor(MIN_SHOWN_MS + 50);
+  await expect(yes).toBeEnabled();
+  await page.clock.resume();
   // A script's click never answers (only a trusted tap does).
   await yes.evaluate((b) => b.click());
   await page.waitForTimeout(80);

@@ -19,10 +19,16 @@
 //! person, Always allow or not (the connector's own write tools need the
 //! card), and a read whose arguments aren't the person's own words asks too
 //! (a result's words carried into another call: exfiltration). **Own
-//! words** ([`own_words`]): every string argument, and every number of
-//! three digits or more, is in what the person said in this conversation
-//! (case, spaces and punctuation aside); a value from the schema's `enum`
-//! counts as theirs; booleans and small numbers are free. **Risky words**
+//! words** ([`own_words`]): every string argument, every key the schema
+//! doesn't declare in its `properties` (a free-form object's), and every
+//! number of three digits or more, is in what the person said in this
+//! conversation (case, spaces and punctuation aside); a value from the
+//! schema's `enum` counts as theirs; booleans are free, and so are a string
+//! of no letters or digits up to [`FREE_PUNCTUATION`] characters ("-", "*")
+//! and up to [`FREE_SMALL_NUMBERS`] small numbers a call (a page, a count) —
+//! past those, punctuation or small numbers could spell out a result's
+//! words (Morse code, character codes), so they need the person's words
+//! too (18 Nov 2026). **Risky words**
 //! ([`risky`]): the tool's name or title says it sends, pays, buys, books,
 //! deletes, signs in… in Yap's seven languages (`chat/pages/act/words.rs`,
 //! the page rules' own tables), or does what a home's locks and alarms do
@@ -138,31 +144,67 @@ fn norm(s: &str) -> String {
     out
 }
 
+/// A string of no letters or digits this short is free ("-", "*", "/",
+/// spaces); a longer one could spell anything (Morse code, spaces and tabs
+/// as bits).
+pub const FREE_PUNCTUATION: usize = 3;
+
+/// Small numbers (under three digits) a call may carry without the
+/// person's words, across all its arguments: a page, a count, a limit.
+/// Past these an array of them could be a text's character codes, so each
+/// needs the person's words as a big number does.
+pub const FREE_SMALL_NUMBERS: usize = 4;
+
+/// `s` is in what the person said (`said`, [`norm`]ed), as whole words; a
+/// string of no letters or digits only when it's [`FREE_PUNCTUATION`]
+/// characters or fewer. Pure.
+fn said_or_short(s: &str, said: &str) -> bool {
+    let n = norm(s);
+    if n.trim().is_empty() {
+        return s.chars().count() <= FREE_PUNCTUATION;
+    }
+    said.contains(&n)
+}
+
 /// **Every word of `args` is the person's own** (`said`: what they wrote in
 /// this conversation, this message first): each string (unless it's one of
-/// its schema's `enum`) and each number of three digits or more found
-/// there as whole words; booleans, nulls, small numbers and empty strings
-/// are free. Objects and arrays by their parts (and their parts' schemas).
-/// Pure.
+/// its schema's `enum`), each key its schema doesn't declare in
+/// `properties` and each number of three digits or more found there as
+/// whole words; booleans, nulls, short punctuation ([`FREE_PUNCTUATION`])
+/// and a few small numbers ([`FREE_SMALL_NUMBERS`] a call; one the person
+/// said doesn't count) are free. Objects and arrays by their parts (and
+/// their parts' schemas). Pure.
 pub fn own_words(args: &Value, schema: &Value, said: &[&str]) -> bool {
     let said: String = said.iter().map(|s| norm(s)).collect();
-    fn walk(v: &Value, schema: &Value, said: &str) -> bool {
+    fn walk(v: &Value, schema: &Value, said: &str, small: &mut usize) -> bool {
         match v {
             Value::String(s) => {
                 let in_enum = schema["enum"].as_array().is_some_and(|e| e.iter().any(|x| x.as_str() == Some(s.as_str())));
-                let n = norm(s);
-                in_enum || n.trim().is_empty() || said.contains(&n)
+                in_enum || said_or_short(s, said)
             }
             Value::Number(n) => {
-                let digits = n.to_string().chars().filter(char::is_ascii_digit).count();
-                digits < 3 || said.contains(&norm(&n.to_string()))
+                let text = n.to_string();
+                if said.contains(&norm(&text)) {
+                    return true;
+                }
+                let digits = text.chars().filter(char::is_ascii_digit).count();
+                if digits < 3 && *small < FREE_SMALL_NUMBERS {
+                    *small += 1;
+                    return true;
+                }
+                false
             }
-            Value::Array(items) => items.iter().all(|x| walk(x, &schema["items"], said)),
-            Value::Object(map) => map.iter().all(|(k, x)| walk(x, &schema["properties"][k], said)),
+            Value::Array(items) => items.iter().all(|x| walk(x, &schema["items"], said, small)),
+            Value::Object(map) => map.iter().all(|(k, x)| {
+                // A key the tool declares is its own; any other (a
+                // free-form object's) carries words as a value does.
+                let declared = schema["properties"].get(k).is_some();
+                (declared || said_or_short(k, said)) && walk(x, &schema["properties"][k], said, small)
+            }),
             Value::Bool(_) | Value::Null => true,
         }
     }
-    walk(args, schema, &said)
+    walk(args, schema, &said, &mut 0)
 }
 
 /// What a home's devices do that asks first: open a lock, a door or a gate,
@@ -257,7 +299,16 @@ mod tests {
     #[test]
     fn own_words_are_the_persons_whole_words_enums_and_small_numbers_free() {
         let said = ["Turn off the kitchen lights", "and make a page called Launch notes, budget 1,200"];
-        let schema = json!({ "type": "object", "properties": { "mode": { "type": "string", "enum": ["fast", "slow"] }, "tags": { "type": "array", "items": { "type": "string" } } } });
+        let text = json!({ "type": "string" });
+        let number = json!({ "type": "integer" });
+        // Every key used below is the tool's own (declared): its value is what's checked.
+        let schema = json!({ "type": "object", "properties": {
+            "mode": { "type": "string", "enum": ["fast", "slow"] },
+            "tags": { "type": "array", "items": { "type": "string" } },
+            "area": text, "title": text, "to": text, "q": text, "note": text,
+            "budget": number, "count": number, "id": number, "draft": { "type": "boolean" },
+            "filter": { "type": "object", "properties": { "room": text } }
+        } });
         assert!(own_words(&json!({ "area": "Kitchen" }), &schema, &said));
         assert!(own_words(&json!({ "title": "launch notes", "budget": 1200, "count": 12, "draft": true, "mode": "slow" }), &schema, &said));
         // Words from nowhere the person said (a result's): not theirs.
@@ -272,6 +323,62 @@ mod tests {
         // Nothing to say: free.
         assert!(own_words(&json!({}), &schema, &said));
         assert!(own_words(&json!({ "note": "  " }), &schema, &said));
+    }
+
+    /// A key a free-form object allows (`additionalProperties`, no
+    /// `properties`) carries words as a value does: a result's words as a
+    /// key aren't the person's (18 Nov 2026).
+    #[test]
+    fn a_key_the_schema_doesnt_declare_is_words_like_a_value() {
+        let said = ["Find the kitchen lights"];
+        let schema = json!({ "type": "object", "properties": {
+            "room": { "type": "string" },
+            "filter": { "type": "object", "additionalProperties": { "type": "boolean" } }
+        } });
+        assert!(own_words(&json!({ "room": "kitchen" }), &schema, &said), "a declared key is the tool's own");
+        assert!(!own_words(&json!({ "filter": { "the launch is on the ninth": true } }), &schema, &said));
+        assert!(!own_words(&json!({ "filter": { "sk FAKE 0123": null } }), &schema, &said));
+        assert!(!own_words(&json!({ "room": "kitchen", "note to self": "kitchen" }), &schema, &said), "an undeclared key at the top");
+        // Unless the person said it.
+        assert!(own_words(&json!({ "filter": { "kitchen": true } }), &schema, &said));
+        // A schema with no properties at all: every key is words.
+        assert!(!own_words(&json!({ "launch date": "kitchen" }), &json!({ "type": "object" }), &said));
+    }
+
+    /// A string with no letters or digits is free only when it's short
+    /// ("-", "*", "/"): a longer one can spell anything (Morse code, spaces
+    /// and tabs as bits).
+    #[test]
+    fn punctuation_is_free_only_when_short() {
+        let said = ["List the kitchen lights"];
+        let schema = json!({ "type": "object", "properties": { "sep": { "type": "string" }, "q": { "type": "string" } } });
+        for short in ["", "-", "*", "/", "--", "...", "  "] {
+            assert!(own_words(&json!({ "sep": short }), &schema, &said), "{short:?}");
+        }
+        for long in [".... . -.-. .-. . -", "----", "\t \t\t \t", "!!!!!!!!", "    "] {
+            assert!(!own_words(&json!({ "q": long }), &schema, &said), "{long:?}");
+        }
+    }
+
+    /// A page or a count is free; a string of small numbers isn't (they can
+    /// be a text's character codes): at most [`FREE_SMALL_NUMBERS`] across a
+    /// call's arguments, then each needs the person's words as a big one does.
+    #[test]
+    fn a_few_small_numbers_are_free_never_a_string_of_them() {
+        let said = ["Show page 2 of the kitchen lights"];
+        let schema = json!({ "type": "object", "properties": {
+            "page": { "type": "integer" },
+            "limit": { "type": "integer" },
+            "ids": { "type": "array", "items": { "type": "integer" } }
+        } });
+        assert!(own_words(&json!({ "page": 3, "limit": 10 }), &schema, &said));
+        assert!(own_words(&json!({ "ids": [1, 2, 3, 4] }), &schema, &said), "four");
+        // "SECRET" as character codes.
+        assert!(!own_words(&json!({ "ids": [83, 69, 67, 82, 69, 84] }), &schema, &said));
+        // Counted across the arguments, not per array.
+        assert!(!own_words(&json!({ "page": 3, "limit": 10, "ids": [5, 6, 7] }), &schema, &said));
+        // A number the person said is theirs, and doesn't count: page 2.
+        assert!(own_words(&json!({ "page": 2, "limit": 10, "ids": [5, 6, 7] }), &schema, &said));
     }
 
     #[test]
