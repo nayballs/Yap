@@ -966,9 +966,11 @@ pub fn bracket_citations(reply: &str) -> String {
         .into_owned()
 }
 
-/// The citation numbers in an answer ("[1]", "[2, 3]", "[1][4]"). Pure.
+/// The citation numbers in an answer ("[1]", "[2, 3]", "[1][4]", "[104]":
+/// a deep turn's searches number past 99, so three digits, as research's
+/// report reads them — never a year in brackets, "[2026]"). Pure.
 pub fn citations(reply: &str) -> Vec<usize> {
-    static CITE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[(\d{1,2}(?:\s*[,–-]\s*\d{1,2})*)\]").expect("static regex"));
+    static CITE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[(\d{1,3}(?:\s*[,–-]\s*\d{1,3})*)\]").expect("static regex"));
     let mut out: Vec<usize> = Vec::new();
     for m in CITE.captures_iter(reply) {
         let whole = m.get(0).expect("match");
@@ -1035,6 +1037,13 @@ mod tests {
         let sources: Vec<Source> = (1..=3).map(|n| Source { n, title: format!("T{n}"), url: format!("https://e{n}.com/"), site: format!("e{n}.com"), ..Default::default() }).collect();
         assert_eq!(cited_sources(&sources, "Fact [2].").iter().map(|s| s.n).collect::<Vec<_>>(), [2]);
         assert_eq!(cited_sources(&sources, "No citations.").len(), 3);
+        // 18 Nov 2026: a deep turn's sources number past 99 — its "[104]"
+        // was never read, so an answer citing only it kept every source.
+        assert_eq!(citations("The vents open at dusk [104], and [99, 101]."), [104, 99, 101]);
+        let many: Vec<Source> = (1..=110).map(|n| Source { n, title: format!("T{n}"), url: format!("https://e{n}.com/"), site: format!("e{n}.com"), ..Default::default() }).collect();
+        assert_eq!(cited_sources(&many, "The vents open at dusk [104].").iter().map(|s| s.n).collect::<Vec<_>>(), [104]);
+        // A year in brackets isn't one.
+        assert_eq!(citations("Founded [2026]."), Vec::<usize>::new());
     }
 
     #[test]

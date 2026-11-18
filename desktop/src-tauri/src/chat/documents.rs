@@ -1910,14 +1910,20 @@ const SELECTED_CHARS: usize = 1_500;
 /// — for the rich set their ids and hashes (an `edit_document` straight
 /// on them), for the simple set their markdown to copy `edit_note`'s
 /// old_text from — and that a change goes there only; a model without
-/// tools (`set` `None`) the words alone. `None`: no such note, or nothing
-/// selected.
-pub fn selection_note(sel: &Selection, set: Option<ToolSet>) -> Option<String> {
+/// tools (`set` `None`) the words alone. The words: at most `max_chars`,
+/// sized to the model's room as text selected elsewhere is
+/// (`assistant::selected::room`), and said when they're only the start (18
+/// Nov 2026: 400 characters whatever the model, so a model without tools
+/// asked to rewrite a longer passage rewrote its first lines). `None`: no
+/// such note, or nothing selected.
+pub fn selection_note(sel: &Selection, set: Option<ToolSet>, max_chars: usize) -> Option<String> {
     let note = crate::notes::get(sel.note_id)?;
-    let words = clip(&sel.text, 400);
+    let words = clip(&sel.text, max_chars);
     if words.is_empty() {
         return None;
     }
+    let whole = sel.text.split_whitespace().collect::<Vec<_>>().join(" ").chars().count();
+    let cut = if whole > max_chars { format!(" (only its first {max_chars} characters are here: it was longer)") } else { String::new() };
     let doc = blocks::Doc::of(&note.content);
     let lines = sel.from_line.zip(sel.to_line.or(sel.from_line));
     let at = rich::selected_blocks(&doc, lines, &sel.text);
@@ -1935,9 +1941,9 @@ pub fn selection_note(sel: &Selection, set: Option<ToolSet>) -> Option<String> {
         }
     }
     tracing::info!(note_id = note.id, blocks = at.len(), chars = sel.text.chars().count(), set = set.map_or("none", ToolSet::name), "Chat: a question about a selected passage");
-    let head = format!("The user selected this passage in \"{title}\" (note_id {}) and asks about it: \"{words}\"", note.id);
+    let head = format!("The user selected this passage in \"{title}\" (note_id {}) and asks about it{cut}: \"{words}\"", note.id);
     Some(match (set, at.is_empty()) {
-        (None, _) => format!("The user selected this passage in the document \"{title}\" and asks about it: \"{words}\""),
+        (None, _) => format!("The user selected this passage in the document \"{title}\" and asks about it{cut}: \"{words}\""),
         (_, true) => format!("{head}. If the question asks for a change, change only that passage, nothing else."),
         (Some(ToolSet::Rich), false) => {
             let ids: Vec<String> = at.iter().map(|i| format!("{} (hash {})", doc.ids[*i].id, doc.ids[*i].hash)).collect();
@@ -2692,22 +2698,42 @@ mod tests {
         let sel = Selection { note_id: id, text: "A stove\nTwo pans\nA kettle".into(), from_line: Some(6), to_line: Some(8) };
         let doc = blocks::Doc::of(&crate::notes::get(id).unwrap().content);
         let list = &doc.ids[3];
-        let rich = selection_note(&sel, Some(ToolSet::Rich)).unwrap();
+        let rich = selection_note(&sel, Some(ToolSet::Rich), 4_000).unwrap();
         assert!(rich.starts_with(&format!("The user selected this passage in \"Kit\" (note_id {id}) and asks about it: \"A stove Two pans A kettle\"")), "{rich}");
         assert!(rich.contains(&format!("It's in block {} (hash {}) of the document:\n- A stove\n- Two pans\n- A kettle\n", list.id, list.hash)), "{rich}");
         assert!(rich.contains("change only those blocks (edit_document"), "{rich}");
-        let simple = selection_note(&sel, Some(ToolSet::Simple)).unwrap();
+        let simple = selection_note(&sel, Some(ToolSet::Simple), 4_000).unwrap();
         assert!(simple.contains("In the document's markdown it's:\n- A stove\n- Two pans\n- A kettle\n"), "{simple}");
         assert!(simple.contains("edit_note with old_text copied exactly"), "{simple}");
-        let plain = selection_note(&sel, None).unwrap();
+        let plain = selection_note(&sel, None, 4_000).unwrap();
         assert_eq!(plain, "The user selected this passage in the document \"Kit\" and asks about it: \"A stove Two pans A kettle\"");
         // No lines from the page: found by its words.
         let by_words = Selection { from_line: None, to_line: None, ..sel.clone() };
-        assert!(selection_note(&by_words, Some(ToolSet::Rich)).unwrap().contains(&list.id));
+        assert!(selection_note(&by_words, Some(ToolSet::Rich), 4_000).unwrap().contains(&list.id));
         // Kept with the question: its note and words, bounded.
         assert_eq!(sel.quote(), Some(Quote { note_id: id, text: "A stove\nTwo pans\nA kettle".into(), app: String::new() }));
         assert_eq!(Selection { text: "  ".into(), ..sel.clone() }.quote(), None);
-        assert!(selection_note(&Selection { note_id: 999_999, ..sel }, Some(ToolSet::Rich)).is_none());
+        assert!(selection_note(&Selection { note_id: 999_999, ..sel }, Some(ToolSet::Rich), 4_000).is_none());
+    }
+
+    /// 18 Nov 2026: a passage longer than 400 characters was cut there
+    /// whatever the model — one without tools, asked to rewrite it, rewrote
+    /// its first lines. Now as much as the model's room holds
+    /// (`assistant::selected::room`), and said when it's only the start.
+    #[test]
+    fn a_long_selected_passage_goes_as_the_models_room_holds() {
+        let para = "The ridge path leaves the car park by the old quarry gate and climbs for two kilometres before it levels out above the reservoir. ".repeat(8);
+        let id = crate::notes::create("Walks", &format!("# Walks\n\n{para}\n"), "chat", "").id;
+        let sel = Selection { note_id: id, text: para.clone(), from_line: Some(3), to_line: Some(3) };
+        let whole = para.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(whole.chars().count() > 1_000);
+        let plain = selection_note(&sel, None, crate::chat::assistant::selected::room(8_192)).unwrap();
+        assert!(plain.contains(&whole) && !plain.contains("only its first"), "{plain}");
+        let rich = selection_note(&sel, Some(ToolSet::Rich), 4_000).unwrap();
+        assert!(rich.contains(&whole), "{rich}");
+        // Past the room: its start, said so.
+        let short = selection_note(&sel, None, 300).unwrap();
+        assert!(short.contains("(only its first 300 characters are here: it was longer)") && !short.contains(&whole), "{short}");
     }
 
     /// The quote over Chat's box goes with a spoken question only when Chat
