@@ -838,7 +838,9 @@ the right, dividers, › for a submenu, ↑ ↓ → ← Esc), in the app's order
   stays the workspace's files. In a Code chat "/" is never one of Yap's own
   Skills (`chatState` `skillOf`): the words go to Claude Code as typed, which
   runs them — but `/clear`, `/compact` and `/model`, which are Yap's to do
-  ([below](#clear-compact-and-model-in-a-code-chat-2026-11-17)). **Search
+  ([below](#clear-compact-and-model-in-a-code-chat-2026-11-17)), and Yap's
+  own **`/agents`**, listed among the built-in ones
+  ([below](#agents-the-agent-panel-2026-11-18)). **Search
   commands** on top of the submenu (17 Nov 2026, as Plugins has): by name,
   an alias or the line, best first; ↓ into the list, Enter the first.
 - **Plugins ›**: **Search plugins** (filters what's under it); the
@@ -1028,6 +1030,57 @@ named the commands with no lines (its `commands_changed` doesn't always come
 in a run), so a workspace's menu stayed bare for a day — a mostly bare
 list is now looked at again at the next menu (`menu::bare`); and the
 "Compacted" line never went away.
+
+## /agents: the Agent panel (2026-11-18)
+
+The maintainer typed `/agents` in a Code chat to see its Agent panel and got
+only his own Claude Code commands that hold the word: Claude Code's own
+`/agents` runs only in its terminal (`terminal_slash_commands`), so the list
+leaves it out ([The + menu](#a-code-chats--menu-2026-11-17)). It's **Yap's
+own command** now, done on the page (`Composer.svelte` `agentsCommand`,
+`codeMenu.svelte.js` `AGENTS_COMMAND`); nothing goes to Claude Code or to
+Chat's model.
+
+- **Listed** in a Code chat's "/" list and Slash commands ›, among the
+  "Built in" ones in its alphabetical place, with its line "Show the agents
+  and helpers working in this chat" (`withYapCommands`: one of Claude
+  Code's called `agents` is replaced, never listed twice). It's there before
+  Claude Code has answered in the workspace too; the list's notes ("Asking
+  Claude Code what it offers here…") show under it until then. The person's
+  own commands that hold "agents" (`/agents-digest`) stay as they are, after
+  it. The "/" list's foot says what Enter or Tab does on it: "open the Agent
+  panel".
+- **Picked or sent** (typed on its own, then Enter; picked with a click,
+  Enter or Tab — it takes nothing, so a pick runs it): the chat's **Agent
+  tab** comes forward on its panel view, the one it's in the panel's row
+  (`panelAgentFor`: the agent tab in view, else one still in the row, else
+  the chat's newest agent — the panel lists all of the chat's either way),
+  opened beside the chat if it wasn't. The "/" typed leaves the box; words
+  in the box when it's picked from the + menu stay. Not with screenshots, a
+  file or a quote in the box (then the words go as typed), and `/agents`
+  with words after it is words for Claude.
+- **A plain chat** too: the agents Chat sent from it, in the same panel;
+  none yet, a toast says "No agents yet · Chat hasn't sent an agent in this
+  chat yet." A plain chat's own Skill called `/agents` runs as ever; a Skill
+  whose command only starts with it (`/agents-weekly`) doesn't take its
+  Enter.
+- **A Code chat with no agent yet** (nothing sent): "No agents yet · Claude
+  sends one when part of the work needs it: they show in the Agent panel
+  then." Once Claude has answered, the chat's own session is its agent
+  record underneath, so the panel opens — its header's totals, its helpers'
+  rows, or "No agents yet. Claude sends one when part of the work needs
+  it."
+
+**Tests**: `code-commands.spec.js` — its pure rules (its place among the
+built-in ones, once; only on its own; which agent's tab), and on Yap's
+stand-in: none yet said; the "/" list (Yap's first, the person's own that
+hold "agents" after it, the foot); Enter opens the Agent panel in front;
+with the summary in front it comes forward; picked with a click from the
+"/" list, and from Slash commands › with the box's words kept; nothing
+sent to Claude Code; a plain chat with none, then with an agent Chat sent
+(seeded): its row in the same panel. Light and dark shots.
+`code-plus-menu.spec.js`' Slash commands › list has it among the built-in
+ones.
 
 ## Dev servers
 
@@ -1958,7 +2011,7 @@ ids made up):
 
 `views/chat/AgentTab.svelte`: an `agent:<id>` tab in the panel beside the chat
 (`chatDoc.svelte.js`, `DocPanel.svelte`). It opens on the turn's agent event, a
-pill or the bar's Open, and is fed by `agent_get` (the agent and its log, to
+pill, the bar's Open or `/agents` ([/agents](#agents-the-agent-panel-2026-11-18)), and is fed by `agent_get` (the agent and its log, to
 replay) and `yap-agent` (live). **Closing the tab never stops the agent.** A
 Code chat's own session working on the person's words opens no tab by itself
 ([The chat itself is no agent](#a-code-chat-that-works-directly)).
