@@ -19,7 +19,9 @@
 //!
 //! - `{"_wait_user":true}`: wait for the next user message on stdin (one
 //!   sent earlier counts). stdin closed: the fake exits 0, as Claude Code
-//!   does.
+//!   does. `{"_wait_user":{"local":true}}`: the message is a command Claude
+//!   Code runs itself (`/cost`, `/clear`…: its result says `local_command`),
+//!   taken in with no echo, as 2.1.296 takes one.
 //! - `{"_sleep_ms":N}`: wait N ms (an interrupt still answered).
 //! - `{"_hook":{"event":"PreToolUse","input":{…}}}`: POST `input` (with
 //!   `session_id`, `hook_event_name` and `cwd` added when missing) to every
@@ -627,9 +629,14 @@ impl Player<'_> {
 
     /// **A tool call's end**: the user messages that came while the turn
     /// worked join it now, as 2.1.296 takes them — never a turn of their own.
+    /// A command ("/cost", "/clear …") never joins: Claude Code runs it as a
+    /// turn of its own after (2.1.296, 18 Nov 2026), it and what came after it.
     fn tool_call_ended(&mut self) -> Result<(), String> {
         self.drain()?;
         while self.in_turn {
+            if self.queue.front().is_some_and(|(text, _)| text.trim_start().starts_with('/')) {
+                break;
+            }
             let Some((text, pictures)) = self.queue.pop_front() else { break };
             self.record(&text);
             self.replay(&text)?;
@@ -693,10 +700,14 @@ impl Player<'_> {
         match key {
             "_wait_user" => {
                 self.skipping = false;
+                // (A command Claude Code runs itself is never echoed.)
+                let local = arg.get("local").and_then(Value::as_bool) == Some(true);
                 loop {
                     if let Some((text, pictures)) = self.queue.pop_front() {
                         self.record(&text);
-                        self.replay(&text)?;
+                        if !local {
+                            self.replay(&text)?;
+                        }
                         self.user_text = text;
                         self.pictures = pictures;
                         self.notes.clear();

@@ -2640,9 +2640,20 @@ impl Follow {
         if let Some(kind) = r.origin.as_deref().filter(|_| !r.own_turn()) {
             tracing::info!(id = %self.id, turn = self.n, kind, "Agents: a result says a start Yap doesn't know; taken as an answer");
         }
+        // **A command Claude Code ran itself** (`local_command`: "/cost", "/clear the cache"… — 18 Nov 2026, checked
+        // on 2.1.296): the message it answers is never echoed, there's no model call and maybe no words, and it runs
+        // as a turn of its own after the one working. It's the answer to the next message written and not yet taken
+        // in, taken in now: before, a "/clear …" as the turn's message was "nothing" and the turn stayed at work
+        // for good, and a "/cost" note stayed unread, its turn ended 20 s on and the note sent again as a new turn.
+        // (One with no message of Yap's waiting answers nothing: never taken as the turn's answer.)
+        let local = !own && r.local_command.is_some() && {
+            let next = with_state(|s| s.live.get(&self.id).and_then(|l| l.written.get(l.taken).cloned()));
+            tracing::info!(id = %self.id, turn = self.n, answers = next.is_some(), "Agents: a command Claude Code ran itself");
+            next.map(|text| self.on_taken(&text)).is_some()
+        };
         // (It echoes each message as it takes it in: none yet, the turn's first is still to be read.)
         let first_unread = with_state(|s| s.live.get(&self.id).is_some_and(|l| !l.written.is_empty() && l.taken == 0));
-        if r.empty() && (own || first_unread) {
+        if r.empty() && !local && (own || first_unread) {
             tracing::info!(id = %self.id, turn = self.n, own, "Agents: a turn of Claude Code's own with nothing in it (a background task's end noted), not this turn's answer");
             if self.answered && self.waiting_since.is_some() {
                 // Waiting: more still out, it waits on; all back with nothing to say of it, nothing more is coming.
@@ -4692,6 +4703,77 @@ mod tests {
         follow.on_taken("How many files are there?");
         assert_eq!(follow.take_result(&answer("Two files.", false)), After::End);
         assert_eq!(follow.outcome.as_ref().map(|(s, t)| (*s, t.as_str())), Some((Status::Done, "Two files.")));
+        test_live(&id, None);
+    }
+
+    /// **A command Claude Code runs itself** (18 Nov 2026, as 2.1.296 does:
+    /// "/clear the cache" typed in a Code chat goes as words, and Claude Code
+    /// clears) — its result has no model call and no words, and the message
+    /// is never echoed. It's that message's answer all the same: the turn
+    /// ends. (Before, it was "nothing", and the turn stayed at work for good.)
+    #[test]
+    fn a_command_claude_code_runs_itself_answers_its_message() {
+        let (id, folder) = at_work("/clear the cache");
+        let agent = store::get(&id).unwrap();
+        let mut follow = Follow::new(&agent, 1, folder, Mode::Auto, 200_000, None);
+        let cleared = TurnResult { subtype: "success".into(), num_turns: 0, local_command: Some("clear".into()), ..Default::default() };
+        assert!(cleared.empty(), "no model call, no words");
+        // Without its `local_command` it would be a turn of Claude Code's own with nothing in it.
+        assert_eq!(follow.take_result(&TurnResult { local_command: None, ..cleared.clone() }), After::Nothing);
+        assert_eq!(follow.take_result(&cleared), After::End);
+        assert_eq!(follow.outcome.as_ref().map(|(s, t)| (*s, t.as_str())), Some((Status::Done, "")));
+        assert_eq!(with_state(|s| s.live.get(&id).map(|l| (l.taken, l.unread()))), Some((1, 0)), "its message taken in");
+        test_live(&id, None);
+    }
+
+    /// **"/cost" sent while a turn works** (2.1.296, as recorded): never
+    /// joined to the turn, never echoed — Claude Code runs it after the
+    /// turn's answer, as a turn of its own. Played by the stand-in: the note
+    /// is read with that answer (✓✓), its words are the turn's from there,
+    /// and the turn ends — before, the note stayed unread, the input open,
+    /// and 20 s on the note went again as a turn of its own.
+    #[tokio::test]
+    async fn a_command_written_while_a_turn_works_is_answered_after_it_never_sent_twice() {
+        use crate::ai::claude_code::session::{stand_in, Spec};
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ai/claude_code/fixtures/2.1.296/real-local-command.jsonl");
+        let first = "What does the planting plan say?";
+        let (id, _) = at_work(first);
+        let dir = std::env::temp_dir().join(format!("yap-runner-{id}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (program, env) = stand_in(&script);
+        let mut spec = Spec::new(&dir, Pay::Plan);
+        spec.env = env;
+        spec.replay_user_messages = true;
+        let (session, mut rx) = Session::start_with(&program, spec).unwrap();
+        let session = Arc::new(session);
+        with_state(|s| s.live.get_mut(&id).unwrap().session = Some(Arc::clone(&session)));
+        session.send_user(first, &[]).unwrap();
+        // The person's "/cost" while it works: handed to it now, as any message is.
+        let ask = Ask { text: "/cost".into(), direct: true, message_id: Some("chat:7:3".into()), ..Default::default() };
+        assert_eq!(follow_up(&id, ask).map(|(_, how)| how), Ok(FollowedUp::Passed));
+        let agent = store::get(&id).unwrap();
+        let mut follow = Follow::new(&agent, 1, dir.clone(), Mode::Auto, 200_000, None);
+        // After each result: (its input over, the notes it never read).
+        let mut after = Vec::new();
+        let code = loop {
+            match tokio::time::timeout(Duration::from_secs(30), rx.recv()).await.expect("the stand-in in time") {
+                Some(Event::Exited(code)) => break code,
+                None => break None,
+                Some(ev) => {
+                    let result = matches!(ev, Event::Result(_));
+                    follow.on(ev, &session);
+                    if result {
+                        after.push((follow.input_over_at.is_some(), with_state(|s| s.live.get(&id).map_or(0, Live::unread))));
+                    }
+                }
+            }
+        };
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(after, [(false, 1), (true, 0)], "the answer left the command to come; the command's own result ended the turn");
+        assert_eq!(code, Some(0), "its input closed: it ends by itself");
+        assert_eq!(follow.outcome.as_ref().map(|(_, t)| t.as_str()), Some("Total cost: $0.0046 this session."), "the command's words, from where it was read");
+        assert!(store::log_read(&id).iter().any(|e| e["read"] == "chat:7:3"), "the note read (✓✓)");
+        assert!(with_state(|s| s.live.get_mut(&id).map(Live::take_unread_notes)).is_some_and(|n| n.is_empty()), "nothing to send again");
         test_live(&id, None);
     }
 

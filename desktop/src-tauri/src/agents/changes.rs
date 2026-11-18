@@ -274,7 +274,13 @@ pub fn after(before: &Before, windows: &[Window]) -> Result<Vec<Found>, Skip> {
     for (rel, seen) in now {
         let k = key(&rel);
         let was = before.files.get(&k).map(|(_, s)| s);
-        if let Some((new, _)) = classify(was, &seen, clean.contains(&k), windows) {
+        // **Git listed it at the start and it wasn't there** (deleted): there now, it was made in the turn, whatever
+        // its birth time says — NTFS gives a file the creation time of one of the same name deleted in that folder
+        // in the last 15 s ("tunnelling", 18 Nov 2026: a file made again under a deleted one's name read as changed,
+        // never new, whenever a turn came that soon after the deletion; its test failed under load).
+        let remade = was.is_none() && before.listed.contains(&k);
+        let class = if remade { during(seen.modified, windows).then_some((true, false)) } else { classify(was, &seen, clean.contains(&k), windows) };
+        if let Some((new, _)) = class {
             found.push(Found { rel, new });
             if found.len() > MOST_FOUND {
                 return Err(Skip::TooManyChanged(found.len()));

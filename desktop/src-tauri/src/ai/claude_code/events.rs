@@ -400,6 +400,12 @@ pub struct TurnResult {
     /// end, `peer` on a helper's report sent back as a message
     /// ([`TurnResult::own_turn`]). None for a message's.
     pub origin: Option<String>,
+    /// **`local_command`: a command Claude Code ran itself** (`cost`,
+    /// `clear`, `compact`…; 2.1.296, 18 Nov 2026): no model call
+    /// (`num_turns` 0), its words maybe none (`/clear`'s), and the message it
+    /// answers **never echoed** (`--replay-user-messages`) — run as a turn of
+    /// its own after the one working, never joined to it.
+    pub local_command: Option<String>,
 }
 
 /// One model's line of a result's `modelUsage`.
@@ -877,6 +883,7 @@ fn result(v: &Value) -> TurnResult {
             })
             .unwrap_or_default(),
         origin: v.get("origin").and_then(|o| opt_str(o, "kind")),
+        local_command: opt_str(v, "local_command").filter(|c| !c.trim().is_empty()),
     }
 }
 
@@ -1533,6 +1540,22 @@ pub(crate) mod tests {
         assert_eq!(results[1].text, "Two files: notes.md and planting-plan.md.");
         // An error with no turn is never "empty": it says what went wrong.
         assert!(!TurnResult { is_error: true, ..Default::default() }.empty());
+    }
+
+    /// **A command Claude Code runs itself** (2.1.296, 18 Nov 2026): its
+    /// result says `local_command`, with no model call — "/cost" with words,
+    /// "/clear" with none (then it's [`TurnResult::empty`] too).
+    #[test]
+    fn a_command_claude_code_runs_itself_says_so_in_its_result() {
+        let events = fixture("real-local-command.jsonl");
+        let results: Vec<&TurnResult> = events.iter().filter_map(|e| if let Event::Result(r) = e { Some(r) } else { None }).collect();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].local_command, None);
+        assert_eq!((results[1].local_command.as_deref(), results[1].num_turns, results[1].empty()), (Some("cost"), 0, false));
+        let Some(Event::Result(clear)) = parse_line(r#"{"type":"result","subtype":"success","is_error":false,"duration_api_ms":0,"num_turns":0,"stop_reason":null,"result":"","local_command":"clear","session_id":"s","total_cost_usd":0}"#) else { panic!("a result") };
+        assert_eq!((clear.local_command.as_deref(), clear.empty(), clear.own_turn()), (Some("clear"), true, false));
+        let Some(Event::Result(none)) = parse_line(r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Hi.","local_command":"","session_id":"s"}"#) else { panic!("a result") };
+        assert_eq!(none.local_command, None);
     }
 
     #[test]
