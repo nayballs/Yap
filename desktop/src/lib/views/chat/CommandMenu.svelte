@@ -3,8 +3,11 @@
   // `CommandPicker`): the commands and skills the chat's Claude Code offers in its workspace — the person's own and
   // their plugins', then Claude Code's built-in ones — each with its one line and what it takes. A click (or Enter,
   // Tab) puts `/name ` in the box; the keys stay in the box. Nothing known yet: said, while it's looked at.
+  // (Yap's own /agents is there from the start: the notes say what's still to come from Claude Code under it.)
   /** `picker`: the box's CommandPicker; `onpick(command)`. */
   let { picker, onpick } = $props();
+  /** Claude Code's own rows matching (Yap's /agents aside). */
+  const theirs = $derived(picker.items.filter((c) => !c.yap).length);
 
   let listEl = $state(null);
   $effect(() => {
@@ -53,19 +56,22 @@
             {#each g.items as c, k (c.name)}{@render option(c, g.start + k)}{/each}
           </div>
         {/each}
-      {:else if !menu.loaded || menu.looking}
-        <p class="empty" role="status">Asking Claude Code what it offers here…</p>
-      {:else if menu.error}
-        <p class="empty" role="status">{menu.error}</p>
-      {:else if picker.query}
-        <p class="empty" role="status">No command starts with /{picker.query}. Enter sends it as typed.</p>
-      {:else}
-        <p class="empty" role="status">Claude Code's commands show here once it has answered in this workspace.</p>
+      {/if}
+      {#if !theirs}
+        {#if !menu.loaded || menu.looking}
+          <p class="empty" role="status">Asking Claude Code what it offers here…</p>
+        {:else if menu.error}
+          <p class="empty" role="status">{menu.error}</p>
+        {:else if picker.query && !picker.items.length}
+          <p class="empty" role="status">No command starts with /{picker.query}. Enter sends it as typed.</p>
+        {:else if !picker.query}
+          <p class="empty" role="status">Claude Code's commands show here once it has answered in this workspace.</p>
+        {/if}
       {/if}
     </div>
     <div class="foot" aria-hidden="true">
       <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
-      <span><kbd>Enter</kbd> or <kbd>Tab</kbd> put it in the box</span>
+      <span><kbd>Enter</kbd> or <kbd>Tab</kbd> {picker.items[picker.active]?.yap === 'agents' ? 'open the Agent panel' : 'put it in the box'}</span>
       <span><kbd>Esc</kbd> close</span>
     </div>
   </div>

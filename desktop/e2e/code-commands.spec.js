@@ -7,6 +7,9 @@
 // - /compact [words]: Claude Code's own compaction of the session (`-p "/compact …" --resume <session>`, kept in it),
 //   a quiet line while it runs, then what it came to; the chat's ring follows.
 // - /model <name>: the chat's model chip switched, its effort kept; alone, the picker opens.
+// - /agents (18 Nov 2026, Yap's own: Claude Code's runs only in its terminal): listed with its line among the built-in
+//   commands, before the person's own that hold "agents"; typed or picked, the chat's Agent panel opens or comes
+//   forward — in a plain chat too, on the agents Chat sent ("No agents yet" when there are none). Nothing sent.
 // - Anything else after "/" goes as typed.
 //
 // Chat is on the plan with Yap's stand-in for Claude Code (`yap.exe fake-claude <script>`); the workspace and folders
@@ -16,8 +19,8 @@ import path from 'node:path';
 import { test as base, expect, openView, setConfig, closeToasts, jsonLines } from './support/fixtures.js';
 import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
-import { newCodeChat } from './support/code-chats.js';
-import { codeCommand, modelFor, roughTokens } from '../src/lib/views/chat/codeMenu.svelte.js';
+import { newCodeChat, toSide } from './support/code-chats.js';
+import { codeCommand, modelFor, roughTokens, AGENTS_COMMAND, withYapCommands, isAgentsCommand, panelAgentFor, commandGroups } from '../src/lib/views/chat/codeMenu.svelte.js';
 
 const HERE = path.join(RUNS, `code-commands-spec-w${process.env.TEST_WORKER_INDEX ?? 0}`);
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -30,6 +33,9 @@ const COMMANDS = [
   { name: 'tidy-beds', description: "Tidy the flower beds' notes", argumentHint: '[bed]' },
   { name: 'garden-tools:water', description: '(garden-tools) Water the seedlings on a schedule', argumentHint: '<bed>' },
   { name: 'garden-tools:prune', description: "(garden-tools) Prune what's overgrown", argumentHint: '' },
+  // The person's own that hold "agents": kept as they are, after Yap's /agents.
+  { name: 'agents-digest', description: 'Sum up what the helpers did today', argumentHint: '' },
+  { name: 'bed-agents', description: 'Name the agents that look after each bed', argumentHint: '' },
   { name: 'clear', description: 'Start a new session with empty context', argumentHint: '[name]', builtin: true },
   { name: 'compact', description: 'Free up context by summarizing the conversation so far', argumentHint: '<optional custom summarization instructions>', builtin: true },
   { name: 'model', description: 'Set the AI model for Claude Code', argumentHint: '<model>', builtin: true },
@@ -150,6 +156,49 @@ test("the box's three commands, a model by its name, and a token count in a word
   expect(roughTokens(600)).toBe('600');
 });
 
+test("/agents is Yap's own: among the built-in commands in its place, once; only on its own; the panel on the tab in view, else the chat's newest agent", () => {
+  const cc = [
+    { name: 'tidy-beds', description: 'Tidy the beds' },
+    { name: 'agents-digest', description: 'Sum up the helpers' },
+    { name: 'clear', description: 'Start afresh', builtin: true },
+    { name: 'compact', description: 'Free up context', builtin: true },
+  ];
+  const withOurs = withYapCommands(cc);
+  expect(withOurs.map((c) => c.name)).toEqual(['tidy-beds', 'agents-digest', 'agents', 'clear', 'compact']);
+  expect(withOurs.find((c) => c.name === 'agents')).toBe(AGENTS_COMMAND);
+  expect(AGENTS_COMMAND.description).toBe('Show the agents and helpers working in this chat');
+  // In the "Built in" group, never the person's own.
+  expect(commandGroups(withOurs).map((g) => [g.label, g.items.map((c) => c.name)])).toEqual([
+    ['Commands and skills', ['tidy-beds', 'agents-digest']],
+    ['Built in', ['agents', 'clear', 'compact']],
+  ]);
+  // One of Claude Code's own called "agents" (its terminal's): Yap's in its place, never twice.
+  expect(withYapCommands([...cc, { name: 'agents', description: 'Manage agent configurations', builtin: true }]).filter((c) => c.name === 'agents')).toEqual([AGENTS_COMMAND]);
+  // Nothing known yet: Yap's alone; built-in ones all before it: at their end.
+  expect(withYapCommands(null)).toEqual([AGENTS_COMMAND]);
+  expect(withYapCommands([{ name: 'add-dir', builtin: true }]).map((c) => c.name)).toEqual(['add-dir', 'agents']);
+  expect(isAgentsCommand('/agents')).toBe(true);
+  expect(isAgentsCommand('  /Agents ')).toBe(true);
+  expect(isAgentsCommand('/agents please list them')).toBe(false);
+  expect(isAgentsCommand('/agents-digest')).toBe(false);
+  expect(isAgentsCommand('agents')).toBe(false);
+  // Which agent's tab: the one in view, else one in the row, else the chat's newest (the list is newest first).
+  const list = [
+    { id: 'n3', conversation: 7 },
+    { id: 'o9', conversation: 8 },
+    { id: 'n2', conversation: 7 },
+    { id: 'n1', conversation: 7 },
+  ];
+  expect(panelAgentFor(list, 7, null)).toBe('n3');
+  expect(panelAgentFor(list, 7, { showing: 'agent', agent: { id: 'n1' }, extra: [], hidden: [] })).toBe('n1');
+  expect(panelAgentFor(list, 7, { showing: 'summary', agent: { id: 'n1' }, extra: [{ kind: 'agent', key: 'agent:n2', id: 'n2' }], hidden: [] })).toBe('n2');
+  // A tab closed, or another chat's: not that one.
+  expect(panelAgentFor(list, 7, { showing: 'doc', extra: [{ kind: 'agent', key: 'agent:n2', id: 'n2' }], hidden: ['agent:n2'] })).toBe('n3');
+  expect(panelAgentFor(list, 7, { showing: 'agent', agent: { id: 'o9' }, extra: [], hidden: [] })).toBe('n3');
+  expect(panelAgentFor(list, 9, null)).toBeNull();
+  expect(panelAgentFor(list, null, null)).toBeNull();
+});
+
 test('/clear: Claude starts afresh (a new session for the next message), the thread kept under a divider; asked first while it works', async ({ yap, main, shot }) => {
   await codeChat(main);
   const first = await send(yap, main, 'When are the beds watered?');
@@ -258,6 +307,136 @@ test('/model: the chat model chip switched, its effort kept; alone, the picker o
   await typed(main, '/model haiku');
   await expect.poll(async () => (await yap.invoke('ai_model_status', { scope: 'chat' })).model?.id, { timeout: 10_000 }).toBe('claude-haiku-5-5');
   await closeToasts(main);
+});
+
+/** The panel beside the chat, and an agent's tab in its row. */
+const panelOf = (main) => main.getByTestId('chat-doc');
+const agentTabOf = (main, id) => main.locator(`[data-testid="chat-panel-tab"][data-key="agent:${id}"]`);
+/** The Agent panel in front: the panel on an agent, its rows and totals showing. */
+async function agentPanelInFront(main) {
+  await expect(panelOf(main)).toHaveAttribute('aria-label', 'Agent');
+  await expect(panelOf(main).getByTestId('chat-agent-panel')).toBeVisible();
+  await expect(panelOf(main).getByTestId('chat-agent-total-tokens')).toBeVisible();
+}
+async function closePanel(main) {
+  if (await panelOf(main).count()) await panelOf(main).getByRole('button', { name: 'Close the panel' }).first().click();
+  await expect(panelOf(main)).toHaveCount(0);
+}
+
+test("/agents in a Code chat: listed with its line; typed or picked, the chat's Agent panel opens or comes forward; nothing goes to Claude Code", async ({ yap, main, shot }) => {
+  await codeChat(main);
+  // Before Claude has answered here: no agent yet, said; the box emptied.
+  await typed(main, '/agents');
+  await expect(main.locator('.toast').filter({ hasText: 'No agents yet' })).toContainText('Claude sends one when part of the work needs it');
+  await expect(box(main)).toHaveValue('');
+  await closeToasts(main);
+  await send(yap, main, 'When are the beds watered?');
+  await idle(yap);
+  const own = (await agents(yap))[0];
+
+  // The "/" list: Yap's /agents first, with its line; the person's own that hold "agents" after it, as they are.
+  await box(main).click();
+  await box(main).pressSequentially('/agents');
+  const list = main.getByTestId('code-command-menu');
+  await expect(list.getByRole('option')).toHaveText([/^\/agents\s*Show the agents and helpers working in this chat$/, /^\/agents-digest/, /^\/bed-agents/], { timeout: 15_000 });
+  // Its foot says what Enter does on it (on the person's own: put it in the box).
+  await expect(list.locator('.foot')).toContainText('open the Agent panel');
+  await box(main).press('ArrowDown');
+  await expect(list.locator('.foot')).toContainText('put it in the box');
+  await box(main).press('ArrowUp');
+  await shot(main, '11-agents-in-the-list-light');
+  // Enter: the Agent panel, in front; the box empty.
+  await box(main).press('Enter');
+  await agentPanelInFront(main);
+  await expect(panelOf(main).getByTestId('chat-agent-panel-empty')).toContainText('No agents yet');
+  await expect(box(main)).toHaveValue('');
+  await expect(list).toHaveCount(0);
+  await shot(main, '12-agents-panel-light');
+  await theme(yap, main, 'dark');
+  await agentPanelInFront(main);
+  await shot(main, '13-agents-panel-dark');
+  await theme(yap, main, 'light');
+
+  // Another tab in front (the summary): /agents brings the Agent tab forward.
+  await main.getByTestId('chat-summary-button').click();
+  await expect(panelOf(main)).toHaveAttribute('aria-label', 'Summary');
+  await expect(agentTabOf(main, own.id)).toHaveAttribute('aria-selected', 'false');
+  await typed(main, '/agents');
+  await expect(agentTabOf(main, own.id)).toHaveAttribute('aria-selected', 'true');
+  await agentPanelInFront(main);
+  await expect(main.getByTestId('chat-panel-tab').and(main.locator('[aria-selected="true"]'))).toHaveCount(1);
+
+  // Picked from the "/" list with a click: done at once, nothing left in the box.
+  await main.getByTestId('chat-summary-button').click();
+  await expect(panelOf(main)).toHaveAttribute('aria-label', 'Summary');
+  await box(main).click();
+  await box(main).pressSequentially('/age');
+  await list.getByRole('option', { name: /^\/agents Show/ }).click();
+  await expect(agentTabOf(main, own.id)).toHaveAttribute('aria-selected', 'true');
+  await expect(box(main)).toHaveValue('');
+
+  // And from + → Slash commands ›, among the built-in ones; the words in the box stay.
+  await main.getByTestId('chat-summary-button').click();
+  await expect(panelOf(main)).toHaveAttribute('aria-label', 'Summary');
+  await box(main).fill('Then the herbs');
+  await plus(main).click();
+  await menu(main).getByRole('button', { name: 'Slash commands' }).click();
+  const sub = main.getByTestId('code-plus-commands-menu');
+  const row = sub.getByRole('menuitem', { name: /^\/agents Show/ });
+  await expect(row).toContainText('Show the agents and helpers working in this chat');
+  await expect(sub.locator('.mhead')).toHaveText(['Commands and skills', 'Built in']);
+  await shot(main, '14-agents-in-slash-commands-light');
+  await row.click();
+  await expect(menu(main)).toHaveCount(0);
+  await expect(agentTabOf(main, own.id)).toHaveAttribute('aria-selected', 'true');
+  await expect(box(main)).toHaveValue('Then the herbs');
+  await box(main).fill('');
+
+  // Nothing of it went to Claude Code: its one run is the message's.
+  expect(argsSeen()).toHaveLength(1);
+  await closePanel(main);
+});
+
+test("/agents in a plain chat: the agents Chat sent, in the same panel; with none, it says so", async ({ yap, main, shot }) => {
+  await openView(main, 'Chat');
+  await closePanel(main);
+  await toSide(main, 'Chat');
+  await main.getByRole('button', { name: 'New chat' }).click();
+  await typed(main, '/agents');
+  await expect(main.locator('.toast').filter({ hasText: 'No agents yet' })).toContainText("Chat hasn't sent an agent in this chat yet.");
+  await expect(box(main)).toHaveValue('');
+  await closeToasts(main);
+  // A chat with an answer, and an agent Chat sent from it (seeded: nothing runs).
+  await box(main).fill('When are the beds watered?');
+  await main.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(main.locator('.msgs')).toContainText(ANSWER, { timeout: 20_000 });
+  await idle(yap);
+  await typed(main, '/agents');
+  await expect(main.locator('.toast').filter({ hasText: 'No agents yet' })).toBeVisible();
+  await closeToasts(main);
+  const conversation = Math.max(...(await yap.invoke('chats_list')).map((c) => c.id));
+  const now = Math.floor(Date.now() / 1000);
+  const id = `plainsent${now.toString(16)}`;
+  const turn = { n: 1, title: 'Tidy the watering notes', request: 'Tidy the watering notes.', status: 'done', mode: 'auto', model: 'claude-sonnet-5-5', effort: 'medium', startedTs: now - 300, endedTs: now - 120, cost: 0.04 };
+  await yap.invoke('e2e_agents_seed', {
+    agents: [{ id, conversation, folder: 'garden-planner', path: GARDEN, brief: 'Tidy the watering notes.', model: 'claude-sonnet-5-5', effort: 'medium', mode: 'auto', pay: 'plan', status: 'done', createdTs: now - 320, startedTs: now - 300, endedTs: now - 120, updatedTs: now, turns: 1, turnList: [turn] }],
+  });
+  // (The page hears of it a moment later — its `yap-agent` event, the list read again: tried until it has.)
+  await expect(async () => {
+    await closeToasts(main);
+    await typed(main, '/agents');
+    await expect(panelOf(main)).toHaveAttribute('aria-label', 'Agent', { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  await agentPanelInFront(main);
+  await expect(panelOf(main).locator(`[data-testid="chat-agent-row"][data-key="${id}:1"]`)).toContainText('Tidy the watering notes');
+  await expect(box(main)).toHaveValue('');
+  await shot(main, '15-agents-plain-chat-light');
+  await theme(yap, main, 'dark');
+  await agentPanelInFront(main);
+  await shot(main, '16-agents-plain-chat-dark');
+  await theme(yap, main, 'light');
+  await closePanel(main);
+  await toSide(main, 'Code');
 });
 
 test('"+1 folder" on the edge once a folder is added: its card on hover, the summary on a click', async ({ yap, main, shot }) => {

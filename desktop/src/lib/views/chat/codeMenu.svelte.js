@@ -9,6 +9,7 @@
 // - `CommandPicker`: the box's "/" list in a Code chat — "/" at the start of the box, then letters, `:` or `-`:
 //   the commands whose name holds them, the ones that start with them first; ↑ ↓ move, Enter or Tab put
 //   `/name ` in the box, Esc closes.
+// - Yap's own `/agents` (18 Nov 2026, `AGENTS_COMMAND`) is in both lists: picked or sent, the chat's Agent panel.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
@@ -76,6 +77,46 @@ export function modelFor(rows, name) {
     return words.every((w) => hay.includes(w));
   };
   return list.find(holds) ?? null;
+}
+
+/**
+ * **Yap's own `/agents`** (18 Nov 2026): the chat's Agent panel — its helpers and agents, with the crew, cost, tokens
+ * and time — opened or brought forward; nothing is sent to Claude Code (its own `/agents` runs only in its terminal,
+ * so its list leaves it out). Listed among the built-in commands, in a Code chat's "/" list and Slash commands ›.
+ */
+export const AGENTS_COMMAND = Object.freeze({ name: 'agents', description: 'Show the agents and helpers working in this chat', hint: '', builtin: true, skill: false, plugin: '', yap: 'agents' });
+
+/**
+ * Claude Code's commands with Yap's own laid in: `/agents` among the built-in ones in its alphabetical place, in place
+ * of any `agents` of Claude Code's (a name twice would be one row twice). Pure.
+ */
+export function withYapCommands(commands) {
+  const list = (Array.isArray(commands) ? commands : []).filter((c) => String(c?.name || '').toLowerCase() !== AGENTS_COMMAND.name);
+  const at = list.findIndex((c) => c.builtin && String(c.name || '').toLowerCase() > AGENTS_COMMAND.name);
+  const end = list.findLastIndex((c) => c.builtin);
+  const i = at >= 0 ? at : end >= 0 ? end + 1 : list.length;
+  return [...list.slice(0, i), AGENTS_COMMAND, ...list.slice(i)];
+}
+
+/** `/agents` typed on its own (any case, spaces around): Yap's. With words after it, they're words for Claude. Pure. */
+export function isAgentsCommand(text) {
+  return /^\/agents$/i.test(String(text ?? '').trim());
+}
+
+/**
+ * **The agent whose tab `/agents` shows** in chat `conversation` (`list`: every agent, newest first): the agent tab
+ * showing now, else one still in the panel's row (`doc.extra` less `doc.hidden`), else the chat's newest — the panel
+ * lists all of the chat's either way. null: none in this chat yet. Pure.
+ */
+export function panelAgentFor(list, conversation, doc = null) {
+  if (conversation == null) return null;
+  const mine = (Array.isArray(list) ? list : []).filter((a) => a?.conversation === conversation);
+  if (!mine.length) return null;
+  const has = (id) => id != null && mine.some((a) => a.id === id);
+  if (doc?.showing === 'agent' && has(doc.agent?.id)) return doc.agent.id;
+  const hidden = new Set(doc?.hidden || []);
+  const tab = (doc?.extra || []).filter((t) => t?.kind === 'agent' && !hidden.has(t.key) && has(t.id)).at(-1);
+  return tab?.id ?? mine[0].id;
 }
 
 /** "about 54k" for a token count. Pure. */
@@ -242,8 +283,9 @@ export class CodeMenu {
     }
   }
 
+  /** Claude Code's commands here, with Yap's own `/agents` among them (before Claude Code has answered too). */
   get commands() {
-    return this.offered?.commands ?? [];
+    return withYapCommands(this.offered?.commands ?? []);
   }
 
   destroy() {
