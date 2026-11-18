@@ -554,6 +554,11 @@ pub enum FollowedUp {
     Started,
     /// The turn about to start (or waiting for a slot) takes it too.
     Added,
+    /// It was "/clear …" for a Code chat's own session: Yap's own `/clear`
+    /// ran (`agents/slash.rs`), nothing went to Claude Code.
+    Cleared,
+    /// It was "/compact …" for it: Yap's own `/compact` started.
+    Compacting,
 }
 
 /// An agent that has a slot.
@@ -3405,6 +3410,14 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
         return Err("Say what to tell the agent.".into());
     }
     let current = store::get(id).ok_or("There's no such agent.")?;
+    // **Yap's own /clear and /compact for a Code chat's own session** (18 Nov 2026): whatever sent them — a phone's
+    // Remote Control (its gates passed first), an agent's tab — never words for Claude Code, which clears its context
+    // on "/clear …" with no divider in the thread (a question in the chat is caught before: `chat/turn.rs`).
+    if let (Some(own), Some(conversation)) = (super::slash::own_command(&ask.text), current.conversation.filter(|_| current.works_directly())) {
+        let how = super::slash::own_for_session(conversation, own)?;
+        tracing::info!(id, how = ?how, phone = ask.phone.is_some(), "Agents: one of Yap's own commands for a Code chat's session, done by Yap");
+        return Ok((store::get(id).ok_or("There's no such agent.")?, how));
+    }
     // A phone's words never join a turn that runs above Auto: they wait for
     // a turn of their own (at most Auto), as a request while it works does.
     let joins = ask.phone.is_none() || modes::or_auto(&current.mode) <= super::remote::PHONE_MAX;
@@ -4776,6 +4789,59 @@ mod tests {
         assert_eq!(follow.outcome.as_ref().map(|(s, t)| (*s, t.as_str())), Some((Status::Done, "")));
         assert_eq!(with_state(|s| s.live.get(&id).map(|l| (l.taken, l.unread()))), Some((1, 0)), "its message taken in");
         test_live(&id, None);
+    }
+
+    /// **"/clear …" for a Code chat's own session from a phone's Remote
+    /// Control, or an agent's tab** (18 Nov 2026): Yap's own `/clear` —
+    /// the chat's agents set aside, the divider above its next message — never
+    /// words for Claude Code, which clears its context on them with no divider
+    /// in the thread. An agent Chat sent out (not the chat's own session) gets
+    /// its words as ever.
+    #[test]
+    fn a_clear_for_a_code_chats_own_session_from_anywhere_is_yaps_own() {
+        let conv = crate::chat::chats::create("Garden plan");
+        crate::chat::chats::append_question(conv.id, "When are the beds watered?", false, &[]).unwrap();
+        crate::chat::chats::append(conv.id, "assistant", "Twice a week.", &[], None, false).unwrap();
+        let id = store::new_id();
+        let path = format!(r"D:\Projects\garden-planner-{id}");
+        store::insert(Agent { id: id.clone(), folder: "garden-planner".into(), path, conversation: Some(conv.id), status: Status::Done, started_ts: 5, session: session::new_session_id(), turn_list: vec![store::TurnNote { n: 1, status: Status::Done, started_ts: 5, direct: true, ..Default::default() }], ..Default::default() });
+        // From a paired phone (Remote Control builds it so), after its gates.
+        let ask = Ask { phone: Some("phone-kitchen".into()), mode: Some(super::super::remote::PHONE_MAX), ..Ask::of("/clear the old watering notes", false) };
+        let (agent, how) = follow_up(&id, ask).expect("done by Yap");
+        assert_eq!(how, FollowedUp::Cleared);
+        assert!(super::super::menu::cleared(conv.id, &id), "the chat's agents set aside: its next message starts afresh");
+        assert_eq!(agent.turn_list.len(), 1, "no turn of its own: nothing went to Claude Code");
+        assert!(!active(&id), "nothing scheduled");
+        // "/compact …" too: Yap's own (here there's nothing of a session to compact: said).
+        assert!(follow_up(&id, Ask::of("/compact keep the watering plan", false)).is_err());
+        assert!(!active(&id));
+        // An agent Chat sent out (at work here): the words are its own business, as ever — its next turn's.
+        let sent = store::new_id();
+        let sent_path = format!(r"D:\Projects\garden-planner-{sent}");
+        store::insert(Agent { id: sent.clone(), folder: "garden-planner".into(), path: sent_path.clone(), conversation: Some(conv.id), status: Status::Running, started_ts: 5, session: session::new_session_id(), turn_list: vec![store::TurnNote { n: 1, status: Status::Running, started_ts: 5, ..Default::default() }], ..Default::default() });
+        test_live(&sent, Some(&sent_path));
+        let (_, how) = follow_up(&sent, Ask::of("/clear the cache", false)).unwrap();
+        assert_eq!(how, FollowedUp::Queued);
+        assert_eq!(test_pending(&sent).map(|a| a.text), Some("/clear the cache".to_string()));
+        test_live(&sent, None);
+    }
+
+    /// **The one rule for Yap's own commands in a message's words**
+    /// (`slash::own_command`), as Claude Code 2.1.296 reads them; the page's
+    /// `codeCommand` says the same (code-commands.spec.js).
+    #[test]
+    fn yaps_own_commands_in_a_messages_words() {
+        use super::super::slash::{own_command, Own};
+        assert_eq!(own_command("/clear"), Some(Own::Clear));
+        assert_eq!(own_command("  /CLEAR the old notes "), Some(Own::Clear));
+        assert_eq!(own_command("/compact keep the test plan"), Some(Own::Compact("keep the test plan".into())));
+        assert_eq!(own_command("/compact"), Some(Own::Compact(String::new())));
+        assert_eq!(own_command("/compact\nKeep the plan."), Some(Own::Compact("Keep the plan.".into())));
+        for words in ["/clearance notes", "/compacted", "clear", "Please /clear it", "/tidy-beds", "/model haiku", ""] {
+            assert_eq!(own_command(words), None, "{words}");
+        }
+        assert_eq!(super::super::slash::compacted_words(54_135, 2_900), "Compacted: about 54k tokens of context down to 3k");
+        assert_eq!(super::super::slash::compacted_words(1_200_000, 600), "Compacted: about 1.2M tokens of context down to 600");
     }
 
     /// **A CronCreate job holds no turn open** (2.1.296, as recorded, 18 Nov
