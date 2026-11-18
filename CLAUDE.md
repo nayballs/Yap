@@ -319,6 +319,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `shell/com.rs` — COM's multithreaded apartment kept up while Yap runs.
 - `shell/browsers.rs` / `shell/download.rs` / `shell/file_drop.rs` — which browser links open in; big downloads; files dragged in.
 - `shell/webview_memory.rs` / `shell/theme.rs` / `shell/portable.rs` — hidden webviews' memory; the theme; portable mode.
+- `shell/view_fit.rs` (+ `core/viewFit.js`) — the main window's page fitted to its window again once its size settles, and whenever the page finds itself at another size (a Snap layouts drop left it at the snapped size).
 - `shell/guide.rs` / `shell/help.rs` — getting started (`onboarding.json`); the shortcut sheet.
 - Commands: each module's own, else its area's `commands.rs` (app-shell.md).
 - `shell/window.rs` / `settings.rs` / `autostart.rs` / `logging.rs` / `commands.rs` — the main window (`show_quietly`), config applied, launch at sign-in, the log, links.
