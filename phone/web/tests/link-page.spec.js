@@ -421,9 +421,14 @@ test.describe('talking', () => {
     await ask(page, pc);
     pc.send({ type: 'state', phase: 'speaking' });
     pc.send({ type: 'speak_start', rate: 24000 });
-    for (let i = 0; i < 6; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
-    await expect.poll(async () => (await snapshot(page)).player.queued).toBeCloseTo(0.6, 6);
-    // 600 ms waiting is past the 250 ms the buffer wants: it plays straight away.
+    // The whole answer, then its end at once, as a PC that has it all says
+    // it: 3 s, so it's still playing through the checks below on a busy PC,
+    // and never run dry waiting for an end sent after them (an underrun
+    // counted under load, 18 Nov 2026).
+    for (let i = 0; i < 30; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
+    pc.send({ type: 'speak_end' });
+    await expect.poll(async () => (await snapshot(page)).player.queued).toBeCloseTo(3, 6);
+    // 3 s waiting is past the 250 ms the buffer wants: it plays straight away.
     await expect.poll(async () => (await snapshot(page)).player.state).toBe('playing');
     await expect(page.getByTestId('phase')).toHaveText('Speaking');
     await expect(page.getByTestId('stop')).toBeVisible();
@@ -432,13 +437,12 @@ test.describe('talking', () => {
     expect(p.loaded).toBe(true);
     expect(p.startBufferedMs).toBeGreaterThanOrEqual(250);
     expect(p.startDelayMs).toBeLessThan(100);
-    pc.send({ type: 'speak_end' });
     pc.send({ type: 'state', phase: 'idle' });
-    // 0.6 s of sound, then quiet: all of it played, none of it missing.
-    await expect.poll(async () => (await snapshot(page)).player.active, { timeout: 4000 }).toBe(false);
+    // 3 s of sound, then quiet: all of it played, none of it missing.
+    await expect.poll(async () => (await snapshot(page)).player.active, { timeout: 10_000 }).toBe(false);
     p = (await snapshot(page)).player;
     expect(p.state).toBe('idle');
-    expect(p.played).toBeCloseTo(0.6, 3);
+    expect(p.played).toBeCloseTo(3, 3);
     expect(p.underruns).toBe(0);
     expect(p.maxStep).toBeLessThan(0.03);
     await expect(page.getByTestId('stop')).toBeHidden();
