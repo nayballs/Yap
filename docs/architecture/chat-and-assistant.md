@@ -3231,7 +3231,9 @@ of sight. What they share is said once, in the line.
   goes. Let go, it's laid out at its last place, comes up in sight (just
   under Tauri's resizing edges, `TAURI_DRAG_RESIZE_BORDERS`, so the window's
   edge still resizes it where the page reaches it), and the still goes two
-  frames later. A resize in one go (maximise, restore) just follows. **A menu
+  frames later. A resize in one go (maximise, restore) just follows (and Yap's
+  own page is fitted to its window again once its size settles: a Snap layouts
+  drop once left it at the snapped size, `shell/view_fit.rs` in app-shell.md). **A menu
   of Yap's open over the page** stands a still in for it the same way (15 Nov
   2026, the maintainer's screenshot: the page tab's Dev servers menu dropped
   behind the page, which as a window of its own covered it, and the nine points

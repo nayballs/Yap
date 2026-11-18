@@ -1269,3 +1269,68 @@ test('Yap’s window resized by its edge: a still stands in for the page while i
   await sizing('exit', size[0], size[1]);
   await expectAtRest(yap, main);
 });
+
+// ---- Yap's page fills its window (18 Nov 2026) --------------------------------------------------
+// The maintainer dropped Yap's window into a Snap layouts zone by its title bar, then maximised, minimised and
+// restored it: Yap's page went on drawing (clocks, typing) at the snapped size, the rest of the window the webview's
+// background, until Chat was left and opened again. Programmatic snaps (Win+Left, a quarter, maximise, minimise,
+// restore, a resize while cloaked) never did it; the state it left is WebView2's own window inside Yap's webview at
+// an older size than the webview's bounds (`e2e_main_view_stale`: its page laid out at that size). Yap fits its
+// webview to its window again when the page finds itself at another size (core/viewFit.js) and once the window's
+// size settles or a drag of its title bar ends (shell/view_fit.rs).
+
+test('viewFit.js: the page tells its size in device pixels, and has its webview fitted only when it’s off twice', async () => {
+  const { watchViewFit, pageSize } = await import('../src/lib/core/viewFit.js');
+  const win = { devicePixelRatio: 1.5, innerWidth: 801, innerHeight: 600, addEventListener() {}, removeEventListener() {}, document: { hasFocus: () => true } };
+  expect(pageSize(win)).toEqual({ width: 1202, height: 900 });
+  const run = async (answers) => {
+    const calls = [];
+    const stop = watchViewFit({ invoke: async (cmd, args) => (calls.push([cmd, args]), answers.shift() ?? 'fine'), appWindow: null, win, every: 60_000, again: 20, settle: 5 });
+    await new Promise((done) => setTimeout(done, 150));
+    stop();
+    return calls;
+  };
+  // Fine: asked once, nothing done.
+  expect(await run(['fine'])).toEqual([['main_view_fit', { width: 1202, height: 900, fit: false }]]);
+  // Off, then still off a moment later: fitted.
+  expect((await run(['off', 'fitted'])).map(([, a]) => a.fit)).toEqual([false, true]);
+});
+
+/** Yap's page's own size, in device pixels: what it's laid out at. */
+const laidOut = (main) => main.evaluate(() => [Math.round(innerWidth * devicePixelRatio), Math.round(innerHeight * devicePixelRatio)]);
+
+test('Yap’s page left at an older size than its window (a Snap layouts drop): fitted again; minimised and restored, Chat and the page beside it fill the window', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  fakeLlm.scriptChat([{ tools: [{ name: 'browser_navigate', args: { url: FORT_JOY_URL } }] }, { content: 'It’s open beside the chat.' }]);
+  await ask(main, `Bring up the treasure map page ${FORT_JOY_URL}`);
+  await expect.poll(async () => pageNow(yap), { timeout: 20_000 }).toMatchObject({ made: true, loaded: true, onScreen: true });
+  await expectAtRest(yap, main);
+  const size = await laidOut(main);
+  const old = [size[0] - 320, size[1] - 160];
+  const leftAtOldSize = async () => {
+    await yap.invoke('e2e_main_view_stale', { width: old[0], height: old[1] });
+    await expect.poll(() => laidOut(main), { message: 'the page at the older size', timeout: 5_000, intervals: [50] }).toEqual(old);
+  };
+  /** The page as wide and tall as its window, Chat's panel to its right edge, the page beside it exactly over its stage. */
+  const fillsTheWindow = async (timeout) => {
+    await expect.poll(() => laidOut(main), { message: 'the page as large as its window', timeout }).toEqual(size);
+    const gap = () => main.getByTestId('chat-panel-slot').evaluate((el) => innerWidth - el.getBoundingClientRect().right);
+    await expect.poll(gap, { message: 'Chat’s panel to the window’s right edge' }).toBeLessThan(24);
+    await expectAtRest(yap, main);
+  };
+
+  // At the older size, nothing else happening: the page finds it and has its webview fitted again.
+  await leftAtOldSize();
+  await fillsTheWindow(8_000);
+
+  // A drag of its title bar ending (the drop of a Snap layouts zone ends one): fitted again.
+  await leftAtOldSize();
+  await yap.invoke('e2e_main_window', { action: 'dragged' });
+  await fillsTheWindow(8_000);
+
+  // Minimised and restored (never taking the focus): the page, Chat and the page beside it fill the window.
+  await yap.invoke('e2e_main_window', { action: 'minimise' });
+  await main.waitForTimeout(600);
+  await yap.invoke('e2e_main_window', { action: 'restore' });
+  await fillsTheWindow(8_000);
+});

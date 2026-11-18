@@ -1074,6 +1074,11 @@ pub fn run() {
             chat::pages::view::e2e_window_sizing,
             #[cfg(debug_assertions)]
             chat::pages::view::e2e_window_picture,
+            shell::view_fit::main_view_fit,
+            #[cfg(all(debug_assertions, windows))]
+            shell::view_fit::e2e_main_view_stale,
+            #[cfg(all(debug_assertions, windows))]
+            shell::view_fit::e2e_main_window,
             #[cfg(debug_assertions)]
             chat::pages::pick::e2e_page_click,
             #[cfg(debug_assertions)]
@@ -1659,6 +1664,12 @@ pub fn run() {
                 if let Some(w) = app.get_webview_window(label) {
                     shell::file_drop::watch(&w);
                 }
+            }
+            // The main window's page fitted to it again once its size
+            // settles, besides wry's own resize (18 Nov 2026: a Snap layouts
+            // drop left it laid out at the snapped size; shell/view_fit.rs).
+            if let Some(w) = app.get_webview_window("settings") {
+                shell::view_fit::watch(&w);
             }
 
             // The theme (Settings → General → Appearance): the opaque windows'
