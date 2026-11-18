@@ -493,16 +493,24 @@ export async function ready(page, pc) {
   return pc;
 }
 
+/**
+ * How long the mic's opening and the page's messages may take on a busy PC:
+ * Firefox's sound set up afresh (a new AudioContext, the worklets, its
+ * pretend sound device) and every 20 ms frame through the routed socket
+ * took more than 8 s while builds ran (18 Nov 2026); quiet, under 1 s.
+ */
+export const BUSY_MS = 20_000;
+
 /** A question asked by tapping Talk, `ms` of it, and sent with a second tap. */
 export async function ask(page, pc, ms = 600) {
   const frames = pc.frames.length;
   const starts = pc.of('start').length;
   const stops = pc.of('stop').length;
   await page.getByTestId('talk').click();
-  await expect.poll(() => pc.of('start').length).toBe(starts + 1);
-  await expect.poll(() => pc.frames.length - frames, { timeout: 5000 }).toBeGreaterThan(Math.floor(ms / 20) - 5);
+  await expect.poll(() => pc.of('start').length, { timeout: BUSY_MS }).toBe(starts + 1);
+  await expect.poll(() => pc.frames.length - frames, { timeout: BUSY_MS }).toBeGreaterThan(Math.floor(ms / 20) - 5);
   await page.getByTestId('talk').click();
-  await expect.poll(() => pc.of('stop').length).toBe(stops + 1);
+  await expect.poll(() => pc.of('stop').length, { timeout: BUSY_MS }).toBe(stops + 1);
 }
 
 /** Zero crossings → the pitch of Int16 samples at `rate`. */

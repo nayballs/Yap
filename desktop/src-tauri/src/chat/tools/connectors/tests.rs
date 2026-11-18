@@ -257,6 +257,13 @@ async fn a_call_runs_asks_or_is_refused_as_its_setting_and_the_turn_say() {
     let r = turn.execute("homelights__list_lights", &json!({ "area": "hall" }), ctx(true)).await;
     assert!(r.reached);
     assert_eq!(log.cards().len(), cards, "the person's own words run");
+    // A key the tool doesn't declare carries words as a value does: asks
+    // (18 Nov 2026).
+    let keyed = json!({ "the gate code is 4821": true });
+    let (r, ()) = tokio::join!(turn.execute("homelights__list_lights", &keyed, ctx(true)), answer_next(&log, "once"));
+    assert!(r.reached);
+    assert!(log.cards().len() > cards, "an undeclared key asks");
+    assert_eq!(log.cards().last().unwrap().connector.as_ref().unwrap().why, "outside");
 
     // Nobody watching the turn: what would ask is refused, with the reason.
     let nobody = Ctx { live: None, ..ctx(true) };
