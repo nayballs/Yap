@@ -632,7 +632,7 @@ impl Shared {
 
         self.mic_dead.store(false, Ordering::SeqCst);
         if let Ok(mut u) = self.unplugged.lock() {
-            *u = None;
+            *u = super::unplugged::Unplug::default();
         }
         let session = self.rec_session.fetch_add(1, Ordering::SeqCst) + 1;
 

@@ -569,7 +569,9 @@ roadmap, "Meeting notes you can fix" and "Tasks").
   transcript; stop marks after it move up; digests from the one that read it
   dropped, `drop_digests_from`; its place to `meetings::audio::set_cut` so
   Transcribe again and the refine never bring it back; kept in memory for
-  Undo, `Removed`) and `transcript_line_restore` (`restore_line`: where it
+  Undo, `Removed`, forgotten with its note — `forget`, from
+  `notes::forget_own`, Reset app and the transcript's days — so a new note
+  given its id never gets it back) and `transcript_line_restore` (`restore_line`: where it
   was when nothing changed since, its stops as they were, else by time),
   `transcript_line_split` (`split_line` at word `at`: each part its side,
   voice, lock and stretch — the words' times, else shared by length; on an
@@ -643,7 +645,11 @@ local API and search see the same text.
   2026-11-16: TipTap's own `focus` waits for the next frame, and a busy PC
   can draw none for seconds, so words typed as the page came in went to no
   box: meeting-crash's note, now and then; notes-rich-text's "typing as the
-  page comes in" holds the chunk and the frames to check it). The Yap bar's
+  page comes in" holds the chunk and the frames to check it). Every `focus`
+  of the page's (`richEditor.js`) gives it the keyboard at once too
+  (2026-11-18: the quick note's new tab took the keys typed right after
+  Ctrl+T or + nowhere; quick-note.spec's "a new tab takes the very next
+  key"). The Yap bar's
   and the main window's first paint never carry the editor (frontend.md, the
   main window's chunk).
 - **Where it is.** Notes' My thoughts (`views/notes/NoteThoughts.svelte` in
@@ -769,8 +775,10 @@ file: it's never copied into notes.json.
   `\n` (a file with both: the more common one, ties to `\r\n`; none: `\n`).
   Anything else is shown (`from_utf8_lossy`) but opens **read-only**, as does
   a read-only file. The footer says how it's written ("UTF-8 · CRLF").
-- **Saving** (the page, `doc/docFile.js`): 600 ms after the last change, and
-  on blur, close and Ctrl+S, one save at a time. Rust writes atomically
+- **Saving** (the page, `doc/docFile.js`): 600 ms after the last change, at
+  least every 2 s while typing goes on (`core/typingSave.js`, 2026-11-18:
+  only a pause saved, so a crash while someone typed on lost everything
+  since the last one), and on blur, close and Ctrl+S, one save at a time. Rust writes atomically
   (`config::atomic_write_bytes`) **only if the file is still what the page
   last read or wrote** (its stamp: modified time and size). Otherwise the
   page is told (`conflict`) and asks.
@@ -800,7 +808,7 @@ file: it's never copied into notes.json.
   Settings → General → Markdown files) and `md-file-launch.spec.js` (a file
   given at launch: [`docs/e2e-tests.md`](../e2e-tests.md)).
 - **Not yet done**: "Ask about this" on the page; quitting from the tray can
-  lose the last 600 ms of typing; a file with mixed line endings gets the
+  lose the last moments of typing (at most 2 s); a file with mixed line endings gets the
   more common one; the atomic replace drops the file's attributes
   (`ReplaceFileW` would keep them); the installer's registration is
   untried until a nightly is installed.
@@ -900,7 +908,8 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   names for the same two fields since 2026-10-22, also the list's "summary"
   tag and "## My thoughts" in an export; until then Raw / Enhanced) **+
   staleness dot**; on Summary, **Edit summary** / Done (its Markdown in a
-  box, saved as typed; Escape ends it), "Edited" once it's the person's,
+  box, saved as typed — once it pauses and at least every 2 s while it goes
+  on, `core/typingSave.js`, 2026-11-18; Escape ends it), "Edited" once it's the person's,
   "2 new lines since this summary · **Update**", tasks ticked in place, and
   every rewrite of an edited summary (Action plan, an action, Update) asked
   first (`askReplaceSummary`); since 2026-10-25 "Edited · **Back to Yap's

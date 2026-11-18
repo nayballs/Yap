@@ -122,7 +122,8 @@ impl Secrets {
 /// Where secrets are kept.
 trait Backend: Send + Sync {
     fn put(&self, user: &str, secret: &str) -> Result<(), String>;
-    fn get(&self, user: &str) -> Option<String>;
+    /// `Err`: the store couldn't be read (never "nothing there").
+    fn get(&self, user: &str) -> Result<Option<String>, String>;
     fn remove(&self, user: &str) -> Result<(), String>;
     /// A turn for a whole multi-part read or write (Credential Manager's).
     fn turn(&self) -> Option<crate::shell::credentials::Turn> {
@@ -189,32 +190,42 @@ impl Vault {
         Ok(())
     }
 
-    /// Connector `id`'s secrets (none: empty).
+    /// Connector `id`'s secrets (none, or a store that couldn't be read:
+    /// empty).
     pub fn load(&self, id: &str) -> Secrets {
+        self.read(id).unwrap_or_default()
+    }
+
+    /// Connector `id`'s secrets, or `Err` when Credential Manager couldn't
+    /// read one of their parts (a part missing would cut the value short).
+    /// Parts that read but aren't secrets (damaged) are none.
+    fn read(&self, id: &str) -> Result<Secrets, String> {
         if check_id(id).is_err() {
-            return Secrets::default();
+            return Ok(Secrets::default());
         }
         let _turn = self.backend.turn();
         let mut blob = String::new();
         for i in 0..PARTS {
-            match self.backend.get(&self.user(id, i)) {
+            match self.backend.get(&self.user(id, i))? {
                 Some(part) => blob.push_str(&part),
                 None => break,
             }
         }
         if blob.is_empty() {
-            return Secrets::default();
+            return Ok(Secrets::default());
         }
-        serde_json::from_str(&blob).unwrap_or_else(|_| {
+        Ok(serde_json::from_str(&blob).unwrap_or_else(|_| {
             tracing::warn!(connector = id, "connectors: a connector's secrets didn't read; treated as none");
             Secrets::default()
-        })
+        }))
     }
 
-    /// Change connector `id`'s secrets: read, `f`, saved whole.
+    /// Change connector `id`'s secrets: read, `f`, saved whole. A read that
+    /// failed changes nothing (saving what little was read would lose the
+    /// rest: a client's secret, a pasted token).
     pub fn update<R>(&self, id: &str, f: impl FnOnce(&mut Secrets) -> R) -> Result<R, String> {
         let _turn = self.backend.turn();
-        let mut s = self.load(id);
+        let mut s = self.read(id)?;
         let out = f(&mut s);
         self.save(id, &s)?;
         Ok(out)
@@ -292,10 +303,10 @@ mod os {
             })
         }
 
-        fn get(&self, user: &str) -> Option<String> {
-            credentials::read(&self.service, user).unwrap_or_else(|e| {
+        fn get(&self, user: &str) -> Result<Option<String>, String> {
+            credentials::read(&self.service, user).map_err(|e| {
                 tracing::error!("connectors: couldn't read a connector's secret: {e}");
-                None
+                "Windows Credential Manager couldn't read the connector's sign-in.".to_string()
             })
         }
 
@@ -348,9 +359,9 @@ mod file {
             map.insert(user.to_string(), secret.to_string());
             self.write(&map)
         }
-        fn get(&self, user: &str) -> Option<String> {
+        fn get(&self, user: &str) -> Result<Option<String>, String> {
             let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-            self.read().get(user).cloned()
+            Ok(self.read().get(user).cloned())
         }
         fn remove(&self, user: &str) -> Result<(), String> {
             let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -380,8 +391,8 @@ mod memory {
             MAP.with(|m| m.borrow_mut().insert(user.into(), secret.into()));
             Ok(())
         }
-        fn get(&self, user: &str) -> Option<String> {
-            MAP.with(|m| m.borrow().get(user).cloned())
+        fn get(&self, user: &str) -> Result<Option<String>, String> {
+            Ok(MAP.with(|m| m.borrow().get(user).cloned()))
         }
         fn remove(&self, user: &str) -> Result<(), String> {
             MAP.with(|m| m.borrow_mut().remove(user));
@@ -423,14 +434,55 @@ mod tests {
         let long = Secrets { token: Some("t".repeat(PART_CHARS * 3)), ..Default::default() };
         v.save("c3", &long).unwrap();
         assert_eq!(v.load("c3"), long);
-        assert!(v.backend.get(&v.user("c3", 3)).is_some(), "four parts");
+        assert!(v.backend.get(&v.user("c3", 3)).unwrap().is_some(), "four parts");
         v.save("c3", &some()).unwrap();
-        assert!(v.backend.get(&v.user("c3", 1)).is_none(), "the parts it no longer needs are gone");
+        assert!(v.backend.get(&v.user("c3", 1)).unwrap().is_none(), "the parts it no longer needs are gone");
         assert_eq!(v.load("c3"), some());
         let too_long = Secrets { token: Some("t".repeat(PART_CHARS * PARTS)), ..Default::default() };
         assert!(v.save("c3", &too_long).is_err());
         v.save("c3", &Secrets::default()).unwrap();
         assert!(v.load("c3").is_empty());
+    }
+
+    /// The test memory, with Credential Manager failing one read.
+    struct Flaky {
+        fails: std::sync::Mutex<Option<String>>,
+    }
+
+    impl Backend for Flaky {
+        fn put(&self, user: &str, secret: &str) -> Result<(), String> {
+            memory::Memory.put(user, secret)
+        }
+        fn get(&self, user: &str) -> Result<Option<String>, String> {
+            let mut fails = self.fails.lock().unwrap();
+            if fails.as_deref() == Some(user) {
+                *fails = None;
+                return Err("Element not found.".into());
+            }
+            memory::Memory.get(user)
+        }
+        fn remove(&self, user: &str) -> Result<(), String> {
+            memory::Memory.remove(user)
+        }
+    }
+
+    #[test]
+    fn a_read_that_fails_never_saves_over_the_secrets_it_missed() {
+        // A sign-in's tokens and the person's own client secret, in parts.
+        let kept = Secrets { token: Some("t".repeat(PART_CHARS * 2)), ..some() };
+        Vault::this_run().save("c5", &kept).unwrap();
+        let v = Vault { backend: Box::new(Flaky { fails: std::sync::Mutex::new(Some("yap-connector-c5-2".into())) }), prefix: "yap-connector".into() };
+        // A refresh writing its new tokens while the second part won't read:
+        // nothing saved, the rest kept.
+        let refreshed = v.update("c5", |s| s.grant.as_mut().map(|g| g.access = "at-FAKE-2".into()));
+        assert!(refreshed.is_err());
+        assert_eq!(Vault::this_run().load("c5"), kept, "every part as it was");
+        // It reads again: the update goes.
+        v.update("c5", |s| s.grant.as_mut().map(|g| g.access = "at-FAKE-2".into())).unwrap();
+        let now = Vault::this_run().load("c5");
+        assert_eq!(now.grant.unwrap().access, "at-FAKE-2");
+        assert_eq!(now.own_secret.as_deref(), Some("cs-FAKE-own"));
+        Vault::this_run().delete("c5");
     }
 
     #[test]
@@ -519,7 +571,7 @@ mod tests {
         }
         assert!(v.load("c24").is_empty(), "every part gone by the uninstaller's names");
         for i in 0..PARTS {
-            assert!(v.backend.get(&v.user("c24", i)).is_none());
+            assert!(v.backend.get(&v.user("c24", i)).unwrap().is_none());
         }
     }
 
@@ -535,7 +587,7 @@ mod tests {
         v.delete("c1");
         assert!(v.load("c1").is_empty());
         for i in 0..PARTS {
-            assert!(v.backend.get(&v.user("c1", i)).is_none());
+            assert!(v.backend.get(&v.user("c1", i)).unwrap().is_none());
         }
     }
 }

@@ -36,7 +36,9 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   digests when there's no summary, transcript in ~6k-token pages via
   `transcript_page`), `search_notes`, `get_note`, `list_tasks` (the action plans'
   tasks by meeting, open by default, whether ticked done, "said at 0:15"; read
-  only), `list_folders`, and `create_note`
+  only; both lists ask the API for one more than their limit and, cut there,
+  say so and how to see more: "The 20 newest meetings in Yap (there are
+  more)…"), `list_folders`, and `create_note`
   only when `config.mcp_allow_writes` (Settings → AI apps (MCP); source `"mcp"`). Markdown
   for the model, local-time dates (chrono). Transcript lines carry the
   speaker map's names (`speakers::display_line`: "You", "Them", "Priya",
@@ -127,7 +129,9 @@ and evaluations: [below](#connectors-and-your-data-wave-8)) are built.
   Ask first, flagged or skipped → Off. A **changed** tool (another hash: a
   rug pull) that was Always allow drops to Ask first; a removed one goes; a
   tool that can delete is never Always allow. Listed when it's added, on Try
-  again, and before the first call of a new connection (`connectors::ensure`).
+  again, and before the first call of a new connection (`connectors::ensure`,
+  which refuses with the preview switched off, mid-turn too: nothing
+  started or sent).
 - **Names** (`names.rs`): a model would see `<slug>__<tool>`, the tool's
   name with anything but `[A-Za-z0-9_-]` made `_`, cut to 64 with a
   4-character hash when longer or when two come out alike: what OpenAI,
@@ -156,7 +160,10 @@ and evaluations: [below](#connectors-and-your-data-wave-8)) are built.
   needed (at most 30 s for a program, 15 s for a link — a test run's
   `YAP_E2E_CONNECTOR_START_MS` shortens a link's), shared by callers, let go
   after 10 idle minutes (a sweep every 30 s: a program's stdin closed, 3 s,
-  then its job ended), **three failures in 10 minutes** (a failed start, a
+  then its job ended) — never while a call is under way on it, and idle
+  from that call's end (`Manager::using`, 18 Nov 2026: a call may run 10
+  minutes, 30 with progress, and the sweep used to cut it off as a lost
+  connection) —, **three failures in 10 minutes** (a failed start, a
   connection that ended by itself) → Stopped until Try again. Every
   connection stops at Quit (`shutdown_cleanup`, within 3 s). Statuses in
   plain words — "Connected · 9 tools", "Starts when Chat needs it",
@@ -324,7 +331,9 @@ and evaluations: [below](#connectors-and-your-data-wave-8)) are built.
   (1,100-character parts, at most 8 — room for a sign-in's two JWTs and a
   client secret), never in a file, the log or the page (`Secrets`' and
   `Grant`'s `Debug` name which there are); the uninstaller removes all 24 ×
-  8 names ("Delete the application data", below). A test run keeps them in its data folder's
+  8 names ("Delete the application data", below). A change (`Vault::update`:
+  a refresh's new tokens, a sign-in) whose read failed saves nothing, so a
+  part Credential Manager couldn't read is never saved over as missing. A test run keeps them in its data folder's
   `connector-secrets.e2e.json`; unit tests in memory, and two tests use the
   real store under names of their own and remove them however they end, one
   at a time across test binaries (a lock file in the temp folder): Credential

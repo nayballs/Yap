@@ -291,6 +291,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `agents/output.rs` — what a command printed, its start and its end, for its row in the thread; in the agent's own log, never sent to a phone.
 - `agents/mention.rs` — `@` in a Code chat: the workspace's files (`git ls-files`, else a walk past build output), fuzzy, for the picker; `@path` goes in the words as Claude Code reads it.
 - `agents/pictures.rs` — a picture a step's answer carried (a picture file read, a screenshot), kept in `agents/<id>/pictures/`, never `chat-images/`; shown at the end of its line.
+- `agents/shots.rs` — a Code chat's screenshots also as files (`code-shots/<chat>-<createdTs>/shot-<n>.png`, named after the message's words, the folder `--add-dir` on its runs) so Claude can hand one to a helper; gone with their picture, the folder with its chat.
 - `agents/menu.rs` (+ `agents/plugins.rs`) — a Code chat's + menu (the Claude Code app's): what Claude Code offers in a workspace (slash commands, MCP servers, plugins: each run's init, else a look with no message), the chat's added folders (`--add-dir`, never system folders or Yap's data) and servers off (`--disallowedTools mcp__<name>`), in `code_menu.json`; plugins switched with `claude plugin`, never installed.
 - `agents/slash.rs` — a Code chat's own `/clear` (its agents set aside, the next message a new session, the thread kept under a divider) and `/compact` (Claude Code's own compaction of its session, run headless, saved into it); `/model` is the page's (the chip, effort kept), and so is Yap's own `/agents` (the chat's Agent panel, a plain chat's too; `codeMenu.svelte.js`).
 
@@ -509,7 +510,7 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`); what each holds:
 `model_catalog.json`, `groq_usage.json`, `ai_usage.json`, `dictation_stats.json`,
 `dictionary_usage.json`, `hints.json`, `onboarding.json`, `mic_tips.json`,
 `word_suggestions.json`, `snippet_suggestions.json`, `language_nudges.json`, `notices.json`,
-`memory.json`, `writing_samples.json`, `chat_styles.json`, `projects.json` (+ `projects/`), `chat-images/` (+ `thumbs/`), `chat-files/`, `chat_attachments.json`, `connections.json`,
+`memory.json`, `writing_samples.json`, `chat_styles.json`, `projects.json` (+ `projects/`), `chat-images/` (+ `thumbs/`), `code-shots/`, `chat-files/`, `chat_attachments.json`, `connections.json`,
 `quieted_apps.json`, `stt_speed.json`, `recent-audio/`, `meeting-audio/` (+ `cuts.json`),
 `search-index/`, `link_devices.json`, `link/`, `claude_sessions.json`, `claude/`,
 `agents.json`, `agents/`, `workspaces.json`, `code_menu.json`, `remote_control.json`, `connectors.json`,

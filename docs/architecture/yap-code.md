@@ -348,6 +348,40 @@ workspace, word for word, and no model of Chat's is asked.
   - **One gone since** (kept past "Keep chat screenshots") is said in the
     turn's message: "(A screenshot that came with this is no longer on
     this PC.)".
+  - **Each also a file** (18 Nov 2026, `agents/shots.rs`; the maintainer
+    asked Claude to send a helper to look into his screenshot and was told
+    it "wasn't saved as a file", so Claude described it in words: a helper
+    takes words, so a path is the only way to hand a picture on; Claude
+    Code's own app keeps a pasted picture as a file too):
+    - in a folder of the chat's own under Yap's data folder,
+      `code-shots/<chat id>-<its createdTs>/shot-<n>.png`, never the
+      workspace (the person's project never fills with screenshots). The
+      chat's `createdTs` in its name: a later chat given a deleted one's id
+      never finds its screenshots. Numbered as they came; one sent again
+      keeps its file. Which picture each is: the index beside the folder
+      (`<chat id>-<createdTs>.json`), never in it;
+    - **the folder on the run** as `--add-dir` (as the + menu's added
+      folders), so Claude and the helpers it starts read one with no prompt
+      in every Mode — only that folder, never the rest of Yap's data. The
+      chat's own session gets it on every run (made then: a note's
+      screenshot may come while it works); an agent sent from the chat once
+      there's one; a chat made with Fork from here the original's too while
+      it's there (its session's earlier messages name those files);
+    - **named after the words** (`runner::shots_for`, `Shots::after`): "(This
+      screenshot is also a file you can read or pass to a helper: <path>)";
+      several "…files…, in the order they came: <path>, <path>)". The
+      turn's first message and a note to the turn working alike (a note's
+      line, and one gone since, are made before its words are counted for
+      Claude Code's echo). The phone's and the Voice Assistant's
+      screenshots come the same way (`direct::send`);
+    - **kept as long as the picture** in `chat-images/`: deleted with it
+      (`images::delete` → `shots::forget`: its message, its chat), past
+      "Keep chat screenshots" (`shots::sweep` after `images::sweep`: a file
+      whose picture is gone, anything else in the folder after an hour, the
+      folder of a chat that's gone), the chat's folder with the chat
+      (`code_chat::chat_deleted`), and all of them with Settings' Delete
+      all… and Delete some of your data → Chats (`shots::reset`). Not in
+      Download your data: copies of `chat-images/`'s, which is.
   - **Not these**: a picture Yap took of the screen by itself (the Voice
     Assistant's window, `look_at_screen`) keeps Chat's rules and never goes
     this way; one sent as its text ("Send its text instead") is in the

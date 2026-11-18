@@ -40,6 +40,15 @@
 //! has "Delete all meeting audio". A recording going on is never touched.
 //! Nothing here ever leaves the PC.
 //!
+//! **Never ahead of notes.json** (2026-11-18): a recording's audio is the
+//! other copy of what was said until the note's lines are on disk. While
+//! notes.json can't be saved (a full disk, another program holding it:
+//! `saving.rs` keeps the lines in memory and tries again), a recording's
+//! progress isn't moved on (`Recorder::progress`: a crash recovers from
+//! the last lines that were saved), and audio not to be kept isn't deleted
+//! ([`Recorder::finish`], [`release`], a recovery): it's held, as for a
+//! refine, and goes once released with the lines saved, or a day on.
+//!
 //! **Logs**: note ids, counts, lengths and sizes only — never a path, a
 //! title or a line.
 
@@ -90,6 +99,13 @@ pub const RECOVER_ACTION: &str = "recoverMeetings";
 
 fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// Whether notes.json holds every line the notes store has: its last save
+/// worked (`saving.rs`). Until it does, a recording's audio is the only copy
+/// on disk of what was said since (see the module notes).
+fn lines_on_disk() -> bool {
+    crate::notes::SAVER.status().is_ok()
 }
 
 // ---- Where it lives ----
@@ -493,6 +509,15 @@ impl Recorder {
     /// (logged; the meeting records anyway).
     pub fn start(app: &AppHandle, note_id: u64, you: &AudioBuf, them: &AudioBuf) -> Option<Recorder> {
         let cfg = crate::config::load();
+        let recorder = Self::open(note_id, you, them, cfg.meeting_keep_audio, &cfg.model_size)?;
+        tracing::info!(note_id, keep = cfg.meeting_keep_audio, "Meeting audio: kept as it's recorded");
+        let _ = app.emit(EVENT_AUDIO, serde_json::json!({ "noteId": note_id }));
+        Some(recorder)
+    }
+
+    /// [`Self::start`]'s files and writer (`keep`: "Keep meeting audio";
+    /// `model`: the speech model the live lines are made with).
+    fn open(note_id: u64, you: &AudioBuf, them: &AudioBuf, keep: bool, model: &str) -> Option<Recorder> {
         let recording = new_id();
         let made = std::fs::create_dir_all(note_dir(note_id)).and_then(|()| {
             let y = flac::Writer::create(&audio_path(note_id, recording, "you"))?;
@@ -517,8 +542,8 @@ impl Recorder {
             note_id,
             recording,
             started_ms: recording,
-            keep: cfg.meeting_keep_audio,
-            model: cfg.model_size.clone(),
+            keep,
+            model: model.to_string(),
             ..Default::default()
         };
         save_meta(&meta);
@@ -536,8 +561,6 @@ impl Recorder {
         };
         match writer {
             Ok(handle) => {
-                tracing::info!(note_id, keep = cfg.meeting_keep_audio, "Meeting audio: kept as it's recorded");
-                let _ = app.emit(EVENT_AUDIO, serde_json::json!({ "noteId": note_id }));
                 Some(Recorder {
                     note_id,
                     recording,
@@ -569,8 +592,13 @@ impl Recorder {
         self.update(|m| m.started_ms = started_ms);
     }
 
-    /// The note has each side's lines up to these positions.
+    /// The note has each side's lines up to these positions. Counted only
+    /// once notes.json has them ([`lines_on_disk`]): a crash while it can't
+    /// be saved transcribes again from the last lines that were.
     pub fn progress(&self, (you, them): (u64, u64)) {
+        if !lines_on_disk() {
+            return;
+        }
         self.update(|m| {
             m.you_done = m.you_done.max(you);
             m.them_done = m.them_done.max(them);
@@ -591,9 +619,13 @@ impl Recorder {
     /// its days, or deleted now ("Keep meeting audio" off) — unless `hold`:
     /// a chunk of it failed (Try again needs its audio) or the meeting may
     /// be transcribed again when it ends (`refine.rs`); then it
-    /// goes once that's done ([`release`]), or a day on ([`prune`]).
+    /// goes once that's done ([`release`]), or a day on ([`prune`]). Held
+    /// too while notes.json couldn't be saved ([`lines_on_disk`]): the audio
+    /// is the only copy on disk of the lines.
     pub fn finish(mut self, hold: bool) {
         self.close();
+        let unsaved = !lines_on_disk();
+        let hold = hold || unsaved;
         let mut keep = true;
         self.update(|m| {
             m.ended_ms = Some(now_ms());
@@ -602,6 +634,8 @@ impl Recorder {
         live().remove(&(self.note_id, self.recording));
         if keep {
             tracing::info!(note_id = self.note_id, "Meeting audio: recording kept");
+        } else if unsaved {
+            tracing::warn!(note_id = self.note_id, "Meeting audio: held, as the meeting's lines aren't saved yet (not kept)");
         } else if hold {
             tracing::info!(note_id = self.note_id, "Meeting audio: held until it's transcribed again (not kept)");
         } else {
@@ -848,26 +882,41 @@ pub fn prune(app: Option<&AppHandle>) {
 /// finished, or none is due; a Try again done): the recordings that were
 /// only held for that ("Keep meeting audio" off, [`Recorder::finish`]) go
 /// now — unless a stretch of the meeting still couldn't be transcribed
-/// (Try again needs it: a day at most, [`HELD_MS`]) or a job runs on it.
+/// (Try again needs it: a day at most, [`HELD_MS`]) or a job runs on it —
+/// or notes.json couldn't be saved ([`lines_on_disk`]: the audio is the
+/// only copy on disk of its lines; held a day at most).
 pub fn release(app: &AppHandle, note_id: u64) {
+    if release_now(note_id) > 0 {
+        changed(app, note_id);
+    }
+}
+
+/// [`release`]: how many recordings went.
+fn release_now(note_id: u64) -> usize {
     if jobs().get(&note_id).is_some_and(|j| j.state == "running") {
-        return;
+        return 0;
     }
     let failed = crate::notes::get(note_id).is_some_and(|n| n.transcript.iter().any(|s| s.failed));
     if failed {
-        return;
+        return 0;
     }
-    let mut n = 0;
-    for m in recordings(note_id) {
-        if !m.keep && m.ended_ms.is_some() && !recording_now(note_id, m.recording) {
-            delete_recording(note_id, m.recording);
-            n += 1;
-        }
+    let held: Vec<u64> = recordings(note_id)
+        .into_iter()
+        .filter(|m| !m.keep && m.ended_ms.is_some() && !recording_now(note_id, m.recording))
+        .map(|m| m.recording)
+        .collect();
+    if held.is_empty() {
+        return 0;
     }
-    if n > 0 {
-        tracing::info!(note_id, recordings = n, "Meeting audio: deleted now the meeting's transcribed (not kept)");
-        changed(app, note_id);
+    if !lines_on_disk() {
+        tracing::warn!(note_id, recordings = held.len(), "Meeting audio: held, as the meeting's lines aren't saved yet");
+        return 0;
     }
+    for &recording in &held {
+        delete_recording(note_id, recording);
+    }
+    tracing::info!(note_id, recordings = held.len(), "Meeting audio: deleted now the meeting's transcribed (not kept)");
+    held.len()
 }
 
 /// Note `note_id` was deleted: its audio goes (not a recording going on:
@@ -937,7 +986,7 @@ fn crashed() -> Vec<Meta> {
             if meta.left() < MIN_LEFT {
                 meta.ended_ms = Some(now_ms());
                 save_meta(&meta);
-                if !meta.keep {
+                if !meta.keep && lines_on_disk() {
                     delete_recording(note_id, meta.recording);
                 }
                 continue;
@@ -1493,7 +1542,8 @@ async fn recover(app: &AppHandle, engine: &crate::dictation::pipeline::EngineSlo
         meta.ended_ms = Some(now_ms());
         save_meta(&meta);
         pending().retain(|m| m.recording != meta.recording);
-        if !meta.keep {
+        // Not kept: gone once its lines are on disk (else held a day).
+        if !meta.keep && lines_on_disk() {
             delete_recording(note_id, meta.recording);
         }
     }
@@ -1930,6 +1980,60 @@ mod tests {
         forget(note_id);
         assert!(!note_dir(note_id).exists());
         assert!(recordings(note_id).is_empty());
+        let _ = std::fs::remove_dir_all(root());
+    }
+
+    /// notes.json that can't be saved while a meeting records (a full disk,
+    /// another program holding it: `saving.rs` keeps the lines in memory and
+    /// tries again): the recording never counts lines as in the note before
+    /// they're on disk (a crash then recovers them from the audio), and its
+    /// audio, not to be kept, isn't deleted at its end or when released
+    /// until they are — it's the only copy of what was said. Until
+    /// 2026-11-18 both went ahead: a crash after it lost those lines for
+    /// good.
+    #[test]
+    fn audio_stays_until_the_meetings_lines_are_saved() {
+        use crate::meetings::recorder::{push_audio, side_for_test};
+        let _turn = saves();
+        let _ = std::fs::remove_dir_all(root());
+        // This test's notes.json saves (never the real one): failing, or not.
+        let notes_dir = std::env::temp_dir().join(format!("yap-audio-notes-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let notes_file = notes_dir.join("notes.json");
+        let save_notes = |fail: bool| {
+            crate::shell::saving::stage_failures(crate::notes::SAVER.id, u32::from(fail));
+            let _ = crate::notes::SAVER.write(&notes_file, "{}");
+        };
+        let note_id = 43;
+        let (you, them) = (side_for_test(), side_for_test());
+        let rec = Recorder::open(note_id, &you, &them, false, "").expect("its files");
+        let recording = rec.recording;
+        let overflow = AtomicBool::new(false);
+        push_audio(&you, &tone(3.0), &overflow);
+        push_audio(&them, &tone(3.0), &overflow);
+        let done = || load_meta(note_id, recording).map(|m| (m.you_done, m.them_done));
+
+        // Two seconds of lines the note couldn't save: not counted.
+        save_notes(true);
+        rec.progress((2 * RATE, 2 * RATE));
+        assert_eq!(done(), Some((0, 0)), "not in notes.json: a crash transcribes them again");
+        // Saved with the next lines: counted.
+        save_notes(false);
+        rec.progress((3 * RATE, 3 * RATE));
+        assert_eq!(done(), Some((3 * RATE, 3 * RATE)));
+
+        // It ends with its last lines unsaved: its audio stays, held.
+        save_notes(true);
+        rec.finish(false);
+        let held = recordings(note_id);
+        assert_eq!(held.len(), 1, "the only copy of the lines on disk");
+        assert!(held[0].ended_ms.is_some() && !held[0].keep);
+        assert_eq!(release_now(note_id), 0, "still unsaved");
+        assert_eq!(recordings(note_id).len(), 1);
+        // Saved at last: released as any recording not kept.
+        save_notes(false);
+        assert_eq!(release_now(note_id), 1);
+        assert!(recordings(note_id).is_empty());
+        let _ = std::fs::remove_dir_all(&notes_dir);
         let _ = std::fs::remove_dir_all(root());
     }
 

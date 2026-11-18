@@ -130,7 +130,13 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   `tool_use` and its `input_json_delta` (a document's section into the
   panel), each server tool as `Delta::Server` ("Searching the web…" /
   "Reading a page…"; what came before it isn't the answer), `citations_delta`
-  and `signature_delta` kept. `pause_turn` is asked to go on (≤ 4); 429 and
+  and `signature_delta` kept. `pause_turn` is asked to go on (≤ 4; a fifth
+  is said, "Claude's web search kept pausing", never taken for the answer:
+  18 Nov 2026); a call of Yap's whose arguments aren't whole JSON (the step
+  hit `max_tokens` part-way through a section) goes back to the model as the
+  OpenAI-compatible path's does ("its arguments weren't complete JSON…"),
+  never run with none; an `error` event in the stream before any of the
+  answer ("Overloaded") is asked again once, as a cut stream is; 429 and
   529 waited out as every Chat call; "too long" said plainly; a 400 naming
   `web_fetch` drops the fetch and asks again. **Thinking the API won't take
   back** (10 Nov 2026): each of Claude's thinking blocks is tied to the
@@ -1687,7 +1693,7 @@ While signed in with the plan, the key store holds `PLAN_KEY` ("chatgpt-plan") f
 **Answers:**
 - Only `response.completed` counts as an answer.
 - A broken stream is asked again once (`Delta::Restart`).
-- `response.incomplete` keeps what it wrote, if anything.
+- `response.incomplete` keeps what it wrote, if anything: its words, and its calls whose arguments are whole JSON (`written_before_stopping`). Only its reasoning (a reasoning item always comes first) is nothing written: said as the stop, never an empty answer (18 Nov 2026).
 
 **The plan's errors** (`plan_error`, after OpenAI's "Errors and recovery"):
 

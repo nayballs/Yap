@@ -303,6 +303,16 @@ function callsOf(result) {
   return result?.tools ?? [];
 }
 
+/**
+ * **A Code chat's own session's calls** (an `expect` with `session: true`,
+ * 18 Nov 2026): what the turn's summary has `via: "session"` — the session
+ * the person's message went straight to, a helper's steps among them — which
+ * `callsOf` leaves out as an agent's. Pure.
+ */
+export function sessionCallsOf(result) {
+  return (result?.tools ?? []).filter((c) => c.via === 'session');
+}
+
 /** The card a step answers: an id, "next" (the first waiting), or `{ kind, label, … }`. */
 function cardFor(want, cards) {
   if (typeof want === 'string' && want !== 'next') return want;
@@ -427,7 +437,7 @@ export async function runScript(script, { send, state, options = {} }) {
       } else if (kind === 'expect') {
         const e = step.expect;
         if (e.agent !== undefined && !agents) agents = must(await send('agents', {}));
-        const checks = checkTurn(e, { result: last, calls: callsOf(last), agents });
+        const checks = checkTurn(e, { result: last, calls: e.session ? sessionCallsOf(last) : callsOf(last), agents });
         for (const sc of screenChecks(e)) {
           const got = await send('probe', sc.args);
           checks.push(got.ok ? { check: sc.check, pass: probePasses(sc.want, got), ...(probePasses(sc.want, got) ? {} : { detail: JSON.stringify({ count: got.count, visible: got.visible, has: got.has }) }) } : { check: sc.check, pass: false, detail: got.error });

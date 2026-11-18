@@ -16,7 +16,10 @@
 //   the picture with its words, as Claude Code's own app sends a pasted
 //   one — the first message, the next one (that turn's own picture only),
 //   and a note while it works. Before, a screenshot made the message
-//   Chat's own business: Chat's model read it and sent an agent.
+//   Chat's own business: Chat's model read it and sent an agent. Each is
+//   also a file in the chat's own folder (18 Nov 2026, agents/shots.rs),
+//   given to the run with --add-dir and named after the words, so Claude
+//   can hand it to a helper; deleted with the chat.
 // - Its words as it writes them (12 Nov 2026): the message being written is
 //   the last paragraph of its work, growing; whole, it's the line that was
 //   coming (or the chat's answer). Never a line of its log.
@@ -657,6 +660,13 @@ const picturesSeen = () => jsonLines(ARGS).map((l) => l.user_pictures);
 const after = (args, flag) => {
   const i = args.indexOf(flag);
   return i >= 0 ? args[i + 1] : undefined;
+};
+/** Every value after `flag`, up to the next flag (`--add-dir <a> <b>`). */
+const valuesAfter = (args, flag) => {
+  const i = args.indexOf(flag);
+  const out = [];
+  for (let j = i + 1; i >= 0 && j < args.length && !args[j].startsWith('--'); j++) out.push(args[j]);
+  return out;
 };
 
 // ---- the app ----
@@ -1903,6 +1913,30 @@ test('a message with a screenshot goes straight to its session too: the picture 
   expect(then[5].text).toBe('Pictures with it: 2.');
 
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Pictures with it: 1.', 'Pictures with it: 2.']);
+
+  // **Each also a file** (18 Nov 2026, agents/shots.rs): in the chat's own folder under Yap's data, never the
+  // workspace, given to every run with --add-dir, and named in a line after the words — so Claude can hand
+  // one to a helper. Numbered as they came; the same folder on the next turn.
+  const runs = jsonLines(ARGS);
+  const dirs = runs.map((r) => valuesAfter(r.args, '--add-dir'));
+  expect(dirs[0]).toHaveLength(1);
+  const shotsDir = dirs[0][0];
+  expect(path.dirname(path.resolve(shotsDir))).toBe(path.resolve(yap.dataDir, 'code-shots'));
+  expect(path.basename(shotsDir)).toMatch(new RegExp(`^${done.conversation}-\\d+$`));
+  expect(dirs[1]).toEqual([shotsDir]);
+  const file = (n) => path.join(shotsDir, `shot-${n}.png`);
+  expect(runs[0].user_text).toBe(`Make the beds look like this.\n\n(This screenshot is also a file you can read or pass to a helper: ${file(1)})`);
+  expect(runs[1].user_text).toBe(`And the legend and the path like these.\n\n(These screenshots are also files you can read or pass to a helper, in the order they came: ${file(2)}, ${file(3)})`);
+  // The pictures themselves, byte for byte; nothing else in the folder, nothing in the workspace.
+  const stored = (id) => fs.readFileSync(path.join(yap.dataDir, 'chat-images', `${id}.png`));
+  expect(fs.readFileSync(file(1)).equals(stored(agent.turnList[0].shots[0]))).toBe(true);
+  expect(fs.readFileSync(file(3)).equals(stored(again.turnList[1].shots[1]))).toBe(true);
+  expect(fs.readdirSync(shotsDir).sort()).toEqual(['shot-1.png', 'shot-2.png', 'shot-3.png']);
+  expect(fs.readdirSync(GARDEN).filter((f) => /^shot-\d+\.png$/.test(f))).toEqual([]);
+
+  // The chat deleted: its screenshots' files go with it (a later chat may get its id).
+  await yap.invoke('chat_delete', { id: done.conversation });
+  await expect.poll(() => fs.existsSync(shotsDir)).toBe(false);
 });
 
 test('a note with a screenshot while it works is handed to it at once, the picture with it', async ({ yap, main }) => {
@@ -1923,6 +1957,12 @@ test('a note with a screenshot while it works is handed to it at once, the pictu
   expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'user', 'agentReport', 'assistant']);
   expect(messages[1].images).toHaveLength(1);
   expect(messages[3].text).toContain('Pictures with it: 1. Noted: Keep the headings like this.');
+  // Its file named in the note, in the chat's folder the run had from its start (made then, before any screenshot).
+  const [shotsDir] = valuesAfter(argsSeen()[0], '--add-dir');
+  expect(path.dirname(path.resolve(shotsDir))).toBe(path.resolve(yap.dataDir, 'code-shots'));
+  const escaped = path.join(shotsDir, 'shot-1.png').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  expect(messages[3].text).toMatch(new RegExp(`Keep the headings like this\\.\\s+\\(This screenshot is also a file you can read or pass to a helper: ${escaped}\\)`));
+  expect(fs.readFileSync(path.join(shotsDir, 'shot-1.png')).equals(fs.readFileSync(path.join(yap.dataDir, 'chat-images', `${messages[1].images[0].id}.png`)))).toBe(true);
 });
 
 test('its words show as it writes them: the message so far, then the whole line; its final words become the answer', async ({ yap, main, shot }) => {

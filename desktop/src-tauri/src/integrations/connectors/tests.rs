@@ -353,6 +353,26 @@ async fn a_link_lists_and_calls_with_its_headers_and_every_request_has_its_recei
     assert!(vault::load(&v.id).is_empty() && cache::get(&v.id).is_none());
 }
 
+/// The preview switched off mid-turn (its tools were offered while it was
+/// on): a call that turn goes on to make starts nothing and sends nothing.
+#[tokio::test]
+async fn switched_off_mid_turn_a_call_starts_and_sends_nothing() {
+    on();
+    let srv = fake::http(Mode::Answer);
+    let v = connector_add(link(&srv.url("/mcp"))).await.unwrap();
+    let c = store::get(&v.id).unwrap();
+    assert!(ensure(&c).await.is_ok(), "on: up");
+    set_switch(false);
+    // Up already, and let go (the next use would start it again).
+    assert_eq!(ensure(&c).await.unwrap_err(), OFF);
+    manager().stop(&v.id, false).await;
+    let before = srv.said().len();
+    assert_eq!(ensure(&c).await.unwrap_err(), OFF);
+    assert_eq!(srv.said().len(), before, "nothing sent");
+    assert!(!manager().is_up(&v.id), "nothing started");
+    set_switch(true);
+}
+
 /// The receipts name the host and "A connector", never the name the person
 /// typed, the link's path or query, a token or a header's value (wave 8).
 #[tokio::test]

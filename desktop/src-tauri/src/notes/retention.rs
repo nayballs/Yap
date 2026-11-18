@@ -107,6 +107,8 @@ pub fn sweep(app: Option<&AppHandle>) -> usize {
             // The summary's earlier versions too (notes/versions.rs): Yap's
             // writing from what was said, like the digests. My thoughts' stay.
             crate::notes::versions::drop_summaries(id);
+            // Its lines deleted earlier in this run (Undo's copies) with them.
+            crate::notes::transcript_edits::forget(&[id]);
             done.push(id);
         }
     }

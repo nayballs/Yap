@@ -9,7 +9,8 @@
   //   it. **Source**: its Markdown, coloured (core/markdownSource.js, a copy
   //   under a clear text box, as Chat's document panel has it) and editable,
   //   Ctrl+F too. The choice is remembered (`yap.doc.view`).
-  // - **Saved back to the file** 600 ms after the last change (and on the
+  // - **Saved back to the file** 600 ms after the last change, and at least
+  //   every 2 s while typing goes on (core/typingSave.js; and on the
   //   way out: blur, close, Ctrl+S), one save at a time, each only while the
   //   file is still what the page last read or wrote (`expect`, its stamp:
   //   modified time and size); Rust keeps its encoding and line endings.
@@ -44,6 +45,7 @@
   import { askSelectionKey, initSpeech, readAloud, readPageSelection, speech } from '../stores/speech.svelte.js';
   import { askConfirm, menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
   import { afterRead, statusLine, formLine, POLL_MS, SAVE_MS } from './docFile.js';
+  import { saveDelay } from '../core/typingSave.js';
 
   const appWindow = getCurrentWindow();
   const LABEL = appWindow.label;
@@ -221,13 +223,18 @@
 
   // ---- saving --------------------------------------------------------------------------
 
+  // When the first change not saved yet was made (core/typingSave.js).
+  let unsavedSince = 0;
   function onChange(md) {
     if (readOnly || md === text) return;
     text = md;
     dirty = true;
     saveState = 'saving';
+    // Once the typing pauses, and at least every two seconds while it goes on: only a pause saved, so a crash
+    // while someone typed on lost everything since the last one (18 Nov 2026, as notes' on 16 Nov).
+    if (timer === null) unsavedSince = Date.now();
     clearTimeout(timer);
-    timer = setTimeout(flush, SAVE_MS);
+    timer = setTimeout(flush, saveDelay(unsavedSince, Date.now(), SAVE_MS));
   }
 
   /** Save what's typed now (after any save on its way); resolves once it's saved. */

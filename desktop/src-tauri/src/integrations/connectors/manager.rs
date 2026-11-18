@@ -262,11 +262,43 @@ pub struct Manager {
     limits: Limits,
     connect: Connect,
     notify: Notify,
+    /// Each connector's calls under way, and when its last one ended (the
+    /// clock's): a connection with a call on it is never idle ([`Manager::using`]).
+    calls: Mutex<HashMap<String, (usize, u64)>>,
 }
 
 impl Manager {
     pub fn new(clock: Arc<dyn Clock>, limits: Limits, connect: Connect, notify: Notify) -> Manager {
-        Manager { slots: Mutex::new(HashMap::new()), statuses: Mutex::new(HashMap::new()), clock, limits, connect, notify }
+        Manager { slots: Mutex::new(HashMap::new()), statuses: Mutex::new(HashMap::new()), clock, limits, connect, notify, calls: Mutex::new(HashMap::new()) }
+    }
+
+    /// **`call` on connector `id`'s connection, kept up while it runs**: the
+    /// idle sweep never lets go of a connection with a call under way (a
+    /// call may take up to [`super::call::MAX_TOTAL`], past [`Limits::idle`]),
+    /// and its idle time counts from the call's end. However the call ends —
+    /// its answer, a timeout, ■ Stop, the turn dropped — it's counted out.
+    pub async fn using<T>(&self, id: &str, call: impl std::future::Future<Output = T>) -> T {
+        struct Using<'a> {
+            m: &'a Manager,
+            id: &'a str,
+        }
+        impl Drop for Using<'_> {
+            fn drop(&mut self) {
+                let now = self.m.clock.now();
+                if let Some(c) = self.m.calls.lock().unwrap_or_else(|p| p.into_inner()).get_mut(self.id) {
+                    c.0 = c.0.saturating_sub(1);
+                    c.1 = now;
+                }
+            }
+        }
+        self.calls.lock().unwrap_or_else(|p| p.into_inner()).entry(id.to_string()).or_default().0 += 1;
+        let _using = Using { m: self, id };
+        call.await
+    }
+
+    /// Connector `id`'s calls under way, and when its last one ended.
+    fn calls_of(&self, id: &str) -> (usize, u64) {
+        self.calls.lock().unwrap_or_else(|p| p.into_inner()).get(id).copied().unwrap_or_default()
     }
 
     fn slot(&self, id: &str) -> Arc<tokio::sync::Mutex<Slot>> {
@@ -399,21 +431,22 @@ impl Manager {
         self.statuses.lock().unwrap_or_else(|p| p.into_inner()).remove(id);
     }
 
-    /// Let go of connections idle for [`Limits::idle`], and of ones that
-    /// ended by themselves (each a failure). A slot in use is left for the
-    /// next sweep.
+    /// Let go of connections idle for [`Limits::idle`] (no call under way on
+    /// them: [`Manager::using`]), and of ones that ended by themselves (each
+    /// a failure). A slot in use is left for the next sweep.
     pub async fn sweep(&self) {
         let slots: Vec<(String, Arc<tokio::sync::Mutex<Slot>>)> = self.slots.lock().unwrap_or_else(|p| p.into_inner()).iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         for (id, slot) in slots {
             let Ok(mut s) = slot.try_lock() else { continue };
             let now = self.clock.now();
             let Some(live) = &s.live else { continue };
+            let (calling, call_ended) = self.calls_of(&id);
             if live.closed() {
                 s.live = None;
                 tracing::warn!(connector = %id, "connectors: a connection ended by itself");
                 let status = if s.health.failed(now, &self.limits) { Status::Stopped } else { Status::Idle };
                 self.set(&id, &mut s, status);
-            } else if idle(s.last_used, now, &self.limits) {
+            } else if calling == 0 && idle(s.last_used.max(call_ended), now, &self.limits) {
                 if let Some(live) = s.live.take() {
                     live.stop().await;
                 }
@@ -720,6 +753,56 @@ mod tests {
         let told: Vec<&'static str> = heard.lock().unwrap().iter().map(|(_, s)| s.word()).collect();
         assert_eq!(told[..3], ["starting", "connected", "idle"]);
         assert!(told.contains(&"stopped") && told.ends_with(&["off"]));
+    }
+
+    /// Start the fake's `slow` tool (`ms` long) on `peer`, through `m.using`
+    /// when `kept`, and let it get under way.
+    async fn slow_call(m: &Arc<Manager>, peer: Peer<RoleClient>, kept: bool, ms: u64) -> tokio::task::JoinHandle<Result<super::super::results::Shaped, super::super::call::CallError>> {
+        let m = Arc::clone(m);
+        let call = tokio::spawn(async move {
+            let (args, stop) = (serde_json::json!({ "ms": ms, "every": 0 }), Default::default());
+            let run = super::super::call::call(&peer, "slow", &args, Duration::from_secs(60), &stop);
+            if kept {
+                m.using("c4", run).await
+            } else {
+                run.await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        call
+    }
+
+    #[tokio::test]
+    async fn a_call_still_under_way_keeps_its_connection_past_the_idle_time() {
+        let clock = Arc::new(FakeClock::default());
+        let (m, _) = manager(clock.clone(), Arc::new(AtomicU64::new(0)));
+        let m = Arc::new(m);
+        let c = connector("c4");
+        // The connection taken, then a call that runs on past 10 minutes
+        // (a connector's own timeout goes to 10, progress to 30).
+        let (peer, _) = m.peer(&c).await.unwrap();
+        let call = slow_call(&m, peer.clone(), true, 600).await;
+        clock.advance(Duration::from_secs(11 * 60));
+        m.sweep().await;
+        assert!(m.is_up("c4"), "never let go under a call");
+        let r = call.await.unwrap();
+        assert!(r.is_ok(), "{r:?}");
+        // Idle from the call's end: 9 minutes on, kept; 10, let go.
+        clock.advance(Duration::from_secs(9 * 60));
+        m.sweep().await;
+        assert!(m.is_up("c4"));
+        clock.advance(Duration::from_secs(60));
+        m.sweep().await;
+        assert_eq!(m.status("c4"), Status::Idle);
+        assert!(peer.is_transport_closed());
+
+        // Without it (as before): the sweep cut the call off, a lost
+        // connection — "it may or may not have done it".
+        let (peer, _) = m.peer(&c).await.unwrap();
+        let call = slow_call(&m, peer, false, 600).await;
+        clock.advance(Duration::from_secs(11 * 60));
+        m.sweep().await;
+        assert!(call.await.unwrap().is_err(), "cut off before its answer");
     }
 
     #[tokio::test]

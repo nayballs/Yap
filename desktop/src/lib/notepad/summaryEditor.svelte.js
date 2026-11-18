@@ -1,9 +1,10 @@
 // The meeting's summary, edited in place (notes/edits.rs): Edit turns it into
-// its markdown, saved 600 ms after typing stops; Done (or Esc, another note,
-// Generate summary) saves what's left. Kept while another tab is up, and
-// read by the notepad's loads: words typed and not yet saved are never
-// replaced by an older copy (`dirty`).
+// its markdown, saved 600 ms after typing stops (and at least every 2 s while
+// it goes on); Done (or Esc, another note, Generate summary) saves what's
+// left. Kept while another tab is up, and read by the notepad's loads: words
+// typed and not yet saved are never replaced by an older copy (`dirty`).
 import { saveSummary, offerSummaryWords } from '../core/noteEdits.js';
+import { saveDelay } from '../core/typingSave.js';
 import { toast } from '../ui/toast.svelte.js';
 import { LABEL } from './actions.js';
 
@@ -35,11 +36,18 @@ export class SummaryEditor {
   /** The summary at Edit: a word swapped by Done is offered for the dictionary. */
   #before = '';
 
-  /** A keystroke: saved once typing stops. */
+  /** When the first edit not saved yet was made (core/typingSave.js). */
+  #unsavedSince = 0;
+
+  /**
+   * A keystroke: saved once typing pauses, and at least every two seconds while it goes on (core/typingSave.js; only
+   * a pause saved, so a crash while someone typed on lost everything since the last one: 18 Nov 2026).
+   */
   queueSave() {
     this.dirty = true;
+    if (this.#timer === null) this.#unsavedSince = Date.now();
     clearTimeout(this.#timer);
-    this.#timer = setTimeout(() => this.flush(), 600);
+    this.#timer = setTimeout(() => this.flush(), saveDelay(this.#unsavedSince));
   }
 
   async flush() {

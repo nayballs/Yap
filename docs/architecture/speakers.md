@@ -109,7 +109,9 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   `lineSpeakers` (`[voice, locked, echo]` per line) and `enhancedContent`,
   + `yap-notes-changed`; a name put on a voice that a summary already
   called "Speaker 2" is written into the summary and the digests' owners
-  too (`naming::rename_in_summary`). `suggest` is the automatic path. **1:1 calls** (`calendar_guess`, from `notes::link_event`): exactly
+  too (`naming::rename_in_summary`), and into Yap's own version kept beside
+  an edited summary (`summary_ai`), so "Back to Yap's summary" keeps the
+  name and that person's ticked tasks. `suggest` is the automatic path. **1:1 calls** (`calendar_guess`, from `notes::link_event`): exactly
   one other invitee (no you, rooms or declines) → "Them" named after them,
   source calendar. `known_people` (attendees + map names) is what owner
   checks accept. **Line timing**: `word_times(text,
