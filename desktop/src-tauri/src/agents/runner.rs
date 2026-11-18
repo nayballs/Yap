@@ -474,21 +474,56 @@ fn add_shots(shots: &mut Vec<String>, more: &[String]) {
 /// (`snip::images::fitted`: made already when the message was sent, so
 /// this is usually a look-up), and how many couldn't be read (gone since:
 /// "Keep chat screenshots"). Slow when a copy has to be made: off the
-/// async runtime where there is one.
-fn shots_of(ids: &[String]) -> (Vec<Image>, usize) {
+/// async runtime where there is one. Each with its id.
+fn shots_of(ids: &[String]) -> (Vec<(String, Image)>, usize) {
     let fit = crate::snip::images::fit_for(crate::ai::claude_plan::PROVIDER, false);
     let cap = fit.cap_for(ids.len());
-    let made: Vec<Image> = ids
+    let made: Vec<(String, Image)> = ids
         .iter()
-        .filter_map(|id| crate::snip::images::fitted(id, fit.edge, cap).ok())
-        .filter_map(|f| {
+        .filter_map(|id| Some((id, crate::snip::images::fitted(id, fit.edge, cap).ok()?)))
+        .filter_map(|(id, f)| {
             let (head, data) = f.url.split_once(',')?;
             let media = head.strip_prefix("data:")?.strip_suffix(";base64")?;
-            Some(Image { media_type: media.to_string(), base64: data.to_string() })
+            Some((id.clone(), Image { media_type: media.to_string(), base64: data.to_string() }))
         })
         .collect();
     let lost = ids.len() - made.len();
     (made, lost)
+}
+
+/// **What a request's screenshots send** ([`shots_for`]).
+#[derive(Default)]
+struct Shots {
+    pictures: Vec<Image>,
+    /// How many couldn't be read ([`lost_line`]).
+    lost: usize,
+    /// The line naming them as files (`agents/shots.rs`, 18 Nov 2026):
+    /// Claude can read one or hand its path to a helper.
+    files: Option<String>,
+}
+
+impl Shots {
+    /// `text` with what Claude is told of them after it: their files, one
+    /// gone since.
+    fn after(&self, text: &str) -> String {
+        let lost = (self.lost > 0).then(|| lost_line(self.lost));
+        std::iter::once(text.to_string()).chain(self.files.clone()).chain(lost).collect::<Vec<_>>().join("\n\n")
+    }
+}
+
+/// **Screenshots `ids` of chat `conversation` as its Claude Code gets
+/// them**: the pictures ([`shots_of`]), and each also a file in the chat's
+/// own folder (`shots::files`), named in the message. Slow when a copy has
+/// to be made: off the async runtime where there is one.
+fn shots_for(conversation: Option<u64>, ids: &[String]) -> Shots {
+    if ids.is_empty() {
+        return Shots::default();
+    }
+    let (made, lost) = shots_of(ids);
+    let sent: Vec<String> = made.iter().map(|(id, _)| id.clone()).collect();
+    let files = super::shots::files(conversation, &sent);
+    let line = super::shots::paths_line(&files, files.len() == sent.len());
+    Shots { pictures: made.into_iter().map(|(_, i)| i).collect(), lost, files: line }
 }
 
 /// **Does a turn's first message go with the turn's screenshots?** Not a
@@ -1465,6 +1500,11 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     // **Its Code chat's + menu choices** (menu.rs): the folders it may use too
     // (`--add-dir`), the servers switched off for it (`--disallowedTools`).
     super::menu::apply(&mut spec, agent.conversation);
+    // **The chat's screenshots as files** (shots.rs): its folder of them, so
+    // Claude and its helpers read one with no prompt in any Mode. Made for
+    // its own session's every run (a note's screenshot may come while it
+    // works); an agent sent from the chat gets it once there's one.
+    super::shots::apply(&mut spec, super::shots::run_dirs(agent.conversation, direct, agent.forked.as_ref().map(|f| f.from)));
     // (Read before Claude Code starts: none of its commands can have run yet.)
     let before = match scan.await {
         Ok(Ok(b)) => Some(b),
@@ -1517,12 +1557,12 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     let pictures = if shots.is_empty() || stopped_early {
         Vec::new()
     } else {
-        let (pictures, lost) = tauri::async_runtime::spawn_blocking(move || shots_of(&shots)).await.unwrap_or_default();
-        if lost > 0 {
-            first = format!("{first}\n\n{}", lost_line(lost));
-        }
-        tracing::info!(id, turn = n, pictures = pictures.len(), lost, "Agents: its message goes with its screenshots");
-        pictures
+        // (Each also a file in the chat's own folder, named after its words: agents/shots.rs.)
+        let chat = agent.conversation;
+        let sent = tauri::async_runtime::spawn_blocking(move || shots_for(chat, &shots)).await.unwrap_or_default();
+        first = sent.after(&first);
+        tracing::info!(id, turn = n, pictures = sent.pictures.len(), lost = sent.lost, files = sent.files.is_some(), "Agents: its message goes with its screenshots");
+        sent.pictures
     };
     if stopped_early {
         session.kill();
@@ -3372,7 +3412,10 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
         Not,
     }
     let text = ask.text.clone();
-    let note = note_text(&ask);
+    // Its screenshots, each also a file named after its words (shots.rs):
+    // made now, so the words counted for a note are the words written.
+    let sent = shots_for(current.conversation, &ask.shots);
+    let note = sent.after(&note_text(&ask));
     let at = with_state(|s| {
         if let Some(l) = s.live.get_mut(id) {
             if !l.started && l.stopping.is_none() && joins {
@@ -3445,14 +3488,13 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
                     told_changed(&agent, "waiting");
                 }
             }
-            // Its screenshots with it. (The note's words stay exactly as
-            // counted above: Claude Code's echo of them is how Yap knows
-            // it took the note in — so one gone since isn't said here.)
-            let (pictures, lost) = if ask.shots.is_empty() { (Vec::new(), 0) } else { shots_of(&ask.shots) };
+            // Its screenshots with it. (The note's words are exactly as
+            // counted above, their files and one gone since said in them:
+            // Claude Code's echo of them is how Yap knows it took it in.)
             if !ask.shots.is_empty() {
-                tracing::info!(id, pictures = pictures.len(), lost, "Agents: a note goes with its screenshots");
+                tracing::info!(id, pictures = sent.pictures.len(), lost = sent.lost, files = sent.files.is_some(), "Agents: a note goes with its screenshots");
             }
-            if let Err(e) = session.send_user(&note, &pictures) {
+            if let Err(e) = session.send_user(&note, &sent.pictures) {
                 // Its input closed under us (it's ending): not handed over
                 // after all — the note waits for its next turn.
                 tracing::info!(id, "Agents: a note couldn't be handed to the turn working ({e}); it waits for its next turn");
