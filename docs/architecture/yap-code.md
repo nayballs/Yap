@@ -2000,11 +2000,12 @@ ids made up):
   input closed, Claude Code exits at once and the job never runs (checked:
   18 s). While a turn's input is still open (it waits for a helper), each run
   is a turn of Claude Code's own bracketed by `command_lifecycle`, as a
-  wake-up's is, with no origin. **Not yet right**: `Background::on_lifecycle`
-  takes the earliest wake-up as the one starting, so a job's run lets a
-  wake-up that isn't due go (`runner.rs`
-  `a_scheduled_jobs_run_never_takes_a_wake_up_not_due`, ignored until
-  `runner/background.rs` is fixed).
+  wake-up's is, with no origin: so `Background::on_lifecycle` takes a
+  wake-up as the one starting only once it's due (5 s early at most,
+  `WAKE_EARLY_MS`). Before, it took the earliest, and a job's run while the
+  turn waited for a wake-up 10 minutes off let that wake-up go, the turn
+  ending before it (`runner.rs`
+  `a_scheduled_jobs_run_never_takes_a_wake_up_not_due`).
 - **A helper's own background work** (recorded 18 Nov 2026,
   `fixtures/2.1.296/real-background-nested.jsonl`): a helper's own helper
   says `parent_task_id` and `spawn_depth` 2 (no `owned_by_subagent`); its
@@ -2067,7 +2068,8 @@ ids made up):
   - an end is a task's own notice (a later one for the same task is
     normal) or the list no longer naming it (a paused helper apart); a
     wake-up is due when its record says and done when Claude Code's own
-    turn starts (one 5 minutes past due with none is let go). A Claude Code
+    turn starts once it's due (one starting earlier is a scheduled job's
+    run; one 5 minutes past due with none is let go). A Claude Code
     that says nothing of its tasks has none here: nothing waits, as before.
   - **Its input ended** (a note never read, a stop), the process is ended
     15 s on only once nothing is listed or paused: Claude Code exits by

@@ -44,6 +44,11 @@ use crate::ai::claude_code::events::Task;
 /// A wake-up this long past due with no turn of Claude Code's own is let go.
 const WAKE_LATE_MS: u64 = 5 * 60 * 1000;
 
+/// **A wake-up's turn may start this much before its `scheduledFor`** (the
+/// same PC's clock, read a moment apart); any earlier, the turn starting is
+/// something else's (a scheduled job's run).
+const WAKE_EARLY_MS: u64 = 5_000;
+
 /// **A paused helper with nothing of its own left** is started again by
 /// Claude Code at once (5 ms on 2.1.296); one that isn't within this long is
 /// taken as done.
@@ -173,14 +178,20 @@ impl Background {
         }
     }
 
-    /// **A turn Claude Code started by itself** (`command_lifecycle`): the
-    /// earliest wake-up is it.
-    pub fn on_lifecycle(&mut self, started: bool) {
-        if !started || self.wakes.is_empty() {
+    /// **A turn Claude Code started by itself** (`command_lifecycle`, at
+    /// `now_ms`): the earliest wake-up is it — when it's due. A scheduled
+    /// job's run (`CronCreate`) is bracketed the same way (18 Nov 2026,
+    /// `fixtures/2.1.296/real-cron.jsonl`); one that starts before any
+    /// wake-up is due is the job's, and lets none go (before, it took the
+    /// earliest, and a turn waiting for a wake-up 10 minutes off ended there).
+    pub fn on_lifecycle(&mut self, started: bool, now_ms: u64) {
+        if !started {
             return;
         }
-        let first = self.wakes.iter().enumerate().min_by_key(|(_, d)| **d).map(|(i, _)| i).unwrap_or(0);
-        self.wakes.remove(first);
+        let first = self.wakes.iter().enumerate().filter(|(_, d)| **d <= now_ms.saturating_add(WAKE_EARLY_MS)).min_by_key(|(_, d)| **d).map(|(i, _)| i);
+        if let Some(i) = first {
+            self.wakes.remove(i);
+        }
     }
 
     /// **Wake-ups long past due** at `now_ms` with no turn: let go. Whether any went.
@@ -523,9 +534,12 @@ mod tests {
         assert_eq!(bg.what(), "a wake-up");
         assert!(bg.pending());
         assert_eq!(bg.line(), "Waiting for background work (a wake-up)");
-        bg.on_lifecycle(false);
+        bg.on_lifecycle(false, 1_000_000);
         assert!(bg.pending(), "a turn's end isn't a wake-up starting");
-        bg.on_lifecycle(true);
+        // A turn of its own long before the wake-up is due: a scheduled job's run, never the wake-up's.
+        bg.on_lifecycle(true, 1_000_000 - 60_000);
+        assert!(bg.pending(), "a job's run lets no wake-up go");
+        bg.on_lifecycle(true, 1_000_000);
         assert!(!bg.pending());
         wake(&mut bg, "w3", Some(json!({ "scheduledFor": 1_000_000u64 })));
         wake(&mut bg, "w4", Some(json!({ "scheduledFor": 2_000_000u64 })));
