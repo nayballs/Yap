@@ -141,6 +141,14 @@ fn deleted() -> std::sync::MutexGuard<'static, Vec<(u64, Removed)>> {
 
 const UNDO_KEEP: usize = 32;
 
+/// Notes `ids` went (deleted, or their transcript deleted after its days):
+/// the lines deleted from them in this run go too. Note ids come round
+/// again, so a window's Undo never puts a deleted meeting's line into the
+/// new note given its id, nor back into a transcript that's gone for good.
+pub fn forget(ids: &[u64]) {
+    deleted().retain(|(n, _)| !ids.contains(n));
+}
+
 /// A deleted line's place, kept beside the meeting's audio.
 fn cut_of(line: &TranscriptSegment) -> Option<crate::meetings::audio::Cut> {
     Some(crate::meetings::audio::Cut {
@@ -435,6 +443,24 @@ mod tests {
             .map(|&(f, t)| serde_json::from_value(json!({ "fromSeg": f, "toSeg": t, "startTs": 0, "endTs": 0 })).unwrap())
             .collect();
         n
+    }
+
+    /// A meeting deleted (or Delete some of your data) after a line of it was
+    /// deleted: Undo's copy of that line goes with it, so the window's Undo
+    /// never puts it into the new note given the meeting's id (ids come
+    /// round again). Until 2026-11-18 it stayed for the rest of the run.
+    #[test]
+    fn a_deleted_notes_lines_are_never_put_back_into_another() {
+        // Ids no other test uses: the Undo list is one for the process.
+        let (gone, kept) = (90_001, 90_002);
+        let removed = |text: &str| Removed { line: seg("them", text, 12, 2_000, 5_000), index: 1, breaks: Vec::new(), len: 3 };
+        deleted().push((gone, removed("the budget is final")));
+        deleted().push((kept, removed("lunch at one")));
+        crate::notes::forget_own(&[gone]);
+        let left: Vec<(u64, String)> = deleted().iter().filter(|(n, _)| [gone, kept].contains(n)).map(|(n, r)| (*n, r.line.text.clone())).collect();
+        assert_eq!(left, [(kept, "lunch at one".to_string())]);
+        forget(&[kept]);
+        assert!(!deleted().iter().any(|(n, _)| *n == kept));
     }
 
     #[test]

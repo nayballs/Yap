@@ -770,20 +770,34 @@ pub fn plan(costs: &[u64], summary: Option<(usize, u64)>, room: u64, step: usize
     }
     let step = step.max(1);
     let from_end = |from: usize| -> u64 { costs[from.min(len)..].iter().sum() };
-    // The fewest messages dropped for `room`, from `base`, `step` at a time.
-    let first_fitting = |base: usize, room: u64| -> Option<usize> {
-        let mut s = base;
-        while s <= len {
+    // The fewest messages dropped for `room`, from `base`, `step` at a time —
+    // and once a step would reach the end, the latest that fit two at a time
+    // (a question and its answer), so the newest are never dropped while
+    // they fit (18 Nov 2026: three answers of 300 tokens in a room of 1,000
+    // sent no history at all, the step past the end taken as "nothing fits").
+    let first_fitting = |base: usize, room: u64| -> usize {
+        let (mut s, mut last) = (base, base);
+        while s < len {
             if from_end(s) <= room {
-                return Some(s);
+                return s;
             }
+            last = s;
             s += step;
         }
-        None
+        let mut s = last + 2;
+        while s < len {
+            if from_end(s) <= room {
+                return s;
+            }
+            s += 2;
+        }
+        len
     };
     if let Some((upto, cost)) = summary.filter(|(upto, _)| *upto > 0 && *upto <= len) {
         if cost < room {
-            if let Some(s) = first_fitting(upto, room - cost) {
+            // (Nothing after it fits beside it: the latest that fit, below.)
+            let s = first_fitting(upto, room - cost);
+            if s < len || upto == len {
                 return Plan { start: s, summary: true, left_out: s - upto, tokens: cost + from_end(s) };
             }
         }
@@ -791,7 +805,7 @@ pub fn plan(costs: &[u64], summary: Option<(usize, u64)>, room: u64, step: usize
     if total <= room {
         return Plan { start: 0, summary: false, left_out: 0, tokens: total };
     }
-    let s = first_fitting(0, room).unwrap_or(len).min(len);
+    let s = first_fitting(0, room);
     Plan { start: s, summary: false, left_out: s, tokens: from_end(s) }
 }
 
@@ -1122,6 +1136,30 @@ mod tests {
         assert_eq!(plan(&costs, None, 1_000, 6).start, 18);
         // One message bigger than the room: nothing fits.
         assert_eq!(plan(&[5_000], None, 1_000, 6), Plan { start: 1, summary: false, left_out: 1, tokens: 0 });
+    }
+
+    #[test]
+    fn the_newest_messages_go_whenever_they_fit() {
+        // 18 Nov 2026: three questions and answers of 300 tokens each, room
+        // for 1,000 — the step of 6 landed on the end, and no history went
+        // at all, though the last question and answer fit.
+        let p = plan(&[300; 6], None, 1_000, 6);
+        assert_eq!((p.start, p.left_out, p.tokens), (4, 4, 600));
+        // …and past the end (10 messages: the last 4 don't fit, the last 2 do).
+        let p = plan(&[300; 10], None, 1_000, 6);
+        assert_eq!((p.start, p.tokens), (8, 600));
+        // The Voice Assistant's step of 4, as a spoken follow-up asks.
+        assert_eq!(plan(&[300; 8], None, 1_000, 4).start, 6);
+        // Still on a question: two at a time from the last step tried (the
+        // last question, one a newer question replaced, alone).
+        assert_eq!(plan(&[100, 100, 100, 100, 100, 100, 100, 600, 350], None, 1_000, 6).start, 8);
+        // Beside a summary: what fits after it…
+        let p = plan(&[300; 10], Some((4, 200)), 1_000, 6);
+        assert_eq!((p.start, p.summary, p.tokens), (8, true, 800));
+        // …and with nothing after it fitting beside it, the latest that fit
+        // without it (the follow-up's own question and answer).
+        let p = plan(&[100, 100, 100, 100, 450, 450], Some((4, 200)), 1_000, 6);
+        assert_eq!((p.start, p.summary, p.tokens), (4, false, 900));
     }
 
     #[test]

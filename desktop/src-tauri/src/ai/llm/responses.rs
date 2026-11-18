@@ -167,6 +167,23 @@ pub fn body(model: &str, messages: &Value, tools: Option<&Value>, extra: &Map<St
 
 // ---- the answer -----------------------------------------------------------------
 
+/// **What a `response.incomplete` wrote** before it stopped (its
+/// `max_output_tokens`, a content filter), kept as the answer: its words,
+/// and the calls whose arguments are whole JSON (one cut off part-way is
+/// left out). Only its reasoning — a reasoning item always comes first, so
+/// `output` is never empty — is nothing written: `None`, said as the stop
+/// (18 Nov 2026: kept, it came back as an empty answer, and a call cut off
+/// mid-arguments ran). Pure.
+pub fn written_before_stopping(mut response: Value) -> Option<Value> {
+    if let Some(items) = response["output"].as_array_mut() {
+        items.retain(|i| i["type"] != "function_call" || i["arguments"].as_str().is_some_and(|a| serde_json::from_str::<Value>(a).is_ok()));
+    }
+    let m = message_of(&response);
+    let words = m["content"].as_str().is_some_and(|t| !t.trim().is_empty());
+    let calls = m["tool_calls"].as_array().is_some_and(|c| !c.is_empty());
+    (words || calls).then_some(response)
+}
+
 /// **The response as Yap's calls read it**: an OpenAI-shaped message — its
 /// text, its calls, its reasoning summary (`reasoning_content`) — with its
 /// output items kept (`yap_responses`, sent back next step). Pure.
@@ -502,11 +519,12 @@ pub(super) async fn post(
             Some(End::Incomplete(r)) => {
                 let why = r["incomplete_details"]["reason"].as_str().unwrap_or("unknown").to_string();
                 // What it wrote before it stopped, if anything, is the answer.
-                if r["output"].as_array().is_some_and(|o| !o.is_empty()) {
-                    tracing::info!(reason = %why, "ChatGPT stopped early; keeping what it wrote");
-                    r
-                } else {
-                    return Err(call.failed(format!("ChatGPT stopped before answering ({why}).")));
+                match written_before_stopping(r) {
+                    Some(r) => {
+                        tracing::info!(reason = %why, "ChatGPT stopped early; keeping what it wrote");
+                        r
+                    }
+                    None => return Err(call.failed(format!("ChatGPT stopped before answering ({why})."))),
                 }
             }
             None => return Err(call.failed("ChatGPT didn't answer.".into())),
@@ -536,6 +554,28 @@ pub(super) async fn post(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_response_that_stopped_early_keeps_only_what_it_wrote() {
+        let reasoning = json!({ "type": "reasoning", "summary": [{ "type": "summary_text", "text": "Looking at the calendar…" }] });
+        let words = json!({ "type": "message", "content": [{ "type": "output_text", "text": "Your review is at two" }] });
+        let whole_call = json!({ "type": "function_call", "call_id": "c1", "name": "search_notes", "arguments": "{\"query\":\"review\"}" });
+        let cut_call = json!({ "type": "function_call", "call_id": "c2", "name": "write_section", "arguments": "{\"key\":\"gear\",\"markdown\":\"# Ge" });
+        let stopped = |output: Vec<Value>| json!({ "output": output, "incomplete_details": { "reason": "max_output_tokens" } });
+        // Only its reasoning (a reasoning model spent its budget thinking):
+        // nothing written — before, an empty answer.
+        assert!(written_before_stopping(stopped(vec![reasoning.clone()])).is_none());
+        // …nor a call cut off mid-arguments (before, it ran with them).
+        assert!(written_before_stopping(stopped(vec![reasoning.clone(), cut_call.clone()])).is_none());
+        // Words it wrote: the answer, as ever.
+        let kept = written_before_stopping(stopped(vec![reasoning.clone(), words])).unwrap();
+        assert_eq!(message_of(&kept)["content"], "Your review is at two");
+        // A whole call kept, the cut one left out.
+        let kept = written_before_stopping(stopped(vec![reasoning, whole_call, cut_call])).unwrap();
+        let calls = message_of(&kept)["tool_calls"].as_array().cloned().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["function"]["name"], "search_notes");
+    }
 
     fn function(name: &str) -> Value {
         json!({ "type": "function", "function": { "name": name, "description": "d", "parameters": { "type": "object", "properties": { "q": { "type": "string" } } } } })

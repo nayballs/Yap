@@ -919,10 +919,16 @@ pub fn init(app: &AppHandle) {
     });
 }
 
+/// connections.json's writes in order (`saving::Ordered`): the writer
+/// thread's flush and Clear's can each take a snapshot and write it after
+/// the lock is let go, and an older one landing last would put receipts the
+/// person just cleared back on disk.
+static ORDER: crate::shell::saving::Ordered = crate::shell::saving::Ordered::new();
+
 /// Write the store if it changed (the writer thread, and at exit).
 pub fn flush() {
     let Some(path) = FILE_PATH.get() else { return };
-    let text = {
+    let (seq, text) = {
         let mut s = lock();
         if SAVER.any_unread() {
             if let Some(disk) = SAVER.reread::<Store>(path, crate::shell::saving::json) {
@@ -942,14 +948,19 @@ pub fn flush() {
         }
         s.dirty = false;
         match serde_json::to_string(&s.store) {
-            Ok(t) => t,
+            Ok(t) => (ORDER.take(), t),
             Err(_) => return,
         }
     };
-    if SAVER.write(path, &text).is_err() {
-        // Kept, and written with the next (saving.rs logs why).
-        lock().dirty = true;
-        return;
+    match ORDER.write(seq, || SAVER.write(path, &text)) {
+        // A newer snapshot is on disk already: it holds all of this one.
+        None => return,
+        Some(Err(_)) => {
+            // Kept, and written with the next (saving.rs logs why).
+            lock().dirty = true;
+            return;
+        }
+        Some(Ok(())) => {}
     }
     if let Some(app) = APP.get() {
         let _ = app.emit(EVENT, ());

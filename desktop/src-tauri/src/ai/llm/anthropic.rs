@@ -72,6 +72,11 @@ const MAX_TOKENS: u32 = 16_000;
 const MAX_TOKENS_STREAMED: u32 = 32_000;
 /// How many times a paused server-tool loop (`pause_turn`) is asked to go on.
 const PAUSES: usize = 4;
+/// Said when it paused once more than that.
+const KEPT_PAUSING: &str = "Claude's web search kept pausing. Ask again in a moment.";
+/// How long an error in the stream before any of the answer (Anthropic's
+/// "Overloaded") is waited out before asking again.
+const STREAM_ERROR_WAIT: Duration = Duration::from_millis(1_500);
 /// A step with server tools searches and reads before it answers: it may
 /// take this long.
 const SERVER_TOOLS_TIMEOUT: Duration = Duration::from_secs(150);
@@ -401,6 +406,9 @@ pub struct Stream {
     usage: Map<String, Value>,
     error: Option<String>,
     done: bool,
+    /// One of Yap's tools called with arguments that weren't whole JSON
+    /// (cut off at the most a step may write): its name.
+    broken_call: Option<String>,
 }
 
 impl Stream {
@@ -467,7 +475,18 @@ impl Stream {
                     if matches!(b["type"].as_str(), Some("tool_use" | "server_tool_use")) {
                         let raw = self.json[at].trim();
                         if !raw.is_empty() {
-                            b["input"] = serde_json::from_str(raw).unwrap_or_else(|_| json!({}));
+                            match serde_json::from_str(raw) {
+                                Ok(input) => b["input"] = input,
+                                Err(_) => {
+                                    // (Never run with no arguments: the call goes
+                                    // back to the model, as the OpenAI-compatible
+                                    // path's.)
+                                    if b["type"] == "tool_use" && self.broken_call.is_none() {
+                                        self.broken_call = Some(b["name"].as_str().unwrap_or("").to_string());
+                                    }
+                                    b["input"] = json!({});
+                                }
+                            }
                         } else if !b["input"].is_object() {
                             b["input"] = json!({});
                         }
@@ -606,7 +625,7 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
     // The step was asked again without its thinking ([`thinking_unbound`]).
     let mut thinking_dropped = false;
     let mut pause = 0;
-    while pause <= PAUSES {
+    loop {
         let call = crate::ai::eval::Call::start(&req.provider, &endpoint, &body).await;
         let mut waited = Duration::ZERO;
         let mut attempt = 0u32;
@@ -721,6 +740,19 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
                 }
             }
             if let Some(e) = s.error.take() {
+                // Before any of the answer came (Anthropic's "Overloaded" in
+                // the stream, after its 200): asked again once, as a stream
+                // cut off then is, and as a 529 is waited out — never the
+                // turn's end at the first one (18 Nov 2026).
+                if !heard && !cut_asked_again {
+                    tracing::info!("Chat: Anthropic sent an error before any of the answer came; asking again");
+                    cut_asked_again = true;
+                    if let Some(on) = on.as_deref_mut() {
+                        on(Delta::Restart);
+                    }
+                    tokio::time::sleep(STREAM_ERROR_WAIT).await;
+                    continue;
+                }
                 return Err(call.failed(format!("Anthropic sent an error mid-way: {e}")));
             }
             // Cut off (it went quiet past the timeout, the connection
@@ -741,6 +773,14 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
                 tracing::info!(part_way = heard, "Chat: Claude's stream was cut off ({why})");
                 return Err(call.failed(super::CUT_OFF.to_string()));
             }
+            // A call of Yap's whose arguments weren't whole JSON (its step hit
+            // the most it may write part-way through a long section): told to
+            // the model to call it again shorter, as the OpenAI-compatible
+            // path does — never run with no arguments at all (18 Nov 2026).
+            if let Some(name) = s.broken_call.take() {
+                tracing::info!(tool = %name, stop = s.stop_reason.as_deref().unwrap_or(""), "Chat: a streamed Claude tool call's arguments weren't JSON");
+                return Err(call.failed(format!("{}{}", super::TOOL_CALL_REJECTED, super::BROKEN_ARGUMENTS)));
+            }
             s.whole()
         } else {
             resp.json::<Value>().await.map_err(|e| call.failed(format!("failed to parse response: {e}")))?
@@ -754,8 +794,15 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
             return Err(DECLINED.to_string());
         }
         let blocks = value["content"].as_array().cloned().unwrap_or_default();
-        // Its server tools paused their loop: asked to go on, from where it stopped.
-        if value["stop_reason"] == "pause_turn" && pause < PAUSES {
+        // Its server tools paused their loop: asked to go on, from where it
+        // stopped — at most `PAUSES` times; one more pause is said, never
+        // taken for the answer (18 Nov 2026: the fifth paused reply, its
+        // searches part-way, was kept as the whole answer).
+        if value["stop_reason"] == "pause_turn" {
+            if pause >= PAUSES {
+                tracing::info!(pauses = pause, "Chat: Claude's server tools kept pausing; not an answer");
+                return Err(KEPT_PAUSING.to_string());
+            }
             tracing::info!(blocks = blocks.len(), "Chat: Claude's server tools paused; asking it to go on");
             before.extend(blocks.iter().cloned());
             if let Some(msgs) = body["messages"].as_array_mut() {
@@ -795,7 +842,6 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
         );
         return Ok(message);
     }
-    Err("Claude's web search kept pausing. Ask again in a moment.".to_string())
 }
 
 #[cfg(test)]
@@ -1186,5 +1232,106 @@ mod tests {
         let (out, _) = ask(&claude(&base)).await;
         assert_eq!(out.unwrap_err(), crate::ai::llm::CUT_OFF);
         assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// A server-tool loop that keeps pausing (`pause_turn`): asked to go on
+    /// `PAUSES` times, then said — never the fifth paused reply, its
+    /// searches part-way, taken for the whole answer (18 Nov 2026).
+    #[tokio::test]
+    async fn a_claude_search_that_keeps_pausing_is_said_not_taken_for_the_answer() {
+        use crate::ai::llm::cut_tests::{ask, provider, req, Plan};
+        let ev = |kind: &str, data: Value| format!("event: {kind}\ndata: {data}\n\n");
+        let paused = |end: &str| {
+            vec![
+                ev("message_start", json!({ "type": "message_start", "message": { "id": "m", "type": "message", "role": "assistant", "content": [], "usage": { "input_tokens": 5, "output_tokens": 0 } } })),
+                ev("content_block_start", json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "text", "text": "" } })),
+                ev("content_block_delta", json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": "Still looking." } })),
+                ev("content_block_stop", json!({ "type": "content_block_stop", "index": 0 })),
+                ev("message_delta", json!({ "type": "message_delta", "delta": { "stop_reason": end }, "usage": { "output_tokens": 3 } })),
+                ev("message_stop", json!({ "type": "message_stop" })),
+            ]
+        };
+        let claude = |base: &str| ChatRequest { native: Some(Native { server_tools: vec![] }), provider: "anthropic".into(), ..req(base, 2_000) };
+        let plans = |n: usize| (0..n).map(|_| Plan { chunks: paused("pause_turn"), gap_ms: 0, hang: false }).collect::<Vec<_>>();
+
+        // Paused every time: asked to go on four times, then said.
+        let (base, asked) = provider(plans(PAUSES + 1)).await;
+        let (out, _) = ask(&claude(&base)).await;
+        assert_eq!(out.unwrap_err(), KEPT_PAUSING);
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), PAUSES + 1);
+
+        // Paused four times, then done: the answer, every part of it.
+        let mut four = plans(PAUSES);
+        four.push(Plan { chunks: paused("end_turn"), gap_ms: 0, hang: false });
+        let (base, asked) = provider(four).await;
+        let (out, _) = ask(&claude(&base)).await;
+        assert_eq!(out.unwrap()["content"].as_str().map(|t| t.matches("Still looking.").count()), Some(PAUSES + 1));
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), PAUSES + 1);
+    }
+
+    /// Anthropic's "Overloaded" in the stream after its 200, before any of
+    /// the answer came: asked again once (as a cut stream, as a 529) and
+    /// answered — not the turn's end (18 Nov 2026). Once some of it came,
+    /// said as before.
+    #[tokio::test]
+    async fn an_error_in_claudes_stream_before_the_answer_is_asked_again() {
+        use crate::ai::llm::cut_tests::{ask, provider, req, Plan};
+        let ev = |kind: &str, data: Value| format!("event: {kind}\ndata: {data}\n\n");
+        let start = || ev("message_start", json!({ "type": "message_start", "message": { "id": "m", "type": "message", "role": "assistant", "content": [], "usage": { "input_tokens": 5, "output_tokens": 0 } } }));
+        let block = || ev("content_block_start", json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "text", "text": "" } }));
+        let text = |t: &str| ev("content_block_delta", json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": t } }));
+        let overloaded = || ev("error", json!({ "type": "error", "error": { "type": "overloaded_error", "message": "Overloaded" } }));
+        let whole = vec![
+            start(),
+            block(),
+            text("The review is at two."),
+            ev("content_block_stop", json!({ "type": "content_block_stop", "index": 0 })),
+            ev("message_delta", json!({ "type": "message_delta", "delta": { "stop_reason": "end_turn" }, "usage": { "output_tokens": 6 } })),
+            ev("message_stop", json!({ "type": "message_stop" })),
+        ];
+        let claude = |base: &str| ChatRequest { native: Some(Native { server_tools: vec![] }), provider: "anthropic".into(), ..req(base, 2_000) };
+
+        let (base, asked) = provider(vec![Plan { chunks: vec![start(), overloaded()], gap_ms: 0, hang: false }, Plan { chunks: whole.clone(), gap_ms: 0, hang: false }]).await;
+        let (out, restarts) = ask(&claude(&base)).await;
+        assert_eq!(out.unwrap()["content"], "The review is at two.");
+        assert_eq!((asked.load(std::sync::atomic::Ordering::SeqCst), restarts), (2, 1));
+
+        // Part of the answer came first: said, never asked again.
+        let (base, asked) = provider(vec![Plan { chunks: vec![start(), block(), text("The review "), overloaded()], gap_ms: 0, hang: false }, Plan { chunks: whole, gap_ms: 0, hang: false }]).await;
+        let (out, _) = ask(&claude(&base)).await;
+        assert_eq!(out.unwrap_err(), "Anthropic sent an error mid-way: Overloaded");
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// A call of Yap's cut off part-way through its arguments (the step hit
+    /// `max_tokens` inside a long section): back to the model to call again
+    /// shorter, as the OpenAI-compatible path's — never run as
+    /// `write_section({})` (18 Nov 2026). Whole arguments run as ever.
+    #[tokio::test]
+    async fn a_claude_tool_call_cut_off_part_way_goes_back_to_the_model() {
+        use crate::ai::llm::cut_tests::{ask, provider, req, Plan};
+        let ev = |kind: &str, data: Value| format!("event: {kind}\ndata: {data}\n\n");
+        let call = |args: &str, end: &str| {
+            vec![
+                ev("message_start", json!({ "type": "message_start", "message": { "id": "m", "type": "message", "role": "assistant", "content": [], "usage": { "input_tokens": 5, "output_tokens": 0 } } })),
+                ev("content_block_start", json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "tool_use", "id": "toolu_1", "name": "write_section", "input": {} } })),
+                ev("content_block_delta", json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "input_json_delta", "partial_json": args } })),
+                ev("content_block_stop", json!({ "type": "content_block_stop", "index": 0 })),
+                ev("message_delta", json!({ "type": "message_delta", "delta": { "stop_reason": end }, "usage": { "output_tokens": 9 } })),
+                ev("message_stop", json!({ "type": "message_stop" })),
+            ]
+        };
+        let claude = |base: &str| ChatRequest { native: Some(Native { server_tools: vec![] }), provider: "anthropic".into(), ..req(base, 2_000) };
+
+        let (base, _) = provider(vec![Plan { chunks: call(r##"{"key":"gear","markdown":"# Gear\n\nThe tent wei"##, "max_tokens"), gap_ms: 0, hang: false }]).await;
+        let (out, _) = ask(&claude(&base)).await;
+        let e = out.unwrap_err();
+        assert_eq!(crate::ai::llm::rejected_tool_call(&e), Some(crate::ai::llm::BROKEN_ARGUMENTS), "{e}");
+
+        let (base, _) = provider(vec![Plan { chunks: call(r##"{"key":"gear","markdown":"# Gear"}"##, "tool_use"), gap_ms: 0, hang: false }]).await;
+        let (out, _) = ask(&claude(&base)).await;
+        let message = out.unwrap();
+        assert_eq!(message["tool_calls"][0]["function"]["name"], "write_section");
+        assert_eq!(serde_json::from_str::<Value>(message["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap()["key"], "gear");
     }
 }

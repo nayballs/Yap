@@ -779,6 +779,8 @@ export function createNotesState() {
   let summaryDraft = $state('');
   let summaryEl = $state(null);
   let summaryTimer = null;
+  // When the summary's first edit not saved yet was made (core/typingSave.js).
+  let summaryUnsavedSince = 0;
   // Typed and not yet saved: an event or a read never puts older words back.
   let summaryDirty = false;
   // "3 new lines since this summary · Update" (not while it records: the
@@ -801,11 +803,15 @@ export function createNotesState() {
     summaryEl.style.height = 'auto';
     summaryEl.style.height = `${summaryEl.scrollHeight + 2}px`;
   }
+  // Saved once the typing pauses, and at least every two seconds while it goes on (core/typingSave.js; only a pause
+  // saved, so a crash while someone typed on lost everything since the last one: 18 Nov 2026, as the note's own on
+  // 16 Nov).
   function queueSummarySave() {
     summaryDirty = true;
     fitSummary();
+    if (summaryTimer === null) summaryUnsavedSince = Date.now();
     clearTimeout(summaryTimer);
-    summaryTimer = setTimeout(flushSummary, 600);
+    summaryTimer = setTimeout(flushSummary, saveDelay(summaryUnsavedSince));
   }
   async function flushSummary() {
     clearTimeout(summaryTimer);

@@ -503,7 +503,11 @@ to **Run again** from Home.
   heard is on the clipboard: press Ctrl+V." (instead of Undo's own "Your text
   is copied"), "kept what it heard" (the Chat box, the assistant, no words:
   said once the transcription is done) or "before it heard anything"; the
-  paste says it (`tell_unplugged`, once). The next microphone named is the
+  paste says it (`tell_unplugged`, once). The alert and the strict paste are
+  apart (`Unplug`, pure, 2026-11-18): an alert said after 3 minutes of
+  transcribing (`TELL_WITHIN`) no longer lets the paste go into whatever is
+  in front; the strictness ends with the transcription (`Unplug::done`, in
+  `run_stt`'s guard). The next microphone named is the
   next one in the order, which the next dictation opens (the one lost passed
   over while Windows still lists it). Unit tests (`unplugged::tests`), e2e
   `mics.spec.js`.
@@ -724,7 +728,16 @@ to **Run again** from Home.
   shortcut and why); one that held a recording sends `STUCK` →
   `pipeline::key_stuck` → `gesture::key_lost`: the recording goes on
   hands-free, the next press stops it. The table is kept honest too (a key
-  no binding holds that Windows says is up is forgotten). **Robot mode**
+  no binding holds that Windows says is up is forgotten). **Yap's own keys**
+  (2026-11-18: the paste and submit keys, typing, edit mode's Ctrl+C, the
+  modifiers let go and pressed again around them, the menu mask) carry
+  `OWN_MARK` in their extra info and pass by as if no hook were there
+  (`heard_as`, pure; still counted as heard for `HEARD_TICK`): never a
+  binding's press or release, never "another key", never in `HELD`. Before,
+  the rewrite shortcut or Ask about the selection held with nothing
+  selected sent its Ctrl+C under a second into the hold — a chord, the
+  recording dropped — and a held combo's modifiers, let go around Yap's
+  keys, ended its press. **Robot mode**
   (`realtest.rs`, debug builds): the hook runs, acting only on events whose
   extra info is `ROBOT_MARK`; `UNHEARD_MARK` events pass by unheard (the
   robot's lost key-up); everything else passes untouched (the developer's

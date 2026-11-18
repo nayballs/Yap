@@ -558,6 +558,12 @@ the action is one a phone may take.
   and the follow-up lower it there too, so the chip, the card and the record
   say so). A phone's words never join a turn already starting above Auto:
   they wait for a turn of their own.
+- **A new Code chat is checked again when its question comes**
+  (`code::new_code_taken`, 18 Nov 2026): `code_new` only keeps the
+  workspace; Remote Control switched off, the phone unticked or the
+  workspace switched off since (none of them cuts the phone off) and the
+  question makes a plain chat, no Claude Code started there. Remote Control
+  going off for a phone also drops the one waiting.
 - **Approvals need a fresh tap** (`gates::Shown`): `approve` only for a card
   the PC sent that phone (at connect, as it was asked, or in a `thread`),
   still waiting, at least **700 ms** after it was sent and **400 ms** after the
@@ -588,7 +594,9 @@ the action is one a phone may take.
 A turn asked from a phone (`remote::phone_of_turn`) has its report said **on
 that phone** (`chat/turn/report.rs` `said_where` → `link::say_report` → the
 session's `Cmd::Say`: Yap's voice down its socket as ▶'s, `speak_streamed_to`,
-once Yap's voice and the phone are free, up to 5 minutes), **never on this
+once Yap's voice and the phone are free, up to 5 minutes; its newest
+connection, `newest_session`, never an old socket of a phone that came back
+on another Wi-Fi before Windows noticed it gone), **never on this
 PC's speakers**; that phone not connected: not said at all (it's in the chat).
 `agents_speak` still decides whether it's said. This applies whether or not
 Remote Control is on: it's who asked.

@@ -212,7 +212,9 @@ one side.
   screenshots waiting in the box** (2026-10-25) are kept in Rust
   (`snip/waiting.rs`, `yap-chat-waiting`; the page's `waitingShots` follows):
   `chat_send` takes the ids it sends (back in the box if it fails before the
-  answer), and a **Voice Assistant question takes them all** — to the
+  answer; a failed question's words go back before whatever was typed in the
+  box since it went, never in its place, and screenshots added meanwhile
+  stay: 2026-11-18, chat-streaming.spec; the same in a note's Ask bar), and a **Voice Assistant question takes them all** — to the
   conversation they wait in, through the same `vision` / `turn::prepare` /
   `turn::with` steps; a model known not to read images gets nothing, the
   question goes into the box beside them and Chat comes up with its line
@@ -4034,7 +4036,8 @@ spans that add no character) under a clear text box that takes the typing
 coloured words. **Source took the Edit box's place** rather than sitting
 beside it: two raw views would say the same thing twice, the old box was
 already the markdown, and Claude's file view has exactly Preview and
-Source; it saves as the box did (600 ms after typing, `chat_document_save
+Source; it saves as the box did (600 ms after typing, and at least every 2 s
+while it goes on: `core/typingSave.js`, 2026-11-18; `chat_document_save
 {id, base, content}`: Rust lays the person's edit over whatever Chat wrote
 meanwhile, `documents::merge3`; a save that comes back while more was typed
 keeps the newer typing and saves again from what it was typed over; it
@@ -5865,7 +5868,11 @@ a technical error.
    bigger model since); else **the summary and the messages after it**;
    else the latest that fit (and the summary beside them when it fits).
    The start moves 6 messages at a time (the Voice Assistant's 4), so a
-   hybrid local model re-reads only from the first change. The summary goes
+   hybrid local model re-reads only from the first change — and once a
+   step would reach the end, two at a time from the last step tried, so the
+   newest question and answer go whenever they fit (18 Nov 2026: a step
+   landing on the end sent no history at all; with a summary and nothing
+   after it fitting beside it, the latest that fit go without it). The summary goes
    in the system prompt before its end ("Earlier in this chat (Yap's notes
    on the older messages, which aren't shown; the latest messages follow in
    full): …", `compact::block`). Logged: counts and tokens only.
@@ -6076,6 +6083,13 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
 - **Stop, and a newer question**: the interrupt (`Session::interrupt`), and
   the turn read to its end (10 s at most, else the process is ended), so the
   next question's events are its own.
+- **How long a turn may take** (`plan.rs` `Clock`, 18 Nov 2026): 15 minutes
+  with nothing from Claude Code or Yap's tools (stuck: "Claude Code took too
+  long to answer"), started again at each event — a long search and read, a
+  card the person takes their time over, Claude Code's word every 30 s that
+  a tool still runs keep it going — and an hour however busy. Until then the
+  15 minutes were the whole turn's: a document's outline card (10 minutes
+  for the person) counted in them, and the writing after it was cut off.
 - **Yap Code** (while offered: `on_the_plan` keeps `agents`): Yap's agent tools over
   the same endpoint, allowed and named in the prompt (`plan.rs` `AGENTS`). Each
   turn opens on the session's run (`RunHandle::begin_turn`), and the turn's
@@ -6298,7 +6312,9 @@ The Claude app's everyday message action, as its Chat tab has it: **Edit**
 **Save and send** asks the new words in its place as a new version from
 there, the old one reachable through ‹ 1/2 › on that message. As many
 versions as are made (at most 50 at one message: `branches::MAX_BRANCHES`),
-each with everything that followed it.
+each with everything that followed it. The edit box gone (Esc, Cancel, Save
+and send), the keyboard is back in the message box (2026-11-18: it was left
+on nothing).
 
 **↻ Retry came and went** (15–16 Nov 2026): under an answer it asked the
 question again and kept both answers, ‹ 1/2 › on the answer. The maintainer
@@ -7007,7 +7023,8 @@ never an incognito chat.
   first; its chats stay, out of it, and its files' copies go), **New chat
   in <name>**, its chats, and beside them (below, when narrow) its
   **Instructions** (saved a moment after the typing stops, and on leaving
-  the box) and its **Files** (Add files…, × to take one out).
+  the box; a save coming back marks only what it sent saved: words typed
+  while it was on its way go in their own, 2026-11-18) and its **Files** (Add files…, × to take one out).
 - **A chat joins one** by starting from its page (chatState's
   `newProject`, `chat_send`'s `project` → `projects::with_new` →
   `turn_conversation` → `adopt_new`), or from its ⋯ → **Move to project ▸**

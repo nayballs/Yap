@@ -195,6 +195,36 @@ test('a Markdown file opens in its window: Preview renders it, Source edits it, 
   await doc.keyboard.press('Escape');
 });
 
+test('typing that goes on without a pause is saved to the file as it goes, not only once it stops', async ({ yap }) => {
+  // 18 Nov 2026: saved only once the typing paused, as notes were before 16
+  // Nov (core/typingSave.js): a crash while someone typed on lost everything
+  // since the last pause. Now at most the last two seconds. A key every
+  // 200 ms for four seconds.
+  const file = fixture(yap, 'typing-on.md', 'Shopping\n');
+  const { doc } = await openFile(yap, file);
+  await toView(doc, 'Source');
+  await caretAfter(source(doc), 'Shopping');
+  // (A read as Yap replaces the file can fail: not saved yet, as far as this knows.)
+  const onFile = () => {
+    try {
+      return read(file);
+    } catch {
+      return '';
+    }
+  };
+  const keys = 'abcdefghijklmnopqrst';
+  let savedAt = -1;
+  for (const [i, k] of [...keys].entries()) {
+    await doc.keyboard.insertText(k);
+    await doc.waitForTimeout(200);
+    if (savedAt < 0 && onFile().includes('Shoppinga')) savedAt = i;
+  }
+  expect(savedAt, 'saved while the typing went on').toBeGreaterThanOrEqual(0);
+  expect(savedAt).toBeLessThan(keys.length - 3);
+  await expect.poll(onFile, { timeout: 10_000 }).toBe(onDisk(`Shopping${keys}\n`));
+  await expect(status(doc)).toHaveText('Saved');
+});
+
 test('a change on disk reloads in place, keeping the scroll; with unsaved edits it asks: Reload or Keep mine', async ({ yap, main, shot }) => {
   const file = fixture(yap, 'diary.md');
   const { doc } = await openFile(yap, file);

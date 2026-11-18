@@ -716,6 +716,14 @@ async fn run_check(app: &AppHandle, manual: bool) -> (Outcome, String) {
         update_record(|r| r.last_checked = Some(checked_at));
     }
     changed(app);
+    // A restart asked while it checked (`Restart::AfterCheck`): now, with
+    // what the check left (the same update, a newer one to download first,
+    // or none: a pulled release clears it).
+    if lock().install_queued {
+        if let Err(msg) = request_install(app) {
+            let _ = app.emit(EVENT_BLOCKED, msg);
+        }
+    }
     maybe_announce(app);
     outcome
 }
@@ -813,24 +821,39 @@ pub fn request_install(app: &AppHandle) -> Result<(), String> {
     if portable() {
         return Err(PORTABLE_MESSAGE.into());
     }
-    let phase = lock().phase;
-    match phase {
-        Phase::Ready => {}
-        Phase::Available => {
+    let step = {
+        let mut s = lock();
+        let step = restart_step(&s);
+        // Queued under the same lock the check's end reads it under
+        // (`run_check`), so it's never missed.
+        if step == Restart::AfterCheck {
+            s.install_queued = true;
+            s.deferred = false;
+        }
+        step
+    };
+    match step {
+        Restart::Install => {}
+        Restart::Download => {
             lock().install_queued = true;
             show_download_progress(app);
             tauri::async_runtime::spawn(download_update(app.clone()));
             changed(app);
             return Ok(());
         }
-        Phase::Downloading => {
+        Restart::Queue => {
             lock().install_queued = true;
             show_download_progress(app);
             changed(app);
             return Ok(());
         }
-        Phase::Installing => return Ok(()),
-        Phase::Idle | Phase::Checking => {
+        Restart::AfterCheck => {
+            tracing::info!("updates: restart asked during a check — after it");
+            changed(app);
+            return Ok(());
+        }
+        Restart::Already => return Ok(()),
+        Restart::Nothing => {
             return Err("There's no update ready to install.".into());
         }
     }
@@ -855,6 +878,38 @@ pub fn request_install(app: &AppHandle) -> Result<(), String> {
         changed(app);
     }
     Err(refused.into())
+}
+
+/// What "Restart to update" does now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Restart {
+    /// Downloaded and verified: install (or once the dictation ends).
+    Install,
+    /// Found, not downloaded: download it, then install.
+    Download,
+    /// Downloading: install once it's done.
+    Queue,
+    /// A check is under way after an update was found (a scheduled one, or
+    /// the window coming back): install what it leaves ready once it ends.
+    AfterCheck,
+    /// Installing already.
+    Already,
+    /// Nothing to install.
+    Nothing,
+}
+
+/// **What "Restart to update" does in `s`** (a toast, the tray, a restart
+/// that waited for a dictation). A check doesn't refuse it: the found
+/// update stays found while Yap checks for a newer one. Pure.
+fn restart_step(s: &Inner) -> Restart {
+    match s.phase {
+        Phase::Ready => Restart::Install,
+        Phase::Available => Restart::Download,
+        Phase::Downloading => Restart::Queue,
+        Phase::Checking if s.update.is_some() || s.payload.is_some() => Restart::AfterCheck,
+        Phase::Installing => Restart::Already,
+        Phase::Idle | Phase::Checking => Restart::Nothing,
+    }
 }
 
 /// Why a restart can't happen while Yap is `busy` (said to the person), or
@@ -997,8 +1052,16 @@ fn open_release(app: &AppHandle) {
 /// open), not the launch itself. Read before `init`, which clears the marker.
 #[cfg_attr(debug_assertions, allow(dead_code))] // read by release builds' launch
 pub fn relaunch_after_update() -> bool {
-    let rec = record();
-    !rec.restart_from.is_empty() && now().saturating_sub(rec.restart_at) < 3600
+    is_update_relaunch(&record(), now(), current_version())
+}
+
+/// The record says Yap left `restart_from` for the installer within the
+/// hour, and this is another version: the installer's relaunch. The same
+/// version is the person opening Yap again after an installer that never
+/// ran (UAC said no, it failed): an ordinary launch. Pure.
+#[cfg_attr(debug_assertions, allow(dead_code))]
+fn is_update_relaunch(rec: &Record, now: u64, current: &str) -> bool {
+    !rec.restart_from.is_empty() && rec.restart_from != current && now.saturating_sub(rec.restart_at) < 3600
 }
 
 /// Start the scheduler (and confirm a just-finished update). Call at the end
@@ -1506,6 +1569,35 @@ mod tests {
         assert_eq!(tray_item(), None);
         assert!(!tray_badge());
         assert_eq!(tray_note(), None);
+    }
+
+    #[test]
+    fn a_restart_asked_during_a_check_waits_for_it_instead_of_being_refused() {
+        // A scheduled check (or the window coming back) runs while the
+        // update is downloaded: "Restart to update", or a restart waiting
+        // for the dictation to end, goes ahead once the check is done.
+        let checking = Inner { phase: Phase::Checking, payload: Some(vec![1]), ..ready("0.1.2") };
+        assert_eq!(restart_step(&checking), Restart::AfterCheck);
+        // Nothing was found before the check: nothing to restart to.
+        assert_eq!(restart_step(&Inner { phase: Phase::Checking, ..Inner::new() }), Restart::Nothing);
+        assert_eq!(restart_step(&Inner::new()), Restart::Nothing);
+        assert_eq!(restart_step(&ready("0.1.2")), Restart::Install);
+        assert_eq!(restart_step(&Inner { phase: Phase::Available, ..ready("0.1.2") }), Restart::Download);
+        assert_eq!(restart_step(&Inner { phase: Phase::Downloading, ..ready("0.1.2") }), Restart::Queue);
+        assert_eq!(restart_step(&Inner { phase: Phase::Installing, ..ready("0.1.2") }), Restart::Already);
+    }
+
+    #[test]
+    fn a_launch_after_an_installer_that_never_ran_is_an_ordinary_launch() {
+        let at = now() - 60;
+        let left = |from: &str| Record { restart_from: from.into(), restart_at: at, ..Record::default() };
+        // The installer's relaunch: the new version, within the hour.
+        assert!(is_update_relaunch(&left("0.0.1"), now(), "0.0.2"));
+        // The installer didn't run (UAC said no, it failed) and the person
+        // opened Yap again: the same version, so its window shows as usual.
+        assert!(!is_update_relaunch(&left("0.0.2"), now(), "0.0.2"));
+        assert!(!is_update_relaunch(&Record { restart_at: at - 3600, ..left("0.0.1") }, now(), "0.0.2"), "over an hour on");
+        assert!(!is_update_relaunch(&Record::default(), now(), "0.0.2"));
     }
 
     #[test]
