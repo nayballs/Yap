@@ -907,7 +907,10 @@ one side.
   aside), for the rich set their ids and hashes and their markdown ("change
   only those blocks (edit_document…)"), for the simple set their markdown
   to copy `edit_note`'s old_text from, for a model without tools the words.
-  The question keeps it (`ChatMessage.quote {noteId, text}`, ≤ 600
+  The words go as the model's room holds (`selected::room`: 4,000
+  characters, 12,000 from a 32K context, as text selected in another app),
+  said when they're only the start (18 Nov 2026: 400 whatever the model, so
+  a model without tools rewrote a long passage's first lines). The question keeps it (`ChatMessage.quote {noteId, text}`, ≤ 600
   characters; `chats::set_quote`), shown above it, and the history the
   model reads later says it (`ChatMessage::sent_text`: "(About this passage
   of "…": "…")"). An older Yap's save drops `quote`: the question stays,

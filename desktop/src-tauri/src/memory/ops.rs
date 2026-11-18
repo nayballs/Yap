@@ -259,6 +259,21 @@ fn list_of(v: &Value, keys: &[&str]) -> Vec<String> {
         .collect()
 }
 
+/// **The changes in a pass's reply, when it could be read** ([`parse_changes`]):
+/// `None` for a reply that says nothing (empty: a reasoning model that spent
+/// its whole reply thinking) or whose JSON is cut off or broken (a local
+/// model stopped at its cap mid-JSON) — never the same as "nothing to
+/// change" (18 Nov 2026: both marked the chat read for good). A reply in
+/// words with no JSON at all ("Nothing to remember.") is nothing to change.
+/// Pure.
+pub fn read_changes(reply: &str) -> Option<Vec<Change>> {
+    let t = reply.trim();
+    if t.is_empty() || json_in(t).is_none() && (t.contains('{') || t.contains('[')) {
+        return None;
+    }
+    Some(parse_changes(t))
+}
+
 /// The changes in a model's reply: `{"changes": [...]}` (or `ops`,
 /// `memory`, a bare array), each `{action, id?, section?, name?, about?,
 /// facts?, add_facts?, remove_facts?, say?}` — lenient about the keys and
@@ -1084,6 +1099,14 @@ mod tests {
         assert!(parse_changes("{\"changes\": []}").is_empty());
         assert!(parse_changes("Nothing to remember.").is_empty());
         assert_eq!(parse_changes("[{\"action\":\"add\",\"section\":\"profile\",\"facts\":[\"Nurse\"]}]").len(), 1);
+        // 18 Nov 2026: a reply that says nothing, or whose JSON is cut off,
+        // isn't "nothing to change" (the pass leaves the chat unread).
+        assert_eq!(read_changes(""), None);
+        assert_eq!(read_changes("\n "), None);
+        assert_eq!(read_changes("{\"changes\": [{\"action\": \"add\", \"facts\": [\"Lives in"), None);
+        assert_eq!(read_changes("{\"changes\": []}"), Some(Vec::new()));
+        assert_eq!(read_changes("Nothing to remember."), Some(Vec::new()));
+        assert_eq!(read_changes(reply).map(|c| c.len()), Some(3));
     }
 
     #[test]

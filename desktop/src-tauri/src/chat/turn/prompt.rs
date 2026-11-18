@@ -360,7 +360,7 @@ impl Prompt {
         // this"): which document and blocks, and that a change goes there only
         // — in place of `steer`'s line (the selection says where). A model
         // without tools hears what was selected.
-        let selected = selection.and_then(|s| crate::chat::documents::selection_note(s, g.tools.then_some(g.doc_tools)));
+        let selected = selection.and_then(|s| crate::chat::documents::selection_note(s, g.tools.then_some(g.doc_tools), crate::chat::assistant::selected::room(context_size)));
         // **Text selected in another app** (`assistant/selected.rs`): what was
         // selected and where, as much as the model's context has room for.
         let selected = selected.or_else(|| {

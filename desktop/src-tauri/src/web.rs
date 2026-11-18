@@ -662,18 +662,43 @@ pub fn search_chip(query: &str, found: &Found, s: &Settings) -> String {
     }
 }
 
+/// What ends the newest message when only its start fits ([`fit_history`]).
+pub const HISTORY_CUT: &str = "… [the rest of this message is left out]";
+
 /// The newest messages of a conversation that fit `budget` tokens, in
-/// order (the fixed pipeline keeps an 8k model's prompt in bounds). Pure.
+/// order (the fixed pipeline keeps an 8k model's prompt in bounds) — and
+/// when the newest alone is too long, its start, cut to fit and marked so
+/// ([`HISTORY_CUT`]), never no history at all (18 Nov 2026: a long answer
+/// before "and the second one?" left the small model with nothing to go
+/// on; as `chat/budget.rs` `plan` keeps the newest whenever they fit). Pure.
 pub fn fit_history(history: &[(String, String)], budget: usize) -> Vec<(String, String)> {
+    let tokens = crate::meetings::summary::estimate_tokens;
     let mut used = 0;
     let mut kept: Vec<(String, String)> = Vec::new();
     for (role, text) in history.iter().rev() {
-        let t = crate::meetings::summary::estimate_tokens(text) + 4;
+        let t = tokens(text) + 4;
         if used + t > budget {
             break;
         }
         used += t;
         kept.push((role.clone(), text.clone()));
+    }
+    if kept.is_empty() {
+        if let Some((role, text)) = history.last() {
+            // Its start, a little less each time until it fits beside the mark.
+            let room = budget.saturating_sub(4 + tokens(HISTORY_CUT));
+            let chars: Vec<char> = text.trim_end().chars().collect();
+            let mut n = chars.len().min(room * 4);
+            while n > 0 && tokens(&chars[..n].iter().collect::<String>()) > room {
+                n = n * 9 / 10;
+            }
+            let start: String = chars[..n].iter().collect();
+            // (At a word's end, when it's whole.)
+            let start = if n < chars.len() { start.rsplit_once(char::is_whitespace).map_or(start.as_str(), |(a, _)| a) } else { start.as_str() }.trim_end();
+            if !start.is_empty() {
+                kept.push((role.clone(), format!("{start}{HISTORY_CUT}")));
+            }
+        }
     }
     kept.reverse();
     kept
@@ -737,14 +762,23 @@ pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
     let model = s.native.as_ref().map_or("", |n| n.model.as_str());
     // A deeper search (a document's) says more and opens more pages: kept apart.
     let deep = s.native.as_ref().is_some_and(|n| n.deep);
+    // The question too, not only its game: it picks the free source for a
+    // query that says nothing itself, the weather's place, the provider's
+    // summary (18 Nov 2026: "Tarnwick" searched for a price was kept as
+    // "prices aren't covered" for "What is Tarnwick?").
+    let asked = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        context.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase().hash(&mut h);
+        h.finish()
+    };
     let key = format!(
-        "{}|{:?}|{model}|{deep}|{}|{}|{}|{}",
+        "{}|{:?}|{model}|{deep}|{}|{}|{}|{asked:x}",
         ep.cache_scope(),
         backend(s),
         s.lang,
         s.country.as_deref().unwrap_or(""),
         query.to_lowercase(),
-        game_for(context).map_or("", |g| g.game)
     );
     if let Some((at, found)) = SEARCHES.lock().unwrap_or_else(|p| p.into_inner()).get(&key) {
         if at.elapsed() < CACHE_FOR {
@@ -1186,6 +1220,25 @@ mod tests {
         assert_eq!(shown[0].site, "site2.example");
     }
 
+    /// **The same query for another question** (18 Nov 2026): the free
+    /// sources are picked by the question when the query says nothing
+    /// ("Tarnwick" for a price, then for what it is) — the cache kept the
+    /// first's "prices aren't covered" for the second, which was told
+    /// nothing was searched and not to search again.
+    #[tokio::test]
+    async fn a_cached_search_is_the_same_questions_only() {
+        let (s, ep) = (settings(""), offline());
+        let price = search(&s, &ep, "Tarnwick", "How much is a Tarnwick subscription?").await.unwrap();
+        let prices = Some(Handoff { query: "Tarnwick".into(), why: sources::Why::NotCovered(sources::NotCovered::Prices) });
+        assert_eq!(price.handoff, prices);
+        // The same question again: the cache's.
+        assert_eq!(search(&s, &ep, "Tarnwick", "How much is a Tarnwick subscription?").await.unwrap().handoff, prices);
+        // Another question with the same query: looked up for itself (here,
+        // offline, the free sources can't be reached) — never the prices'.
+        let what = search(&s, &ep, "Tarnwick", "What is Tarnwick?").await;
+        assert!(what.as_ref().map_or(true, |f| f.handoff != prices), "{:?}", what.map(|f| f.handoff));
+    }
+
     #[test]
     fn the_history_beside_web_passages_keeps_the_newest_that_fit() {
         let history: Vec<(String, String)> =
@@ -1194,6 +1247,21 @@ mod tests {
         assert!(!kept.is_empty() && kept.len() < 10);
         assert_eq!(kept.last(), history.last());
         assert!(kept.iter().map(|(_, t)| crate::meetings::summary::estimate_tokens(t) + 4).sum::<usize>() <= 200);
+        // 18 Nov 2026: the newest alone too long (a long answer before "and
+        // the second one?"): its start, cut to fit and marked so — before,
+        // no history at all.
+        let answer = format!("Three trails near Kellbrook: the first is the river loop. {}", "The second climbs the ridge past the old quarry. ".repeat(80));
+        let history = vec![("user".to_string(), "Which trails are near Kellbrook?".to_string()), ("assistant".to_string(), answer.clone())];
+        let kept = fit_history(&history, 200);
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(kept[0].0, "assistant");
+        assert!(kept[0].1.starts_with("Three trails near Kellbrook: the first is the river loop.") && kept[0].1.ends_with(HISTORY_CUT), "{}", kept[0].1);
+        assert!(crate::meetings::summary::estimate_tokens(&kept[0].1) + 4 <= 200);
+        // A whole word before the mark.
+        assert!(answer.contains(kept[0].1.trim_end_matches(HISTORY_CUT)));
+        assert!(kept[0].1.trim_end_matches(HISTORY_CUT).ends_with(|c: char| c.is_alphanumeric() || c == '.'));
+        // No room at all: nothing.
+        assert!(fit_history(&history, 10).is_empty());
     }
 
     /// The real keyless lookup, read-only, no key: Wikipedia and bg3.wiki.
