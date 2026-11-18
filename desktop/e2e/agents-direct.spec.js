@@ -58,6 +58,7 @@ import { newCodeChat, toSide } from './support/code-chats.js';
 import { writePng } from './support/png.js';
 import { startFakeWeb, FORT_JOY_URL, LEVELING_URL, BASKET_URL, BASKET_APP } from './support/fake-web.js';
 import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine, turnParts, notesAfter, workOf, turnPictures, todosIn, lastRead, cardPart, thoughtFor } from '../src/lib/core/agents.js';
+import { messageTurn } from '../src/lib/core/agents.js';
 import { panelRows, panelGroups, panelTotals } from '../src/lib/core/agentPanel.js';
 import { workingLine } from '../src/lib/core/working.js';
 import { sayingOver, questionAnswers, questionsAnswered } from '../src/lib/core/agentNow.js';
@@ -2795,6 +2796,19 @@ test('core/agents.js: a turn in parts at the messages it read, its thinking in o
   expect(cardPart(parts, 'chat:9:7')).toBe('chat:9:1');
   expect(cardPart(turnParts(events.slice(0, 5), ['chat:9:1']), undefined)).toBeNull();
   expect(cardPart([], undefined)).toBeNull();
+});
+
+// 18 Nov 2026: a turn that failed before Claude Code started (signed out, say) has no end in the session, and every
+// message after it read "Can't rewind past a message from before this version of Yap".
+test('core/agents.js: a turn that never reached Claude Code is no Rewind point; one from before Yap kept turn ends is', () => {
+  const t = (n, startedTs, endUuid, messageId) => ({ n, direct: true, status: 'done', startedTs, endUuid, messageId });
+  const agent = (turnList) => [{ conversation: 9, status: 'done', turnList }];
+  // Turn 2 failed before it started (no end of its own): Rewind to turn 3 branches at turn 1's end.
+  const failedEarly = agent([t(1, 5, 'u1', 'chat:9:0'), { ...t(2, 0, null, 'chat:9:2'), status: 'failed' }, t(3, 9, 'u3', 'chat:9:4')]);
+  expect(messageTurn(failedEarly, 9, 'chat:9:4').rewind).toBe('');
+  // A turn that ran but whose end Yap didn't keep (an older Yap's): still no guess.
+  const old = agent([t(1, 5, null, 'chat:9:0'), t(2, 9, 'u2', 'chat:9:2')]);
+  expect(messageTurn(old, 9, 'chat:9:2').rewind).toBe("Can't rewind past a message from before this version of Yap");
 });
 
 test('core/agents.js: the Code chat’s own session at work is what the message box’s ■ stops', () => {
