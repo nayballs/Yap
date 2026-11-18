@@ -2295,7 +2295,7 @@ mod tests {
         assert_eq!(heard_as(ROBOT_MARK, false), Heard::Act);
         assert_eq!(heard_as(UNHEARD_MARK, false), Heard::Act);
         // Three marks, all different.
-        assert!(OWN_MARK != ROBOT_MARK && OWN_MARK != UNHEARD_MARK);
+        const { assert!(OWN_MARK != ROBOT_MARK && OWN_MARK != UNHEARD_MARK) };
     }
 
     #[test]
