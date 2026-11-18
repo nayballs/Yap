@@ -1061,7 +1061,7 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
   // Its panel: a row a turn, the newest first, both finished.
   await expect(tab(main).getByTestId('chat-agent-row')).toHaveCount(2);
   await expect(tab(main).getByTestId('chat-agent-row').first()).toHaveAttribute('data-turn', '2');
-  await expect(tab(main).locator('[data-testid="chat-agent-group"][data-group="finished"] [data-testid="chat-agent-group-head"]')).toHaveText('Finished · 2');
+  await expect(tab(main).locator('[data-testid="chat-agent-group"][data-group="finished"] [data-testid="chat-agent-group-head"]')).toHaveText('Finished today · 2');
   await expect(rowAt(main, 1).getByTestId('chat-agent-row-title')).toHaveText('Add a watering schedule');
   await expect(rowAt(main, 2).getByTestId('chat-agent-row-title')).toHaveText('Add a minimap button');
   // Its whole timeline: a section a turn.

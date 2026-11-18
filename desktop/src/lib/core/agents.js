@@ -211,6 +211,8 @@ const stepOf = (e, step) => ({
   back: null,
   // A helper's own steps, when this step handed part of the work over (`workOf`).
   helped: [],
+  // How many more of them a full log's cut took (agents/store.rs `log_cut`: its row still counts them).
+  helpedGone: Number(e.helped) || 0,
   ts: Number(e.ts) || 0,
 });
 
@@ -895,9 +897,12 @@ const stepsWord = (n) => (n === 1 ? '1 step' : n > 0 ? `${n} steps` : 'No steps'
  * **A turn's helpers** (12 Nov 2026): Claude Code's own subagents, one for
  * each part its session handed over — the Agent panel's entries under the
  * turn's row, as Claude Code's own app lists a session's subagents. Each
- * `{key, title, steps, status, line, ts}` (`ts`: when it was handed over, unix seconds): its hand-over's words ("Check the
- * docs"), its own steps (`workOf`'s `helped`), `status` working (not back
- * yet, the turn still going: `live`), done or failed, and the line it's on
+ * `{key, title, steps, count, status, line, ts}` (`ts`: when it was handed over, unix seconds): its hand-over's words ("Check the
+ * docs"), its own steps (`workOf`'s `helped`; `count`, how many it took,
+ * those a full log's cut took too), `status` working (not back
+ * yet, the turn still going: `live` — one sent in the background, or
+ * paused for work of its own, stays so till its task ends: agents/runner.rs
+ * `background_ended`), done or failed, and the line it's on
  * while it works, else how many steps it took. Pure.
  */
 export function helpersOf(events, live = false) {
@@ -907,13 +912,32 @@ export function helpersOf(events, live = false) {
     for (const st of item.steps) {
       if (stepKind(st) !== 'helper') continue;
       const steps = st.helped || [];
+      const count = steps.length + (Number(st.helpedGone) || 0);
       const status = st.back === 'failed' ? 'failed' : st.back || !live ? 'done' : 'working';
       const title = String(st.step || '').replace(/^Handing part of it to a helper(?: · )?/, '').trim() || 'A helper';
-      const line = status === 'working' ? steps.at(-1)?.step || 'Starting' : status === 'failed' ? `Didn't finish · ${stepsWord(steps.length).toLowerCase()}` : stepsWord(steps.length);
-      out.push({ key: st.calls[0] || `helper-${out.length + 1}`, title, steps, status, line, ts: Number(st.ts) || 0 });
+      const line = status === 'working' ? steps.at(-1)?.step || 'Starting' : status === 'failed' ? `Didn't finish · ${stepsWord(count).toLowerCase()}` : stepsWord(count);
+      out.push({ key: st.calls[0] || `helper-${out.length + 1}`, title, steps, count, status, line, ts: Number(st.ts) || 0 });
     }
   }
   return out;
+}
+
+/**
+ * **How many steps a turn took** (the Agent panel's finished row: "Opus 5.5 ·
+ * 12 steps"): its session's own (a helper's are its row's), the same plain
+ * line twice in a row once, as its work lists them. Pure.
+ */
+export function stepCount(events) {
+  let n = 0;
+  let last = '';
+  for (const e of events || []) {
+    const step = typeof e?.step === 'string' ? e.step.trim() : '';
+    if (!step || e.under) continue;
+    const plain = !e.file && !e.command;
+    if (!(plain && step === last)) n++;
+    last = plain ? step : '';
+  }
+  return n;
 }
 
 /**

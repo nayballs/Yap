@@ -39,7 +39,7 @@
 //   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 //   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 //   DEALINGS IN THE SOFTWARE.
-import { isLive, turnsOf, todosOf, helpersOf, statusWord, turnStatusWord, planWaitsNow, planNotUsed, PLAN_NOT_USED, money, modeLabel, modelLabel, titleOf } from './agents.js';
+import { isLive, turnsOf, todosOf, helpersOf, stepCount, statusWord, turnStatusWord, planWaitsNow, planNotUsed, PLAN_NOT_USED, money, modeLabel, modelLabel, titleOf } from './agents.js';
 import { effortLabel } from './effort.js';
 
 /** Tokens as the panel says them: "980", "12k", "1.2M". */
@@ -235,10 +235,13 @@ export function rowPose(state, turn, unused = false) {
  * Code's own app lists a session's subagents. What it was asked, the step
  * it's on (then how many it took), its steps when opened. Its usage is its
  * turn's: no stats of its own. `seq`: its place among its turn's helpers.
+ * One sent in the background (or paused for work of its own) is at work
+ * till its task's end says it's back (core/agents.js `helpersOf`).
  */
-function helperRow(agent, t, h, seq) {
+function helperRow(agent, t, h, seq, now) {
   const status = h.status === 'working' ? 'running' : h.status === 'failed' ? 'failed' : 'done';
   const tone = modeTone(t.mode || agent.mode);
+  const back = Number(helperBack(h, t.events)?.ts) || 0;
   return {
     key: `${agent.id}:${t.n}:${h.key}`,
     kind: 'helper',
@@ -273,11 +276,17 @@ function helperRow(agent, t, h, seq) {
     cost: 0,
     estimated: false,
     pay: agent.pay || 'plan',
-    secs: 0,
+    secs: helperSecs(h, t.events, now),
     events: [],
+    // Its turn's (its clock and its report: `helperSecs`, `helperReport`).
+    turnEvents: t.events || [],
     helpers: [],
     files: 0,
     commands: commandCount(h.steps),
+    steps: Number(h.count ?? h.steps.length) || 0,
+    startedTs: Number(h.ts) || 0,
+    // Back: its "back" event's; an older log's says none — its turn's end.
+    endedTs: status === 'running' ? 0 : back || Number(t.endedTs) || Number(h.ts) || 0,
     createdTs: Number(agent.createdTs) || 0,
   };
 }
@@ -334,9 +343,13 @@ export function panelRows(agents, { logs = {}, steps = {}, now = Date.now() / 10
       pay: 'plan',
       secs: 0,
       events: [],
+      turnEvents: [],
       helpers: [],
       files: 0,
       commands: 0,
+      steps: 0,
+      startedTs: 0,
+      endedTs: 0,
       createdTs: Number.MAX_SAFE_INTEGER,
       unused: false,
       dismissed: false,
@@ -349,7 +362,7 @@ export function panelRows(agents, { logs = {}, steps = {}, now = Date.now() / 10
     const asked = (approvals || []).find((a) => a?.run === agent.id) ?? null;
     for (const t of turns) {
       if (t.direct && !own) {
-        helpersOf(t.events, isLive(t.status)).forEach((h, i) => rows.push(helperRow(agent, t, h, i)));
+        helpersOf(t.events, isLive(t.status)).forEach((h, i) => rows.push(helperRow(agent, t, h, i, now)));
         continue;
       }
       if (t.dismissed && !dismissed) continue;
@@ -403,6 +416,9 @@ export function panelRows(agents, { logs = {}, steps = {}, now = Date.now() / 10
         helpers: helpersOf(t.events, live),
         files: t.files?.length ?? 0,
         commands: commandCount(t.events),
+        steps: stepCount(t.events),
+        startedTs: Number(t.startedTs) || 0,
+        endedTs: live ? 0 : Number(t.endedTs) || 0,
         createdTs: Number(agent.createdTs) || 0,
       });
     }
@@ -410,12 +426,17 @@ export function panelRows(agents, { logs = {}, steps = {}, now = Date.now() / 10
   return rows;
 }
 
-/** The groups' order and names. */
+/**
+ * The groups' order and names (18 Nov 2026, the maintainer's tidy panel, after
+ * the Claude app's agents panel): what waits on the person, what works now
+ * and what's next at the top; then what finished today — what finished
+ * before today folds behind one line (`finishedByDay`).
+ */
 export const GROUPS = [
   ['needs', 'Needs you'],
   ['running', 'Running'],
-  ['finished', 'Finished'],
   ['queued', 'Queued'],
+  ['finished', 'Finished today'],
 ];
 
 /** The group a row shows in: its state's, a dismissed one shown again in Finished. */
@@ -425,6 +446,108 @@ export const groupOf = (r) => (r.dismissed ? 'finished' : r.state);
 export function panelGroups(rows) {
   const newestFirst = [...(rows || [])].sort((a, b) => b.createdTs - a.createdTs || (b.n ?? 0) - (a.n ?? 0) || (b.seq ?? 0) - (a.seq ?? 0));
   return GROUPS.map(([id, label]) => ({ id, label, rows: newestFirst.filter((r) => groupOf(r) === id) })).filter((g) => g.rows.length);
+}
+
+// ---- Finished, by day (18 Nov 2026) ----
+//
+// The maintainer's Code chat listed "Finished · 92": every agent and helper
+// back to days before, each a card of four lines. Now what finished today
+// shows as compact rows, and everything before folds behind one quiet line
+// ("Show 89 earlier ›") that opens to them grouped by day — nothing deleted,
+// each row still opening to its own view.
+
+/** **When a row finished** (unix seconds): its end, else its start, else its agent's making (an older record says none). */
+export const finishedAt = (r) => Number(r?.endedTs) || Number(r?.startedTs) || (Number(r?.createdTs) < Number.MAX_SAFE_INTEGER ? Number(r?.createdTs) || 0 : 0);
+
+const two = (n) => String(n).padStart(2, '0');
+
+/** **A day on this PC's clock** (local time), as a key: "2026-11-16". */
+export function dayKey(ts) {
+  const d = new Date((Number(ts) || 0) * 1000);
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+}
+
+/** The local day before `ts`'s, as a key. */
+const dayBefore = (ts) => {
+  const d = new Date((Number(ts) || 0) * 1000);
+  return dayKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1, 12).getTime() / 1000);
+};
+
+/** **A day as the panel names it** (`now`: unix seconds): "Today", "Yesterday", "Mon 16 Nov", and its year when not this one ("Tue 30 Dec 2025"). */
+export function dayLabel(ts, now = Date.now() / 1000) {
+  const key = dayKey(ts);
+  if (key === dayKey(now)) return 'Today';
+  if (key === dayBefore(now)) return 'Yesterday';
+  const d = new Date((Number(ts) || 0) * 1000);
+  const words = `${d.toLocaleDateString('en-GB', { weekday: 'short' })} ${d.getDate()} ${d.toLocaleDateString('en-GB', { month: 'short' })}`;
+  return d.getFullYear() === new Date(now * 1000).getFullYear() ? words : `${words} ${d.getFullYear()}`;
+}
+
+/**
+ * **Finished rows by day** (`now`: unix seconds, local days): `{today,
+ * earlier: [{key, label, rows}], count}` — what finished today, then each
+ * day before it, newest day first, every row in the order it came
+ * (`panelGroups`'s); `count` how many are earlier. A row that says no time
+ * at all is earlier's, under the oldest day. Pure.
+ */
+export function finishedByDay(rows, now = Date.now() / 1000) {
+  const today = dayKey(now);
+  const days = new Map();
+  const out = { today: [], earlier: [], count: 0 };
+  for (const r of rows || []) {
+    const at = finishedAt(r);
+    const key = at ? dayKey(at) : '';
+    if (key === today) {
+      out.today.push(r);
+      continue;
+    }
+    if (!days.has(key)) days.set(key, { key, label: at ? dayLabel(at, now) : 'Earlier', rows: [] });
+    days.get(key).rows.push(r);
+    out.count++;
+  }
+  // Newest day first ("" — no time said — last).
+  out.earlier = [...days.values()].sort((a, b) => (a.key === '' ? 1 : b.key === '' ? -1 : b.key.localeCompare(a.key)));
+  return out;
+}
+
+/**
+ * **Whether the earlier days are open** (`opened`: the day they were opened on,
+ * a `dayKey`, per chat): only on the day they were opened — a new day folds
+ * them again, yesterday's with them.
+ */
+export const earlierOpen = (opened, now = Date.now() / 1000) => !!opened && opened === dayKey(now);
+
+/** "1 step", "12 steps". */
+const stepsWords = (n) => (n === 1 ? '1 step' : `${n} steps`);
+
+/**
+ * **A finished row in two lines** (as the Claude app's agents panel): its
+ * second line's parts — `who` ("Opus 5.5"; a helper's "Helper"), `what`
+ * ("5/5 done", "12 steps", "Didn't finish · …", "Plan not used"), `stats`
+ * ("≈ $2.37 · 4:53") — its mark (`done` ✓, `failed` ✕, else none), and
+ * its thin bar only where it adds something: to-dos left undone. Pure.
+ */
+export function compactOf(r) {
+  const who = r.kind === 'helper' ? 'Helper' : r.modelWord || r.modeWord || 'Agent';
+  const c = todoCounts(r.todos);
+  let what = r.line || '';
+  const plainDone = r.status === 'done' && !r.unused && r.state !== 'needs';
+  if (r.kind === 'turn' && c.total && plainDone && c.done === c.total) what = `${c.done}/${c.total} done`;
+  else if (r.kind === 'turn' && !c.total && plainDone && (what === 'Done' || !what)) what = r.steps ? stepsWords(r.steps) : 'Done';
+  const parts = [];
+  const cost = costWords(r.cost, { pay: r.pay, estimated: r.estimated });
+  if (cost) parts.push(cost);
+  if (r.startedTs > 0 && r.secs > 0) parts.push(fmtClock(r.secs));
+  const mark = r.unused ? '' : r.status === 'done' ? 'done' : r.status === 'failed' ? 'failed' : '';
+  const bar = r.progress?.kind === 'todos' && r.progress.value < 1;
+  return { who, what, stats: parts.join(' · '), mark, bar };
+}
+
+/** **How long a row has worked, to `now`** (its live clock; a finished row's own). */
+export function liveSecs(r, now = Date.now() / 1000) {
+  if (r?.kind === 'helper') return helperSecs(r.helper, r.turnEvents, now);
+  if (r?.kind === 'turn') return turnSecs(r.turn, now);
+  return Number(r?.secs) || 0;
 }
 
 /**
