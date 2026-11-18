@@ -60,11 +60,59 @@ export function colour(hex, fallback = [128, 128, 128]) {
 }
 
 /**
- * A made-up picture: `shape` ("circle", "square", "triangle", "stripes")
- * in `color` on `background`, `width` × `height` (at most 2000 each). For a
- * script's workspace: nothing from outside. Pure but for the codec.
+ * A 5 × 7 pixel font for a made-up picture's `word` (18 Nov 2026: a picture
+ * whose word only reading it tells, for the `shots-as-files` script): A–Z and
+ * 0–9, each seven rows of five ("#" on).
  */
-export function drawPng({ width = 320, height = 200, shape = 'circle', color = '#d1495b', background = '#edf2f4' } = {}) {
+const GLYPHS = {
+  A: '.###.,#...#,#...#,#####,#...#,#...#,#...#', B: '####.,#...#,#...#,####.,#...#,#...#,####.',
+  C: '.###.,#...#,#....,#....,#....,#...#,.###.', D: '####.,#...#,#...#,#...#,#...#,#...#,####.',
+  E: '#####,#....,#....,####.,#....,#....,#####', F: '#####,#....,#....,####.,#....,#....,#....',
+  G: '.###.,#...#,#....,#.###,#...#,#...#,.####', H: '#...#,#...#,#...#,#####,#...#,#...#,#...#',
+  I: '.###.,..#..,..#..,..#..,..#..,..#..,.###.', J: '..###,...#.,...#.,...#.,...#.,#..#.,.##..',
+  K: '#...#,#..#.,#.#..,##...,#.#..,#..#.,#...#', L: '#....,#....,#....,#....,#....,#....,#####',
+  M: '#...#,##.##,#.#.#,#.#.#,#...#,#...#,#...#', N: '#...#,#...#,##..#,#.#.#,#..##,#...#,#...#',
+  O: '.###.,#...#,#...#,#...#,#...#,#...#,.###.', P: '####.,#...#,#...#,####.,#....,#....,#....',
+  Q: '.###.,#...#,#...#,#...#,#.#.#,#..#.,.##.#', R: '####.,#...#,#...#,####.,#.#..,#..#.,#...#',
+  S: '.####,#....,#....,.###.,....#,....#,####.', T: '#####,..#..,..#..,..#..,..#..,..#..,..#..',
+  U: '#...#,#...#,#...#,#...#,#...#,#...#,.###.', V: '#...#,#...#,#...#,#...#,#...#,.#.#.,..#..',
+  W: '#...#,#...#,#...#,#.#.#,#.#.#,#.#.#,.#.#.', X: '#...#,#...#,.#.#.,..#..,.#.#.,#...#,#...#',
+  Y: '#...#,#...#,.#.#.,..#..,..#..,..#..,..#..', Z: '#####,....#,...#.,..#..,.#...,#....,#####',
+  0: '.###.,#...#,#..##,#.#.#,##..#,#...#,.###.', 1: '..#..,.##..,..#..,..#..,..#..,..#..,.###.',
+  2: '.###.,#...#,....#,...#.,..#..,.#...,#####', 3: '####.,....#,....#,.###.,....#,....#,####.',
+  4: '...#.,..##.,.#.#.,#..#.,#####,...#.,...#.', 5: '#####,#....,####.,....#,....#,#...#,.###.',
+  6: '.###.,#....,#....,####.,#...#,#...#,.###.', 7: '#####,....#,...#.,..#..,.#...,.#...,.#...',
+  8: '.###.,#...#,#...#,.###.,#...#,#...#,.###.', 9: '.###.,#...#,#...#,.####,....#,....#,.###.',
+};
+
+/**
+ * Whether pixel (`x`, `y`) of a `w` × `h` picture is in `word` written
+ * across its middle (letters and digits; anything else a space), as wide as
+ * fits in `room` pixels. Pure.
+ */
+export function inWord(word, x, y, w, h, room) {
+  const text = String(word ?? '').toUpperCase();
+  if (!text) return false;
+  // Each glyph 5 wide and a gap of 1: the scale that fits the room, 7 rows tall at most a fifth of the picture.
+  const scale = Math.max(1, Math.floor(Math.min(room / (text.length * 6 - 1), h / 5 / 7)));
+  const left = Math.floor((w - (text.length * 6 - 1) * scale) / 2);
+  const top = Math.floor((h - 7 * scale) / 2);
+  const col = Math.floor((x - left) / scale);
+  const row = Math.floor((y - top) / scale);
+  if (x < left || y < top || row >= 7 || col >= text.length * 6) return false;
+  const glyph = GLYPHS[text[Math.floor(col / 6)]];
+  const c = col % 6;
+  return Boolean(glyph) && c < 5 && glyph.split(',')[row][c] === '#';
+}
+
+/**
+ * A made-up picture: `shape` ("circle", "square", "triangle", "stripes")
+ * in `color` on `background`, `width` × `height` (at most 2000 each), with
+ * `word` written across its middle in `wordColor` when it's given. For a
+ * script's workspace or message box: nothing from outside. Pure but for the
+ * codec.
+ */
+export function drawPng({ width = 320, height = 200, shape = 'circle', color = '#d1495b', background = '#edf2f4', word = '', wordColor = '#ffffff' } = {}) {
   const w = Math.max(8, Math.min(2000, Math.round(width)));
   const h = Math.max(8, Math.min(2000, Math.round(height)));
   const fg = colour(color, [209, 73, 91]);
@@ -88,9 +136,12 @@ export function drawPng({ width = 320, height = 200, shape = 'circle', color = '
         return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
     }
   };
+  const ink = colour(wordColor, [255, 255, 255]);
+  // (Within the shape's middle: 1.6 × its radius wide.)
+  const room = shape === 'stripes' ? w * 0.8 : r * 1.6;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const [cr, cg, cb] = inside(x + 0.5, y + 0.5) ? fg : bg;
+      const [cr, cg, cb] = word && inWord(word, x, y, w, h, room) ? ink : inside(x + 0.5, y + 0.5) ? fg : bg;
       const i = (y * w + x) * 4;
       data[i] = cr;
       data[i + 1] = cg;

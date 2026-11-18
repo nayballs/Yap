@@ -779,6 +779,17 @@
   screenshot's thumbnails at the device pixels Chat draws it at, a few sizes
   each, deleted with it (and by the sweep once it's gone); not in Download
   your data, not in Settings' count.
+- A Code chat's screenshots as files (18 Nov 2026, `agents/shots.rs`):
+  `%APPDATA%/yap/code-shots/` — a folder per Code chat
+  (`<chat id>-<its createdTs>/`: a reused id's folder is another chat's)
+  holding a copy of each screenshot sent to its Claude Code
+  (`shot-<n>.png`, numbered as they came), so Claude can read one or hand
+  its path to a helper; the folder is on the chat's runs as `--add-dir`.
+  Beside it, `<chat id>-<createdTs>.json` (`{shots: [{n, id}]}`: which
+  picture in `chat-images/` each is). A copy goes when its picture does,
+  the folder with its chat; all of them with Delete all… and Delete some
+  of your data → Chats. Not in Download your data (copies of
+  `chat-images/`'s), never logged.
 - History: `%APPDATA%/yap/history.json` (local-only; cleared from Settings → Privacy & data → History,
   kept always, 24 hours or not at all). Since 2026-10-29 a new entry has `secs`, how long it was
   spoken for (its audio's length); an older Yap drops it when it saves history, which only leaves
