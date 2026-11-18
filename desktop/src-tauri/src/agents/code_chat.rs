@@ -122,8 +122,9 @@ pub fn became(conversation: u64, path: &str) {
 /// reports: its agents keep no chat (`store::detach`).
 pub fn chat_deleted(conversation: u64) {
     set(conversation, None);
-    // (Nor keep its + menu's folders and servers off.)
+    // (Nor keep its + menu's folders and servers off, nor its screenshots' files.)
     super::menu::chat_deleted(conversation);
+    super::shots::chat_deleted(conversation);
     let detached = store::detach(conversation);
     if detached > 0 {
         tracing::info!(agents = detached, "Agents: a chat deleted, its agents keep no chat");
