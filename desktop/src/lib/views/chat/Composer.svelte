@@ -177,11 +177,15 @@
   // **/clear, /compact and /model are Yap's to do** in a Code chat (17 Nov 2026, the Claude Code app's; codeMenu.svelte.js
   // `codeCommand`, agents/slash.rs), picked from the menu or typed — in a Code chat that works directly; anywhere else,
   // and every other "/", the words go as typed. /model switches the chat's model chip, effort kept; with no name, the
-  // picker opens.
+  // picker opens. /clear and /compact are Yap's with screenshots, files or a quote in the box too (18 Nov 2026: Claude
+  // Code 2.1.296 runs either whatever the message carries, and drops the rest); those stay in the box for the next
+  // message.
   /** Enter or Send. */
   function submit(opts) {
     if (agentsAsked()) return agentsCommand();
-    const cmd = code?.current && !chat.attached.length && !chat.files.length && !chat.quote && !chat.sending ? codeCommand(chat.input) : null;
+    const more = chat.attached.length || chat.files.length || chat.quote;
+    const asked = code?.current && !chat.sending ? codeCommand(chat.input) : null;
+    const cmd = asked && (!more || asked.name !== 'model') ? asked : null;
     if (!cmd) return chat.send(opts);
     if (cmd.name === 'model') return modelCommand(cmd.arg);
     if (cmd.name === 'clear') return clearCommand(opts);

@@ -56,8 +56,9 @@ export function codeCommand(text) {
   if (!m) return null;
   const name = m[1].toLowerCase();
   const arg = (m[2] || '').trim();
-  // (/clear takes nothing: "/clear the cache" is words for Claude.)
-  if (name === 'clear' && arg) return null;
+  // (/clear takes nothing, but words after it are still a /clear: Claude Code 2.1.296 clears its context on "/clear
+  // the cache" — 18 Nov 2026 — so Yap does too, its own way, rather than send words that end the session's memory.)
+  if (name === 'clear') return { name, arg: '' };
   return { name, arg };
 }
 

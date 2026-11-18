@@ -224,7 +224,8 @@ pub struct Agent {
     pub report_message_id: Option<String>,
     /// Its log and pictures are gone (7 days after it ended).
     pub swept: bool,
-    /// The diff lines its log has so far (`diff::AGENT_MAX` at most).
+    /// The diff lines its log has so far, every turn's (each turn's own:
+    /// [`TurnNote::diff_lines`], the cap's).
     pub diff_lines: u32,
     /// **Its turns** (2026-11-07: one agent per Code chat): each request to
     /// it — its brief, each follow-up — and what came of it. A field of its
@@ -393,6 +394,13 @@ pub struct TurnNote {
     /// Its words were longer than Yap keeps (`words::MAX`), and cut there.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub words_cut: bool,
+    /// **The diff lines its log has** (`diff::TURN_MAX` at most a turn, 18 Nov
+    /// 2026: the cap was the agent's, and a Code chat is one agent for days,
+    /// so its later edits showed no diff at all). A field of the turn's own: an
+    /// older Yap drops it on its save, and a Continue of the turn then counts
+    /// afresh.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub diff_lines: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub plan: bool,

@@ -1746,7 +1746,8 @@ struct Follow {
     line: String,
     /// Edit and Write calls whose diff goes out once they're back.
     changes: HashMap<String, Change>,
-    /// Diff lines the agent's log has (across its turns; `diff::AGENT_MAX`).
+    /// Diff lines this turn's log has (`diff::TURN_MAX`), from what its note
+    /// kept (a Continue goes on from there).
     diff_used: usize,
     /// The helper's call the message being read was made under (its
     /// `parent_tool_use_id`): its steps say so (`AgentEvent::under`).
@@ -1917,7 +1918,7 @@ impl Follow {
             todos: Vec::new(),
             line: String::new(),
             changes: HashMap::new(),
-            diff_used: agent.diff_lines as usize,
+            diff_used: agent.turn_list.iter().find(|t| t.n == n).map_or(0, |t| t.diff_lines as usize),
             under: None,
             helpers: HashSet::new(),
             pictures: 0,
@@ -2299,10 +2300,16 @@ impl Follow {
             result.and_then(|r| diff::of_patch(&change.file, "edit", r)).or_else(|| diff::of_edit(&change.tool, &change.input, &change.file))
         };
         let Some(d) = d else { return };
-        let (d, kept) = diff::capped(d, diff::AGENT_MAX.saturating_sub(self.diff_used));
+        // (The turn's own cap: a long Code chat's later edits show theirs.)
+        let (d, kept) = diff::capped(d, diff::TURN_MAX.saturating_sub(self.diff_used));
         self.diff_used += kept;
-        let used = self.diff_used as u32;
-        if let Some(agent) = store::touch(&self.id, |j| j.diff_lines = used) {
+        let (used, n) = (self.diff_used as u32, self.n);
+        if let Some(agent) = store::touch(&self.id, |j| {
+            j.diff_lines = j.diff_lines.saturating_add(kept as u32);
+            if let Some(t) = j.turn_mut(n) {
+                t.diff_lines = used;
+            }
+        }) {
             emit(&AgentEvent { diff: Some(d), call: Some(call.to_string()).filter(|c| !c.is_empty()), ..self.event(&agent) });
         }
     }
@@ -4132,6 +4139,47 @@ mod tests {
         assert!(kept <= super::super::output::TURN_MAX && kept > super::super::output::TURN_MAX / 2, "{kept}");
     }
 
+    /// **A long Code chat's later edits show their own diffs** (18 Nov 2026):
+    /// the cap is a turn's, never the agent's — a Code chat is one agent for
+    /// days, and once its earlier turns had shown 2,000 lines, every later
+    /// edit's diff was empty ("…N more lines"). One huge turn still can't
+    /// flood the page: its own share, and a Continue goes on from what it kept.
+    #[test]
+    fn a_long_code_chats_later_turn_shows_its_own_diffs_within_its_own_cap() {
+        use serde_json::json;
+        let id = store::new_id();
+        let folder = PathBuf::from(format!(r"D:\Projects\seed-tracker-{id}"));
+        let earlier = |n: u32| store::TurnNote { n, status: Status::Done, started_ts: 5, direct: true, diff_lines: 900, ..Default::default() };
+        // Three earlier turns showed 2,700 lines between them: past the old cap of 2,000 an agent.
+        let turns = vec![earlier(1), earlier(2), earlier(3), store::TurnNote { n: 4, status: Status::Running, started_ts: 9, direct: true, ..Default::default() }];
+        store::insert(Agent { id: id.clone(), folder: "seed-tracker".into(), path: folder.to_string_lossy().into_owned(), status: Status::Running, started_ts: 5, diff_lines: 2_700, turn_list: turns, ..Default::default() });
+        let agent = store::get(&id).unwrap();
+        let mut follow = Follow::new(&agent, 4, folder.clone(), Mode::Auto, 200_000, None);
+        let notes = folder.join("notes.md").to_string_lossy().into_owned();
+        follow.on_tool("toolu_edit_4", "Edit", &json!({ "file_path": notes, "old_string": "two beds", "new_string": "three beds" }));
+        follow.on_tool_result("toolu_edit_4", false, "The file has been updated.", None);
+        let diffs = |id: &str| store::log_read(id).into_iter().filter_map(|e| e.get("diff").cloned()).collect::<Vec<_>>();
+        assert_eq!(diffs(&id)[0]["lines"], json!(["-two beds", "+three beds"]), "turn 4's own diff, whole");
+        let saved = store::get(&id).unwrap();
+        assert_eq!((saved.turn_list[3].diff_lines, saved.diff_lines), (2, 2_702), "the turn's count, and every turn's");
+        // A huge turn: its own share, then "…N more lines" — never more than its cap.
+        let big: String = (0..600).map(|i| format!("row {i}\n")).collect();
+        for i in 0..20 {
+            let call = format!("toolu_write_{i}");
+            follow.on_tool(&call, "Write", &json!({ "file_path": folder.join(format!("big{i}.csv")).to_string_lossy(), "content": big }));
+            follow.on_tool_result(&call, false, "File created successfully", None);
+        }
+        let shown: usize = diffs(&id).iter().map(|d| d["lines"].as_array().map_or(0, Vec::len)).sum();
+        assert_eq!(shown, diff::TURN_MAX, "the turn's cap, whole");
+        assert!(diffs(&id).last().unwrap()["more"].as_u64().unwrap() > 0, "the rest counted");
+        // A Continue of the same turn goes on from what it kept: nothing more.
+        let again = Follow::new(&store::get(&id).unwrap(), 4, folder.clone(), Mode::Auto, 200_000, None);
+        assert_eq!(again.diff_used, diff::TURN_MAX);
+        // The next turn starts its own.
+        store::update(&id, |j| j.turn_list.push(store::TurnNote { n: 5, status: Status::Running, started_ts: 12, direct: true, ..Default::default() }));
+        assert_eq!(Follow::new(&store::get(&id).unwrap(), 5, folder, Mode::Auto, 200_000, None).diff_used, 0);
+    }
+
     /// Its words as they're written: the message so far, told at once, then
     /// at most every [`SAYING_EVERY`]; a helper's are never its own; the
     /// whole message (or a new one starting) ends what was being written.
@@ -4724,6 +4772,71 @@ mod tests {
         assert_eq!(follow.outcome.as_ref().map(|(s, t)| (*s, t.as_str())), Some((Status::Done, "")));
         assert_eq!(with_state(|s| s.live.get(&id).map(|l| (l.taken, l.unread()))), Some((1, 0)), "its message taken in");
         test_live(&id, None);
+    }
+
+    /// **A CronCreate job holds no turn open** (2.1.296, as recorded, 18 Nov
+    /// 2026): no task, nothing on Claude Code's list, so the answer ends the
+    /// turn; its input closed, Claude Code exits before the job ever runs.
+    /// Played by the stand-in.
+    #[tokio::test]
+    async fn a_scheduled_job_holds_no_turn_open() {
+        use crate::ai::claude_code::session::{stand_in, Spec};
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ai/claude_code/fixtures/2.1.296/real-cron.jsonl");
+        let first = "Remind me every minute to water the beds.";
+        let (id, _) = at_work(first);
+        let dir = std::env::temp_dir().join(format!("yap-runner-{id}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (program, env) = stand_in(&script);
+        let mut spec = Spec::new(&dir, Pay::Plan);
+        spec.env = env;
+        spec.replay_user_messages = true;
+        let (session, mut rx) = Session::start_with(&program, spec).unwrap();
+        let session = Arc::new(session);
+        with_state(|s| s.live.get_mut(&id).unwrap().session = Some(Arc::clone(&session)));
+        session.send_user(first, &[]).unwrap();
+        let agent = store::get(&id).unwrap();
+        let mut follow = Follow::new(&agent, 1, dir.clone(), Mode::Auto, 200_000, None);
+        let mut after = Vec::new();
+        let code = loop {
+            match tokio::time::timeout(Duration::from_secs(30), rx.recv()).await.expect("the stand-in in time") {
+                Some(Event::Exited(code)) => break code,
+                None => break None,
+                Some(ev) => {
+                    let result = matches!(ev, Event::Result(_));
+                    follow.on(ev, &session);
+                    if result {
+                        after.push((follow.input_over_at.is_some(), waiting(&id).is_some(), follow.bg.pending()));
+                    }
+                }
+            }
+        };
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(after, [(true, false, false)], "answered, nothing in the background: its input ends");
+        assert_eq!(code, Some(0), "it exits by itself, the job with it");
+        assert_eq!(follow.outcome.as_ref().map(|(_, t)| t.as_str()), Some("Scheduled: every minute I'll remind you to water the beds."));
+        test_live(&id, None);
+    }
+
+    /// **A scheduled job's run is no wake-up's** (18 Nov 2026, found with the
+    /// recording above): both are a turn of Claude Code's own bracketed by
+    /// `command_lifecycle`, and `Background::on_lifecycle` takes the earliest
+    /// wake-up as the one that started — so a CronCreate job running while
+    /// the turn waits for a wake-up 10 minutes off let that wake-up go, and,
+    /// nothing else out, the turn ended before it. Only a wake-up that's due
+    /// is the one starting. Left ignored: the fix is `runner/background.rs`'s,
+    /// held for the Agent panel tidy's PR (#187) to land first.
+    #[test]
+    #[ignore = "runner/background.rs: on_lifecycle takes a wake-up that isn't due yet (fix after #187 lands)"]
+    fn a_scheduled_jobs_run_never_takes_a_wake_up_not_due() {
+        use serde_json::json;
+        let mut bg = Background::default();
+        let due = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64 + 10 * 60 * 1000;
+        bg.on_call("toolu_wake", background::WAKE_TOOL, &json!({ "delaySeconds": 600 }));
+        bg.on_call_back("toolu_wake", false, Some(&json!({ "scheduledFor": due })));
+        assert!(bg.pending(), "the wake-up waits");
+        // A CronCreate job's run starts now, 10 minutes before the wake-up is due.
+        bg.on_lifecycle(true);
+        assert!(bg.pending(), "the wake-up still waits: that run was the job's");
     }
 
     /// **"/cost" sent while a turn works** (2.1.296, as recorded): never
