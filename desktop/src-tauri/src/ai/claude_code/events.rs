@@ -168,13 +168,24 @@ pub enum Task {
         task_type: String,
         /// `is_backgrounded`: it goes on past its call (and its turn).
         background: bool,
-        /// `owned_by_subagent`: a helper's own, not the session's.
+        /// `owned_by_subagent`: a helper's own command (a helper's own
+        /// helper doesn't say it: it has `parent_task_id`, `spawn_depth` 2).
         by_helper: bool,
+        /// `parent_task_id`: the helper's task that started it (none: the
+        /// session's own).
+        parent: Option<String>,
+        /// `spawn_depth` (a helper's: 1 the session's own, 2 a helper's;
+        /// 0 when not said).
+        depth: u64,
     },
     /// `task_updated`: `patch.status` when it says one.
     Updated { task_id: String, status: Option<String> },
     /// `task_notification`: it ended (`completed`, `stopped`, …), with
-    /// Claude Code's words about it (a helper's: what it came back with).
+    /// Claude Code's words about it (a helper's: what it came back with). A
+    /// helper's `completed` may be **interim** (2.1.296): it ended its turn
+    /// with background work of its own still running, and when that work
+    /// ends it's started again — the same task id, a new `task_started` —
+    /// and notifies again.
     Notice { task_id: String, tool_use_id: String, status: String, summary: String },
     /// `background_tasks_changed`: the tasks in the background now (ids).
     Background { tasks: Vec<String> },
@@ -685,6 +696,8 @@ pub fn from_value(v: Value) -> Event {
                 task_type: str_of(&v, "task_type").to_string(),
                 background: v.get("is_backgrounded").and_then(Value::as_bool).unwrap_or(false),
                 by_helper: v.get("owned_by_subagent").and_then(Value::as_bool).unwrap_or(false),
+                parent: opt_str(&v, "parent_task_id").filter(|p| !p.is_empty()),
+                depth: u64_of(&v, "spawn_depth"),
             })),
             "task_updated" => Some(Event::Task(Task::Updated {
                 task_id: str_of(&v, "task_id").to_string(),
@@ -1477,7 +1490,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             tasks[1],
-            &Task::Started { task_id: "a4f1c9e27b3d50816".into(), tool_use_id: "toolu_01SeedHelper".into(), task_type: "local_agent".into(), background: true, by_helper: false },
+            &Task::Started { task_id: "a4f1c9e27b3d50816".into(), tool_use_id: "toolu_01SeedHelper".into(), task_type: "local_agent".into(), background: true, by_helper: false, parent: None, depth: 1 },
         );
         // The helper's own command: a task too, its own, never in the background.
         assert!(matches!(tasks[2], Task::Started { background: false, by_helper: true, .. }));

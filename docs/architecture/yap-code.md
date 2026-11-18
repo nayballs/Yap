@@ -1941,7 +1941,18 @@ ids made up):
   while a turn works joins it at its next tool call's end (one result).
   `ScheduleWakeup`'s turn has no origin: `command_lifecycle` `started` and
   `completed` bracket it, and its call's record says when it's due
-  (`scheduledFor`). Monitor isn't among 2.1.296's tools in a `-p` run.
+  (`scheduledFor`). Monitor wasn't offered in a plain `-p` run.
+- **A helper's own background work** (recorded 18 Nov 2026,
+  `fixtures/2.1.296/real-background-nested.jsonl`): a helper's own helper
+  says `parent_task_id` and `spawn_depth` 2 (no `owned_by_subagent`); its
+  own background commands say `owned_by_subagent`, `parent_task_id` and
+  `is_backgrounded`; the list names each one's parent. A helper that ends
+  its turn with that work running notifies `completed` — **interim**: it
+  drops off the list while its work stays on it; its work's notices go to
+  the session (each a turn of the session's own), not to it; when its own
+  work ends it's started again (listed again, a new `task_started` with
+  the same task id) and notifies again. Between its last command ending
+  and it starting again the list is empty for about 5 ms.
 - **What went wrong.** Yap closed the input at the answer and ended the
   process 15 seconds later (`EXIT_GRACE`), the work with it. On the next
   message Claude Code, resumed, said the task `stopped` and — before it
@@ -1961,13 +1972,35 @@ ids made up):
   message was even echoed back — is nothing at all ("Agents: a turn of
   Claude Code's own with nothing in it…" in the log).
 - **Work left in the background is waited for** (`runner/background.rs`
-  `Background`): a start is the session's own call asking for it, made a
-  task by Claude Code (`task_started` naming that call, backgrounded, not a
-  helper's own); an end is its `task_notification` or the background list no
-  longer naming it; a wake-up is due when its record says and done when
-  Claude Code's own turn starts (one 5 minutes past due with none is let
-  go). A Claude Code that says nothing of its tasks has none here: nothing
-  waits, as before.
+  `Background`):
+  - **while Claude Code's own list** (its latest `background_tasks_changed`)
+    names anything (18 Nov 2026);
+  - **while a task Claude Code started in the background runs**: the
+    session's own (its call's `run_in_background` says what it is) and its
+    helpers' own — their helpers and background commands, which count
+    under them (the line says "1 helper", never its six), never as the
+    session's own;
+  - **a helper's `completed` with work of its own still running is
+    interim**: it stays, paused, off the list, till it's started again and
+    notifies with nothing of its own left, or has had nothing left for 30
+    s without starting again (`PAUSE_GRACE`, `Background::settle`). From a
+    Code chat whose lead helper paused for six helpers of its own and a
+    watcher (18 Nov 2026): Yap took its first notice for its end, never
+    counted the watcher, and ended the process 15 s after the sixth helper
+    reported, 8 s before the watcher's next tick would have woken it to
+    merge their work;
+  - an end is a task's own notice (a later one for the same task is
+    normal) or the list no longer naming it (a paused helper apart); a
+    wake-up is due when its record says and done when Claude Code's own
+    turn starts (one 5 minutes past due with none is let go). A Claude Code
+    that says nothing of its tasks has none here: nothing waits, as before.
+  - **Its input ended** (a note never read, a stop), the process is ended
+    15 s on only once nothing is listed or paused: Claude Code exits by
+    itself when its own work is done. The log says why each input ended
+    and each process was ended ("Agents: its input ends", "Agents: ending
+    its process", with the counts), and at debug each task's start
+    (`task_type`, `is_backgrounded`, `owned_by_subagent`, `parent_task_id`,
+    `spawn_depth`), each list's size and each notice — ids and counts only.
   - **Answered with work still out** (`After::Background`), the input stays
     open and `EXIT_GRACE` doesn't apply; the turn stays at work (■ in the
     box, "Claude is working" on the bar) and the lead's line says what for:
@@ -3705,10 +3738,15 @@ app: `{with, name, program, args, commandLine, rel, line}`, nothing started).
   answer, answered with work out it waits — its line, a helper's steps
   never the line's, its row back with the notice's words, the answer from
   what came back on —, the 45-minute ask and Keep waiting, a to-do left in
-  progress stopped (`runner`), and both recordings played by the stand-in
+  progress stopped (`runner`), and the recordings played by the stand-in
   through the runner's own following (`the_stand_in_resumed_after_a_stopped_task_and_with_a_helper_in_the_background`:
   the empty turn leaves the input open, the waits, the process ending by
-  itself).
+  itself). A helper's own work (18 Nov 2026, `real-background-nested.jsonl`):
+  waited for while Claude Code lists anything, an interim notice while a
+  child runs still pending, a later one with nothing left its end, a paused
+  helper never started again done after the grace, its helpers and
+  commands counted under it, and the stand-in's run waiting through every
+  pause till the merge is the answer.
 - **E2E** ([`docs/e2e-tests.md`](../e2e-tests.md)): the scripted fake AI calls
   `start_agent`, and Claude Code is the build's own stand-in (`yap.exe
   fake-claude <script>`, switched per turn with `e2e_claude_script`), whose
