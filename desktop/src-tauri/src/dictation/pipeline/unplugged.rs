@@ -90,6 +90,40 @@ pub(crate) struct Lost {
     next: Option<String>,
 }
 
+/// **A dictation that ended because its mic was disconnected**: the mic,
+/// for the alert said once ([`Unplug::take`]), and — apart from it — that
+/// its paste goes to its own window or the clipboard ([`Unplug::ended`])
+/// until its transcription is over ([`Unplug::done`]). Until 2026-11-18 one
+/// `Option<Lost>` was both: a transcription and cleanup longer than
+/// [`TELL_WITHIN`] had the alert said meanwhile, which took it, and the
+/// paste after it went into whatever had the focus. Pure.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Unplug {
+    lost: Option<Lost>,
+    ended: bool,
+}
+
+impl Unplug {
+    pub(crate) fn lost(lost: Lost) -> Unplug {
+        Unplug { lost: Some(lost), ended: true }
+    }
+
+    /// Its paste goes to its own window only.
+    pub(crate) fn ended(&self) -> bool {
+        self.ended
+    }
+
+    /// The mic, for the alert: once.
+    pub(crate) fn take(&mut self) -> Option<Lost> {
+        self.lost.take()
+    }
+
+    /// Its transcription is over (pasted, left on the clipboard, or nothing).
+    pub(crate) fn done(&mut self) {
+        self.ended = false;
+    }
+}
+
 /// "Contoso H2 disconnected" — what became of the dictation, and which
 /// microphone the next one uses (`next`: its name; `None`: none is
 /// connected).
@@ -131,7 +165,7 @@ impl Shared {
             OnLost::Transcribe => {
                 tracing::warn!(samples, "Dictation: the microphone was disconnected; transcribing what it heard");
                 if let Ok(mut u) = self.unplugged.lock() {
-                    *u = Some(Lost { device: device.to_string(), next });
+                    *u = Unplug::lost(Lost { device: device.to_string(), next });
                 }
                 self.stop_and_transcribe();
                 // The paste says it (`tell_unplugged`); anything else, once
@@ -174,11 +208,12 @@ impl Shared {
     /// This dictation ended because its microphone was disconnected: its
     /// paste goes to its own window only.
     pub(super) fn unplugged(&self) -> bool {
-        self.unplugged.lock().map(|u| u.is_some()).unwrap_or(false)
+        self.unplugged.lock().map(|u| u.ended()).unwrap_or(false)
     }
 
     /// Say, once, that this dictation's mic was disconnected and what became
-    /// of its words. `false`: it wasn't (or it's been said).
+    /// of its words. `false`: it wasn't (or it's been said). Its paste stays
+    /// its own window's ([`Unplug::ended`]) either way.
     pub(super) fn tell_unplugged(&self, outcome: Outcome) -> bool {
         let Some(lost) = self.unplugged.lock().ok().and_then(|mut u| u.take()) else {
             return false;
@@ -208,6 +243,25 @@ mod tests {
         assert_eq!(on_lost(false, true, false, true, 48_000), OnLost::Ignore);
         assert_eq!(on_lost(true, false, false, true, 48_000), OnLost::Ignore);
         assert_eq!(on_lost(true, true, true, true, 48_000), OnLost::Ignore);
+    }
+
+    /// A transcription and cleanup longer than TELL_WITHIN: the alert goes
+    /// meanwhile ("kept what it heard"), and until 2026-11-18 that took the
+    /// one flag the paste asked too — which then went into whatever had the
+    /// focus, not its own window or the clipboard.
+    #[test]
+    fn the_alert_said_during_a_long_transcription_leaves_the_paste_its_own_windows() {
+        let lost = Lost { device: "Headset Microphone (Contoso H2)".into(), next: None };
+        let mut u = Unplug::lost(lost);
+        assert!(u.ended());
+        assert!(u.take().is_some(), "the alert, after TELL_WITHIN");
+        assert!(u.ended(), "the paste still goes to its own window or the clipboard");
+        assert!(u.take().is_none(), "said once");
+        // The transcription is over: the next paste (a Command allowed
+        // later, say) is no longer this dictation's.
+        u.done();
+        assert!(!u.ended());
+        assert!(!Unplug::default().ended());
     }
 
     #[test]

@@ -331,7 +331,7 @@ mod platform {
                     w_scan: unit,
                     dw_flags: KEYEVENTF_UNICODE | if up { KEYEVENTF_KEYUP } else { 0 },
                     time: 0,
-                    dw_extra_info: 0,
+                    dw_extra_info: crate::dictation::input_hook::OWN_MARK,
                 },
             },
         }
@@ -368,7 +368,7 @@ mod platform {
                     w_scan: 0,
                     dw_flags: if up { KEYEVENTF_KEYUP } else { 0 },
                     time: 0,
-                    dw_extra_info: 0,
+                    dw_extra_info: crate::dictation::input_hook::OWN_MARK,
                 },
             },
         }
@@ -395,7 +395,7 @@ mod platform {
                     w_scan: (scan & 0xFF) as u16,
                     dw_flags: flags,
                     time: 0,
-                    dw_extra_info: 0,
+                    dw_extra_info: crate::dictation::input_hook::OWN_MARK,
                 },
             },
         }
@@ -417,7 +417,7 @@ mod platform {
                     w_scan: (scan & 0xFF) as u16,
                     dw_flags: flags,
                     time: 0,
-                    dw_extra_info: 0,
+                    dw_extra_info: crate::dictation::input_hook::OWN_MARK,
                 },
             },
         }
@@ -626,6 +626,27 @@ mod platform {
         let sent = send_keys(vec![make_key(vk, false), make_key(vk, true)], key.name());
         thread::sleep(Duration::from_millis(20));
         sent
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Every key Yap sends carries its mark, so its own keyboard hook
+        /// never takes them for the person's (`input_hook::heard_as`): edit
+        /// mode's Ctrl+C under a second into a held rewrite shortcut made
+        /// the hold a chord, and the recording was dropped.
+        #[test]
+        fn every_key_yap_sends_carries_its_mark() {
+            use crate::pasting::modifiers::Key;
+            let own = crate::dictation::input_hook::OWN_MARK;
+            let extra = |i: INPUT| unsafe { i.union.ki.dw_extra_info };
+            assert_eq!(extra(make_key(VK_C, false)), own, "Ctrl+C, Ctrl+V, Enter, Tab");
+            assert_eq!(extra(make_key(VK_CONTROL, true)), own);
+            assert_eq!(extra(make_key_scanned(VK_INSERT, false, unsafe { GetKeyboardLayout(0) })), own, "a terminal's paste keys");
+            assert_eq!(extra(make_modifier(Key { vk: 0xA2, up: true, extended: false })), own, "a held modifier let go around them");
+            assert_eq!(extra(make_unicode(u16::from(b'a'), false)), own, "typing");
+        }
     }
 }
 
@@ -1490,6 +1511,10 @@ pub enum Left {
     /// The keys went, but no app read the text off the clipboard in time
     /// (`read_check.rs`): the paste reached nothing that took it.
     NotRead,
+    /// A paste in slices (`slices.rs`) stopped because another window came
+    /// to the front partway (the person went to another app, a dialog came
+    /// up): the rest never goes there ([`slices_go_on`]).
+    FocusMoved,
 }
 
 impl Left {
@@ -1510,6 +1535,10 @@ impl Left {
                 "Couldn't paste · it's copied, press Ctrl+V",
                 "The app didn't take the paste, so your dictation is on the clipboard: click where it goes and press Ctrl+V.",
             ),
+            Left::FocusMoved => (
+                "Paste stopped · the rest is copied, press Ctrl+V",
+                "Another window came to the front while Yap was pasting, so the rest of your dictation is on the clipboard: click where it goes and press Ctrl+V.",
+            ),
         };
         crate::notices::alert::Alert {
             kind: "pasteBlocked",
@@ -1528,6 +1557,7 @@ impl Left {
             Left::KeysBlocked => "Left on the clipboard: Windows didn't take the paste keys",
             Left::NoTextBox => "Left on the clipboard: no text box had the focus",
             Left::NotRead => "Left on the clipboard: the app didn't read the paste",
+            Left::FocusMoved => "Partly pasted: another window came to the front, the rest is on the clipboard",
         }
     }
 
@@ -1538,8 +1568,17 @@ impl Left {
             Left::KeysBlocked => "keysBlocked",
             Left::NoTextBox => "noTextBox",
             Left::NotRead => "notRead",
+            Left::FocusMoved => "focusMoved",
         }
     }
+}
+
+/// A paste in slices goes on into the window in front only while it's the
+/// one that was in front for its first slice (`first`; `now`: in front
+/// now). Another app the person went to, or a dialog that came up, never
+/// gets the rest. Pure.
+pub(crate) fn slices_go_on(first: Option<isize>, now: Option<isize>) -> bool {
+    first == now
 }
 
 /// Test mode: a paste fails this way (0 none, 1 keys blocked, 2 no text
@@ -2591,6 +2630,9 @@ fn inject_text_sync(
         if let Some(o) = &offer {
             o.keys_going();
         }
+        // The window the first paste keys go into: a paste in slices goes on
+        // only while it's still in front (`slices_go_on`).
+        let front = current_foreground();
         if let Err(e) = press_paste(target_hwnd, key) {
             warn!("Windows didn't take the paste keys: {e}; the text is left on the clipboard");
             // A sliced paste: the whole text on it, not just its first slice.
@@ -2618,6 +2660,13 @@ fn inject_text_sync(
                 (pasted_at + Duration::from_millis(crate::pasting::slices::PACE_MS)).saturating_duration_since(Instant::now()),
             );
             let rest: String = slices[i..].concat();
+            // Another window in front now (the person went to another app,
+            // a dialog came up): the rest never goes there. (The keys go to
+            // whatever is in front; only robot mode checked it before.)
+            if !slices_go_on(front, current_foreground()) {
+                warn!(slice = i, "Another window came to the front during a paste in slices; the rest is left on the clipboard");
+                return leave_on_clipboard(&rest, None, target_hwnd, Left::FocusMoved);
+            }
             offer = Offer::put(slice, None, private, targets.clone(), open);
             if offer.is_none() && !clip::put_text_verified(slice, private) {
                 warn!(slice = i, "Couldn't put a slice on the clipboard; the rest is left there");
@@ -2818,6 +2867,23 @@ mod tests {
         // when Yap's own had it): as before.
         assert!(submit_goes(None, Some(0x5678)));
         assert!(submit_goes(None, None));
+    }
+
+    /// A long paste into a coding CLI goes in slices, a second or more in
+    /// all: the keys of every slice after the first went to whatever was in
+    /// front (only robot mode checked), so the rest of a dictation landed
+    /// in the app the person had gone to. Now it goes on only into the
+    /// window the first slice went into.
+    #[test]
+    fn a_paste_in_slices_never_goes_on_into_another_window() {
+        assert!(slices_go_on(Some(0x1234), Some(0x1234)));
+        assert!(!slices_go_on(Some(0x1234), Some(0x5678)), "the person went to another app");
+        assert!(!slices_go_on(Some(0x1234), None), "one of Yap's own windows came up");
+        assert!(!slices_go_on(None, Some(0x5678)));
+        assert!(slices_go_on(None, None));
+        // The rest is on the clipboard, and that's said.
+        assert_eq!(Left::FocusMoved.code(), "focusMoved");
+        assert!(Left::FocusMoved.alert().body.contains("the rest of your dictation is on the clipboard"));
     }
 
     #[test]

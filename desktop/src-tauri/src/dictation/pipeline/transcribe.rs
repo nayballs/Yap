@@ -14,13 +14,17 @@ use super::engine::{lease_engine, model_loading, wait_for_model, EngineCell, DIC
 use super::finish::{apply_corrections, as_said_text, finish_dictation};
 use super::{Reran, Shared, DICTATION_ERROR};
 
-/// Clears `capped` when a dictation's transcription is over, however it
+/// Clears `capped`, and an unplugged dictation's hold on its own window
+/// (`Unplug::done`), when a dictation's transcription is over, however it
 /// ends.
 struct ClearCapped(Arc<Shared>);
 
 impl Drop for ClearCapped {
     fn drop(&mut self) {
         self.0.capped.store(false, Ordering::SeqCst);
+        if let Ok(mut u) = self.0.unplugged.lock() {
+            u.done();
+        }
     }
 }
 

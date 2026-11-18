@@ -564,9 +564,9 @@ struct Shared {
     audio_secs: Mutex<Option<f32>>,
     /// The dictation ended because its microphone was disconnected
     /// (`unplugged.rs`): its paste goes to its own window or the clipboard,
-    /// never another, and the person is told once, by what became of it.
-    /// Cleared when the next one starts.
-    unplugged: Mutex<Option<unplugged::Lost>>,
+    /// never another, until its transcription is over, and the person is
+    /// told once, by what became of it. Cleared when the next one starts.
+    unplugged: Mutex<unplugged::Unplug>,
     /// The bar's **Skip cleanup**, while a dictation's AI cleanup takes
     /// longer than usual (`pipeline/slow.rs`).
     skip_cleanup: tokio::sync::Notify,
@@ -777,7 +777,7 @@ impl Pipeline {
             undoing: AtomicBool::new(false),
             audio_id: Mutex::new(None),
             audio_secs: Mutex::new(None),
-            unplugged: Mutex::new(None),
+            unplugged: Mutex::new(unplugged::Unplug::default()),
             skip_cleanup: tokio::sync::Notify::new(),
             capped: AtomicBool::new(false),
         });
