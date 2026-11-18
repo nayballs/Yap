@@ -354,6 +354,31 @@ re-exported by the module, except `local_llm`'s, which callers name
   drag from a window of our own onto a normal-mode copy (31 Oct; not in a suite).
   Not fixable that way: Yap run as administrator still takes no drops from
   Explorer (Windows blocks a drag into a higher-integrity window, UIPI).
+- **`shell/view_fit.rs`** + **`core/viewFit.js`** — the main window's page
+  fills its window, whatever resized it (18 Nov 2026). The maintainer dropped
+  the window into a Snap layouts zone by its title bar, then maximised,
+  minimised and restored it: the page went on drawing (clocks, typing) at the
+  snapped size, the rest of the window the webview's background, until Chat
+  was left and opened again. Programmatic snaps never did it (Win+Left, a
+  quarter by `SetWindowPos`, maximise, minimise, restore, a resize while
+  cloaked, the low memory target); the picture is reproduced exactly by
+  WebView2's own window inside the webview (`Chrome_WidgetWin_1`, in its
+  browser process) left at an older size than the controller's bounds, and
+  **the controller's bounds set again, even unchanged, put it right**. So,
+  besides wry's own resize on `WM_SIZE`: a subclass of the main window fits
+  the webview to its client area again 150 ms after its size settles (a
+  `WM_SIZE` that isn't a minimise, a size change in `WM_WINDOWPOSCHANGED`,
+  `WM_EXITSIZEMOVE` — a Snap layouts drop ends one — or `WM_DPICHANGED`;
+  never minimised or at 0 × 0), and the page checks itself (`viewFit.js`: its
+  `innerWidth` × `devicePixelRatio` told to `main_view_fit` on a resize, the
+  window's focus and every 2 s while it has it; off by more than 3 device
+  pixels twice, 400 ms apart, outside a drag of the window's edge, the webview
+  is fitted again and the log says so at `info`, sizes only). Fitting is
+  `SetBounds` to the client area and wry's container window to the same.
+  Tests: `chat-pages.spec.js` (`e2e_main_view_stale` puts WebView2's window
+  at an older size; `e2e_main_window` minimises, restores or ends a title-bar
+  drag without taking the focus). What the snap itself does to WebView2 was
+  not found.
 - **`shell/webview_memory.rs`** — hidden webviews keep less in memory (2026-10-22):
   a watcher thread reads each window's visibility every 3 s (`target`, pure:
   hidden or minimised → low) and gives an off-screen window's webview

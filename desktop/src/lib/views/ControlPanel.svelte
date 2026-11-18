@@ -9,6 +9,7 @@
   // window-level listeners (in-window hotkey fallback — the WebView2-focus
   // gotcha), auto-save effect, and attention badge must run for the lifetime
   // of the window, not only while the modal is open.
+  import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { onMount } from 'svelte';
@@ -61,6 +62,7 @@
   // Chat narrows it for a panel's room (chatRoom.js).
   import { RAIL_WIDE, RAIL_NARROW, RAIL_SHORTCUT, isRailKey } from '../core/navRail.js';
   import { navRail, railIsNarrow, toggleRail, glided } from '../stores/navRail.svelte.js';
+  import { watchViewFit } from '../core/viewFit.js';
 
   // Home is in this window's chunk; every other view is a chunk of its own,
   // loaded the first time it shows and fetched once the window is idle
@@ -391,6 +393,9 @@
     }).then((u) => uns.push(u));
     refreshMaximized();
     appWindow.onResized(() => refreshMaximized()).then((u) => uns.push(u));
+    // The page laid out at another size than its window (a Snap layouts drop
+    // left it at the snapped size, 18 Nov 2026): fitted again (core/viewFit.js).
+    uns.push(watchViewFit({ invoke, appWindow }));
     return () => uns.forEach((u) => u && u());
   });
 </script>
