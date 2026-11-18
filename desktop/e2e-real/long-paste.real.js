@@ -14,6 +14,12 @@
 //   slices of at most 4,000. Measured here from 1,000 to 64,000 characters
 //   (a plain program, no coding CLI) in both, written to
 //   test-results/real/long-paste.json.
+// - The focus moved to another window partway through (the person went to
+//   another app): the slices still to come never go there — they stay on
+//   the clipboard, and Yap says "Paste stopped · the rest is copied"
+//   (text_injector.rs `slices_go_on`, 2026-11-18). Yap stops by itself:
+//   robot mode's guard, which refuses keys for any window but the paste's
+//   (and so kept them from the other window before then too), never has to.
 import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect } from './support/robot.js';
@@ -120,4 +126,47 @@ test('a long paste arrives whole: Windows Terminal and conhost, 1,000 to 64,000 
   fs.writeFileSync(path.join(OUT, 'long-paste.json'), JSON.stringify(results, null, 2));
   // Every size arrives whole in both.
   for (const r of results) expect(r.intact, JSON.stringify(r)).toBe(true);
+});
+
+test('the focus moved to another window partway through: the rest never goes there, it stays copied, and Yap says so', async ({ robot }) => {
+  const { pad, yap } = robot;
+  const cli = await robot.claudeCode();
+  // The other window: the test pad, with text of its own.
+  await pad.set('box', 'Untouched.');
+  await pad.pastes();
+  const refused = (await yap.invoke('realtest_refusals')).length;
+  // About 8,000 characters: ten slices or more, at least a quarter of a
+  // second apart.
+  const text = sentences(8_000);
+  await cli.focus();
+  const going = yap.invoke('realtest_dictate_text', { text, hwnd: cli.hwnd });
+  // The first slice arrived: the person goes to another window, between it
+  // and the next.
+  await expect
+    .poll(() => pastes(cli.received()).inside.length, { intervals: [20], timeout: 20_000 })
+    .toBeGreaterThanOrEqual(1);
+  await pad.focus('box');
+  const r = await going;
+  expect(r.kind).toBe('terminal (Claude Code in Windows Terminal)');
+  expect(r.leftOnClipboard).toBe(true);
+  expect(r.leftWhy).toBe('focusMoved');
+  // What arrived is the start of the dictation, whole slices of it, and not all.
+  await new Promise((res) => setTimeout(res, 500));
+  const arrived = pastes(cli.received()).inside.join('');
+  expect(arrived.length).toBeGreaterThan(0);
+  expect(arrived.length).toBeLessThan(r.text.length);
+  expect(r.text.startsWith(arrived)).toBe(true);
+  // The rest is on the clipboard (privately, out of Win+V history).
+  const clip = await robot.clipboard('check', r.text.slice(arrived.length));
+  expect(clip.matchesText).toBe(true);
+  expect(clip.private).toBe(true);
+  // Nothing reached the other window.
+  expect(await pad.text('box')).toBe('Untouched.');
+  expect(await pad.pastes()).toEqual([]);
+  // Said once.
+  const said = yap.main.getByRole('status').filter({ hasText: 'Paste stopped · the rest is copied' });
+  await expect(said).toHaveCount(1);
+  await expect(said).toContainText('press Ctrl+V');
+  // Yap stopped by itself: robot mode's guard never had to refuse a key.
+  expect((await yap.invoke('realtest_refusals')).slice(refused)).toEqual([]);
 });

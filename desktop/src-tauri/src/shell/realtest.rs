@@ -108,6 +108,24 @@ pub fn stand_in_editors() -> &'static [String] {
     }
 }
 
+/// Robot mode, when the spec asks (`YAP_REALTEST_OWN_KEYS=1`,
+/// hotkeys.real.js): **Yap's own keys as in real use**. Edit mode's Ctrl+C
+/// goes out when UI Automation finds no selection (into the test's own
+/// windows, as every key), and the keyboard hook hears injected keys the
+/// robot didn't mark for it to miss (`input_hook::robot_only_for`) — so
+/// Yap's own keys meet its hook as they do on the person's PC, where the
+/// hook once took them for the person's. The person's own keys still pass
+/// by. `false` in a normal run and in release builds.
+pub fn own_keys() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        static OWN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *OWN.get_or_init(|| on() && std::env::var("YAP_REALTEST_OWN_KEYS").is_ok_and(|v| v.trim() == "1"))
+    }
+    #[cfg(not(debug_assertions))]
+    false
+}
+
 /// [`gate`], quietly, for reads (the text around the cursor, the window's
 /// title): a normal run, or robot mode and a window the test opened.
 pub fn permits(hwnd: Option<isize>) -> bool {

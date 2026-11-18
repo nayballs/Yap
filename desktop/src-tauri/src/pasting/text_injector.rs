@@ -1947,9 +1947,11 @@ pub(crate) fn say_trouble(copied: Copied) -> Copied {
 ///    clipboard; still busy → it holds the selection, and that's said.
 ///
 /// Test mode never; robot mode only when its spec asks (`robot`:
-/// `realtest_copy_selection`) and into a window the test opened.
+/// `realtest_copy_selection`; or Yap's own keys as in real use,
+/// `realtest::own_keys`) and into a window the test opened.
 pub fn copy_selection(target_hwnd: Option<isize>, robot: bool) -> Copied {
     let nothing = Copied { text: None, trouble: None };
+    let robot = robot || crate::shell::realtest::own_keys();
     let robot_may = robot && crate::shell::realtest::on() && crate::shell::realtest::permits(target_hwnd);
     if crate::shell::e2e::active() && !robot_may {
         info!("e2e: not sending Ctrl+C to another app");

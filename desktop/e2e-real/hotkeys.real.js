@@ -14,18 +14,38 @@
 //   and the next press stops it, nothing lost;
 // - a push-to-talk press that grows into a chord within a second (another
 //   key down while it's held): dropped silently, the other key reaching the
-//   app as a shortcut's would — and a press on its own still dictates.
+//   app as a shortcut's would — and a press on its own still dictates;
+// - Yap's own keys are never the person's (input_hook.rs `OWN_MARK`,
+//   2026-11-18): the rewrite shortcut held with nothing selected — Yap
+//   presses Ctrl+C to read the selection, under a second into the hold —
+//   records to the end and its text is written, never dropped as a chord;
+//   a held combo (Ctrl+Shift+F22) stays held while Yap lets go of its
+//   modifiers around that Ctrl+C and presses them again.
+//
+// This spec's Yap meets its own keys as on the person's PC
+// (`YAP_REALTEST_OWN_KEYS`, shell/realtest.rs `own_keys`): edit mode's
+// Ctrl+C goes out into the test pad when UI Automation finds no selection,
+// and the hook hears injected keys the robot didn't mark — Yap's own
+// included, unless they carry their mark. (Plain robot mode passes every
+// unmarked key by, so it could never see Yap's keys taken for the
+// person's.) Before 2026-11-18 both new tests failed here: the hold was
+// dropped as a chord, and the combo's press ended at Yap's Shift-up.
 import { test, expect } from './support/robot.js';
+import { startFakeLlm } from '../e2e/support/fake-llm.js';
 
 const MIC = { id: 'desk', name: 'Microphone (Contoso Desk Mic)' };
 const F24 = 135; // the suite's dictation hotkey
 const F23 = 134;
+const F22 = 133; // the rewrite shortcut, below
+const LSHIFT = 160;
+const LCTRL = 162;
 const A = 65;
+const WRITTEN = 'Written from what you said.';
 
 test.use({
   robotOptions: {
     name: 'hotkeys',
-    env: { YAP_E2E_MICS: JSON.stringify([MIC]) },
+    env: { YAP_E2E_MICS: JSON.stringify([MIC]), YAP_REALTEST_OWN_KEYS: '1' },
     config: { streamingPartials: false, moreHotkeys: { hotkey: [`kb:${F23}`] } },
   },
 });
@@ -123,4 +143,96 @@ test('a push-to-talk press that grows into a chord within a second is dropped; o
   await robot.hookKeys(`d:${F24},w:1500,u:${F24}`);
   await expect.poll(() => pad.text('box'), { timeout: 20_000 }).toContain('STT stub');
   await idle(robot);
+});
+
+test.describe("the rewrite shortcut held: Yap's own Ctrl+C is never the person's", () => {
+  let llm;
+  test.beforeAll(async ({ robot }) => {
+    // The rewrite's model: nothing selected, so new text is written from
+    // what was said (the stub's transcript) and pasted into the pad.
+    llm = await startFakeLlm();
+    llm.reply('rewrite', () => WRITTEN);
+    await robot.configure({
+      recordingMode: 'pushToTalk',
+      postProcessEnabled: true,
+      ppProvider: 'custom',
+      ppBaseUrl: llm.base,
+      ppModel: 'fake-cleanup',
+      ppApiKey: '',
+      cleanupStyles: false,
+      // Write mode, not the last dictation rewritten in place (the pad had
+      // "STT stub" in it a moment ago).
+      rewriteLastDictation: false,
+    });
+  });
+
+  test.afterAll(async ({ robot }) => {
+    await robot.configure({ editHotkey: '', postProcessEnabled: false, ppBaseUrl: '', rewriteLastDictation: true }).catch(() => {});
+    await robot.yap.invoke('e2e_held_keys', { keys: null }).catch(() => {});
+    await llm?.close();
+  });
+
+  /** The rewrite shortcut bound to `spec`, as the hook has it. */
+  async function bindRewrite(robot, spec, key) {
+    await robot.configure({ editHotkey: spec });
+    await expect.poll(async () => (await bindings(robot)).actions.editHotkey[0]?.key).toBe(key);
+    await idle(robot);
+  }
+
+  test('held with nothing selected: Yap presses Ctrl+C to read the selection, and the hold records to the end', async ({ robot }) => {
+    const { pad } = robot;
+    await bindRewrite(robot, `kb:${F22}`, `keyboard vkey ${F22}`);
+    await pad.set('box', '');
+    const asked = llm.requests.filter((r) => r.kind === 'rewrite').length;
+    const mark = robot.logMark();
+    await robot.hookKeys(`d:${F22}`);
+    // Yap's Ctrl+C (into the pad: nothing selected, nothing copied), well
+    // under a second into the hold.
+    await expect.poll(() => robot.logSince(mark), { timeout: 5_000 }).toContain('Ctrl+C copied nothing');
+    await sleep(400);
+    // Still held, still recording: never "another key" making it a chord.
+    expect((await bindings(robot)).actions.editHotkey[0].active).toBe(true);
+    await expect(capsule(robot)).toBeVisible();
+    expect(robot.logSince(mark)).not.toContain('grew into a chord');
+    await sleep(800);
+    await robot.hookKeys(`u:${F22}`);
+    // Transcribed, the instruction given to the model, its text pasted.
+    await expect.poll(() => pad.text('box'), { timeout: 20_000 }).toBe(WRITTEN);
+    const log = robot.logSince(mark);
+    expect(log).toContain('Recording stopped, transcribing');
+    expect(log).not.toContain('grew into a chord');
+    expect(llm.requests.filter((r) => r.kind === 'rewrite').length).toBe(asked + 1);
+    await idle(robot);
+  });
+
+  test("a held combo (Ctrl+Shift+F22) stays held while Yap lets go of its modifiers around that Ctrl+C", async ({ robot }) => {
+    const { pad } = robot;
+    await bindRewrite(robot, `kb:ctrl+shift+${F22}`, `keyboard ctrl+shift+vkey ${F22}`);
+    await pad.set('box', '');
+    // The person's fingers on Ctrl and Shift (no hook of the person's in a
+    // robot run: robot mode says so), so Yap presses them again after.
+    await robot.yap.invoke('e2e_held_keys', { keys: ['ctrl', 'shift'] });
+    const mark = robot.logMark();
+    try {
+      await robot.hookKeys(`d:${LCTRL},d:${LSHIFT},d:${F22}`);
+      await expect.poll(() => robot.logSince(mark), { timeout: 5_000 }).toContain('Ctrl+C copied nothing');
+      // Let go of for the Ctrl+C and pressed again straight after.
+      expect(robot.logSince(mark)).toContain("Modifiers down before Ctrl+C: let go of around Yap's keys");
+      await sleep(400);
+      // The combo's press goes on: Yap's Shift-up and Ctrl-up never ended it.
+      expect((await bindings(robot)).actions.editHotkey[0].active).toBe(true);
+      await expect(capsule(robot)).toBeVisible();
+      await sleep(800);
+      await robot.hookKeys(`u:${F22},u:${LSHIFT},u:${LCTRL}`);
+      await expect.poll(() => pad.text('box'), { timeout: 20_000 }).toBe(WRITTEN);
+      const log = robot.logSince(mark);
+      expect(log).toContain('Recording stopped, transcribing');
+      expect(log).not.toMatch(/a lone tap|grew into a chord|double-tap/);
+      await idle(robot);
+    } finally {
+      // Whatever happened: no modifier left down on this PC.
+      await robot.hookKeys(`u:${F22},u:${LSHIFT},u:${LCTRL}`).catch(() => {});
+      await robot.yap.invoke('e2e_held_keys', { keys: null });
+    }
+  });
 });
