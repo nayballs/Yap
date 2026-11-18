@@ -809,7 +809,8 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   minutes of talk into an action plan… · Step 2 of 3", "Catching up on the
   meeting: part 3 of 12…", the rendered plan, the AI-setup card, the digests
   so far while recording; over the plan **Edit** / Done — its Markdown in a
-  box, saved as typed —, "Edited", and "2 new lines since this summary ·
+  box, saved as typed (at least every 2 s while typing goes on,
+  `core/typingSave.js`) —, "Edited", and "2 new lines since this summary ·
   **Update**"; its tasks tick in place; Update and Retry ask before writing
   over an edited summary; since 2026-10-25 "Edited · **Back to Yap's
   summary**" — Yap's own version back, the person's ticks kept, a toast with
@@ -904,8 +905,11 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   (`--yap-toast-bottom`); the quiet countdown, "Still in your meeting?" and the quiet stop's
   notice whenever Rust picks the notepad (it's on screen;
   `meetingCheckIn.js`). It has
-  the **in-page hotkey fallback** (dictation, and the meeting shortcut when
-  one is set), config re-read on focus.
+  the **in-page hotkey fallback** (dictation, the meeting shortcut, the Voice
+  Assistant, Ask about the selection, Read aloud, Snip, Copy last, Quick
+  note and the language shortcuts, as the quick note's: Snip, Copy last and
+  the language shortcuts were missing until 2026-11-18), config re-read on
+  focus.
 - **`lib/stores/meetingAudio.svelte.js`** — a meeting note's audio on disk, for the
   Notes view and the notepad alike: `meeting_audio_note` per open note
   (refreshed on `yap-meeting-audio`), the jobs from `yap-meeting-redo`

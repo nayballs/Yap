@@ -83,6 +83,8 @@ test('Edit opens the message in place; Save and send asks the new words, ‹ 1/2
   await input.press('Escape');
   await expect(input).toHaveCount(0);
   await expect(questions(main)).toHaveText(['Ideas for Saturday?', 'What should I wear?']);
+  // The keyboard back in the message box, never left on nothing (18 Nov 2026).
+  await expect(box(main)).toBeFocused();
 
   // New words, Save and send: asked in its place, the old ones set aside.
   await questions(main).first().hover();
@@ -93,6 +95,7 @@ test('Edit opens the message in place; Save and send asks the new words, ‹ 1/2
   await thread(main).getByTestId('chat-edit-save').click();
   await expect(answers(main)).toHaveText(['Visit the museum.']);
   await expect(questions(main)).toHaveText(['Ideas for a rainy Saturday?']);
+  await expect(box(main)).toBeFocused();
   const sent = sentWith(fakeLlm, from, 'Ideas for a rainy Saturday?');
   expect(sent).not.toContain('harbour walk');
   expect(sent).not.toContain('What should I wear?');
