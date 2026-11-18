@@ -5,5 +5,7 @@
 // closing an agent's tab and opening it again — or opening another agent's
 // and coming back — finds it as they left it. Rows start folded, the running
 // one too; a pill or a report card opens its own. Never saved: a new window
-// starts afresh (which rows are dismissed is: agents.json).
-export const panelMemory = $state({ open: {}, folded: {}, dismissed: {} });
+// starts afresh (which rows are dismissed is: agents.json). `earlier` (18 Nov
+// 2026): a chat's work from before today shown ("<chat>" → the day it was
+// opened, a `dayKey`; a new day folds it again).
+export const panelMemory = $state({ open: {}, folded: {}, dismissed: {}, earlier: {} });

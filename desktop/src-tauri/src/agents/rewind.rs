@@ -173,9 +173,13 @@ fn turn_at(conversation: u64, index: usize) -> Result<(Agent, TurnNote), String>
 
 /// Where a session branched before turn `n` starts: the end of the latest
 /// turn kept before it (`Some(None)`: none — a new session), or `None` when
-/// that turn's end isn't known (from before Yap kept it). Pure.
+/// that turn's end isn't known (from before Yap kept it). A turn that never
+/// reached Claude Code (it failed before it started — signed out, the folder
+/// gone — or was stopped while it waited) put nothing in the session: never
+/// the point (18 Nov 2026: one made every later message unrewindable, "from
+/// before Yap kept where each turn ends"). Pure.
 pub(crate) fn point_before(turns: &[TurnNote], n: u32) -> Option<Option<String>> {
-    match turns.iter().filter(|t| t.n < n && !t.rewound).max_by_key(|t| t.n) {
+    match turns.iter().filter(|t| t.n < n && !t.rewound && t.ran()).max_by_key(|t| t.n) {
         None => Some(None),
         Some(t) => t.end_uuid.clone().filter(|u| !u.is_empty()).map(Some),
     }
@@ -394,7 +398,24 @@ mod tests {
     use super::*;
 
     fn turn(n: u32, end: Option<&str>) -> TurnNote {
-        TurnNote { n, end_uuid: end.map(str::to_string), direct: true, ..Default::default() }
+        TurnNote { n, end_uuid: end.map(str::to_string), direct: true, started_ts: 100 + u64::from(n), ..Default::default() }
+    }
+
+    /// **A turn that never reached Claude Code** (18 Nov 2026): one that
+    /// failed before it started (signed out, the folder gone) or was stopped
+    /// while it waited put nothing in the session, so it's never the branch
+    /// point — before, every message after it was "from before Yap kept where
+    /// each turn ends", and couldn't be rewound to.
+    #[test]
+    fn a_turn_that_never_ran_is_no_branch_point() {
+        let never = TurnNote { status: store::Status::Failed, started_ts: 0, ..turn(2, None) };
+        let turns = vec![turn(1, Some("u1")), never, turn(3, Some("u3"))];
+        assert_eq!(point_before(&turns, 3), Some(Some("u1".into())));
+        // Rewound to the failed message itself: the turn before it, as ever.
+        assert_eq!(point_before(&turns, 2), Some(Some("u1".into())));
+        // The chat's first message failed before it started: before the next, a new session.
+        let first_failed = vec![TurnNote { started_ts: 0, ..turn(1, None) }, turn(2, Some("u2"))];
+        assert_eq!(point_before(&first_failed, 2), Some(None));
     }
 
     #[test]

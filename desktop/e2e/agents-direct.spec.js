@@ -58,6 +58,7 @@ import { newCodeChat, toSide } from './support/code-chats.js';
 import { writePng } from './support/png.js';
 import { startFakeWeb, FORT_JOY_URL, LEVELING_URL, BASKET_URL, BASKET_APP } from './support/fake-web.js';
 import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine, turnParts, notesAfter, workOf, turnPictures, todosIn, lastRead, cardPart, thoughtFor } from '../src/lib/core/agents.js';
+import { messageTurn } from '../src/lib/core/agents.js';
 import { panelRows, panelGroups, panelTotals } from '../src/lib/core/agentPanel.js';
 import { workingLine } from '../src/lib/core/working.js';
 import { sayingOver, questionAnswers, questionsAnswered } from '../src/lib/core/agentNow.js';
@@ -170,6 +171,30 @@ const BACKGROUND_HELPER = [
   { type: 'system', subtype: 'background_tasks_changed', tasks: [], session_id: '{{session_id}}' },
   said('h3', [{ type: 'text', text: HELPER_BACK }], 'end_turn'),
   { ...result(HELPER_BACK, 0.02), num_turns: 1, origin: { kind: 'task-notification' } },
+  { _wait_user: true },
+];
+/** 18 Nov 2026, the Agent panel: a helper in the background that works a while — a step of its own, then 9 s — while
+ * the chat waits for it (the maintainer's "Audit goal logic" helper had no Running row). */
+const AUDIT_TITLE = 'Audit the watering rules';
+const AUDIT_STARTED = "I've sent a helper to audit the watering rules; it reports back when it's done.";
+const AUDIT_BACK = 'The audit is back: two watering rules clash.';
+const BACKGROUND_FOR_THE_PANEL = [
+  { _wait_user: true },
+  init(),
+  said('p1', [{ type: 'tool_use', id: 'toolu_audit', name: 'Agent', input: { description: AUDIT_TITLE, prompt: 'Check the watering rules for clashes.', run_in_background: true } }]),
+  { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'p1', task_type: 'local_agent' }], session_id: '{{session_id}}' },
+  { type: 'system', subtype: 'task_started', task_id: 'p1', tool_use_id: 'toolu_audit', description: AUDIT_TITLE, is_backgrounded: true, task_type: 'local_agent', session_id: '{{session_id}}' },
+  toolResult('toolu_audit', 'Async agent launched successfully.'),
+  said('p2', [{ type: 'text', text: AUDIT_STARTED }], 'end_turn'),
+  result(AUDIT_STARTED, 0.01),
+  // The helper's own step meanwhile (its messages say the call that sent it).
+  { ...said('p3', [{ type: 'tool_use', id: 'toolu_rules', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }]), parent_tool_use_id: 'toolu_audit' },
+  { _sleep_ms: 9000 },
+  { ...toolResult('toolu_rules', 'Draft notes'), parent_tool_use_id: 'toolu_audit' },
+  { type: 'system', subtype: 'task_notification', task_id: 'p1', tool_use_id: 'toolu_audit', status: 'completed', output_file: '', summary: 'Two watering rules clash.', session_id: '{{session_id}}' },
+  { type: 'system', subtype: 'background_tasks_changed', tasks: [], session_id: '{{session_id}}' },
+  said('p4', [{ type: 'text', text: AUDIT_BACK }], 'end_turn'),
+  { ...result(AUDIT_BACK, 0.02), num_turns: 1, origin: { kind: 'task-notification' } },
   { _wait_user: true },
 ];
 /** Resumed after background work of its was ended: Claude Code says the task stopped and ends a turn of its own with no
@@ -1067,6 +1092,56 @@ test('work Claude leaves in the background is waited for: its answer, “Waiting
   // The stopped task: one quiet line in that turn's work.
   await expect(thread(main).getByTestId('chat-agent-work-notice')).toHaveText('Background work from before was stopped before it finished');
   await shot(main, '132-background-stopped-line');
+});
+
+// 18 Nov 2026: the maintainer's Code chat said "Waiting for background work (1 helper) · 11m" while its Agent panel had
+// no running row for the helper (its log was full and kept nothing newer: agents/store.rs `log_cut`).
+test('the Agent panel: a helper sent in the background is under Running while it works — its clock, its step, a live bar — then in Finished today once back', async ({ yap, main, shot }) => {
+  test.setTimeout(120_000);
+  await script(yap, BACKGROUND_FOR_THE_PANEL, 'background-for-the-panel');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Audit the watering rules while you tidy the notes.');
+  const agent = await newAgent(yap, before);
+  await expect(thread(main).getByTestId('chat-agent-work')).toContainText('Waiting for background work (1 helper)', { timeout: 20_000 });
+  // The chat's Agent panel (as /agents opens it).
+  await yap.invoke('plugin:event|emit', { event: 'yap-agent-open', payload: { id: agent.id, conversation: agent.conversation } });
+  const helper = tab(main).locator('[data-testid="chat-agent-row"][data-kind="helper"]');
+  await expect(helper).toHaveCount(1, { timeout: 20_000 });
+  await expect(helper).toHaveAttribute('data-state', 'running');
+  await expect(helper).toHaveAttribute('data-variant', 'running');
+  await expect(tab(main).locator('[data-testid="chat-agent-group"][data-group="running"] [data-testid="chat-agent-group-head"]')).toHaveText('Running · 1');
+  await expect(helper.getByTestId('chat-agent-row-title')).toHaveText(AUDIT_TITLE);
+  await expect(helper.getByTestId('chat-agent-row-sub')).toHaveText('Helper');
+  await expect(helper.getByTestId('chat-agent-row-line')).toHaveText('Reading notes.md', { timeout: 10_000 });
+  await expect(helper.getByTestId('chat-agent-row-avatar')).toHaveAttribute('data-pose', 'working');
+  await expect(helper.getByTestId('chat-agent-row-bar')).toHaveAttribute('data-kind', 'live');
+  // Its clock ticks, in the Code teal.
+  const clock = helper.getByTestId('chat-agent-row-clock');
+  await expect(clock).toHaveText(/^0:\d\d$/);
+  const first = await clock.textContent();
+  await expect.poll(() => clock.textContent(), { timeout: 5_000 }).not.toBe(first);
+  await shot(main, '135-background-helper-running');
+  await theme(yap, main, 'dark');
+  await shot(main, '136-background-helper-running-dark');
+  await theme(yap, main, 'light');
+  // Back: Finished today, two lines — Helper · 1 step · its time, a ✓ — and Running gone.
+  await ended(yap, agent.id, 40_000);
+  await expect(helper).toHaveAttribute('data-state', 'finished', { timeout: 10_000 });
+  await expect(helper).toHaveAttribute('data-variant', 'compact');
+  await expect(tab(main).locator('[data-testid="chat-agent-group"][data-group="running"]')).toHaveCount(0);
+  await expect(tab(main).locator('[data-testid="chat-agent-group"][data-group="finished"] [data-testid="chat-agent-group-head"]')).toHaveText('Finished today · 1');
+  await expect(helper.getByTestId('chat-agent-row-line')).toHaveText('1 step');
+  await expect(helper.getByTestId('chat-agent-row-stats')).toHaveText(/^0:\d\d$/);
+  await expect(helper.getByTestId('chat-agent-row-mark')).toHaveText('✓');
+  await shot(main, '137-background-helper-finished');
+  await theme(yap, main, 'dark');
+  await shot(main, '138-background-helper-finished-dark');
+  await theme(yap, main, 'light');
+  // Its own view: what it came back with.
+  await helper.locator('> button.rhead').click();
+  await expect(taskView(main).getByTestId('chat-task-report-text')).toHaveText('Two watering rules clash.');
+  await taskView(main).getByRole('button', { name: 'Close the panel' }).click();
 });
 
 test('core/agents.js: a quiet line of Yap’s own is an item of its own in the work, never a step of a stretch', () => {
@@ -2795,6 +2870,19 @@ test('core/agents.js: a turn in parts at the messages it read, its thinking in o
   expect(cardPart(parts, 'chat:9:7')).toBe('chat:9:1');
   expect(cardPart(turnParts(events.slice(0, 5), ['chat:9:1']), undefined)).toBeNull();
   expect(cardPart([], undefined)).toBeNull();
+});
+
+// 18 Nov 2026: a turn that failed before Claude Code started (signed out, say) has no end in the session, and every
+// message after it read "Can't rewind past a message from before this version of Yap".
+test('core/agents.js: a turn that never reached Claude Code is no Rewind point; one from before Yap kept turn ends is', () => {
+  const t = (n, startedTs, endUuid, messageId) => ({ n, direct: true, status: 'done', startedTs, endUuid, messageId });
+  const agent = (turnList) => [{ conversation: 9, status: 'done', turnList }];
+  // Turn 2 failed before it started (no end of its own): Rewind to turn 3 branches at turn 1's end.
+  const failedEarly = agent([t(1, 5, 'u1', 'chat:9:0'), { ...t(2, 0, null, 'chat:9:2'), status: 'failed' }, t(3, 9, 'u3', 'chat:9:4')]);
+  expect(messageTurn(failedEarly, 9, 'chat:9:4').rewind).toBe('');
+  // A turn that ran but whose end Yap didn't keep (an older Yap's): still no guess.
+  const old = agent([t(1, 5, null, 'chat:9:0'), t(2, 9, 'u2', 'chat:9:2')]);
+  expect(messageTurn(old, 9, 'chat:9:2').rewind).toBe("Can't rewind past a message from before this version of Yap");
 });
 
 test('core/agents.js: the Code chat’s own session at work is what the message box’s ■ stops', () => {

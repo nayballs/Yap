@@ -494,7 +494,12 @@ workspace, word for word, and no model of Chat's is asked.
     the chat's first; the branch is let go once that run's init says its
     own id. **Unavailable while the chat's Claude works** ("Rewind to
     here": "Unavailable while Claude is working", as the app), and past a turn
-    from before Yap kept `end_uuid` (said, never guessed).
+    from before Yap kept `end_uuid` (said, never guessed). A turn that never
+    reached Claude Code (it failed before it started — signed out, the
+    folder gone — or was stopped while it waited: `TurnNote::ran` false)
+    put nothing in the session and is never the branch point
+    (`rewind::point_before`, `core/agents.js` `messageTurn`; 18 Nov 2026:
+    one made every later message "from before this version of Yap").
   - **Fork from here** opens a new Code chat ("<title> (fork)") in the same
     workspace and Mode, with the conversation up to and including that
     message's turn — its answer too (`chats::fork`: the messages copied,
@@ -990,11 +995,22 @@ person's own Claude Code).
 The maintainer said yes to wiring three of Claude Code's own commands to
 Yap's actions, as the Claude Code app does. Picked from Slash commands › or
 typed, then Enter (`Composer.svelte` `submit`, `codeMenu.svelte.js`
-`codeCommand`; never with a screenshot, a file or a passage in the box).
-`/clear` and `/compact` are Yap's only in a Code chat that **works
+`codeCommand`; `/model` never with a screenshot, a file or a passage in
+the box). `/clear` and `/compact` are Yap's only in a Code chat that **works
 directly** (`agents/slash.rs`, `chat/turn.rs` `goes_to_session`): anywhere
 else Rust says it isn't its to do and the words go as typed, as does every
-other "/" ("/clear the cache" too: words for Claude).
+other "/".
+
+**Words after them, and what's in the box** (18 Nov 2026, checked on Claude
+Code 2.1.296): Claude Code runs "/clear the cache" as `/clear` (its context
+cleared, the words ignored) and "/compact <words>" as `/compact` with the
+words as its instructions — with a screenshot in the message too, which it
+drops. So Yap does the same: "/clear …" is Yap's `/clear` whatever follows
+it, "/compact <words>" passes the words to its `/compact`, and either runs
+with screenshots, files or a quote in the box, which stay there for the
+next message. (Until then "/clear the cache" went to Claude Code as words —
+the docs called them "words for Claude" — and it cleared its context with
+no divider in the thread.) "/clearance …" is another word, sent as typed.
 
 - **`/clear`** (`slash::code_chat_clear`): Claude starts afresh, as the
   app's does. The chat's agents then are set aside in `code_menu.json`
@@ -1975,7 +1991,21 @@ ids made up):
   while a turn works joins it at its next tool call's end (one result).
   `ScheduleWakeup`'s turn has no origin: `command_lifecycle` `started` and
   `completed` bracket it, and its call's record says when it's due
-  (`scheduledFor`). Monitor wasn't offered in a plain `-p` run.
+  (`scheduledFor`). Monitor wasn't offered in a plain `-p` run (nor on
+  18 Nov 2026).
+- **A scheduled job (`CronCreate`) is no background work** (recorded 18 Nov
+  2026, `fixtures/2.1.296/real-cron.jsonl`): its call comes back at once
+  ("Session-only … dies when Claude exits"), with no `task_started` and
+  nothing on `background_tasks_changed`, so the answer ends the turn; its
+  input closed, Claude Code exits at once and the job never runs (checked:
+  18 s). While a turn's input is still open (it waits for a helper), each run
+  is a turn of Claude Code's own bracketed by `command_lifecycle`, as a
+  wake-up's is, with no origin: so `Background::on_lifecycle` takes a
+  wake-up as the one starting only once it's due (5 s early at most,
+  `WAKE_EARLY_MS`). Before, it took the earliest, and a job's run while the
+  turn waited for a wake-up 10 minutes off let that wake-up go, the turn
+  ending before it (`runner.rs`
+  `a_scheduled_jobs_run_never_takes_a_wake_up_not_due`).
 - **A helper's own background work** (recorded 18 Nov 2026,
   `fixtures/2.1.296/real-background-nested.jsonl`): a helper's own helper
   says `parent_task_id` and `spawn_depth` 2 (no `owned_by_subagent`); its
@@ -2005,6 +2035,18 @@ ids made up):
   (`TurnResult::empty`) — Claude Code's own, or any before the turn's first
   message was even echoed back — is nothing at all ("Agents: a turn of
   Claude Code's own with nothing in it…" in the log).
+- **A command Claude Code runs itself answers its message** (18 Nov 2026,
+  checked on 2.1.296; `TurnResult::local_command`,
+  `fixtures/2.1.296/real-local-command.jsonl`): "/cost", "/clear the cache"
+  (Claude Code clears; its words are none) — no model call, its result's
+  `local_command` says which, and **the message is never echoed**. Sent
+  while a turn works it isn't joined to it either: Claude Code runs it after
+  that turn's answer, as a turn of its own. Its result takes in the next
+  message written and not yet read, as an echo would (✓✓, the turn's words
+  from there): before, "/clear the cache" as a turn's message was "nothing"
+  and the turn stayed at work for good, and a "/cost" sent meanwhile stayed
+  unread, the turn ended 20 s on (`NOTE_GRACE`) and the note went again as a
+  turn of its own.
 - **Work left in the background is waited for** (`runner/background.rs`
   `Background`):
   - **while Claude Code's own list** (its latest `background_tasks_changed`)
@@ -2026,7 +2068,8 @@ ids made up):
   - an end is a task's own notice (a later one for the same task is
     normal) or the list no longer naming it (a paused helper apart); a
     wake-up is due when its record says and done when Claude Code's own
-    turn starts (one 5 minutes past due with none is let go). A Claude Code
+    turn starts once it's due (one starting earlier is a scheduled job's
+    run; one 5 minutes past due with none is let go). A Claude Code
     that says nothing of its tasks has none here: nothing waits, as before.
   - **Its input ended** (a note never read, a stop), the process is ended
     15 s on only once nothing is listed or paused: Claude Code exits by
@@ -2113,10 +2156,53 @@ used. See [Yap's crew](#yaps-crew-the-rows-characters).
   a key, "≈" while any of it is estimated), **Tokens** (every token its turns
   used, "80k"; "—" when none said) and **Time** (its turns added up, "4:02";
   the time between them left out).
-- **Groups**, each with its count ("Running · 3"), folding (▾ / ▸): **Needs
-  you**, **Running**, **Finished** (its head across the row, **Collapse** /
-  **Expand** at its right), **Queued** (a request not sent yet: behind the
-  turn working, or the agent stopped first), newest first in each.
+- **Groups**, each with its count ("Running · 3"): **Needs you**,
+  **Running** (always open), **Queued** (a request not sent yet: behind the
+  turn working, or the agent stopped first), **Finished today** (its head
+  across the row, **Collapse** / **Expand** at its right), newest first in
+  each; Needs you and Queued fold (▾ / ▸).
+- **Tidy, as the Claude app's agents panel** (18 Nov 2026; the
+  maintainer's Code chat listed "Finished · 92", every agent and helper back
+  to days before, each a card of four lines — and no row for the helper
+  then working in the background, its log full: see `agents/<id>/log.jsonl`):
+  - **Running's rows**: the character walking, the title, **its clock**
+    ticking at the right in the Code teal (`agentPanel.js` `liveSecs`: a
+    turn's `turnSecs`, a helper's from its hand-over), then its model (a
+    helper's "Helper") · what it's on, and a **thin live bar** (2 px): its
+    to-dos done, else a sweep (still under reduced motion, paused off
+    screen). Its Mode · model · effort on a hover, its stats in its ▸.
+  - **A helper sent in the background is Running till its task ends**
+    (`runner::on_tool_result`: "Async agent launched…" is no "back";
+    `background_ended` says it's back), a paused one too (#179: its
+    interim "completed" is no end), its line the step its own work is on.
+  - **Finished today's rows, in two lines**: a small character (18 × 16,
+    its badge left out), the title and a ✓ (✕ failed), then "Opus 5.5 ·
+    5/5 done · ≈ $2.37 · 4:53" (`compactOf`: model, or "Helper"; its to-dos
+    done, else how many steps it took — `stepCount`, a helper's `count` —
+    or how it ended, "Didn't finish · …", "Plan not used"; cost; time); a
+    bar only where to-dos were left undone. Its Mode · model · effort on a
+    hover; its context and tokens in its ▸ (`chat-agent-row-detail`).
+  - **Work from before today folds by day** (`finishedByDay`, local days,
+    by when a row finished: `finishedAt`): one quiet line under today's,
+    **"Show 89 earlier ›"**, opening to "Yesterday", "Mon 16 Nov", … (a
+    year when not this one), each its compact rows. Nothing is deleted: the
+    tiles count every row, each row opens its own view, its ⋯, its helpers
+    under it. **Open per chat, on the day it was opened**
+    (`agentPanelMemory` `earlier`: chat → the `dayKey` it was opened; a new
+    day folds it again, yesterday's with it); a pill or report card of an
+    earlier row opens it.
+  - **Quick with a hundred rows**: only what's open is drawn; the rows are
+    read again once a minute by the clock (`minute`: a plan's wait, a row's
+    day) and on every event, never every second — a running row's clock and
+    the Time tile read `now` themselves.
+  - e2e `agents-panel.spec.js` ("Finished today, compact; 100 rows from
+    earlier days fold…": two today's rows drawn of 102, "Show 100 earlier",
+    four days named, an earlier row's view; light and dark), the pure test
+    ("a background helper at work under Running…": by day, labels, the
+    compact parts, a helper's `count`); `agents-direct.spec.js` ("a helper
+    sent in the background is under Running…": its clock ticking, its step,
+    then Finished today, its report); `store.rs`
+    (`a_full_log_loses_its_oldest_turns_keeps_its_helpers_rows_and_counts_on`).
 - **Needs you only while something truly waits, live** (2026-11-08, after
   the maintainer's panel kept a plan from before the redesign — "Read only,
   don't change any files" · Plan · "Its plan is ready", with a ✓ — in
@@ -2198,7 +2284,9 @@ used. See [Yap's crew](#yaps-crew-the-rows-characters).
   None of them stops or changes an agent's work but Stop.
 - **A row is one turn** of the Code chat's agent (and of any other agent the
   chat has — a fresh one —, grouped the same way; its Open goes to that
-  agent's own tab), folded to savvy's density:
+  agent's own tab), folded to savvy's density (Needs you's and Queued's
+  rows in full, as below; Running's and Finished's tidier since 18 Nov
+  2026, above):
   - **its model's character** (`CrewAvatar.svelte`): Haiku, Sonnet, Opus or
     Fable by the turn's model id (Sonnet when it names none), holding its
     Mode's prop, in a pose that says how its row stands — walking while it
@@ -2437,8 +2525,11 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   result says it made it: `tool_use_result.type` "create", or "File created
   successfully"), "Rewritten · N lines" (it was there, or the agent wrote it
   before) or "Written" (nothing says), with its first lines.
-  **Caps**: 200 lines an edit, 2,000 an agent (`diffLines`), 300 characters a
-  line; past them "…N more lines". A diff goes out with the call's result, so
+  **Caps**: 200 lines an edit, 2,000 a turn (`diff::TURN_MAX`, the turn's
+  `diffLines`; a Continue goes on from what it kept), 300 characters a
+  line; past them "…N more lines". (Until 18 Nov 2026 the 2,000 were an
+  agent's, and a Code chat is one agent for days: once its earlier turns had
+  shown them, every later edit's diff was empty.) A diff goes out with the call's result, so
   a refused or failed edit has none. A file one of its commands made or
   changed (the turn's `byCommand`, [Files a command made or
   changed](#files-a-command-made-or-changed)) says "New · By a command" or
@@ -3394,10 +3485,29 @@ saves ([config-and-data.md](./config-and-data.md)).
   - `codeChats`: each Code chat's folder (conversation id → `{path, ts}`);
   - `bypassConfirmed`: the one-time OK for Bypass permissions.
 - **`agents/<id>/log.jsonl`**: every `yap-agent` event the agent sent (its steps, words, diffs and what its commands printed), one a line,
-  appended as it goes (the file is never written whole again); texts over
+  appended as it goes; texts over
   4,000 characters trimmed, at most 5,000 lines. The tab replays it (a
   turn's final words in it are a preview: the tab shows the record's,
   whole).
+  - **Full, its oldest turns go, never its newest** (18 Nov 2026,
+    `store::log_cut`): a Code chat's own session is one agent for days,
+    and its log once stopped at 5,000 lines and kept nothing newer — the
+    maintainer's chat of 104 turns had a log that ended at its 86th, so the
+    Agent panel never heard of the helper its Claude had just sent in the
+    background (its row comes from the hand-over in the log), and the
+    thread's work for every later turn was gone after a restart. Now the
+    file is cut to about its newest 4,000 lines, from a turn's start where
+    one begins within 1,000 lines of that, and written whole (a temporary
+    file, renamed over it). Of what goes, the session's own helpers'
+    hand-overs and their "back" (with what each came back with) stay, each
+    hand-over saying how many of its helper's own steps went (`helped`), so
+    their Agent panel rows stay: title, how it ended, its time, its step
+    count (`helpersOf`'s `count`) and its report.
+  - **Line numbers count on** (Remote Control numbers a phone's events by
+    them, `link/lanes.rs`): `agents/<id>/log.base` says how many lines
+    cuts took, and every line's number is that plus its place in the file
+    (`log_read_numbered`, `log_append`'s return), so a number is never
+    given twice.
 - **`agents/<id>/words/<n>.md`** (17 Nov 2026, `agents/words.rs`): turn
   `n`'s final words, whole, when they're longer than the 8,000 characters
   agents.json keeps of them (200,000 at most); written through `saving.rs`
@@ -3519,8 +3629,11 @@ the Claude app), and the person asks Claude to.
   scan's sight) is changed, never new; with no birth time, never new
   either. With Git, `HEAD` moving (Claude committed) adds the files between
   the two commits (`git diff --name-only`), and a file the commit had at the
-  start (`git cat-file --batch-check`) is changed, never new. At most 500
-  files; past that nothing is noted (logged).
+  start (`git cat-file --batch-check`) is changed, never new; one Git listed
+  at the start that wasn't there (deleted) and a command wrote is new,
+  whatever its birth time says (18 Nov 2026: NTFS gives a file the creation
+  time of one of the same name deleted there within 15 s, "tunnelling", so it
+  read as changed). At most 500 files; past that nothing is noted (logged).
 - **Kept** in the turn's `files`, `byCommand` (`[{file, new}]`,
   `store::CommandFile`) and `created` (its new files, with its Write's), so
   Outputs ("New" for one it made), the summary, the file view (a
