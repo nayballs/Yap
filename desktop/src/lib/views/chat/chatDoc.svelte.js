@@ -55,6 +55,7 @@ import { toast } from '../../ui/toast.svelte.js';
 import { showSaveError } from '../../notices/saveErrors.js';
 import { isPlaceholder, pendingSections } from '../../core/markdown.js';
 import { sectionText } from './docSections.js';
+import { saveDelay } from '../../core/typingSave.js';
 // The panel's widths and the room it leaves (chatRoom.js: the rules, pure).
 import { MIN_WIDTH, DEFAULT_WIDTH, THREAD_MIN, LIST_STAYS } from './chatRoom.js';
 
@@ -193,6 +194,8 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
   let base = '';
   let dirty = false;
   let saveTimer = null;
+  // When the first change not saved yet was made (core/typingSave.js).
+  let unsavedSince = 0;
   let saving = null;
   // A turn is writing it now; the section on the way (its key, '' not
   // known yet); 'writing' a section or 'editing' its blocks (edit_document,
@@ -801,12 +804,17 @@ export function createDocPanel({ onopennote = () => null, onclosed = null } = {}
     if (id != null) scrolls.set(`${id}:${v}`, Math.max(0, Math.round(top)));
   }
 
-  /** The Source box changed. */
+  /**
+   * The Source box (or the page) changed: saved once the typing pauses, and at least every two seconds while it goes
+   * on (core/typingSave.js; only a pause saved, so a crash while someone typed on lost everything since the last one:
+   * 18 Nov 2026, as notes' on 16 Nov).
+   */
   function input(text) {
     draft = text;
     dirty = true;
+    if (saveTimer == null) unsavedSince = Date.now();
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(flushSave, 600);
+    saveTimer = setTimeout(flushSave, saveDelay(unsavedSince));
   }
 
   /** Save what's typed now (if anything is), merged with Chat's writing in Rust. */

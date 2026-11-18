@@ -161,6 +161,53 @@ test('typed on the page, only the words typed change in the markdown: a paragrap
   await saved(yap, 'Ranger build', three);
 });
 
+test('typing that goes on without a pause is saved as it goes, on the page and in Source', async ({ yap, main, fakeLlm }) => {
+  // 18 Nov 2026: a document's typing was saved only once it paused, as notes
+  // were before 16 Nov (core/typingSave.js): a crash while someone typed on
+  // lost everything since the last pause. Now at most the last two seconds.
+  // A key every 200 ms for four seconds.
+  const { content } = await makeBuild(yap, main, fakeLlm, 'Druid build');
+  const onDisk = () => {
+    try {
+      return noteNamed(yap.readJson('notes.json'), 'Druid build')?.content || '';
+    } catch {
+      return '';
+    }
+  };
+  const typeOn = async (keys, done) => {
+    let at = -1;
+    for (const [i, k] of [...keys].entries()) {
+      await main.keyboard.insertText(k);
+      await main.waitForTimeout(200);
+      if (at < 0 && done()) at = i;
+    }
+    return at;
+  };
+  await page(main).locator('p').first().click();
+  await end(main);
+  const keys = 'abcdefghijklmnopqrst';
+  const at = await typeOn(keys, () => onDisk().includes('fictional ranger.a'));
+  expect(at, 'saved while the typing went on').toBeGreaterThanOrEqual(0);
+  expect(at).toBeLessThan(keys.length - 3);
+  const typed = content.replace('fictional ranger.', `fictional ranger.${keys}`);
+  await saved(yap, 'Druid build', typed);
+
+  // Source's box.
+  await panel(main).getByRole('button', { name: 'Source' }).click();
+  const src = panel(main).getByRole('textbox', { name: 'Document source (Markdown)' });
+  await expect(src).toHaveValue(typed);
+  await src.evaluate((el) => {
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  });
+  const more = 'ABCDEFGHIJKLMNOPQRST';
+  const srcAt = await typeOn(more, () => onDisk().includes('|\nA'));
+  expect(srcAt, 'saved while the typing went on').toBeGreaterThanOrEqual(0);
+  expect(srcAt).toBeLessThan(more.length - 3);
+  await expect.poll(onDisk).toContain(`|\n${more}`);
+  await panel(main).getByRole('button', { name: 'Preview' }).click();
+});
+
 test('the toolbar: text style, code, a checklist, the insert menu and a table, each plain markdown', async ({ yap, main, fakeLlm, shot }) => {
   const { content } = await makeBuild(yap, main, fakeLlm, 'Heron build');
   const after = (added) => content.replace('fictional ranger.\n', `fictional ranger.\n\n${added}\n`);
