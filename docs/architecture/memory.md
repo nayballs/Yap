@@ -147,7 +147,15 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   a chat is read once it's been quiet 5 minutes (10 for a small model on the
   processor); another chat starting makes
   the others due now; a pass put off (a dictation, the model stopped, a rate
-  limit) is tried again 2 minutes later; what's waiting is kept in
+  limit) is tried again 2 minutes later — and so is **a reply that couldn't
+  be read** (`ops::read_changes`: empty, a reasoning model's whole reply
+  spent thinking, or its JSON cut off at a local model's cap; 18 Nov 2026:
+  read as "nothing to remember", the chat was marked read for good), the
+  chat left unread; the third in a row marks it read (`read_reply`,
+  `UNREADABLE_MOST`: never sent again and again), a good reply starts the
+  count again, kept in memory for the run (a meeting's likewise, tried again
+  by `meeting_ended`); a reply in words with no JSON at all ("Nothing to
+  remember.") is nothing to change, as before; what's waiting is kept in
   memory.json (`pending`) so a quit doesn't lose it — read a minute after the
   next start (no model call on quit). Not in test mode or an evaluation (the
   e2e suite and the runner call the passes). **Learning from a meeting**

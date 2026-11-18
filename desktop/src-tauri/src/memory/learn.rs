@@ -66,6 +66,49 @@ pub fn endpoint(cfg: &crate::config::YapConfig) -> Result<Endpoint, String> {
 /// scheduler asks again later).
 pub const DEFERRED: &str = "Memory: put off for now";
 
+/// A pass whose reply couldn't be read (`ops::read_changes`: empty, or its
+/// JSON cut off): the chat or meeting stays unread, tried again ([`RETRY`]).
+pub const UNREADABLE: &str = "Memory: the model's reply couldn't be read";
+/// Unreadable replies in a row before a chat or meeting is marked read
+/// anyway: a model that never writes readable JSON never has it sent again
+/// and again.
+const UNREADABLE_MOST: u32 = 3;
+
+/// What a pass reads: a chat, or a meeting's note.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Read {
+    Chat(u64),
+    Meeting(u64),
+}
+
+/// Unreadable replies in a row, by what was read: in memory (a run reads one
+/// at most [`UNREADABLE_MOST`] times in a row), gone with a good reply or
+/// the last one.
+static UNREADABLE_IN_A_ROW: Mutex<Option<HashMap<Read, u32>>> = Mutex::new(None);
+
+/// **A pass's reply, read** ([`ops::read_changes`]): its changes, and the
+/// count of unreadable replies in a row gone; an unreadable one counted —
+/// `None` (left unread, tried again) until the [`UNREADABLE_MOST`]th in a
+/// row, which is nothing to change (read now, never sent again). Logs the
+/// count, never the reply.
+fn read_reply(what: Read, reply: &str) -> Option<Vec<Change>> {
+    let mut g = UNREADABLE_IN_A_ROW.lock().unwrap_or_else(|p| p.into_inner());
+    let counts = g.get_or_insert_with(HashMap::new);
+    if let Some(changes) = ops::read_changes(reply) {
+        counts.remove(&what);
+        return Some(changes);
+    }
+    let failures = counts.get(&what).copied().unwrap_or(0) + 1;
+    if failures >= UNREADABLE_MOST {
+        counts.remove(&what);
+        tracing::info!(?what, failures, "Memory: the model's reply couldn't be read again; marked read");
+        return Some(Vec::new());
+    }
+    counts.insert(what, failures);
+    tracing::info!(?what, failures, "Memory: the model's reply couldn't be read; left unread to try again");
+    None
+}
+
 /// A dictation recording or transcribing (or an Upload): a model on this PC
 /// must be free then.
 fn dictation_busy(app: &AppHandle) -> bool {
@@ -420,7 +463,11 @@ pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applie
         &prompt::chat_excerpt(&before, &fresh, budget),
     );
     let reply = ask(&ep, &prompt::learn_chat_system(cfg.memory_sensitive), &user, 5, !crate::ai::eval::active()).await?;
-    let changes = ops::route_preferences(ops::parse_changes(&reply), &super::items());
+    // (Empty, or its JSON cut off: left unread and tried again, a few times at most.)
+    let Some(changes) = read_reply(Read::Chat(conversation), &reply) else {
+        return Err(UNREADABLE.to_string());
+    };
+    let changes = ops::route_preferences(changes, &super::items());
     let about_you = crate::ai::about_you::profile(&cfg);
     let changes = ops::drop_about_you(changes, &super::items(), &about_you.name, &about_you.about);
     // Grounded in what the person said (theirs, not the AI's answers).
@@ -542,7 +589,11 @@ pub async fn learn_from_meeting(note_id: u64) -> Result<Applied, String> {
     body.push_str(&format!("\nYap's notes after the meeting:\n{}", plan.trim()));
     let user = prompt::pass_input(&prompt::listing(&super::items(), 900), "The meeting", &body);
     let reply = ask(&ep, &prompt::learn_meeting_system(cfg.memory_sensitive), &user, 5, !crate::ai::eval::active()).await?;
-    let changes: Vec<Change> = ops::parse_changes(&reply)
+    // (Empty, or its JSON cut off: left unread and tried again, a few times at most.)
+    let Some(changes) = read_reply(Read::Meeting(note_id), &reply) else {
+        return Err(UNREADABLE.to_string());
+    };
+    let changes: Vec<Change> = changes
         .into_iter()
         // People and projects only (and updates of them).
         .filter(|c| !matches!(c.section, Some(Section::Profile | Section::Preferences | Section::Topics)))
@@ -570,9 +621,18 @@ pub fn meeting_ended(note_id: u64) {
         return;
     }
     tauri::async_runtime::spawn(async move {
-        match learn_from_meeting(note_id).await {
-            Ok(a) => tracing::info!(note_id, changes = a.done.len(), "Memory: read a meeting"),
-            Err(e) => tracing::info!(note_id, "Memory: didn't read the meeting: {e}"),
+        // (A reply that couldn't be read: tried again, until it's read or
+        // marked read — `read_reply`'s count ends it.)
+        loop {
+            match learn_from_meeting(note_id).await {
+                Ok(a) => tracing::info!(note_id, changes = a.done.len(), "Memory: read a meeting"),
+                Err(e) if e == UNREADABLE => {
+                    tokio::time::sleep(RETRY).await;
+                    continue;
+                }
+                Err(e) => tracing::info!(note_id, "Memory: didn't read the meeting: {e}"),
+            }
+            break;
         }
     });
 }
@@ -700,7 +760,7 @@ async fn tick() {
                 let later = Instant::now().checked_sub(quiet).map(|t| t + RETRY_USED_UP).unwrap_or_else(Instant::now);
                 activity(|m| m.insert(id, later));
             }
-            Err(e) if e == DEFERRED || e.contains("limit") || e.contains("timed out") || e.contains("didn't start") => {
+            Err(e) if e == DEFERRED || e == UNREADABLE || e.contains("limit") || e.contains("timed out") || e.contains("didn't start") => {
                 tracing::info!(conversation = id, "Memory: chat pass put off: {e}");
                 let later = Instant::now().checked_sub(quiet).map(|t| t + RETRY).unwrap_or_else(Instant::now);
                 activity(|m| m.insert(id, later));
@@ -1207,6 +1267,32 @@ pub fn forget_changes(items: &[Item], what: &str) -> Vec<Change> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A reply that couldn't be read** (18 Nov 2026: an empty one, or one
+    /// cut off mid-JSON, read as "nothing to remember" and the chat marked
+    /// read for good): left unread and tried again, the third in a row
+    /// marked read, so it's never sent again and again; a good reply starts
+    /// the count again.
+    #[test]
+    fn a_reply_that_couldnt_be_read_leaves_the_chat_unread_three_times_at_most() {
+        let chat = Read::Chat(9_000_001);
+        let cut = "{\"changes\": [{\"action\": \"add\", \"section\": \"pro";
+        let good = "{\"changes\": [{\"action\": \"add\", \"section\": \"profile\", \"facts\": [\"Nurse\"]}]}";
+        assert!(read_reply(chat, "").is_none());
+        assert!(read_reply(chat, cut).is_none());
+        // The third in a row: nothing to change, so the chat is marked read.
+        assert_eq!(read_reply(chat, "  ").map(|c| c.len()), Some(0));
+        // Counted afresh after it.
+        assert!(read_reply(chat, "").is_none());
+        // A good reply: its changes, and the count gone.
+        assert_eq!(read_reply(chat, good).map(|c| c.len()), Some(1));
+        assert!(read_reply(chat, "").is_none());
+        assert!(read_reply(chat, "").is_none());
+        // A meeting's count is its own; words with no JSON are nothing to change.
+        assert!(read_reply(Read::Meeting(9_000_001), "").is_none());
+        assert_eq!(read_reply(Read::Chat(9_000_002), "Nothing to remember.").map(|c| c.len()), Some(0));
+        assert_eq!(UNREADABLE_MOST, 3);
+    }
 
     #[test]
     fn a_code_chat_is_never_learned_from() {

@@ -43,7 +43,10 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   do I find Gale in Baldur's Gate 3?" → "Gale"), `wiki_retry` tries fewer.
   A keyed game question gets the wiki's best article first too. Descriptive
   User-Agent (`USER_AGENT`, contact URL), one request at a time per host
-  250 ms apart, ≤ 5 results, ~700 chars each, 10-minute cache. Never a
+  250 ms apart, ≤ 5 results, ~700 chars each, 10-minute cache (keyed by
+  the question too: it picks the free source, the weather's place and the
+  provider's summary — 18 Nov 2026, "Tarnwick" searched for a price was
+  kept as "prices aren't covered" for "What is Tarnwick?"). Never a
   key-less scrape of a search engine's result pages (Google, Bing,
   DuckDuckGo, Brave, Mojeek, Startpage, nor any of them through SearXNG:
   their `robots.txt` and terms forbid it, checked 31 Oct 2026).
@@ -390,7 +393,9 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   the same lines),
   `grounded_sources` (≤ 3 sources, ≤ 1,500 tokens) + `grounded_prompt`
   (answer only from them, cite, < 80 words) with the history fitted
-  (`fit_history`, ≤ 2,000) for an 8k model; no search → `NOT_SEARCHED_LINE`
+  (`fit_history`, ≤ 2,000: the newest that fit, or the newest's start cut
+  to fit and marked, `HISTORY_CUT` — 18 Nov 2026: a long answer alone left
+  no history at all) for an 8k model; no search → `NOT_SEARCHED_LINE`
   (web on) or `no_search_line` (off). **Every model's answer** then goes
   through `chats::checked_answer` (chat-and-assistant.md):
   `strip_sources_note` (a "(Yap searched the web…)" note always; a

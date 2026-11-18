@@ -998,7 +998,8 @@
   conversation id → `{path, ts}`, yap-code.md "Code chats") and the one-time Bypass OK
   (`bypassConfirmed`); and `%APPDATA%/yap/agents/`, a folder per agent:
   `log.jsonl` (its `yap-agent` events: its steps, words, diffs and what its commands printed; appended line by line, at most 5,000
-  lines), `pictures/` (the pictures its steps came back with, as PNGs, at
+  lines: full, its oldest turns go, its helpers' rows kept — 18 Nov 2026, yap-code.md "agents/<id>/log.jsonl"), `log.base`
+  (how many lines those cuts took: its lines' numbers count on), `pictures/` (the pictures its steps came back with, as PNGs, at
   most 120; yap-code.md "A step's pictures"), `words/<n>.md` (turn `n`'s
   final words whole when they're longer than the 8,000 characters
   agents.json keeps, 200,000 at most; 17 Nov 2026, yap-code.md "An agent's

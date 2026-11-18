@@ -2154,10 +2154,53 @@ used. See [Yap's crew](#yaps-crew-the-rows-characters).
   a key, "≈" while any of it is estimated), **Tokens** (every token its turns
   used, "80k"; "—" when none said) and **Time** (its turns added up, "4:02";
   the time between them left out).
-- **Groups**, each with its count ("Running · 3"), folding (▾ / ▸): **Needs
-  you**, **Running**, **Finished** (its head across the row, **Collapse** /
-  **Expand** at its right), **Queued** (a request not sent yet: behind the
-  turn working, or the agent stopped first), newest first in each.
+- **Groups**, each with its count ("Running · 3"): **Needs you**,
+  **Running** (always open), **Queued** (a request not sent yet: behind the
+  turn working, or the agent stopped first), **Finished today** (its head
+  across the row, **Collapse** / **Expand** at its right), newest first in
+  each; Needs you and Queued fold (▾ / ▸).
+- **Tidy, as the Claude app's agents panel** (18 Nov 2026; the
+  maintainer's Code chat listed "Finished · 92", every agent and helper back
+  to days before, each a card of four lines — and no row for the helper
+  then working in the background, its log full: see `agents/<id>/log.jsonl`):
+  - **Running's rows**: the character walking, the title, **its clock**
+    ticking at the right in the Code teal (`agentPanel.js` `liveSecs`: a
+    turn's `turnSecs`, a helper's from its hand-over), then its model (a
+    helper's "Helper") · what it's on, and a **thin live bar** (2 px): its
+    to-dos done, else a sweep (still under reduced motion, paused off
+    screen). Its Mode · model · effort on a hover, its stats in its ▸.
+  - **A helper sent in the background is Running till its task ends**
+    (`runner::on_tool_result`: "Async agent launched…" is no "back";
+    `background_ended` says it's back), a paused one too (#179: its
+    interim "completed" is no end), its line the step its own work is on.
+  - **Finished today's rows, in two lines**: a small character (18 × 16,
+    its badge left out), the title and a ✓ (✕ failed), then "Opus 5.5 ·
+    5/5 done · ≈ $2.37 · 4:53" (`compactOf`: model, or "Helper"; its to-dos
+    done, else how many steps it took — `stepCount`, a helper's `count` —
+    or how it ended, "Didn't finish · …", "Plan not used"; cost; time); a
+    bar only where to-dos were left undone. Its Mode · model · effort on a
+    hover; its context and tokens in its ▸ (`chat-agent-row-detail`).
+  - **Work from before today folds by day** (`finishedByDay`, local days,
+    by when a row finished: `finishedAt`): one quiet line under today's,
+    **"Show 89 earlier ›"**, opening to "Yesterday", "Mon 16 Nov", … (a
+    year when not this one), each its compact rows. Nothing is deleted: the
+    tiles count every row, each row opens its own view, its ⋯, its helpers
+    under it. **Open per chat, on the day it was opened**
+    (`agentPanelMemory` `earlier`: chat → the `dayKey` it was opened; a new
+    day folds it again, yesterday's with it); a pill or report card of an
+    earlier row opens it.
+  - **Quick with a hundred rows**: only what's open is drawn; the rows are
+    read again once a minute by the clock (`minute`: a plan's wait, a row's
+    day) and on every event, never every second — a running row's clock and
+    the Time tile read `now` themselves.
+  - e2e `agents-panel.spec.js` ("Finished today, compact; 100 rows from
+    earlier days fold…": two today's rows drawn of 102, "Show 100 earlier",
+    four days named, an earlier row's view; light and dark), the pure test
+    ("a background helper at work under Running…": by day, labels, the
+    compact parts, a helper's `count`); `agents-direct.spec.js` ("a helper
+    sent in the background is under Running…": its clock ticking, its step,
+    then Finished today, its report); `store.rs`
+    (`a_full_log_loses_its_oldest_turns_keeps_its_helpers_rows_and_counts_on`).
 - **Needs you only while something truly waits, live** (2026-11-08, after
   the maintainer's panel kept a plan from before the redesign — "Read only,
   don't change any files" · Plan · "Its plan is ready", with a ✓ — in
@@ -2239,7 +2282,9 @@ used. See [Yap's crew](#yaps-crew-the-rows-characters).
   None of them stops or changes an agent's work but Stop.
 - **A row is one turn** of the Code chat's agent (and of any other agent the
   chat has — a fresh one —, grouped the same way; its Open goes to that
-  agent's own tab), folded to savvy's density:
+  agent's own tab), folded to savvy's density (Needs you's and Queued's
+  rows in full, as below; Running's and Finished's tidier since 18 Nov
+  2026, above):
   - **its model's character** (`CrewAvatar.svelte`): Haiku, Sonnet, Opus or
     Fable by the turn's model id (Sonnet when it names none), holding its
     Mode's prop, in a pose that says how its row stands — walking while it
@@ -3438,10 +3483,29 @@ saves ([config-and-data.md](./config-and-data.md)).
   - `codeChats`: each Code chat's folder (conversation id → `{path, ts}`);
   - `bypassConfirmed`: the one-time OK for Bypass permissions.
 - **`agents/<id>/log.jsonl`**: every `yap-agent` event the agent sent (its steps, words, diffs and what its commands printed), one a line,
-  appended as it goes (the file is never written whole again); texts over
+  appended as it goes; texts over
   4,000 characters trimmed, at most 5,000 lines. The tab replays it (a
   turn's final words in it are a preview: the tab shows the record's,
   whole).
+  - **Full, its oldest turns go, never its newest** (18 Nov 2026,
+    `store::log_cut`): a Code chat's own session is one agent for days,
+    and its log once stopped at 5,000 lines and kept nothing newer — the
+    maintainer's chat of 104 turns had a log that ended at its 86th, so the
+    Agent panel never heard of the helper its Claude had just sent in the
+    background (its row comes from the hand-over in the log), and the
+    thread's work for every later turn was gone after a restart. Now the
+    file is cut to about its newest 4,000 lines, from a turn's start where
+    one begins within 1,000 lines of that, and written whole (a temporary
+    file, renamed over it). Of what goes, the session's own helpers'
+    hand-overs and their "back" (with what each came back with) stay, each
+    hand-over saying how many of its helper's own steps went (`helped`), so
+    their Agent panel rows stay: title, how it ended, its time, its step
+    count (`helpersOf`'s `count`) and its report.
+  - **Line numbers count on** (Remote Control numbers a phone's events by
+    them, `link/lanes.rs`): `agents/<id>/log.base` says how many lines
+    cuts took, and every line's number is that plus its place in the file
+    (`log_read_numbered`, `log_append`'s return), so a number is never
+    given twice.
 - **`agents/<id>/words/<n>.md`** (17 Nov 2026, `agents/words.rs`): turn
   `n`'s final words, whole, when they're longer than the 8,000 characters
   agents.json keeps of them (200,000 at most); written through `saving.rs`

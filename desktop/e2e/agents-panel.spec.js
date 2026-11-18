@@ -72,7 +72,15 @@ import {
   rowActions,
   helperSecs,
   helperReport,
+  finishedAt,
+  finishedByDay,
+  dayKey,
+  dayLabel,
+  earlierOpen,
+  compactOf,
+  liveSecs,
 } from '../src/lib/core/agentPanel.js';
+import { stepCount, helpersOf } from '../src/lib/core/agents.js';
 
 const CREW_CSS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib', 'views', 'chat', 'crew', 'crew.css');
 
@@ -416,8 +424,8 @@ test('core/agentPanel.js: tokens and time, the context, progress, the third line
   expect(statsLine(rows[2])).toBe('');
   expect(panelGroups(rows).map((g) => [g.id, g.label, g.rows.map((r) => r.n)])).toEqual([
     ['running', 'Running', [2]],
-    ['finished', 'Finished', [1]],
     ['queued', 'Queued', [3]],
+    ['finished', 'Finished today', [1]],
   ]);
   const totals = panelTotals(rows);
   expect(totals).toMatchObject({ approx: true, known: true, tokens: 6400, secs: 240 + 62 });
@@ -433,6 +441,88 @@ test('core/agentPanel.js: tokens and time, the context, progress, the third line
     '7 to-dos · 5 done',
     '7 to-dos · none done yet',
     '1 to-do · all done',
+  ]);
+});
+
+// 18 Nov 2026, the maintainer's tidy panel: his Code chat's helper sent in the background never showed under Running
+// (its log was full: agents/store.rs `log_cut` now drops the oldest turns instead), and "Finished · 92" was a wall.
+test('core/agentPanel.js: a background helper at work under Running till its task ends; Finished by day; the compact rows', () => {
+  // (Local days, fictional dates: Wednesday 18 November 2026, half past three.)
+  const at = (d, h, m = 0, y = 2026, mo = 10) => new Date(y, mo, d, h, m).getTime() / 1000;
+  const now = at(18, 15, 30);
+  const sent = { turn: 4, ts: at(18, 15, 0), step: 'Handing part of it to a helper · Audit the watering rules', call: 'toolu_bg' };
+  const own = (i, o = {}) => ({ turn: 4, ts: at(18, 15, 1 + i), step: `Reading rules-${i}.md`, call: `toolu_r${i}`, under: 'toolu_bg', ...o });
+  // The chat's own turn, waiting for its background work (agents/runner.rs: answered, still at work).
+  const chat = (turn = {}) => ({ id: 'c1', status: 'running', folder: 'garden-planner', mode: 'bypassPermissions', pay: 'plan', createdTs: at(10, 9), turnList: [{ n: 4, direct: true, status: 'running', startedTs: at(18, 14, 58), title: 'Fix the materials', ...turn }] });
+  // Its call came back at once ("Async agent launched…": no "back" — runner.rs `bg.runs_call`): at work, Running.
+  let [h] = panelRows([chat()], { logs: { c1: [sent, own(1), own(2)] }, now });
+  expect(h).toMatchObject({ kind: 'helper', state: 'running', status: 'running', pose: 'working', title: 'Audit the watering rules', line: 'Reading rules-2.md', endedTs: 0, steps: 2 });
+  expect(panelGroups([h]).map((g) => [g.id, g.rows.length])).toEqual([['running', 1]]);
+  // Its clock from its hand-over, live (the row's own `secs` is the panel's minute's).
+  expect(liveSecs(h, now)).toBe(30 * 60);
+  expect(liveSecs(h, now + 42)).toBe(30 * 60 + 42);
+  // Paused for work of its own (#179): Claude Code's interim "completed" is no "back" (runner/background.rs) — still at
+  // work, its own helper's and commands' steps its row's.
+  [h] = panelRows([chat()], { logs: { c1: [sent, own(1), own(2), own(3, { step: 'Running npm test', command: 'npm test' })] }, now });
+  expect(h).toMatchObject({ state: 'running', line: 'Running npm test', steps: 3 });
+  // Its task's end: back, Finished, its clock stopped there; its report kept.
+  const back = { turn: 4, ts: at(18, 15, 20), call: 'toolu_bg', helper: 'back', report: 'Two rules clash.' };
+  [h] = panelRows([chat()], { logs: { c1: [sent, own(1), own(2), back] }, now });
+  expect(h).toMatchObject({ state: 'finished', status: 'done', line: '2 steps', endedTs: back.ts, secs: 20 * 60 });
+  expect(helperReport(h.helper, h.turnEvents)).toBe('Two rules clash.');
+  // Steps a full log's cut took still count (the hand-over's `helped`).
+  [h] = panelRows([chat({ status: 'done', endedTs: at(18, 15, 25) })], { logs: { c1: [{ ...sent, helped: 56 }, own(1), own(2), back] }, now });
+  expect(h.line).toBe('58 steps');
+  expect(helpersOf([{ ...sent, helped: 3 }], false)[0]).toMatchObject({ count: 3, line: '3 steps', status: 'done' });
+  expect(compactOf(h)).toEqual({ who: 'Helper', what: '58 steps', stats: '20:00', mark: 'done', bar: false });
+  // An older log with no "back", its turn over: done at its turn's end.
+  [h] = panelRows([chat({ status: 'done', endedTs: at(18, 15, 25) })], { logs: { c1: [sent, own(1)] }, now });
+  expect(h).toMatchObject({ state: 'finished', endedTs: at(18, 15, 25) });
+
+  // How many steps a turn took: its own (a helper's are its row's), the same plain line twice in a row once.
+  expect(stepCount([{ step: 'Reading a.md' }, { step: 'Reading a.md' }, { step: 'Editing a.md', file: 'a.md' }, { step: 'Editing a.md', file: 'a.md' }, { step: 'Reading b.md', under: 'x' }, { now: 'Thinking' }])).toBe(3);
+
+  // **Finished by day** (local days): today's; the days before, newest first, each named.
+  expect(dayKey(at(18, 0, 0))).toBe('2026-11-18');
+  expect(dayKey(at(17, 23, 59))).toBe('2026-11-17');
+  expect([dayLabel(at(18, 9), now), dayLabel(at(17, 23, 59), now), dayLabel(at(16, 8), now), dayLabel(at(30, 12, 0, 2025, 11), now)]).toEqual(['Today', 'Yesterday', 'Mon 16 Nov', 'Tue 30 Dec 2025']);
+  // (Yesterday across a month's start.)
+  expect(dayLabel(at(30, 20, 0, 2026, 10), at(1, 9, 0, 2026, 11))).toBe('Yesterday');
+  const fin = (key, ts, o = {}) => ({ key, state: 'finished', endedTs: ts, createdTs: 1, ...o });
+  const byDay = finishedByDay(
+    [fin('a', at(18, 9)), fin('b', at(17, 22)), fin('c', at(18, 0, 5)), fin('d', at(16, 8)), fin('e', at(17, 3)), fin('f', 0, { createdTs: 0 }), fin('g', 0, { startedTs: at(15, 10) })],
+    now,
+  );
+  expect(byDay.today.map((r) => r.key)).toEqual(['a', 'c']);
+  expect(byDay.count).toBe(5);
+  expect(byDay.earlier.map((d) => [d.key, d.label, d.rows.map((r) => r.key)])).toEqual([
+    ['2026-11-17', 'Yesterday', ['b', 'e']],
+    ['2026-11-16', 'Mon 16 Nov', ['d']],
+    ['2026-11-15', 'Sun 15 Nov', ['g']],
+    ['', 'Earlier', ['f']],
+  ]);
+  expect([finishedAt(fin('x', 5)), finishedAt({ startedTs: 4, createdTs: 3 }), finishedAt({ createdTs: 3 }), finishedAt({ createdTs: Number.MAX_SAFE_INTEGER })]).toEqual([5, 4, 3, 0]);
+  // A hundred from days before: today's none, all earlier, in a few milliseconds.
+  const many = Array.from({ length: 100 }, (_, i) => fin(`m${i}`, at(17 - (i % 5), 10)));
+  const t0 = performance.now();
+  const folded = finishedByDay(many, now);
+  expect(performance.now() - t0).toBeLessThan(50);
+  expect([folded.today.length, folded.count, folded.earlier.length]).toEqual([0, 100, 5]);
+  // **Open on the day it was opened**: a new day folds it again.
+  expect(earlierOpen(dayKey(now), now)).toBe(true);
+  expect(earlierOpen(dayKey(now), at(19, 0, 1))).toBe(false);
+  expect(earlierOpen('', now)).toBe(false);
+
+  // **The compact rows**: model · "5/5 done" or steps · cost · time; ✓ or ✕; a bar only for to-dos left undone.
+  const agent = { id: 'a1', status: 'done', folder: 'garden-planner', pay: 'plan', model: 'claude-opus-5-5', effort: 'high', mode: 'auto', createdTs: 1 };
+  const turn = (n, o = {}) => ({ n, title: `Turn ${n}`, status: 'done', startedTs: at(18, 10), endedTs: at(18, 10, 4) + 53, cost: 2.37, ...o });
+  const steps3 = [{ turn: 2, step: 'Reading a.md' }, { turn: 2, step: 'Editing a.md', file: 'a.md' }, { turn: 2, step: 'Running npm test', command: 'npm test' }];
+  const rows = panelRows([{ ...agent, turnList: [turn(1, { todos: todos(7) }), turn(2), turn(3, { status: 'failed', error: 'It stopped.', todos: todos(3) }), turn(4, { plan: true, planUnused: true })] }], { logs: { a1: steps3 }, now });
+  expect(rows.map(compactOf)).toEqual([
+    { who: 'Opus 5.5', what: '7/7 done', stats: `≈ ${money(2.37)} · 4:53`, mark: 'done', bar: false },
+    { who: 'Opus 5.5', what: '3 steps', stats: `≈ ${money(2.37)} · 4:53`, mark: 'done', bar: false },
+    { who: 'Opus 5.5', what: "3/7 · Didn't finish · It stopped.", stats: `≈ ${money(2.37)} · 4:53`, mark: 'failed', bar: true },
+    { who: 'Opus 5.5', what: 'Plan not used', stats: `≈ ${money(2.37)} · 4:53`, mark: '', bar: false },
   ]);
 });
 
@@ -524,7 +614,10 @@ test('the Agent panel: a Code chat’s agent live, needing you, finished; the to
   await expect(row(main, 1).getByTestId('chat-agent-row-line')).toHaveText('3/7 · Writing the planting guide', { timeout: 20_000 });
   await expect(row(main, 1)).toHaveAttribute('data-state', 'running');
   await expect(row(main, 1).getByTestId('chat-agent-row-title')).toHaveText('Build the planner');
-  await expect(row(main, 1).getByTestId('chat-agent-row-sub')).toHaveText('Auto · Sonnet 5.5 · Medium');
+  // Running's row (18 Nov 2026, tidy): its model, what it's on; its Mode, model and effort on a hover.
+  await expect(row(main, 1)).toHaveAttribute('data-variant', 'running');
+  await expect(row(main, 1).getByTestId('chat-agent-row-sub')).toHaveText('Sonnet 5.5');
+  await expect(row(main, 1).locator('.csub')).toHaveAttribute('title', 'Auto · Sonnet 5.5 · Medium');
   await expect(row(main, 1).getByTestId('chat-agent-row-bar')).toHaveAttribute('data-kind', 'todos');
   await expect(row(main, 1).getByTestId('chat-agent-row-bar')).toHaveAttribute('data-value', String(Math.round((3 / 7) * 100)));
   // Its character: Sonnet, walking with Auto's flag.
@@ -533,8 +626,9 @@ test('the Agent panel: a Code chat’s agent live, needing you, finished; the to
   await expect(avatar).toHaveAttribute('data-character', 'sonnet');
   await expect(avatar).toHaveAttribute('data-prop', 'auto');
   await expect(avatar).toHaveAttribute('aria-label', 'Sonnet, working, Auto mode');
-  // Its stats: the context's fill and tokens after its third call, an estimate, the time.
-  await expect(row(main, 1).getByTestId('chat-agent-row-stats')).toHaveText(new RegExp(`^ctx \\d+% · ${fmtTokens(ctxOf(U[2]))} · ≈ \\$[0-9.]+ · \\d+:\\d\\d$`));
+  // Its clock, ticking (its stats — the context's fill and tokens after its third call, an estimate — in its ▸).
+  await expect(row(main, 1).getByTestId('chat-agent-row-clock')).toHaveText(/^\d+:\d\d$/);
+  await expect(row(main, 1).getByTestId('chat-agent-row-stats')).toHaveCount(0);
   // The header's tiles: what the calls so far used.
   const soFar = U.slice(0, 3).reduce((s, u) => s + ctxOf(u), 0);
   await expect(main.getByTestId('chat-agent-total-tokens').locator('.tv')).toHaveText(fmtTokens(soFar));
@@ -609,17 +703,26 @@ test('the Agent panel: a Code chat’s agent live, needing you, finished; the to
   // Finished: ✓, and its totals as Claude Code's result says them.
   const agent = await ended(yap, id);
   expect(agent.status).toBe('done');
-  await expect(group(main, 'finished').getByTestId('chat-agent-group-head')).toHaveText('Finished · 1');
+  await expect(group(main, 'finished').getByTestId('chat-agent-group-head')).toHaveText('Finished today · 1');
   await expect(avatar).toHaveAttribute('data-pose', 'done');
   await expect(row(main, 1).locator('.badge')).toHaveText('✓');
   await expect(avatar.locator('.bubble')).toHaveCount(0);
-  await expect(row(main, 1).getByTestId('chat-agent-row-line')).toHaveText('7/7 · All done');
-  await expect(row(main, 1).getByTestId('chat-agent-row-bar')).toHaveAttribute('data-value', '100');
+  // A compact row (18 Nov 2026): its model · "7/7 done" · cost · time, a ✓ — and no bar, all its to-dos done.
+  await expect(row(main, 1)).toHaveAttribute('data-variant', 'compact');
+  await expect(row(main, 1).getByTestId('chat-agent-row-mark')).toHaveText('✓');
+  await expect(row(main, 1).getByTestId('chat-agent-row-sub')).toHaveText('Sonnet 5.5');
+  await expect(row(main, 1).getByTestId('chat-agent-row-line')).toHaveText('7/7 done');
+  await expect(row(main, 1).getByTestId('chat-agent-row-bar')).toHaveCount(0);
   const total = SUM.input_tokens + SUM.output_tokens + SUM.cache_read_input_tokens + SUM.cache_creation_input_tokens;
   await expect(main.getByTestId('chat-agent-total-tokens').locator('.tv')).toHaveText(fmtTokens(total));
   await expect(main.getByTestId('chat-agent-total-cost').locator('.tv')).toHaveText(`≈ ${money(0.1234)}`);
-  // The window Claude Code said (1M): its latest call's prompt and answer against it.
-  await expect(row(main, 1).getByTestId('chat-agent-row-stats')).toHaveText(new RegExp(`^ctx 1% · ${fmtTokens(ctxOf(U[5]))} · ${esc(`≈ ${money(0.1234)}`)} · \\d+:\\d\\d$`));
+  await expect(row(main, 1).getByTestId('chat-agent-row-stats')).toHaveText(new RegExp(`^${esc(`≈ ${money(0.1234)}`)} · \\d+:\\d\\d$`));
+  // The window Claude Code said (1M): its latest call's prompt and answer against it, in its ▸.
+  const openBefore = await row(main, 1).getAttribute('data-open');
+  if (openBefore !== 'true') await row(main, 1).getByTestId('chat-agent-row-fold').click();
+  await expect(row(main, 1).getByTestId('chat-agent-row-detail')).toHaveText(new RegExp(`^Auto · Sonnet 5\\.5 · Medium · ctx 1% · ${fmtTokens(ctxOf(U[5]))} · ${esc(`≈ ${money(0.1234)}`)} · \\d+:\\d\\d$`));
+  if (openBefore !== 'true') await row(main, 1).getByTestId('chat-agent-row-fold').click();
+  await expect(row(main, 1)).toHaveAttribute('data-open', openBefore ?? 'false');
   // Kept with the turn (a restart shows the same): its usage and its to-do list in agents.json.
   await expectStore(yap, 'agents.json', (j) => {
     const t = j.agents.find((a) => a.id === id)?.turnList?.[0];
@@ -658,12 +761,12 @@ test('the Agent panel: a Code chat’s agent live, needing you, finished; the to
   const both = await ended(yap, id);
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === id).turnList[1].status, { timeout: 30_000 }).toBe('done');
   await messagesOf(yap, both.conversation, 8);
-  await expect(group(main, 'finished').getByTestId('chat-agent-group-head')).toHaveText('Finished · 2');
-  // Newest first; no list: "Done" and a full bar.
+  await expect(group(main, 'finished').getByTestId('chat-agent-group-head')).toHaveText('Finished today · 2');
+  // Newest first; no list: how many steps it took, and no bar.
   await expect(group(main, 'finished').getByTestId('chat-agent-row')).toHaveCount(2);
   await expect(group(main, 'finished').getByTestId('chat-agent-row').first()).toHaveAttribute('data-turn', '2');
-  await expect(row(main, 2).getByTestId('chat-agent-row-line')).toHaveText('Done');
-  await expect(row(main, 2).getByTestId('chat-agent-row-bar')).toHaveAttribute('data-kind', 'done');
+  await expect(row(main, 2).getByTestId('chat-agent-row-line')).toHaveText(/^(\d+ steps?|Done)$/);
+  await expect(row(main, 2).getByTestId('chat-agent-row-bar')).toHaveCount(0);
   // The header adds both turns up.
   await expect(main.getByTestId('chat-agent-total-cost').locator('.tv')).toHaveText(`≈ ${money(0.1234 + 0.002)}`);
   await expect(main.getByTestId('chat-agent-total-tokens').locator('.tv')).toHaveText(fmtTokens(total + ctxOf(ECHO_USE)));
@@ -1107,7 +1210,8 @@ test('Chat sizes each agent: its model and effort reach Claude Code, the row say
   await expectStore(yap, 'agents.json', (j) => j.agents.find((a) => a.id === id)?.turnList?.[0]?.sizing === 'a multi-file change');
   // The row: Opus, at High; ▸ says why.
   await expect(panel(main)).toBeVisible();
-  await expect(row(main, 1).getByTestId('chat-agent-row-sub')).toHaveText('Auto · Opus 5.5 · High');
+  await expect(row(main, 1).getByTestId('chat-agent-row-sub')).toHaveText('Opus 5.5');
+  await expect(row(main, 1).locator('.csub')).toHaveAttribute('title', 'Auto · Opus 5.5 · High');
   await expect(row(main, 1).getByTestId('chat-agent-row-avatar')).toHaveAttribute('data-character', 'opus');
   if ((await row(main, 1).getAttribute('data-open')) !== 'true') await row(main, 1).getByTestId('chat-agent-row-fold').click();
   await expect(row(main, 1).getByTestId('chat-agent-row-sizing')).toHaveText('Opus 5.5 · High: a multi-file change');
@@ -1159,7 +1263,8 @@ test('Chat sizes each agent: its model and effort reach Claude Code, the row say
   expect(flagOf(argsSeen()[1], '--model')).toBe('claude-sonnet-5-5');
   expect(flagOf(argsSeen()[1], '--effort')).toBe('medium');
   expect(notesTold(fakeLlm).some((n) => n.startsWith('Lowered to Sonnet 5.5, medium effort: the most Yap'))).toBe(true);
-  await expect(row(main, 2).getByTestId('chat-agent-row-sub')).toHaveText('Auto · Sonnet 5.5 · Medium');
+  await expect(row(main, 2).getByTestId('chat-agent-row-sub')).toHaveText('Sonnet 5.5');
+  await expect(row(main, 2).locator('.csub')).toHaveAttribute('title', 'Auto · Sonnet 5.5 · Medium');
   await messagesOf(yap, agent.conversation, 8);
 
   // The person's own words go above it: "use Opus… think hard".
@@ -1233,7 +1338,7 @@ async function showCrewSheet(main) {
 }
 
 test('the crew: a character a row in each Mode and pose; rows folded, ▸ remembered; moving only on screen; the crew sheet', async ({ yap, main, fakeLlm, shot }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   await main.emulateMedia({ reducedMotion: 'no-preference' });
   await openView(main, 'Chat');
   if (await tab(main).count()) await tab(main).getByRole('button', { name: 'Close the panel' }).click();
@@ -1341,10 +1446,10 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
   expect(await styleIn(avatarOf(main, B, 1), '.c-eyes', 'transform')).toMatch(/matrix\(1, 0, 0, 1, 0, -1\)/);
   expect(await styleIn(avatarOf(main, A, 1), '.c-bod', 'transform')).toMatch(/matrix\(1, 0, 0, 1, 0, 1\)/);
   expect(await styleIn(avatarOf(main, A, 1), '.c-eu', 'opacity')).toBe('0');
-  // Its group heads as savvy's: "Running · 1", Finished with Collapse.
+  // Its group heads as savvy's: "Running · 1", Finished today with Collapse.
   await expect(group(main, 'needs').getByTestId('chat-agent-group-head')).toHaveText('Needs you · 1');
   await expect(group(main, 'running').getByTestId('chat-agent-group-head')).toHaveText('Running · 1');
-  await expect(group(main, 'finished').getByTestId('chat-agent-group-head')).toHaveText('Finished · 4');
+  await expect(group(main, 'finished').getByTestId('chat-agent-group-head')).toHaveText('Finished today · 4');
   await expect(group(main, 'finished').getByTestId('chat-agent-group-head')).toHaveAttribute('data-act', 'Collapse');
 
   // Only the working one moves: its feet step, its flag flutters; the others are still.
@@ -1481,4 +1586,106 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
   });
   await tab(main).getByRole('button', { name: 'Close the panel' }).click();
   await main.emulateMedia({ reducedMotion: null });
+});
+
+// 18 Nov 2026, the maintainer's tidy panel: a Code chat listed "Finished · 92" — every agent and helper back to days
+// before, a card of four lines each. Now today's are compact rows, and what finished before today folds behind one line.
+test('Finished today, compact; 100 rows from earlier days fold behind “Show 100 earlier”, opening day by day', async ({ yap, main, fakeLlm, shot }) => {
+  test.setTimeout(180_000);
+  await openView(main, 'Chat');
+  if (await tab(main).count()) await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+  await newCodeChat(main, 'garden-planner');
+  fakeLlm.scriptChat([{ plain: true, content: 'Hello! What shall we build?' }]);
+  await send(main, 'Hello.');
+  await expect(thread(main)).toContainText('What shall we build?', { timeout: 20_000 });
+  const conversation = Math.max(...(await yap.invoke('chats_list')).map((c) => c.id));
+  const now = Math.floor(Date.now() / 1000);
+  const D = `days${now.toString(16)}`;
+  const DAY = 86_400;
+  // A hundred turns from the four days before today (25 a day), then two of today's.
+  const earlier = Array.from({ length: 100 }, (_, i) => {
+    const daysAgo = 4 - Math.floor(i / 25);
+    const start = now - daysAgo * DAY - 600 + (i % 25) * 20;
+    return seedTurn(now, i + 1, `Earlier job ${i + 1}`, i % 3 ? 'auto' : 'bypassPermissions', i % 2 ? 'claude-opus-5-5' : 'claude-sonnet-5-5', 'done', { startedTs: start, endedTs: start + 45, todos: i % 4 ? [] : todos(7) });
+  });
+  const today = [
+    seedTurn(now, 101, 'Fix the watering schedule', 'auto', 'claude-opus-5-5', 'done', { startedTs: now - 25, endedTs: now - 20, todos: todos(7), cost: 2.37 }),
+    seedTurn(now, 102, 'Draw the bed legend', 'auto', 'claude-sonnet-5-5', 'failed', { startedTs: now - 15, endedTs: now - 10, todos: todos(3), error: 'Claude Code stopped before it finished.' }),
+  ];
+  await yap.invoke('e2e_agents_seed', {
+    agents: [
+      {
+        conversation,
+        folder: 'garden-planner',
+        path: GARDEN,
+        effort: 'medium',
+        pay: 'plan',
+        updatedTs: now,
+        id: D,
+        brief: 'Earlier job 1.',
+        model: 'claude-opus-5-5',
+        mode: 'auto',
+        status: 'done',
+        createdTs: now - 5 * DAY,
+        startedTs: now - 5 * DAY,
+        endedTs: now - 10,
+        turns: 102,
+        turnList: [...earlier, ...today],
+      },
+    ],
+  });
+  await yap.invoke('plugin:event|emit', { event: 'yap-agent-open', payload: { id: D, conversation, folder: 'garden-planner' } });
+  await expect(panel(main)).toBeVisible({ timeout: 20_000 });
+  // Today's, compact: two lines each; the rest folded — not drawn at all.
+  await expect(group(main, 'finished').getByTestId('chat-agent-group-head')).toHaveText('Finished today · 2', { timeout: 20_000 });
+  await expect(panel(main).getByTestId('chat-agent-row')).toHaveCount(2);
+  const earlierLine = panel(main).getByTestId('chat-agent-earlier');
+  await expect(earlierLine).toHaveText('Show 100 earlier');
+  await expect(earlierLine).toHaveAttribute('aria-expanded', 'false');
+  await expect(row(main, 101).getByTestId('chat-agent-row-sub')).toHaveText('Opus 5.5');
+  await expect(row(main, 101).getByTestId('chat-agent-row-line')).toHaveText('7/7 done');
+  await expect(row(main, 101).getByTestId('chat-agent-row-stats')).toHaveText(`≈ ${money(2.37)} · 0:05`);
+  await expect(row(main, 101).getByTestId('chat-agent-row-mark')).toHaveText('✓');
+  await expect(row(main, 101).getByTestId('chat-agent-row-bar')).toHaveCount(0);
+  await expect(row(main, 101).getByTestId('chat-agent-row-avatar')).toHaveClass(/size-half/);
+  await expect(row(main, 102).getByTestId('chat-agent-row-line')).toHaveText("3/7 · Didn't finish · Claude Code stopped before it finished.");
+  await expect(row(main, 102).getByTestId('chat-agent-row-mark')).toHaveText('✕');
+  await expect(row(main, 102).getByTestId('chat-agent-row-bar')).toHaveAttribute('data-value', String(Math.round((3 / 7) * 100)));
+  // Two lines, not four: about as tall as a row of the Claude app's panel.
+  const tall = (await row(main, 101).locator('> .rhead').boundingBox()).height;
+  expect(tall).toBeLessThan(48);
+  // The header still adds everything up: nothing deleted.
+  await expect(main.getByTestId('chat-agent-total-cost').locator('.tv')).toHaveText(`≈ ${money([...earlier, ...today].reduce((s, t) => s + t.cost, 0))}`);
+  await shot(main, '40-tidy-panel-folded-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '41-tidy-panel-folded-dark');
+  await theme(yap, main, 'light');
+
+  // Open: the four days before, newest first, each named, the same compact rows.
+  await earlierLine.click();
+  await expect(earlierLine).toHaveText('Hide 100 earlier');
+  const days = panel(main).getByTestId('chat-agent-day');
+  await expect(days).toHaveCount(4);
+  await expect(days.getByTestId('chat-agent-day-head').first()).toHaveText('Yesterday · 25');
+  const ago = (n) => new Date((now - n * DAY) * 1000);
+  const named = (d) => `${d.toLocaleDateString('en-GB', { weekday: 'short' })} ${d.getDate()} ${d.toLocaleDateString('en-GB', { month: 'short' })}`;
+  await expect(days.getByTestId('chat-agent-day-head').nth(1)).toHaveText(new RegExp(`^${named(ago(2))}( \\d{4})? · 25$`));
+  await expect(panel(main).getByTestId('chat-agent-row')).toHaveCount(102);
+  await expect(days.first().getByTestId('chat-agent-row').first()).toHaveAttribute('data-turn', '100');
+  await expect(row(main, 1)).toHaveAttribute('data-variant', 'compact');
+  await expect(row(main, 1).getByTestId('chat-agent-row-line')).toHaveText('7/7 done');
+  await shot(main, '42-tidy-panel-earlier-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '43-tidy-panel-earlier-dark');
+  await theme(yap, main, 'light');
+  // An earlier row still opens its own view.
+  await row(main, 98).locator('> .rhead').click();
+  await expect(taskView(main).getByTestId('chat-task-title')).toHaveText('Earlier job 98');
+  await main.locator(`[data-testid="chat-panel-tab"][data-key="agent:${D}"]`).click();
+  // Kept open for this chat while the window stays (another tab and back: still open); Hide folds it again.
+  await expect(earlierLine).toHaveAttribute('aria-expanded', 'true');
+  await earlierLine.click();
+  await expect(earlierLine).toHaveAttribute('aria-expanded', 'false');
+  await expect(panel(main).getByTestId('chat-agent-row')).toHaveCount(2);
+  await tab(main).getByRole('button', { name: 'Close the panel' }).click();
 });

@@ -24,7 +24,7 @@
 
 #[cfg(not(test))]
 use std::sync::Mutex;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -35,8 +35,17 @@ use crate::integrations::claude_live::Origin;
 
 /// How long an agent's log and pictures are kept after it ends.
 pub const KEEP_SECS: u64 = 7 * 24 * 60 * 60;
-/// The most lines an agent's log keeps (the rest of a runaway agent isn't).
+/// **The most lines an agent's log holds.** Full, its oldest turns go
+/// ([`log_append`]), never its newest — a Code chat's own session is one agent
+/// for days, and its log once stopped at this many lines and kept nothing
+/// newer (18 Nov 2026: a chat of 104 turns whose log ended at its 86th, so the
+/// Agent panel never heard of the helper its Claude sent in the background).
 pub const LOG_MAX_LINES: usize = 5_000;
+/// **What a full log is cut to**: about this many of its newest lines, from
+/// the start of a turn where one begins within [`LOG_CUT_SLACK`] of it.
+const LOG_KEEP_LINES: usize = 4_000;
+/// How much further a cut may go to start at a turn's beginning.
+const LOG_CUT_SLACK: usize = 1_000;
 /// The most characters of text a log line keeps (a turn's final words are
 /// kept whole in its record: `agents/words.rs`).
 const LOG_TEXT_MAX: usize = 4_000;
@@ -1395,7 +1404,10 @@ fn clear_but_words(d: &Path) -> bool {
 // ---- the log ----
 
 /// Append `line` (one `yap-agent` event) to agent `id`'s log, its texts
-/// trimmed; nothing past [`LOG_MAX_LINES`].
+/// trimmed. **Full** ([`LOG_MAX_LINES`]), its oldest turns go first
+/// ([`log_cut`]): the newest work is always written. Returns its line's
+/// number, from 1, counting every line the log ever had (Remote Control
+/// numbers the phone's events by it: `link/lanes.rs`).
 pub fn log_append(id: &str, line: &Value) -> Option<u64> {
     let path = log_path(id)?;
     if crate::ai::eval::active() {
@@ -1411,9 +1423,11 @@ pub fn log_append(id: &str, line: &Value) -> Option<u64> {
             }
         }
     }
-    let count = LOG_LINES.with_count(id, &path);
-    if count >= LOG_MAX_LINES {
-        return None;
+    // (One append at a time: a cut rewrites the file.)
+    let mut known = LOG_LINES.0.lock().unwrap_or_else(|p| p.into_inner());
+    let at = known.get_or_insert_with(HashMap::new).entry(id.to_string()).or_insert_with(|| LogAt::read(&path));
+    if at.count >= LOG_MAX_LINES {
+        log_cut_file(id, &path, at);
     }
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -1425,10 +1439,8 @@ pub fn log_append(id: &str, line: &Value) -> Option<u64> {
         .and_then(|mut f| f.write_all(format!("{line}\n").as_bytes()));
     match wrote {
         Ok(()) => {
-            LOG_LINES.bump(id);
-            // Its line in the file, from 1 (Remote Control numbers the
-            // phone's events by it: `link/lanes.rs`).
-            Some(count as u64 + 1)
+            at.count += 1;
+            Some(at.base + at.count as u64)
         }
         Err(e) => {
             tracing::debug!("Agents: a log line couldn't be written ({})", e.kind());
@@ -1442,34 +1454,131 @@ pub fn log_read(id: &str) -> Vec<Value> {
     log_read_numbered(id).into_iter().map(|(_, v)| v).collect()
 }
 
-/// Agent `id`'s log with each event's line in the file (from 1), oldest
-/// first; lines that don't read are left out, their numbers kept.
+/// Agent `id`'s log with each event's line number (from 1, counting the
+/// lines a cut took: [`log_append`]), oldest first; lines that don't read
+/// are left out, their numbers kept.
 pub fn log_read_numbered(id: &str) -> Vec<(u64, Value)> {
     let Some(path) = log_path(id) else { return Vec::new() };
+    let base = log_base(&path);
     std::fs::read_to_string(path)
-        .map(|s| s.lines().enumerate().filter_map(|(i, l)| serde_json::from_str::<Value>(l).ok().map(|v| (i as u64 + 1, v))).collect())
+        .map(|s| s.lines().enumerate().filter_map(|(i, l)| serde_json::from_str::<Value>(l).ok().map(|v| (base + i as u64 + 1, v))).collect())
         .unwrap_or_default()
 }
 
-/// How many lines each agent's log has (counted once from its file).
-struct LogLines(std::sync::Mutex<Option<std::collections::HashMap<String, usize>>>);
+/// The file beside a log that says how many lines cuts took from it (none: 0).
+fn base_path(log: &Path) -> PathBuf {
+    log.with_file_name("log.base")
+}
+
+/// How many lines cuts took from the log at `log` (its first line's number, less one).
+fn log_base(log: &Path) -> u64 {
+    std::fs::read_to_string(base_path(log)).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
+}
+
+/// Whether a log line hands part of the work to a helper of the session's own
+/// (agents/steps.rs: "Handing part of it to a helper · …"; a helper's own helper says `under`).
+fn hands_over(e: &Value) -> bool {
+    e.get("under").is_none() && e.get("call").and_then(Value::as_str).is_some() && e.get("step").and_then(Value::as_str).is_some_and(|s| s.starts_with("Handing part of it to a helper"))
+}
+
+/// **A full log, cut** (pure): its newest [`LOG_KEEP_LINES`] or so, from the
+/// start of a turn where one begins within [`LOG_CUT_SLACK`] after that
+/// point — and, of what goes, **its helpers' hand-overs and their ends**
+/// (`helper` "back", with what each came back with), so the Agent panel's
+/// rows for them stay: each hand-over says how many of its helper's own
+/// steps went (`helped`, added to any it said). The lines kept, and how many
+/// went.
+pub fn log_cut(lines: Vec<Value>) -> (Vec<Value>, usize) {
+    if lines.len() <= LOG_KEEP_LINES {
+        return (lines, 0);
+    }
+    let from = lines.len() - LOG_KEEP_LINES;
+    let turn = |e: &Value| e.get("turn").and_then(Value::as_u64);
+    // A turn's start: a line naming a turn the line before it didn't.
+    let starts = |i: usize| turn(&lines[i]).is_some() && turn(&lines[i]) != turn(&lines[i - 1]);
+    let cut = (from.max(1)..lines.len().min(from + LOG_CUT_SLACK)).find(|&i| starts(i)).unwrap_or(from);
+    let mut gone = lines;
+    let kept = gone.split_off(cut);
+    // A helper's steps that go, counted as its row counts them (the same plain line twice in a row is one step).
+    let mut helped: HashMap<String, (u64, String)> = HashMap::new();
+    for e in &gone {
+        let (Some(under), Some(step)) = (e.get("under").and_then(Value::as_str), e.get("step").and_then(Value::as_str)) else { continue };
+        let plain = e.get("file").is_none() && e.get("command").is_none();
+        let h = helped.entry(under.to_string()).or_default();
+        if !(plain && h.1 == step) {
+            h.0 += 1;
+        }
+        h.1 = if plain { step.to_string() } else { String::new() };
+    }
+    let mut out: Vec<Value> = Vec::new();
+    for mut e in gone.iter().cloned() {
+        if hands_over(&e) {
+            let call = e.get("call").and_then(Value::as_str).unwrap_or_default().to_string();
+            let had = e.get("helped").and_then(Value::as_u64).unwrap_or(0);
+            let more = helped.get(&call).map_or(0, |h| h.0);
+            if let Some(o) = e.as_object_mut().filter(|_| had + more > 0) {
+                o.insert("helped".into(), Value::from(had + more));
+            }
+            out.push(e);
+        } else if e.get("helper").is_some() && e.get("call").is_some() {
+            out.push(e);
+        }
+    }
+    let went = gone.len() - out.len();
+    out.extend(kept);
+    (out, went)
+}
+
+/// Agent `id`'s full log at `path` cut ([`log_cut`]) and written whole in its
+/// place, `at` told; left as it was when it can't be.
+fn log_cut_file(id: &str, path: &Path, at: &mut LogAt) {
+    let Ok(text) = std::fs::read_to_string(path) else { return };
+    let lines: Vec<Value> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    let unread = text.lines().count() - lines.len();
+    let (kept, went) = log_cut(lines);
+    let went = went + unread;
+    let mut body = String::new();
+    for l in &kept {
+        body.push_str(&l.to_string());
+        body.push('\n');
+    }
+    let tmp = path.with_file_name("log.jsonl.tmp");
+    let base = at.base + went as u64;
+    let done = std::fs::write(&tmp, body).and_then(|()| std::fs::write(base_path(path), base.to_string())).and_then(|()| std::fs::rename(&tmp, path));
+    match done {
+        Ok(()) => {
+            tracing::info!(id, went, kept = kept.len(), "Agents: a full log's oldest turns went");
+            *at = LogAt { count: kept.len(), base };
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            // (Its base file may say the cut already: what's on disk, read again.)
+            *at = LogAt::read(path);
+            tracing::warn!("Agents: a full log couldn't be cut ({})", e.kind());
+        }
+    }
+}
+
+/// An agent's log as appends know it: how many lines its file has, and how
+/// many cuts took before them.
+#[derive(Debug, Clone, Copy, Default)]
+struct LogAt {
+    count: usize,
+    base: u64,
+}
+
+impl LogAt {
+    fn read(path: &Path) -> Self {
+        LogAt { count: std::fs::read_to_string(path).map(|s| s.lines().count()).unwrap_or(0), base: log_base(path) }
+    }
+}
+
+/// Each agent's log as appends know it (read once from its files).
+struct LogLines(std::sync::Mutex<Option<HashMap<String, LogAt>>>);
 
 static LOG_LINES: LogLines = LogLines(std::sync::Mutex::new(None));
 
 impl LogLines {
-    fn with_count(&self, id: &str, path: &Path) -> usize {
-        let mut m = self.0.lock().unwrap_or_else(|p| p.into_inner());
-        *m.get_or_insert_with(std::collections::HashMap::new)
-            .entry(id.to_string())
-            .or_insert_with(|| std::fs::read_to_string(path).map(|s| s.lines().count()).unwrap_or(0))
-    }
-
-    fn bump(&self, id: &str) {
-        if let Some(n) = self.0.lock().unwrap_or_else(|p| p.into_inner()).as_mut().and_then(|m| m.get_mut(id)) {
-            *n += 1;
-        }
-    }
-
     fn forget_all(&self) {
         *self.0.lock().unwrap_or_else(|p| p.into_inner()) = None;
     }
@@ -1662,6 +1771,68 @@ mod tests {
         // Never a path from an id.
         assert!(dir("..").is_none() && dir(r"a\b").is_none() && dir("").is_none());
         assert!(log_read("../x").is_empty());
+    }
+
+    /// **A full log loses its oldest turns, never its newest** (18 Nov 2026:
+    /// a Code chat's log stopped at 5,000 lines, its 86th turn of 104, and
+    /// the Agent panel never heard of the helper sent in the background).
+    /// The cut starts at a turn; what goes keeps its helpers' hand-overs and
+    /// ends (with how many of their own steps went); every line keeps
+    /// counting on from the last.
+    #[test]
+    fn a_full_log_loses_its_oldest_turns_keeps_its_helpers_rows_and_counts_on() {
+        // Turn 1: a helper handed part of it, three steps of its own (two the same line), back with its report.
+        let mut lines = vec![
+            json!({ "turn": 1, "step": "Reading notes.md" }),
+            json!({ "turn": 1, "step": "Handing part of it to a helper · Check the docs", "call": "t1" }),
+            json!({ "turn": 1, "step": "Reading docs/a.md", "under": "t1", "call": "r1" }),
+            json!({ "turn": 1, "step": "Reading docs/a.md", "under": "t1", "call": "r2" }),
+            json!({ "turn": 1, "step": "Editing docs/b.md", "file": "docs/b.md", "under": "t1", "call": "e1" }),
+            json!({ "turn": 1, "call": "t1", "helper": "back", "report": "The docs are in order." }),
+            json!({ "turn": 1, "text": "Done." }),
+        ];
+        // Then the turns after it, one line short of full.
+        let mut n = 2;
+        while lines.len() < LOG_MAX_LINES - 1 {
+            lines.push(json!({ "turn": n, "step": format!("Step {}", lines.len()) }));
+            if lines.len() % 500 == 0 {
+                n += 1;
+            }
+        }
+        let (kept, went) = log_cut(lines.clone());
+        assert!(kept.len() <= LOG_KEEP_LINES + 2 && kept.len() >= LOG_KEEP_LINES - LOG_CUT_SLACK, "about the newest {LOG_KEEP_LINES}: {}", kept.len());
+        assert_eq!(kept.len() + went, lines.len());
+        assert_eq!(kept.last(), lines.last(), "the newest kept");
+        // From a turn's start: the line after the helper's two is its turn's first.
+        let first = &kept[2];
+        let at = lines.iter().position(|l| l == first).unwrap();
+        assert_ne!(lines[at - 1]["turn"], first["turn"], "cut at a turn's start");
+        // The helper's hand-over and end stay, with how many of its own steps went (the repeated line once).
+        assert_eq!(kept[0]["call"], "t1");
+        assert_eq!(kept[0]["helped"], 2);
+        assert_eq!((kept[1]["helper"].as_str(), kept[1]["report"].as_str()), (Some("back"), Some("The docs are in order.")));
+        assert!(!kept.iter().any(|l| l["under"] == "t1"), "its steps went");
+        // Cut again: its count stays.
+        let (again, _) = log_cut(kept.iter().cloned().chain((0..LOG_KEEP_LINES).map(|i| json!({ "turn": 99, "step": format!("More {i}") }))).collect());
+        assert_eq!(again[0]["helped"], 2);
+        // Short: as it was.
+        assert_eq!(log_cut(lines[..10].to_vec()), (lines[..10].to_vec(), 0));
+
+        // Through the store: full, the next line is written, numbered on from the last.
+        insert(agent("full", Status::Running, 0));
+        let path = log_path("full").unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, lines.iter().chain(std::iter::once(&json!({ "turn": n, "step": "The last of it" }))).map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+        let read = log_read_numbered("full");
+        assert_eq!(read.last().unwrap().0, LOG_MAX_LINES as u64);
+        let line = log_append("full", &json!({ "turn": n + 1, "step": "Handing part of it to a helper · Audit the goals", "call": "bg" }));
+        assert_eq!(line, Some(LOG_MAX_LINES as u64 + 1), "numbered on from the last");
+        let read = log_read_numbered("full");
+        assert!(read.len() < LOG_MAX_LINES);
+        assert_eq!(read.last().map(|(l, e)| (*l, e["call"].as_str())), Some((LOG_MAX_LINES as u64 + 1, Some("bg"))), "the newest written");
+        assert_eq!(read[read.len() - 2].1["step"], "The last of it");
+        assert_eq!(log_append("full", &json!({ "turn": n + 1, "step": "Waiting" })), Some(LOG_MAX_LINES as u64 + 2));
+        assert!(read.windows(2).all(|w| w[0].0 < w[1].0), "numbers only grow");
     }
 
     #[test]
