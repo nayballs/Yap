@@ -13,9 +13,10 @@
 //! - **Write**: "New file · N lines", "Rewritten · N lines" when the file
 //!   was there before (the backup manifest knows), or "Written" when Yap
 //!   can't tell (no backups were made): its first lines.
-//! - **Caps**: [`EDIT_MAX`] lines an edit, [`AGENT_MAX`] an agent; the rest is
-//!   counted ("…N more lines"), and every line at most [`LINE_MAX`]
-//!   characters.
+//! - **Caps**: [`EDIT_MAX`] lines an edit, [`TURN_MAX`] a turn (18 Nov 2026:
+//!   it was an agent's, and a Code chat is one agent for days — its later
+//!   edits showed no diff at all); the rest is counted ("…N more lines"), and
+//!   every line at most [`LINE_MAX`] characters.
 //!
 //! A diff goes in the agent's `yap-agent` event and its log, never in Yap's own
 //! log (it's the person's files).
@@ -25,8 +26,9 @@ use serde_json::Value;
 
 /// The most lines one edit shows.
 pub const EDIT_MAX: usize = 200;
-/// The most lines a whole agent's diffs show.
-pub const AGENT_MAX: usize = 2_000;
+/// The most lines a turn's diffs show (one huge turn never floods the page;
+/// the next turn's show their own).
+pub const TURN_MAX: usize = 2_000;
 /// The most characters of a line.
 pub const LINE_MAX: usize = 300;
 /// Unchanged lines kept around a change.
@@ -323,9 +325,9 @@ mod tests {
     #[test]
     fn the_caps_count_what_they_leave_out() {
         let content: String = (0..500).map(|i| format!("row {i}\n")).collect();
-        let (d, kept) = capped(of_write("big.csv", &content, "new"), AGENT_MAX);
+        let (d, kept) = capped(of_write("big.csv", &content, "new"), TURN_MAX);
         assert_eq!((d.lines.len(), kept, d.more, d.added), (EDIT_MAX, EDIT_MAX, 300, 500));
-        // The agent's own cap: what's left of it.
+        // The turn's own cap: what's left of it.
         let (d, kept) = capped(of_write("big.csv", &content, "new"), 50);
         assert_eq!((d.lines.len(), kept, d.more), (50, 50, 450));
         let (d, kept) = capped(of_write("big.csv", &content, "new"), 0);
@@ -336,7 +338,7 @@ mod tests {
         assert_eq!((d.lines, kept, d.more), (vec!["-a".to_string(), "+b".to_string()], 2, 1));
         // Under the caps: as it was.
         let small = of_write("a", "one\ntwo", "new");
-        assert_eq!(capped(small.clone(), AGENT_MAX), (small, 2));
+        assert_eq!(capped(small.clone(), TURN_MAX), (small, 2));
     }
 
     #[test]

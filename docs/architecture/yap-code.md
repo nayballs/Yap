@@ -995,11 +995,22 @@ person's own Claude Code).
 The maintainer said yes to wiring three of Claude Code's own commands to
 Yap's actions, as the Claude Code app does. Picked from Slash commands › or
 typed, then Enter (`Composer.svelte` `submit`, `codeMenu.svelte.js`
-`codeCommand`; never with a screenshot, a file or a passage in the box).
-`/clear` and `/compact` are Yap's only in a Code chat that **works
+`codeCommand`; `/model` never with a screenshot, a file or a passage in
+the box). `/clear` and `/compact` are Yap's only in a Code chat that **works
 directly** (`agents/slash.rs`, `chat/turn.rs` `goes_to_session`): anywhere
 else Rust says it isn't its to do and the words go as typed, as does every
-other "/" ("/clear the cache" too: words for Claude).
+other "/".
+
+**Words after them, and what's in the box** (18 Nov 2026, checked on Claude
+Code 2.1.296): Claude Code runs "/clear the cache" as `/clear` (its context
+cleared, the words ignored) and "/compact <words>" as `/compact` with the
+words as its instructions — with a screenshot in the message too, which it
+drops. So Yap does the same: "/clear …" is Yap's `/clear` whatever follows
+it, "/compact <words>" passes the words to its `/compact`, and either runs
+with screenshots, files or a quote in the box, which stay there for the
+next message. (Until then "/clear the cache" went to Claude Code as words —
+the docs called them "words for Claude" — and it cleared its context with
+no divider in the thread.) "/clearance …" is another word, sent as typed.
 
 - **`/clear`** (`slash::code_chat_clear`): Claude starts afresh, as the
   app's does. The chat's agents then are set aside in `code_menu.json`
@@ -1980,7 +1991,21 @@ ids made up):
   while a turn works joins it at its next tool call's end (one result).
   `ScheduleWakeup`'s turn has no origin: `command_lifecycle` `started` and
   `completed` bracket it, and its call's record says when it's due
-  (`scheduledFor`). Monitor wasn't offered in a plain `-p` run.
+  (`scheduledFor`). Monitor wasn't offered in a plain `-p` run (nor on
+  18 Nov 2026).
+- **A scheduled job (`CronCreate`) is no background work** (recorded 18 Nov
+  2026, `fixtures/2.1.296/real-cron.jsonl`): its call comes back at once
+  ("Session-only … dies when Claude exits"), with no `task_started` and
+  nothing on `background_tasks_changed`, so the answer ends the turn; its
+  input closed, Claude Code exits at once and the job never runs (checked:
+  18 s). While a turn's input is still open (it waits for a helper), each run
+  is a turn of Claude Code's own bracketed by `command_lifecycle`, as a
+  wake-up's is, with no origin: so `Background::on_lifecycle` takes a
+  wake-up as the one starting only once it's due (5 s early at most,
+  `WAKE_EARLY_MS`). Before, it took the earliest, and a job's run while the
+  turn waited for a wake-up 10 minutes off let that wake-up go, the turn
+  ending before it (`runner.rs`
+  `a_scheduled_jobs_run_never_takes_a_wake_up_not_due`).
 - **A helper's own background work** (recorded 18 Nov 2026,
   `fixtures/2.1.296/real-background-nested.jsonl`): a helper's own helper
   says `parent_task_id` and `spawn_depth` 2 (no `owned_by_subagent`); its
@@ -2043,7 +2068,8 @@ ids made up):
   - an end is a task's own notice (a later one for the same task is
     normal) or the list no longer naming it (a paused helper apart); a
     wake-up is due when its record says and done when Claude Code's own
-    turn starts (one 5 minutes past due with none is let go). A Claude Code
+    turn starts once it's due (one starting earlier is a scheduled job's
+    run; one 5 minutes past due with none is let go). A Claude Code
     that says nothing of its tasks has none here: nothing waits, as before.
   - **Its input ended** (a note never read, a stop), the process is ended
     15 s on only once nothing is listed or paused: Claude Code exits by
@@ -2499,8 +2525,11 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   result says it made it: `tool_use_result.type` "create", or "File created
   successfully"), "Rewritten · N lines" (it was there, or the agent wrote it
   before) or "Written" (nothing says), with its first lines.
-  **Caps**: 200 lines an edit, 2,000 an agent (`diffLines`), 300 characters a
-  line; past them "…N more lines". A diff goes out with the call's result, so
+  **Caps**: 200 lines an edit, 2,000 a turn (`diff::TURN_MAX`, the turn's
+  `diffLines`; a Continue goes on from what it kept), 300 characters a
+  line; past them "…N more lines". (Until 18 Nov 2026 the 2,000 were an
+  agent's, and a Code chat is one agent for days: once its earlier turns had
+  shown them, every later edit's diff was empty.) A diff goes out with the call's result, so
   a refused or failed edit has none. A file one of its commands made or
   changed (the turn's `byCommand`, [Files a command made or
   changed](#files-a-command-made-or-changed)) says "New · By a command" or

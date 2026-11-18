@@ -135,8 +135,10 @@ test("the box's three commands, a model by its name, and a token count in a word
   expect(codeCommand('  /COMPACT keep the test plan ')).toEqual({ name: 'compact', arg: 'keep the test plan' });
   expect(codeCommand('/model haiku')).toEqual({ name: 'model', arg: 'haiku' });
   expect(codeCommand('/model')).toEqual({ name: 'model', arg: '' });
-  // "/clear the cache" is words for Claude; anything else after "/" goes as typed.
-  expect(codeCommand('/clear the cache')).toBeNull();
+  // "/clear the cache" is a /clear (Claude Code 2.1.296 clears on it too, its words ignored); anything else after "/"
+  // goes as typed.
+  expect(codeCommand('/clear the cache')).toEqual({ name: 'clear', arg: '' });
+  expect(codeCommand('/clearance notes')).toBeNull();
   expect(codeCommand('/tidy-beds north')).toBeNull();
   expect(codeCommand('/compacted')).toBeNull();
   expect(codeCommand('clear')).toBeNull();
@@ -206,7 +208,9 @@ test('/clear: Claude starts afresh (a new session for the next message), the thr
   const session = after(first, '--session-id');
   expect(session).toBeTruthy();
   const conversation = (await agents(yap))[0].conversation;
-  await typed(main, '/clear');
+  // Words after it are still a /clear, as Claude Code takes them (18 Nov 2026: before, they went to it as a turn, and
+  // it cleared its context with no divider here).
+  await typed(main, '/clear the old watering notes');
   await expect(main.locator('.toast').filter({ hasText: 'Context cleared' })).toBeVisible();
   await expect(box(main)).toHaveValue('');
   const divider = main.getByTestId('chat-cleared');
