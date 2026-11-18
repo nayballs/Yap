@@ -143,7 +143,10 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   than the first slice's (the person went to another app, a dialog came
   up; `slices_go_on`, pure, 2026-11-18 — before, only robot mode checked,
   and the rest went into that window) leaves the rest there too
-  (`FocusMoved`: "Paste stopped · the rest is copied"). **The text box itself**
+  (`FocusMoved`: "Paste stopped · the rest is copied"; robot
+  `long-paste.real.js`, the focus moved to the test pad after the first
+  slice: the rest copied, the pad untouched, said once, the guard never
+  refusing). **The text box itself**
   (2026-10-29): after re-focusing the window, `selection::restore_focus`
   puts the focus back on the element the dictation started in when it
   wandered off within the window to something that takes no text

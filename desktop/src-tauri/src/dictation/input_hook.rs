@@ -378,6 +378,9 @@ static HEARD_TICK: AtomicU32 = AtomicU32::new(0);
 static HOOK_THREAD: AtomicU32 = AtomicU32::new(0);
 /// Robot mode: act only on the robot's own keys ([`ROBOT_MARK`]).
 static ROBOT_ONLY: AtomicBool = AtomicBool::new(false);
+/// Robot mode, a spec's ask: injected keys heard as in real use
+/// ([`robot_only_for`]).
+static ROBOT_OWN_KEYS: AtomicBool = AtomicBool::new(false);
 /// A key event the robot sent for the hook to act on (its extra info).
 pub const ROBOT_MARK: usize = 0x5941_5052;
 /// A key event the robot sent for the hook to miss (a key-up the lock
@@ -410,6 +413,18 @@ pub(crate) fn heard_as(extra: usize, robot_only: bool) -> Heard {
         _ if robot_only => Heard::Pass { heard: true },
         _ => Heard::Act,
     }
+}
+
+/// Robot mode: whether the hook acts on the robot's keys alone for this
+/// event ([`heard_as`]'s `robot_only`; `robot`: robot mode is on). When a
+/// spec asks for Yap's own keys as in real use (`own_keys`:
+/// `realtest::own_keys`), a key that was `injected` (`LLKHF_INJECTED`) and
+/// not marked for the hook to miss is heard as real use hears it: the
+/// robot's, another program's, and Yap's own unless they carry
+/// [`OWN_MARK`] — which is what hotkeys.real.js checks. The person's own
+/// keys (never injected) still pass by. Pure.
+pub(crate) fn robot_only_for(robot: bool, own_keys: bool, extra: usize, injected: bool) -> bool {
+    robot && !(own_keys && injected && extra != UNHEARD_MARK)
 }
 
 /// Whether the hook has `vk` down (pure bookkeeping, any thread).
@@ -1719,10 +1734,18 @@ fn note_new_key(vkey: u32, scan: u32, now: u64) {
 /// Whether the hook passes this event by as if no hook were there
 /// ([`heard_as`]): Yap's own keys, and in robot mode (debug builds) all but
 /// the robot's ([`ROBOT_MARK`]) — `Some(true)`: heard, `Some(false)`: an
-/// [`UNHEARD_MARK`] event, not even heard. `None`: act on it.
+/// [`UNHEARD_MARK`] event, not even heard. `None`: act on it. `injected`:
+/// a key event `SendInput` made (a spec may ask robot mode to hear those
+/// as real use does: [`robot_only_for`]); the mouse's, always `false`.
 #[cfg(target_os = "windows")]
-fn robot_skip(extra: usize) -> Option<bool> {
-    match heard_as(extra, ROBOT_ONLY.load(Ordering::Relaxed)) {
+fn robot_skip(extra: usize, injected: bool) -> Option<bool> {
+    let robot_only = robot_only_for(
+        ROBOT_ONLY.load(Ordering::Relaxed),
+        ROBOT_OWN_KEYS.load(Ordering::Relaxed),
+        extra,
+        injected,
+    );
+    match heard_as(extra, robot_only) {
         Heard::Act => None,
         Heard::Pass { heard } => Some(heard),
     }
@@ -1741,7 +1764,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
 
         // Robot mode: only the robot's own keys (`heard`: still counted as
         // input the hook heard).
-        if let Some(heard) = robot_skip(info.dw_extra_info) {
+        if let Some(heard) = robot_skip(info.dw_extra_info, info.flags & 0x10 != 0) {
             if heard {
                 HEARD_TICK.store(win32::GetTickCount(), Ordering::Relaxed);
             }
@@ -1806,7 +1829,7 @@ unsafe extern "system" fn low_level_mouse_proc(
         let msg = wparam as u32;
         let hook_info = &*(lparam as *const win32::MSLLHOOKSTRUCT);
 
-        if let Some(heard) = robot_skip(hook_info.dw_extra_info) {
+        if let Some(heard) = robot_skip(hook_info.dw_extra_info, false) {
             if heard {
                 HEARD_TICK.store(win32::GetTickCount(), Ordering::Relaxed);
             }
@@ -2065,6 +2088,10 @@ pub fn start_input_hook(app_handle: AppHandle) {
     if crate::shell::realtest::on() {
         info!("Input hook: robot mode, only the robot's own keys");
         ROBOT_ONLY.store(true, Ordering::SeqCst);
+        if crate::shell::realtest::own_keys() {
+            info!("Input hook: robot mode, injected keys heard as in real use (Yap's own unless marked)");
+            ROBOT_OWN_KEYS.store(true, Ordering::SeqCst);
+        }
     }
     start_forwarder(app_handle);
     start_hook_thread();
@@ -2296,6 +2323,30 @@ mod tests {
         assert_eq!(heard_as(UNHEARD_MARK, false), Heard::Act);
         // Three marks, all different.
         const { assert!(OWN_MARK != ROBOT_MARK && OWN_MARK != UNHEARD_MARK) };
+    }
+
+    /// Robot mode can meet Yap's own keys as real use does (a spec's ask,
+    /// hotkeys.real.js): injected keys are heard — the robot's, another
+    /// program's, Yap's own unless marked — and the person's never are.
+    #[test]
+    fn robot_mode_hears_injected_keys_only_when_a_spec_asks() {
+        let hook = |extra, injected, own_keys| heard_as(extra, robot_only_for(true, own_keys, extra, injected));
+        // As ever: the robot's keys alone.
+        assert_eq!(hook(ROBOT_MARK, true, false), Heard::Act);
+        assert_eq!(hook(0, true, false), Heard::Pass { heard: true });
+        assert_eq!(hook(0, false, false), Heard::Pass { heard: true });
+        // Asked: an unmarked injected key is acted on, as real use would;
+        // Yap's own marked ones pass by, as in real use.
+        assert_eq!(hook(0, true, true), Heard::Act);
+        assert_eq!(hook(OWN_MARK, true, true), Heard::Pass { heard: true });
+        assert_eq!(hook(ROBOT_MARK, true, true), Heard::Act);
+        // A key-up the robot marked for the hook to miss: still missed.
+        assert_eq!(hook(UNHEARD_MARK, true, true), Heard::Pass { heard: false });
+        // The person's own keys (never injected): never seen.
+        assert_eq!(hook(0, false, true), Heard::Pass { heard: true });
+        // A normal run: as ever.
+        assert!(!robot_only_for(false, true, 0, true));
+        assert!(!robot_only_for(false, false, 0, false));
     }
 
     #[test]

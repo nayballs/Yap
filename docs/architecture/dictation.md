@@ -741,7 +741,14 @@ to **Run again** from Home.
   (`realtest.rs`, debug builds): the hook runs, acting only on events whose
   extra info is `ROBOT_MARK`; `UNHEARD_MARK` events pass by unheard (the
   robot's lost key-up); everything else passes untouched (the developer's
-  keys are never seen). Debug-only `e2e_hotkey_bindings` (`binding_states`).
+  keys are never seen) — unless the spec asks for Yap's own keys as in real
+  use (`YAP_REALTEST_OWN_KEYS`, `realtest::own_keys`, 2026-11-18): then any
+  injected key (`LLKHF_INJECTED`) not marked to be missed is heard as real
+  use hears it (`robot_only_for`, pure), Yap's own passing by only by their
+  `OWN_MARK`, and edit mode's Ctrl+C goes out into the test's windows;
+  `hotkeys.real.js` holds the rewrite shortcut (bare, and Ctrl+Shift+F22)
+  across that Ctrl+C that way (both dropped before the mark). Debug-only
+  `e2e_hotkey_bindings` (`binding_states`).
   **Mouse buttons** (`mouse_button`, 2026-10-31 out of the callback: the
   middle one is 3, XBUTTON1 Back 4, XBUTTON2 Forward 5): a button some
   shortcut has (fixed, language, transform; first match wins) is
