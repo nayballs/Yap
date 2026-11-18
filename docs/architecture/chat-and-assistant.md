@@ -5865,7 +5865,11 @@ a technical error.
    bigger model since); else **the summary and the messages after it**;
    else the latest that fit (and the summary beside them when it fits).
    The start moves 6 messages at a time (the Voice Assistant's 4), so a
-   hybrid local model re-reads only from the first change. The summary goes
+   hybrid local model re-reads only from the first change — and once a
+   step would reach the end, two at a time from the last step tried, so the
+   newest question and answer go whenever they fit (18 Nov 2026: a step
+   landing on the end sent no history at all; with a summary and nothing
+   after it fitting beside it, the latest that fit go without it). The summary goes
    in the system prompt before its end ("Earlier in this chat (Yap's notes
    on the older messages, which aren't shown; the latest messages follow in
    full): …", `compact::block`). Logged: counts and tokens only.
@@ -6076,6 +6080,13 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
 - **Stop, and a newer question**: the interrupt (`Session::interrupt`), and
   the turn read to its end (10 s at most, else the process is ended), so the
   next question's events are its own.
+- **How long a turn may take** (`plan.rs` `Clock`, 18 Nov 2026): 15 minutes
+  with nothing from Claude Code or Yap's tools (stuck: "Claude Code took too
+  long to answer"), started again at each event — a long search and read, a
+  card the person takes their time over, Claude Code's word every 30 s that
+  a tool still runs keep it going — and an hour however busy. Until then the
+  15 minutes were the whole turn's: a document's outline card (10 minutes
+  for the person) counted in them, and the writing after it was cut off.
 - **Yap Code** (while offered: `on_the_plan` keeps `agents`): Yap's agent tools over
   the same endpoint, allowed and named in the prompt (`plan.rs` `AGENTS`). Each
   turn opens on the session's run (`RunHandle::begin_turn`), and the turn's
