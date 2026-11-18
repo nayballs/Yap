@@ -226,6 +226,15 @@ fn a_git_repository_new_and_changed_files_a_commit_in_the_turn_an_ignored_log() 
     write(&ws, "notes.md", "Draft notes\n");
     write(&ws, "src/beds.js", "export const beds = 2;\n");
     write(&ws, "old-plan.md", "Old plan\n");
+    // Made an hour ago, as far as its birth says: on Windows the file made again under its name below inherits that
+    // (NTFS "tunnelling" within 15 s of a deletion), so it's new by Git's word, never by its birth time. (Before,
+    // this test passed only when the machine was quick enough for the real birth to fall within the command's slack.)
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTimesExt;
+        let f = std::fs::OpenOptions::new().write(true).open(os_path(&ws, "old-plan.md")).unwrap();
+        f.set_times(std::fs::FileTimes::new().set_created(SystemTime::now() - Duration::from_secs(3600))).unwrap();
+    }
     write(&repo, "outside.txt", "not the workspace's\n");
     git_here(&git, &repo, &["add", "-A"]);
     git_here(&git, &repo, &["commit", "-q", "-m", "start"]);
