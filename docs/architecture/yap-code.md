@@ -460,7 +460,12 @@ workspace, word for word, and no model of Chat's is asked.
     the chat's first; the branch is let go once that run's init says its
     own id. **Unavailable while the chat's Claude works** ("Rewind to
     here": "Unavailable while Claude is working", as the app), and past a turn
-    from before Yap kept `end_uuid` (said, never guessed).
+    from before Yap kept `end_uuid` (said, never guessed). A turn that never
+    reached Claude Code (it failed before it started — signed out, the
+    folder gone — or was stopped while it waited: `TurnNote::ran` false)
+    put nothing in the session and is never the branch point
+    (`rewind::point_before`, `core/agents.js` `messageTurn`; 18 Nov 2026:
+    one made every later message "from before this version of Yap").
   - **Fork from here** opens a new Code chat ("<title> (fork)") in the same
     workspace and Mode, with the conversation up to and including that
     message's turn — its answer too (`chats::fork`: the messages copied,
@@ -1971,6 +1976,18 @@ ids made up):
   (`TurnResult::empty`) — Claude Code's own, or any before the turn's first
   message was even echoed back — is nothing at all ("Agents: a turn of
   Claude Code's own with nothing in it…" in the log).
+- **A command Claude Code runs itself answers its message** (18 Nov 2026,
+  checked on 2.1.296; `TurnResult::local_command`,
+  `fixtures/2.1.296/real-local-command.jsonl`): "/cost", "/clear the cache"
+  (Claude Code clears; its words are none) — no model call, its result's
+  `local_command` says which, and **the message is never echoed**. Sent
+  while a turn works it isn't joined to it either: Claude Code runs it after
+  that turn's answer, as a turn of its own. Its result takes in the next
+  message written and not yet read, as an echo would (✓✓, the turn's words
+  from there): before, "/clear the cache" as a turn's message was "nothing"
+  and the turn stayed at work for good, and a "/cost" sent meanwhile stayed
+  unread, the turn ended 20 s on (`NOTE_GRACE`) and the note went again as a
+  turn of its own.
 - **Work left in the background is waited for** (`runner/background.rs`
   `Background`):
   - **while Claude Code's own list** (its latest `background_tasks_changed`)

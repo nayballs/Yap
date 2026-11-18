@@ -1027,7 +1027,9 @@ export function messageTurn(agents, conversation, messageId) {
     const turns = a.turnList || [];
     const t = turns.find((x) => x?.direct && !x.rewound && x.messageId === messageId);
     if (!t) continue;
-    const before = turns.filter((x) => x.n < t.n && !x.rewound).sort((x, y) => y.n - x.n)[0];
+    // (A turn that never reached Claude Code — it failed before it started, or was stopped while it waited — put
+    // nothing in the session: never the point a Rewind branches at, as agents/rewind.rs `point_before`.)
+    const before = turns.filter((x) => x.n < t.n && !x.rewound && Number(x.startedTs) > 0).sort((x, y) => y.n - x.n)[0];
     const later = turns.filter((x) => x.n >= t.n && !x.rewound);
     // (What its commands changed stays as it is: Claude Code's checkpoints cover its own edits only.)
     const files = new Set(later.flatMap((x) => (x.files || []).filter((f) => !(x.byCommand || []).some((c) => c.file === f)))).size;
