@@ -1772,6 +1772,8 @@ struct Follow {
     /// A turn Claude Code started by itself is running (`command_lifecycle`:
     /// a wake-up's), so its result is its own.
     woken: bool,
+    /// Its process is being ended (said once in the log).
+    killed: bool,
 }
 
 /// **What a result means for the turn** ([`Follow::take_result`]).
@@ -1900,6 +1902,7 @@ impl Follow {
             drained_at: None,
             last_event: Instant::now(),
             woken: false,
+            killed: false,
         }
     }
 
@@ -2165,17 +2168,41 @@ impl Follow {
     /// turn's; and waiting on the work, the line says what's left — or, all
     /// back, Claude Code's own turn on it is next.
     fn on_task(&mut self, t: &crate::ai::claude_code::events::Task) {
+        use crate::ai::claude_code::events::Task;
         if self.bg.stopped_before(t) {
             tracing::info!(id = %self.id, turn = self.n, "Agents: Claude Code says a background task from before stopped");
             if let Some(agent) = store::get(&self.id) {
                 emit(&AgentEvent { notice: Some(background::STOPPED_EARLIER.into()), ..self.event(&agent) });
             }
         }
-        let ended = self.bg.on_task(t);
+        let was_paused = self.bg.counts().2;
+        let ended = self.bg.on_task(t, Instant::now());
+        // What Claude Code said of its tasks, for a later look (ids and counts only).
+        let (listed, running, paused) = self.bg.counts();
+        match t {
+            Task::Started { task_id, task_type, background, by_helper, parent, depth, .. } => {
+                tracing::debug!(id = %self.id, turn = self.n, task = %task_id, task_type = %task_type, background, by_helper, parent = parent.as_deref().unwrap_or(""), depth, running, paused, "Agents: a task started");
+            }
+            Task::Background { .. } => tracing::debug!(id = %self.id, turn = self.n, listed, running, paused, "Agents: Claude Code's list of background tasks"),
+            Task::Notice { task_id, status, .. } => tracing::debug!(id = %self.id, turn = self.n, task = %task_id, status = %status, running, paused, "Agents: a task's notice"),
+            Task::Updated { .. } => {}
+        }
+        if paused > was_paused {
+            tracing::info!(id = %self.id, turn = self.n, paused, running, "Agents: a helper paused with work of its own still running; still waiting for it");
+        }
         // (Started while it idles waiting: one more to wait for.)
-        if matches!(t, crate::ai::claude_code::events::Task::Started { background: true, by_helper: false, .. }) && self.idle_waiting() {
+        if matches!(t, Task::Started { background: true, by_helper: false, parent: None, .. }) && self.idle_waiting() {
             self.wait_for_background();
         }
+        self.background_ended(ended);
+    }
+
+    /// **The session's own background work that ended** (a task's notice,
+    /// Claude Code's list, or a paused helper left alone: `Background::settle`):
+    /// a helper's row says it's back, with what it came back with; and,
+    /// waiting on it, the line says what's left — or, all back, Claude Code's
+    /// own turn on it is next.
+    fn background_ended(&mut self, ended: Vec<background::Ended>) {
         if ended.is_empty() {
             return;
         }
@@ -2509,13 +2536,16 @@ impl Follow {
         match self.take_result(r) {
             After::Nothing | After::Background => {}
             After::Note => self.unread_since = Some(Instant::now()),
-            After::End => self.end_input(session, false),
-            After::Kill => self.end_input(session, true),
+            After::End => self.end_input(session, false, "every message answered, nothing in the background"),
+            After::Kill => self.end_input(session, true, "stopped with a message unread"),
         }
     }
 
-    /// **The turn's input ends** (`kill`: and the process with it, now).
-    fn end_input(&mut self, session: &Session, kill: bool) {
+    /// **The turn's input ends** (`kill`: and the process with it, now) —
+    /// `why`, in the log (Yap's own words, no content).
+    fn end_input(&mut self, session: &Session, kill: bool, why: &'static str) {
+        let (listed, running, paused) = self.bg.counts();
+        tracing::info!(id = %self.id, turn = self.n, kill, why, listed, running, paused, "Agents: its input ends");
         with_state(|s| {
             if let Some(l) = s.live.get_mut(&self.id) {
                 l.input_over = true;
@@ -2728,9 +2758,21 @@ impl Follow {
             Some(l) => (l.stopping, std::mem::take(&mut l.keep_waiting)),
             None => (None, false),
         });
-        // (Its input over, it exits by itself — but not before work it left in the background is back: Claude
-        // Code stays up for that, then ends.)
-        if stopping.is_some_and(|at| at.elapsed() > STOP_GRACE) || self.input_over_at.is_some_and(|at| at.elapsed() > EXIT_GRACE && !self.bg.pending()) {
+        // (Its input over, it exits by itself — but not before work it left in the background is back, as long as
+        // Claude Code lists any or a helper is paused: Claude Code stays up for that, then ends by itself.)
+        let killing = if stopping.is_some_and(|at| at.elapsed() > STOP_GRACE) {
+            Some("stopped, and still running 8 s on")
+        } else if self.input_over_at.is_some_and(|at| at.elapsed() > EXIT_GRACE && !self.bg.pending()) {
+            Some("its input ended 15 s ago and nothing runs in the background")
+        } else {
+            None
+        };
+        if let Some(why) = killing {
+            if !self.killed {
+                self.killed = true;
+                let (listed, running, paused) = self.bg.counts();
+                tracing::info!(id = %self.id, turn = self.n, why, listed, running, paused, "Agents: ending its process");
+            }
             session.kill();
         }
         self.background_tick(session, keep);
@@ -2738,15 +2780,8 @@ impl Follow {
         // starting on it: its input ends, and the note goes back to Yap
         // (its next turn: `notes_unread`).
         if self.unread_since.is_some_and(|at| at.elapsed() > NOTE_GRACE) {
-            tracing::info!(id = %self.id, "Agents: it never started on a note it hadn't read; ending its input");
             self.unread_since = None;
-            with_state(|s| {
-                if let Some(l) = s.live.get_mut(&self.id) {
-                    l.input_over = true;
-                }
-            });
-            session.end();
-            self.input_over_at = Some(Instant::now());
+            self.end_input(session, false, "it never started on a note it hadn't read");
         }
         if self.last_flush.elapsed() > Duration::from_secs(2) {
             store::flush();
@@ -2763,6 +2798,12 @@ impl Follow {
     /// work all back with nothing from Claude Code for [`DRAIN_GRACE`], its
     /// input ends.
     fn background_tick(&mut self, session: &Session, keep: bool) {
+        // A paused helper with nothing of its own left that Claude Code never started again: done.
+        let settled = self.bg.settle(Instant::now());
+        if !settled.is_empty() {
+            tracing::info!(id = %self.id, turn = self.n, helpers = settled.len(), "Agents: a paused helper was never started again; taken as done");
+            self.background_ended(settled);
+        }
         if self.input_over_at.is_some() {
             return;
         }
@@ -2789,8 +2830,7 @@ impl Follow {
         }
         self.ask_if_long(waits);
         if self.drained_at.is_some_and(|at| at.elapsed() > DRAIN_GRACE) && self.last_event.elapsed() > DRAIN_GRACE && self.answered && !self.bg.pending() {
-            tracing::info!(id = %self.id, turn = self.n, "Agents: its background work is back and Claude Code said nothing more; ending its input");
-            self.end_input(session, false);
+            self.end_input(session, false, "its background work is back and Claude Code said nothing more for 20 s");
         }
     }
 
@@ -4627,10 +4667,10 @@ mod tests {
         let mut follow = Follow::new(&agent, 1, folder, Mode::Auto, 200_000, None);
         follow.on_taken("Compare the seed suppliers.");
         follow.on_tool("toolu_helper", "Agent", &json!({ "description": "Compare seed suppliers", "run_in_background": true }));
-        follow.on_task(&Task::Started { task_id: "a1".into(), tool_use_id: "toolu_helper".into(), task_type: "local_agent".into(), background: true, by_helper: false });
+        follow.on_task(&Task::Started { task_id: "a1".into(), tool_use_id: "toolu_helper".into(), task_type: "local_agent".into(), background: true, by_helper: false, parent: None, depth: 1 });
         follow.on_tool_result("toolu_helper", false, "Async agent launched successfully.", None);
         follow.on_tool("toolu_build", "PowerShell", &json!({ "command": "npm run build", "run_in_background": true }));
-        follow.on_task(&Task::Started { task_id: "b1".into(), tool_use_id: "toolu_build".into(), task_type: "local_bash".into(), background: true, by_helper: false });
+        follow.on_task(&Task::Started { task_id: "b1".into(), tool_use_id: "toolu_build".into(), task_type: "local_bash".into(), background: true, by_helper: false, parent: None, depth: 1 });
         follow.on_tool_result("toolu_build", false, "Command running in background with ID: b1.", None);
         let helpers = |id: &str| store::log_read(id).iter().filter_map(|e| Some((e.get("helper")?.as_str()?.to_string(), e.get("report").and_then(|r| r.as_str()).unwrap_or("").to_string()))).collect::<Vec<_>>();
         assert!(helpers(&id).is_empty(), "launched isn't back");
@@ -4674,7 +4714,7 @@ mod tests {
         let mut follow = Follow::new(&agent, 1, folder, Mode::Auto, 200_000, None);
         follow.on_taken("Run the long tests.");
         follow.on_tool("toolu_t", "Bash", &json!({ "command": "npm test", "run_in_background": "true" }));
-        follow.on_task(&Task::Started { task_id: "b1".into(), tool_use_id: "toolu_t".into(), task_type: "local_bash".into(), background: true, by_helper: false });
+        follow.on_task(&Task::Started { task_id: "b1".into(), tool_use_id: "toolu_t".into(), task_type: "local_bash".into(), background: true, by_helper: false, parent: None, depth: 1 });
         assert_eq!(follow.take_result(&answer("They're running.", false)), After::Background);
         assert!(keep_waiting(&id).is_err(), "nobody was asked yet");
         // Not yet; then past the wait: asked, once.
@@ -4758,6 +4798,17 @@ mod tests {
         assert_eq!(code, Some(0));
         let back: Vec<String> = store::log_read(&id).iter().filter_map(|e| e.get("report").and_then(|r| r.as_str()).map(str::to_string)).collect();
         assert_eq!(back, ["Hedgerow is cheapest at 1.95 a pack."], "the helper's row: back with what it said, once");
+        test_live(&id, None);
+
+        // A helper that pauses for work of its own (18 Nov 2026): its interim notices, Claude Code's own turns on its
+        // helper's report and on each pause, the moment the list is empty — waited through, the turn's input open, till
+        // its last notice; then its merge is the answer and the process ends by itself.
+        let (id, follow, code, after) = play(&fixtures.join("real-background-nested.jsonl"), "Plan the three beds.", false).await;
+        assert_eq!(after, [(false, true), (false, true), (false, true), (false, true), (true, false)]);
+        assert_eq!(follow.outcome.as_ref().map(|(_, t)| t.as_str()), Some("The plan is merged: beans and kale north, herbs east, squash south."));
+        assert_eq!(code, Some(0));
+        let back: Vec<String> = store::log_read(&id).iter().filter_map(|e| e.get("report").and_then(|r| r.as_str()).map(str::to_string)).collect();
+        assert_eq!(back, ["Merged: beans and kale north, herbs east, squash south."], "the lead's row: back once, at its last notice");
         test_live(&id, None);
     }
 }

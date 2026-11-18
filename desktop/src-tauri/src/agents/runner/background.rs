@@ -9,20 +9,33 @@
 //! events.rs`). So a turn now waits for them ([`Background::pending`]): the
 //! runner keeps the process and its input open until they've reported back.
 //!
-//! - **A start**: the session's own call asking for the background
-//!   (`run_in_background` in its input, [`Background::on_call`]), made a
-//!   task by Claude Code (`task_started` with `is_backgrounded`, naming that
-//!   call; a helper's own commands aren't the session's). A Claude Code that
-//!   says nothing of its tasks has none here: nothing waits.
-//! - **An end**: its `task_notification` (completed, failed, stopped…), or
-//!   `background_tasks_changed` no longer listing it ([`Background::on_task`]).
+//! - **Claude Code's own list first** (18 Nov 2026): while its latest
+//!   `background_tasks_changed` lists anything, it waits.
+//! - **A start**: a task Claude Code says runs in the background
+//!   (`task_started` with `is_backgrounded`) — the session's own (its call's
+//!   `run_in_background`, [`Background::on_call`], says what it is) or a
+//!   helper's: its own helpers (`parent_task_id`, `spawn_depth` 2) and its
+//!   own background commands (`owned_by_subagent`, `parent_task_id`), which
+//!   count under it, never as the session's own. A Claude Code that says
+//!   nothing of its tasks has none here: nothing waits.
+//! - **An end**: its `task_notification`, or the list no longer naming it
+//!   ([`Background::on_task`]). **But a helper's `completed` with work of its
+//!   own still running is interim** (18 Nov 2026, from a Code chat whose lead
+//!   helper paused for six helpers of its own and a watcher, was counted as
+//!   finished, and lost its merge when the process was ended under it): it
+//!   ended its turn and waits; when its work ends Claude Code starts it again
+//!   — the same task id, a new `task_started` — and it notifies again. So it
+//!   stays, paused ([`Background::paused`]), till a notice with nothing of
+//!   its own left — or till it has had nothing left for [`PAUSE_GRACE`]
+//!   without starting again ([`Background::settle`]).
 //! - **A wake-up**: due when its call's record says (`scheduledFor`,
 //!   [`Background::on_call_back`]); its turn is the next `command_lifecycle`
 //!   Claude Code starts. One long overdue is let go ([`Background::expire`]).
 //!
-//! Pure: the runner feeds it Claude Code's events.
+//! Pure: the runner feeds it Claude Code's events (and the time).
 
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -30,6 +43,11 @@ use crate::ai::claude_code::events::Task;
 
 /// A wake-up this long past due with no turn of Claude Code's own is let go.
 const WAKE_LATE_MS: u64 = 5 * 60 * 1000;
+
+/// **A paused helper with nothing of its own left** is started again by
+/// Claude Code at once (5 ms on 2.1.296); one that isn't within this long is
+/// taken as done.
+pub const PAUSE_GRACE: Duration = Duration::from_secs(30);
 
 /// What a piece of background work is, as the waiting line counts it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,13 +72,38 @@ pub struct Ended {
     pub summary: String,
 }
 
-/// **The session's own work in the background**, as Claude Code's stream says it.
+/// A task in the background now.
+#[derive(Debug, Clone)]
+struct Running {
+    /// The call that started it.
+    call: String,
+    kind: Kind,
+    /// The helper's task that started it (none: the session's own).
+    parent: Option<String>,
+    /// **Paused**: a helper that ended its turn with work of its own still
+    /// running (its interim notice's words).
+    paused: Option<String>,
+    /// Since when a paused helper has had nothing of its own left.
+    alone_since: Option<Instant>,
+}
+
+impl Running {
+    fn own(&self) -> bool {
+        self.parent.is_none()
+    }
+}
+
+/// **The work in the background**, as Claude Code's stream says it.
 #[derive(Debug, Default)]
 pub struct Background {
-    /// Its own calls that asked for the background, by call id, till their task starts.
+    /// The session's own calls that asked for the background, by call id, till their task starts.
     asked: HashMap<String, Kind>,
-    /// Its tasks in the background now, by task id: their call and kind.
-    running: HashMap<String, (String, Kind)>,
+    /// Every task in the background now — the session's own and its
+    /// helpers' — by task id.
+    running: HashMap<String, Running>,
+    /// **Claude Code's own list** of the tasks in the background, as it last
+    /// said it (`background_tasks_changed`).
+    listed: Vec<String>,
     /// Every task it saw start (any: in the background or not, a helper's
     /// own too): a notice of one it never saw is an earlier process's.
     seen: HashSet<String>,
@@ -147,29 +190,81 @@ impl Background {
         self.wakes.len() != before
     }
 
-    /// **One of Claude Code's task events**: a task of the session's own in
-    /// the background begins, or ends (the ones that ended, returned).
-    pub fn on_task(&mut self, t: &Task) -> Vec<Ended> {
+    /// Whether task `id` has work of its own still in the background (a
+    /// child of it, paused or not).
+    fn has_children(&self, id: &str) -> bool {
+        self.running.values().any(|r| r.parent.as_deref() == Some(id))
+    }
+
+    /// Task `id` is gone: the session's own, said as ended; and a paused
+    /// helper it was the last child of has nothing left from `now`.
+    fn gone(&mut self, id: &str, status: &str, summary: &str, now: Instant) -> Option<Ended> {
+        let r = self.running.remove(id)?;
+        if let Some(parent) = r.parent.as_deref() {
+            let alone = !self.has_children(parent);
+            if let Some(p) = self.running.get_mut(parent).filter(|p| p.paused.is_some() && alone) {
+                p.alone_since = Some(now);
+            }
+        }
+        r.own().then(|| Ended { call: r.call, kind: r.kind, status: status.to_string(), summary: summary.to_string() })
+    }
+
+    /// **One of Claude Code's task events** (at `now`): a task in the
+    /// background begins, pauses, starts again or ends — the session's own
+    /// that ended, returned.
+    pub fn on_task(&mut self, t: &Task, now: Instant) -> Vec<Ended> {
         match t {
-            Task::Started { task_id, tool_use_id, task_type, background, by_helper } => {
+            Task::Started { task_id, tool_use_id, task_type, background, by_helper, parent, .. } => {
                 self.seen.insert(task_id.clone());
                 let call = self.asked.remove(tool_use_id);
-                if *background && !*by_helper && !task_id.is_empty() {
-                    self.running.insert(task_id.clone(), (tool_use_id.clone(), kind_of_task(task_type, call)));
+                if !*background || task_id.is_empty() {
+                    return Vec::new();
                 }
+                // A paused helper started again (its work of its own ended or reported).
+                if let Some(r) = self.running.get_mut(task_id) {
+                    r.paused = None;
+                    r.alone_since = None;
+                    return Vec::new();
+                }
+                // (A helper's own command that names no helper: still its, never the session's.)
+                let parent = parent.clone().or_else(|| by_helper.then(String::new));
+                self.running.insert(task_id.clone(), Running { call: tool_use_id.clone(), kind: kind_of_task(task_type, call), parent, paused: None, alone_since: None });
                 Vec::new()
             }
             // (Its end is said by the notice that follows, with Claude Code's words.)
             Task::Updated { .. } => Vec::new(),
-            Task::Notice { task_id, status, summary, .. } => match self.running.remove(task_id) {
-                Some((call, kind)) => vec![Ended { call, kind, status: status.clone(), summary: summary.clone() }],
-                None => Vec::new(),
-            },
+            Task::Notice { task_id, status, summary, .. } => {
+                let Some(kind) = self.running.get(task_id).map(|r| r.kind) else { return Vec::new() };
+                // A helper done for now, with work of its own still running: paused, not ended.
+                if kind == Kind::Helper && status == "completed" && self.has_children(task_id) {
+                    if let Some(r) = self.running.get_mut(task_id) {
+                        r.paused = Some(summary.clone());
+                        r.alone_since = None;
+                    }
+                    return Vec::new();
+                }
+                self.gone(task_id, status, summary, now).into_iter().collect()
+            }
             Task::Background { tasks } => {
-                let gone: Vec<String> = self.running.keys().filter(|id| !tasks.contains(id)).cloned().collect();
-                gone.into_iter().filter_map(|id| self.running.remove(&id)).map(|(call, kind)| Ended { call, kind, status: String::new(), summary: String::new() }).collect()
+                self.listed = tasks.clone();
+                // Gone from Claude Code's list: ended — but a paused helper, which drops off it while it waits.
+                let gone: Vec<String> = self.running.iter().filter(|(id, r)| !tasks.contains(id) && r.paused.is_none()).map(|(id, _)| id.clone()).collect();
+                gone.into_iter().filter_map(|id| self.gone(&id, "", "", now)).collect()
             }
         }
+    }
+
+    /// **Paused helpers left alone** at `now`: one with nothing of its own
+    /// left for [`PAUSE_GRACE`], never started again, is done — its last
+    /// words its interim notice's.
+    pub fn settle(&mut self, now: Instant) -> Vec<Ended> {
+        let done: Vec<String> = self.running.iter().filter(|(_, r)| r.alone_since.is_some_and(|at| now.duration_since(at) >= PAUSE_GRACE)).map(|(id, _)| id.clone()).collect();
+        done.into_iter()
+            .filter_map(|id| {
+                let summary = self.running.get(&id).and_then(|r| r.paused.clone()).unwrap_or_default();
+                self.gone(&id, "completed", &summary, now)
+            })
+            .collect()
     }
 
     /// **A task an earlier process left, that Claude Code says stopped** (a
@@ -178,21 +273,38 @@ impl Background {
         matches!(t, Task::Notice { task_id, status, .. } if status == "stopped" && !self.seen.contains(task_id))
     }
 
-    /// **Whether a call's task runs in the background now**: its helper's
-    /// row stays at work after the call came back.
+    /// **Whether a call's task runs in the background now** (the session's
+    /// own, paused or not): its helper's row stays at work after the call
+    /// came back.
     pub fn runs_call(&self, call: &str) -> bool {
-        self.running.values().any(|(c, _)| c == call)
+        self.running.values().any(|r| r.own() && r.call == call)
     }
 
-    /// **Work still to report back**: a task in the background, or a wake-up.
+    /// **Work still to report back**: anything on Claude Code's own list, a
+    /// task in the background (a paused helper too), or a wake-up.
     pub fn pending(&self) -> bool {
-        !self.running.is_empty() || !self.wakes.is_empty()
+        !self.listed.is_empty() || !self.running.is_empty() || !self.wakes.is_empty()
+    }
+
+    /// **How many tasks Claude Code lists now, and how many run in the
+    /// background as Yap counts them** (the session's own, its helpers', the
+    /// paused): for the log.
+    pub fn counts(&self) -> (usize, usize, usize) {
+        let paused = self.running.values().filter(|r| r.paused.is_some()).count();
+        (self.listed.len(), self.running.len(), paused)
+    }
+
+    /// **The paused helpers** (ended a turn with work of their own running).
+    #[cfg(test)]
+    pub fn paused(&self) -> usize {
+        self.counts().2
     }
 
     /// **What it waits for, in words**: "1 helper", "2 commands", "1 helper,
-    /// 1 command", "a wake-up" — "" with nothing.
+    /// 1 command", "a wake-up" — the session's own (a helper's own work counts
+    /// under it); "" with nothing.
     pub fn what(&self) -> String {
-        let count = |k: Kind| self.running.values().filter(|(_, kind)| *kind == k).count();
+        let count = |k: Kind| self.running.values().filter(|r| r.own() && r.kind == k).count();
         let some = |n: usize, one: &str, many: &str| match n {
             0 => None,
             1 => Some(format!("1 {one}")),
@@ -226,11 +338,16 @@ mod tests {
     use serde_json::json;
 
     fn started(task: &str, call: &str, task_type: &str, background: bool, by_helper: bool) -> Task {
-        Task::Started { task_id: task.into(), tool_use_id: call.into(), task_type: task_type.into(), background, by_helper }
+        Task::Started { task_id: task.into(), tool_use_id: call.into(), task_type: task_type.into(), background, by_helper, parent: None, depth: 1 }
+    }
+
+    fn notice(task: &str, status: &str, summary: &str) -> Task {
+        Task::Notice { task_id: task.into(), tool_use_id: String::new(), status: status.into(), summary: summary.into() }
     }
 
     #[test]
     fn a_helper_and_a_command_in_the_background_are_waited_for_until_each_reports_back() {
+        let now = Instant::now();
         let mut bg = Background::default();
         assert!(!bg.pending());
         assert_eq!(bg.line(), "Waiting for background work");
@@ -239,44 +356,152 @@ mod tests {
         bg.on_call("toolu_cmd", "PowerShell", &json!({ "command": "npm run build", "run_in_background": "true" }));
         bg.on_call("toolu_fg", "PowerShell", &json!({ "command": "ls" }));
         assert!(!bg.pending(), "nothing runs till Claude Code says it does");
-        assert!(bg.on_task(&Task::Background { tasks: vec!["a1".into()] }).is_empty());
-        bg.on_task(&started("a1", "toolu_helper", "local_agent", true, false));
-        bg.on_task(&started("b1", "toolu_cmd", "local_bash", true, false));
-        // A foreground command's task, and a helper's own: not the session's background.
-        bg.on_task(&started("b2", "toolu_fg", "local_bash", false, false));
-        bg.on_task(&started("b3", "toolu_inner", "local_bash", true, true));
+        bg.on_task(&started("a1", "toolu_helper", "local_agent", true, false), now);
+        bg.on_task(&started("b1", "toolu_cmd", "local_bash", true, false), now);
+        // A foreground command's task: nothing in the background.
+        bg.on_task(&started("b2", "toolu_fg", "local_bash", false, false), now);
+        assert!(bg.on_task(&Task::Background { tasks: vec!["a1".into(), "b1".into()] }, now).is_empty());
         assert!(bg.pending());
         assert_eq!(bg.line(), "Waiting for background work (1 helper, 1 command)");
         assert!(bg.runs_call("toolu_helper") && bg.runs_call("toolu_cmd") && !bg.runs_call("toolu_fg"));
-        // The helper's end: with what it came back with.
-        assert!(bg.on_task(&Task::Updated { task_id: "a1".into(), status: Some("completed".into()) }).is_empty());
-        let ended = bg.on_task(&Task::Notice { task_id: "a1".into(), tool_use_id: "toolu_helper".into(), status: "completed".into(), summary: "Hedgerow is cheapest.".into() });
+        // The helper's end, nothing of its own running: with what it came back with.
+        assert!(bg.on_task(&Task::Updated { task_id: "a1".into(), status: Some("completed".into()) }, now).is_empty());
+        let ended = bg.on_task(&Task::Notice { task_id: "a1".into(), tool_use_id: "toolu_helper".into(), status: "completed".into(), summary: "Hedgerow is cheapest.".into() }, now);
         assert_eq!(ended, [Ended { call: "toolu_helper".into(), kind: Kind::Helper, status: "completed".into(), summary: "Hedgerow is cheapest.".into() }]);
         assert_eq!(bg.line(), "Waiting for background work (1 command)");
         // The command, gone from the list Claude Code keeps.
-        let ended = bg.on_task(&Task::Background { tasks: vec![] });
+        let ended = bg.on_task(&Task::Background { tasks: vec![] }, now);
         assert_eq!(ended, [Ended { call: "toolu_cmd".into(), kind: Kind::Command, status: String::new(), summary: String::new() }]);
         assert!(!bg.pending());
         // A notice of a task it never saw start (an earlier process's): nothing of this turn's, said as stopped before.
         let old = Task::Notice { task_id: "old".into(), tool_use_id: "toolu_old".into(), status: "stopped".into(), summary: String::new() };
         assert!(bg.stopped_before(&old));
-        assert!(bg.on_task(&old).is_empty());
-        // One it saw start — a helper's own command stopped with it — never is.
-        assert!(!bg.stopped_before(&Task::Notice { task_id: "b3".into(), tool_use_id: "toolu_inner".into(), status: "stopped".into(), summary: String::new() }));
-        assert!(!bg.stopped_before(&Task::Notice { task_id: "old2".into(), tool_use_id: String::new(), status: "completed".into(), summary: String::new() }), "only a stop");
+        assert!(bg.on_task(&old, now).is_empty());
+        // One it saw start never is; nor anything but a stop.
+        assert!(!bg.stopped_before(&notice("b2", "stopped", "")));
+        assert!(!bg.stopped_before(&notice("old2", "completed", "")), "only a stop");
+    }
+
+    /// **Claude Code's own list first**: while it lists anything — a task Yap
+    /// never saw start too — the turn waits.
+    #[test]
+    fn while_claude_code_lists_anything_it_waits() {
+        let now = Instant::now();
+        let mut bg = Background::default();
+        bg.on_task(&Task::Background { tasks: vec!["x9".into()] }, now);
+        assert!(bg.pending());
+        assert_eq!(bg.counts(), (1, 0, 0));
+        bg.on_task(&Task::Background { tasks: vec![] }, now);
+        assert!(!bg.pending());
+    }
+
+    /// **The recording** (`fixtures/2.1.296/real-background-nested.jsonl`): a
+    /// helper that starts a helper of its own and two background commands,
+    /// then ends its turn. Its first `completed` is interim (paused: still
+    /// waited for) even as it drops off Claude Code's list; its own work
+    /// counts under it (the line says one helper) and keeps the turn waiting,
+    /// the moment the list is empty too; it's started again (the same id) and
+    /// notifies again; its last notice, nothing of its own left, ends it.
+    #[test]
+    fn a_helper_that_pauses_for_work_of_its_own_is_waited_for_till_its_last_notice() {
+        use crate::ai::claude_code::events::{parse_line, Event};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ai/claude_code/fixtures/2.1.296/real-background-nested.jsonl");
+        let tasks: Vec<Task> = std::fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//") && !l.trim_start().starts_with("{\"_"))
+            .filter_map(|l| match parse_line(&l.replace("{{session_id}}", "s")) {
+                Some(Event::Task(t)) => Some(t),
+                _ => None,
+            })
+            .collect();
+        let lead = "a7c2e91f04b3d6852";
+        let now = Instant::now();
+        let mut bg = Background::default();
+        bg.on_call("toolu_01LeadHelper", "Agent", &json!({ "run_in_background": true }));
+        let mut ended = Vec::new();
+        let mut was = Vec::new();
+        for t in &tasks {
+            ended.extend(bg.on_task(t, now));
+            // After each: still waited for, the lead paused, and the line.
+            was.push((bg.pending(), bg.paused(), bg.what()));
+            if let Task::Notice { task_id, .. } = t {
+                if task_id == lead && !ended.is_empty() {
+                    break;
+                }
+            }
+        }
+        // Waited for at every step (once it started) till the lead's last notice; never "2 helpers": its own work
+        // counts under it.
+        assert!(was[1..was.len() - 1].iter().all(|(p, _, what)| *p && what == "1 helper"), "{was:?}");
+        // Paused at its interim notices (off Claude Code's list then, its own work on it).
+        assert!(was.iter().any(|(_, paused, _)| *paused == 1), "{was:?}");
+        // Its own helper and commands ended with nothing said of them (never the session's own); the lead ended once, at the end.
+        assert_eq!(ended, [Ended { call: "toolu_01LeadHelper".into(), kind: Kind::Helper, status: "completed".into(), summary: "Merged: beans and kale north, herbs east, squash south.".into() }]);
+        // The list's last word: empty — nothing waits.
+        let last = tasks.iter().rev().find(|t| matches!(t, Task::Background { .. })).unwrap();
+        bg.on_task(last, now);
+        assert!(!bg.pending(), "{:?}", bg.counts());
+    }
+
+    /// The same, piece by piece: an interim notice while a child runs stays
+    /// pending (off Claude Code's list); the child's end leaves it alone; it
+    /// starts again and its later notice ends it. Left alone and never
+    /// started again, it's done after [`PAUSE_GRACE`].
+    #[test]
+    fn an_interim_notice_stays_pending_till_a_later_one_or_the_grace() {
+        let t0 = Instant::now();
+        let child = |id: &str, parent: &str, task_type: &str, by_helper: bool| Task::Started { task_id: id.into(), tool_use_id: format!("toolu_{id}"), task_type: task_type.into(), background: true, by_helper, parent: Some(parent.into()), depth: 2 };
+        for started_again in [true, false] {
+            let mut bg = Background::default();
+            bg.on_task(&started("lead", "toolu_lead", "local_agent", true, false), t0);
+            bg.on_task(&child("grand", "lead", "local_agent", false), t0);
+            bg.on_task(&child("watch", "lead", "local_bash", true), t0);
+            assert_eq!(bg.what(), "1 helper", "its own helper and command count under it");
+            // Interim: it ended its turn, its helper and watcher still running; then off the list.
+            assert!(bg.on_task(&notice("lead", "completed", "Waiting for the parts."), t0).is_empty());
+            assert!(bg.on_task(&Task::Background { tasks: vec!["grand".into(), "watch".into()] }, t0).is_empty());
+            assert_eq!((bg.pending(), bg.paused(), bg.runs_call("toolu_lead")), (true, 1, true));
+            // Its helper's end: nothing of the session's own; the watcher still keeps it.
+            assert!(bg.on_task(&notice("grand", "completed", "North bed: beans."), t0).is_empty());
+            assert!(bg.settle(t0 + PAUSE_GRACE * 2).is_empty(), "not alone yet");
+            // The watcher's end: the list empty for a moment, the lead still waited for.
+            assert!(bg.on_task(&notice("watch", "completed", ""), t0).is_empty());
+            assert!(bg.on_task(&Task::Background { tasks: vec![] }, t0).is_empty());
+            assert!(bg.pending());
+            if started_again {
+                bg.on_task(&Task::Background { tasks: vec!["lead".into()] }, t0);
+                bg.on_task(&started("lead", "toolu_lead", "local_agent", true, false), t0);
+                assert_eq!(bg.paused(), 0);
+                // Its later notice, nothing of its own left: the real end.
+                let ended = bg.on_task(&notice("lead", "completed", "Merged."), t0);
+                assert_eq!(ended.iter().map(|e| e.summary.as_str()).collect::<Vec<_>>(), ["Merged."]);
+                bg.on_task(&Task::Background { tasks: vec![] }, t0);
+            } else {
+                // Never started again: done after the grace, its interim words its last.
+                assert!(bg.settle(t0 + PAUSE_GRACE - Duration::from_secs(1)).is_empty());
+                let ended = bg.settle(t0 + PAUSE_GRACE);
+                assert_eq!(ended.iter().map(|e| e.summary.as_str()).collect::<Vec<_>>(), ["Waiting for the parts."]);
+            }
+            assert!(!bg.pending(), "{:?}", bg.counts());
+        }
     }
 
     #[test]
     fn counted_in_words_and_a_call_that_failed_started_nothing() {
+        let now = Instant::now();
         let mut bg = Background::default();
         for (task, call) in [("a1", "c1"), ("a2", "c2")] {
             bg.on_call(call, "Task", &json!({ "run_in_background": true }));
-            bg.on_task(&started(task, call, "", true, false));
+            bg.on_task(&started(task, call, "", true, false), now);
         }
         assert_eq!(bg.what(), "2 helpers");
         bg.on_call("c3", "Monitor", &json!({ "run_in_background": true }));
-        bg.on_task(&started("m1", "c3", "monitor", true, false));
+        bg.on_task(&started("m1", "c3", "monitor", true, false), now);
         assert_eq!(bg.what(), "2 helpers, 1 task");
+        // A helper's own background command naming no helper: still not the session's own.
+        bg.on_task(&started("h1", "c9", "local_bash", true, true), now);
+        assert_eq!((bg.what().as_str(), bg.counts().1), ("2 helpers, 1 task", 4));
         // A call that came back with an error: its asking is forgotten.
         bg.on_call("c4", "Bash", &json!({ "run_in_background": true }));
         bg.on_call_back("c4", true, None);
