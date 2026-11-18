@@ -1,0 +1,152 @@
+{
+  "name": "shots-as-files",
+  "about": "A Code chat's screenshot is also a file its Claude can hand to a helper (18 Nov 2026, agents/shots.rs): a made-up picture with a word on it is put in the message box of a Code chat on lab-sandbox that works directly, and Claude is asked to start a helper that opens the screenshot's file and reports the word. The helper's Read of the file in the chat's own folder (code-shots/…/shot-1.png, given to the run with --add-dir) works with no card, at Auto and again at Bypass permissions, and the word comes back. Before, Claude said the screenshot \"wasn't saved as a file\" and described it to the helper in words. Needs the real Claude Code (a --fake lab's Chat isn't on the plan, so nothing goes directly there).",
+  "needs": {
+    "yapCode": true
+  },
+  "steps": [
+    {
+      "set": {
+        "bypass": false,
+        "config": {
+          "agentsDirect": true
+        }
+      }
+    },
+    {
+      "note": "At Auto: no card may ask about reading the file."
+    },
+    {
+      "ask": "Start a helper with your Agent tool and give it only the path of the screenshot file I just sent, nothing about what's in the picture. Ask it to open that file with its Read tool and tell you the word written on it. Then tell me, in one sentence, the word the helper reported. Don't change anything.",
+      "pictures": [
+        {
+          "width": 640,
+          "height": 360,
+          "shape": "circle",
+          "color": "#2a6f97",
+          "background": "#f4f1de",
+          "word": "LANTERN"
+        }
+      ],
+      "chat": "code:lab-sandbox",
+      "timeout": 420
+    },
+    {
+      "expect": {
+        "status": "answered",
+        "card": false,
+        "notUsed": "/^(start_agent|message_agent)$/"
+      },
+      "note": "Straight to its session, and nothing asked about the file."
+    },
+    {
+      "expect": {
+        "used": "/^(Agent|Task)$/",
+        "session": true
+      },
+      "note": "A helper was started (the Code chat session's own calls: session)."
+    },
+    {
+      "expect": {
+        "tool": {
+          "name": "Read",
+          "args": {
+            "file_path": "/code-shots[\\\\/]\\d+-\\d+[\\\\/]shot-1\\.png$/"
+          }
+        },
+        "session": true
+      },
+      "note": "The screenshot read as a file, in the chat's own folder."
+    },
+    {
+      "expect": {
+        "answerContains": "LANTERN"
+      },
+      "note": "The word the helper read."
+    },
+    {
+      "wait": "agents",
+      "timeout": 600
+    },
+    {
+      "expect": {
+        "agent": {
+          "status": "done",
+          "error": null
+        }
+      }
+    },
+    {
+      "shot": "a-helper-reads-the-screenshot-file-at-auto",
+      "window": "main"
+    },
+    {
+      "set": {
+        "bypass": true
+      }
+    },
+    {
+      "note": "At Bypass permissions: the same, in a new Code chat."
+    },
+    {
+      "ask": "Start a helper with your Agent tool and give it only the path of the screenshot file I just sent, nothing about what's in the picture. Ask it to open that file with its Read tool and tell you the word written on it. Then tell me, in one sentence, the word the helper reported. Don't change anything.",
+      "pictures": [
+        {
+          "width": 640,
+          "height": 360,
+          "shape": "square",
+          "color": "#6a994e",
+          "background": "#f2e8cf",
+          "word": "ORCHARD"
+        }
+      ],
+      "chat": "code:lab-sandbox",
+      "timeout": 420
+    },
+    {
+      "expect": {
+        "status": "answered",
+        "card": false,
+        "notUsed": "/^(start_agent|message_agent)$/"
+      }
+    },
+    {
+      "expect": {
+        "used": "/^(Agent|Task)$/",
+        "session": true
+      }
+    },
+    {
+      "expect": {
+        "tool": {
+          "name": "Read",
+          "args": {
+            "file_path": "/code-shots[\\\\/]\\d+-\\d+[\\\\/]shot-1\\.png$/"
+          }
+        },
+        "session": true
+      }
+    },
+    {
+      "expect": {
+        "answerContains": "ORCHARD"
+      }
+    },
+    {
+      "wait": "agents",
+      "timeout": 600
+    },
+    {
+      "expect": {
+        "agent": {
+          "status": "done",
+          "error": null
+        }
+      }
+    },
+    {
+      "shot": "a-helper-reads-the-screenshot-file-at-bypass",
+      "window": "main"
+    }
+  ]
+}
