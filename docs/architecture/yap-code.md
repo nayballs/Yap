@@ -1012,6 +1012,29 @@ next message. (Until then "/clear the cache" went to Claude Code as words —
 the docs called them "words for Claude" — and it cleared its context with
 no divider in the thread.) "/clearance …" is another word, sent as typed.
 
+**However it comes** (18 Nov 2026): one rule in Rust,
+`slash::own_command`, at the two places every message reaches a Code
+chat's own session, so a new way in can't miss it:
+- **a question in the chat** (`chat/turn.rs` `sent_directly`, once it's
+  known to go to the session): typed (when the page didn't take it
+  first), said out loud with the chat in view (the queue's too), a paired
+  phone's question, an Edit — saved as asked, Yap's own command done
+  (`own_turn`), and **Yap's answer** under it: "Context cleared: Claude
+  starts afresh…" with the divider under that, "Compacted: about 54k
+  tokens of context down to 3k", or why not ("Claude is working: stop it
+  first, then clear."). Read aloud or on the phone where it was asked.
+- **a message for the chat's own session from anywhere else**
+  (`runner::follow_up`, for an agent that `works_directly`): a phone's
+  Remote Control (after its gates, as any phone message), an agent's
+  tab — the clear done, or the compaction started (`slash::own_for_session`;
+  the phone hears "Context cleared…" or "Compacting the conversation…").
+  An agent Chat sent out gets its words as ever.
+
+Both run the page's own commands' code (`clear_chat`, `compact_chat`,
+behind `code_chat_clear` and `code_chat_compact`); the page's
+`codeCommand` is the same rule (the same cases in `runner.rs`
+`yaps_own_commands_in_a_messages_words` and `code-commands.spec.js`).
+
 - **`/clear`** (`slash::code_chat_clear`): Claude starts afresh, as the
   app's does. The chat's agents then are set aside in `code_menu.json`
   (`menu::add_clear`, the chat's `clears`: `{at, ts, agents}`), so

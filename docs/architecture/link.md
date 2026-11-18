@@ -485,7 +485,7 @@ Phone → PC:
 | `agent_log {id, before}` | an older page (events before log line `before`; 0 the newest) |
 | `agent_diff {id, file, turn?}` | one file's diff lines (400 at most, then `more`) |
 | `agent_stop {id}` / `agent_continue {id}` | Stop / Continue (`acted` back) |
-| `agent_message {id, text}` | "Tell the agent…" (4,000 characters at most): its next turn; while it works, handed to it now and read at its next step (a turn at Auto or below: the phone's words never join one above it, and wait for a turn of their own) |
+| `agent_message {id, text}` | "Tell the agent…" (4,000 characters at most): its next turn; while it works, handed to it now and read at its next step (a turn at Auto or below: the phone's words never join one above it, and wait for a turn of their own); "/clear …" or "/compact …" for a Code chat's own session is Yap's own command, as on the PC, never words for Claude Code (`runner::follow_up`, `agents/slash.rs`; 18 Nov 2026) |
 | `agent_go_ahead {id}` | a report card's Go ahead |
 | `approve {id, allow, shownMs}` | Allow once / Deny (Go ahead / Not yet on a plan) on a card this phone was sent |
 | `confirm {id, yes, shownMs}` | Start / Don't on an ask-first card this phone was sent (the same fresh-tap rule) |

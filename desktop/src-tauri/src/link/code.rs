@@ -456,6 +456,9 @@ fn agent_message(cx: &Ctx<'_>, g: &Gate, id: &str, text: &str) {
         runner::follow_up(&a.id, ask).map(|(j, how)| match how {
             runner::FollowedUp::Passed => crate::chat::tools::agents::passed_words(&j.folder),
             runner::FollowedUp::Queued => format!("The agent in {} is still working: it gets that when it finishes this step.", j.folder),
+            // (A Code chat's "/clear …" or "/compact …": Yap's own, as on the PC — `agents/slash.rs`.)
+            runner::FollowedUp::Cleared => crate::agents::slash::CLEARED.to_string(),
+            runner::FollowedUp::Compacting => "Compacting the conversation: Claude Code is summarising it to free up context.".to_string(),
             _ => format!("Passed that to the agent in {}.", j.folder),
         })
     });

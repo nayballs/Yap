@@ -467,7 +467,7 @@ async fn answer_turn(
     let opened = open(&t, conversation_id, asked)?;
     // A Code chat that works directly: the person's message goes straight
     // to its session, and Chat's model isn't asked (agents/direct.rs).
-    if let Some(turn) = sent_directly(&t, &opened)? {
+    if let Some(turn) = sent_directly(&t, &opened).await? {
         return Ok(turn);
     }
     if let Some(turn) = remembered(&t, &opened).await? {
@@ -522,7 +522,7 @@ async fn answer_turn(
 /// (`agents::direct::applies`): sent to the chat's session as its next turn
 /// (its brief, when it's the first), on the chat's own model and effort —
 /// the turn it is, with no answer. `None`: Chat's model answers, as ever.
-fn sent_directly(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, String> {
+async fn sent_directly(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, String> {
     // (Its checks again, with everything known now: [`to_its_session`] told before.)
     let Some(folder) = opened.code.as_ref() else { return Ok(None) };
     // The person's own screenshots go with their words; a picture Yap took
@@ -545,6 +545,12 @@ fn sent_directly(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, Str
     };
     if !crate::agents::direct::applies(message) {
         return Ok(None);
+    }
+    // **Yap's own /clear and /compact** (18 Nov 2026): typed (when the page didn't take it first), said with the chat
+    // in view, a phone's question — never words for Claude Code, which clears its context on "/clear …" with no
+    // divider here. The one rule: `agents::slash::own_command`.
+    if let Some(own) = crate::agents::slash::own_command(&t.text) {
+        return own_turn(opened, own).await.map(Some);
     }
     // (Its effort: the one chosen for that model in the picker, else its own.)
     let effort = crate::ai::effort::info(&t.cfg, &t.ep.provider, &t.ep.model).and_then(|i| i.chosen.or(i.default)).map(str::to_string);
@@ -572,6 +578,50 @@ fn sent_directly(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, Str
         offers: Vec::new(),
         direct: Some(sent.reference()),
     }))
+}
+
+/// **A Code chat's "/clear …" or "/compact …" as a question** (the page's
+/// own toast and line aside): Yap's own command done (`agents/slash.rs`), its
+/// words Yap's answer — "Context cleared…" with the divider under it, or how
+/// far a compaction came down, or why it couldn't — said where it was asked
+/// (a phone, out loud). Nothing goes to Claude Code.
+async fn own_turn(opened: &Opened, own: crate::agents::slash::Own) -> Result<ChatTurn, String> {
+    use crate::agents::slash::{self, Own};
+    let conv = opened.conv.id;
+    let (reply, chip, clear) = match own {
+        Own::Clear => match slash::clear_ready(conv) {
+            Ok(ids) => (slash::CLEARED.to_string(), "Cleared the context", Some(ids)),
+            Err(why) => (why, "Didn't clear the context", None),
+        },
+        Own::Compact(instructions) => match slash::compact_chat(conv, Some(instructions).filter(|i| !i.is_empty())).await {
+            Ok(done) => (slash::compacted_words(done.before.unwrap_or(0), done.after.unwrap_or(0)), "Compacted the conversation", None),
+            Err(why) => (why, "Didn't compact the conversation", None),
+        },
+    };
+    let tools_used = vec![chip.to_string()];
+    let index = crate::chat::chats::append(conv, "assistant", &reply, &tools_used, None, false)?;
+    // (The divider under Yap's answer: above the chat's next message.)
+    if let Some(ids) = clear {
+        slash::clear_now(conv, ids)?;
+    }
+    tracing::info!(conversation = conv, chip, "Code chat: one of Yap's own commands asked as a question, done by Yap");
+    Ok(ChatTurn {
+        conversation_id: conv,
+        user_index: opened.user_index,
+        index,
+        reply,
+        tools_used,
+        model: None,
+        sources: Vec::new(),
+        stopped: false,
+        tokens: None,
+        documents: Vec::new(),
+        pictures: Vec::new(),
+        files: Vec::new(),
+        pages: Vec::new(),
+        offers: Vec::new(),
+        direct: None,
+    })
 }
 
 /// **The question saved** in its conversation (`conversation_id`'s, or a

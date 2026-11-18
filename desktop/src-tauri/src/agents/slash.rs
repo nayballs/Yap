@@ -68,6 +68,81 @@ fn direct(conversation: u64) -> bool {
     crate::chat::turn::goes_to_session(&cfg, Some(conversation), false, false)
 }
 
+/// **One of Yap's own commands in a message's words** ([`own_command`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Own {
+    Clear,
+    /// `/compact` and its instructions ("" none).
+    Compact(String),
+}
+
+/// **Yap's own `/clear` and `/compact` in a message's words, as Claude Code
+/// reads them** (2.1.296, 18 Nov 2026): "/clear" with anything after it
+/// (ignored: Claude Code clears on "/clear the cache" too), "/compact" with
+/// its instructions — never "/clearance" or "/compacted". The one rule every
+/// way a message reaches a Code chat's own session goes by: a question in
+/// the chat (typed, said with the chat in view, a phone's: `chat/turn.rs`
+/// `sent_directly`), and a message for its session from anywhere else
+/// (Remote Control, an agent's tab: `runner::follow_up`). The page's
+/// `codeCommand` says the same before it sends. Pure.
+pub fn own_command(text: &str) -> Option<Own> {
+    let rest = text.trim().strip_prefix('/')?;
+    let (name, arg) = match rest.find(char::is_whitespace) {
+        Some(i) => (&rest[..i], rest[i..].trim()),
+        None => (rest, ""),
+    };
+    match name.to_ascii_lowercase().as_str() {
+        "clear" => Some(Own::Clear),
+        "compact" => Some(Own::Compact(arg.to_string())),
+        _ => None,
+    }
+}
+
+/// **One of Yap's own commands for a Code chat's own session, from anywhere
+/// but a question in the chat** (Remote Control, an agent's tab:
+/// `runner::follow_up`, after a phone's gates): the clear now; the
+/// compaction checked and started, its end heard as [`EVENT`] (as the
+/// page's). Never the words to Claude Code.
+pub fn own_for_session(conversation: u64, own: Own) -> Result<super::runner::FollowedUp, String> {
+    match own {
+        Own::Clear => clear_chat(conversation).map(|_| super::runner::FollowedUp::Cleared),
+        Own::Compact(instructions) => {
+            compact_ready(conversation)?;
+            tauri::async_runtime::spawn(async move {
+                if compact_chat(conversation, Some(instructions).filter(|i| !i.is_empty())).await.is_err() {
+                    tracing::info!(conversation, "Code chat: a /compact from outside the chat didn't compact");
+                }
+            });
+            Ok(super::runner::FollowedUp::Compacting)
+        }
+    }
+}
+
+/// What Yap says of a `/clear` done (the page's toast says the same).
+pub const CLEARED: &str = "Context cleared: Claude starts afresh from your next message. What's above stays here for you, but Claude no longer sees it.";
+
+/// What Yap says of a `/compact` done: "Compacted: about 54k tokens of
+/// context down to 3k" (the page's line). Pure.
+pub fn compacted_words(before: u64, after: u64) -> String {
+    format!("Compacted: about {} tokens of context down to {}", rough_tokens(before), rough_tokens(after))
+}
+
+/// "54k", "3k", "1.2M", "600" (the page's `roughTokens`). Pure.
+fn rough_tokens(n: u64) -> String {
+    match n {
+        0..=999 => n.to_string(),
+        1_000..=999_999 => format!("{}k", (n as f64 / 1_000.0).round() as u64),
+        _ => {
+            let m = (n as f64 / 100_000.0).round() / 10.0;
+            if m.fract() == 0.0 {
+                format!("{}M", m as u64)
+            } else {
+                format!("{m:.1}M")
+            }
+        }
+    }
+}
+
 /// **`/clear`** in Code chat `conversation`: its agents then are never
 /// carried on again, its next message starts afresh. Refused while one works
 /// (the page stops it first, asked).
@@ -76,15 +151,33 @@ pub fn code_chat_clear(conversation: u64) -> Result<Done, String> {
     if !direct(conversation) {
         return Ok(Done::default());
     }
+    clear_chat(conversation)
+}
+
+/// **The chat's `/clear` itself** (its caller knows it works directly):
+/// [`clear_ready`], then [`clear_now`].
+pub fn clear_chat(conversation: u64) -> Result<Done, String> {
+    let ids = clear_ready(conversation)?;
+    clear_now(conversation, ids)
+}
+
+/// Whether Code chat `conversation` can be cleared now: the agents a clear
+/// sets aside, or why not (one works; nothing in it yet).
+pub fn clear_ready(conversation: u64) -> Result<Vec<String>, String> {
     let agents: Vec<Agent> = store::of_conversation(conversation).into_iter().filter(|a| !super::menu::cleared(conversation, &a.id)).collect();
     if agents.iter().any(|a| a.status.live() || super::runner::active(&a.id)) || super::runner::queue_state(conversation) != "idle" {
         return Err("Claude is working: stop it first, then clear.".into());
     }
-    let at = crate::chat::chats::get(conversation).map_or(0, |c| c.messages.len());
-    if at == 0 {
+    if crate::chat::chats::get(conversation).is_none_or(|c| c.messages.is_empty()) {
         return Err("There's nothing to clear yet.".into());
     }
-    let ids: Vec<String> = agents.iter().map(|a| a.id.clone()).collect();
+    Ok(agents.iter().map(|a| a.id.clone()).collect())
+}
+
+/// The clear, now: agents `ids` set aside, the divider above the chat's next
+/// message (after every message it has now).
+pub fn clear_now(conversation: u64, ids: Vec<String>) -> Result<Done, String> {
+    let at = crate::chat::chats::get(conversation).map_or(0, |c| c.messages.len());
     super::menu::add_clear(conversation, at, ids.clone());
     super::menu::saved().map_err(|e| e.to_string())?;
     // The plan's ring for this chat: nothing in its context now.
@@ -172,6 +265,12 @@ pub async fn code_chat_compact(conversation: u64, instructions: Option<String>) 
     if !direct(conversation) {
         return Ok(Done::default());
     }
+    compact_chat(conversation, instructions).await
+}
+
+/// Whether Code chat `conversation`'s session can be compacted now: its
+/// agent, or why not.
+pub fn compact_ready(conversation: u64) -> Result<Agent, String> {
     let folder = super::code_chat::folder_of(Some(conversation)).ok_or("That isn't a Code chat any more.")?;
     let agent = crate::chat::tools::agents::chats_agent_in(Some(conversation), &folder).filter(|a| a.started_ts > 0 && !a.session.is_empty()).ok_or("There's nothing to compact yet: Claude hasn't answered here since it last started afresh.")?;
     if matches!(agent.status, Status::Queued | Status::Running | Status::Asking) || super::runner::active(&agent.id) {
@@ -180,6 +279,12 @@ pub async fn code_chat_compact(conversation: u64, instructions: Option<String>) 
     if agent.branch.is_some() {
         return Err("This chat was rewound: its next message picks the conversation up first, then it can be compacted.".into());
     }
+    Ok(agent)
+}
+
+/// **The chat's `/compact` itself** (its caller knows it works directly).
+pub async fn compact_chat(conversation: u64, instructions: Option<String>) -> Result<Done, String> {
+    let agent = compact_ready(conversation)?;
     {
         let mut going = COMPACTING.lock().unwrap_or_else(|p| p.into_inner());
         if going.contains(&conversation) {

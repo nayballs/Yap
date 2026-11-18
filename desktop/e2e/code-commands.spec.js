@@ -252,6 +252,34 @@ test('/clear: Claude starts afresh (a new session for the next message), the thr
   await idle(yap);
 });
 
+// 18 Nov 2026: only the typed box ran Yap's own /clear and /compact — a "/clear …" said out loud with the chat in view
+// (or a phone's question in it) went to Claude Code as words, which cleared its context with no divider here. Every
+// question in the chat goes by one rule now (`agents::slash::own_command`, chat/turn.rs `sent_directly`).
+test('a /clear or /compact said out loud with the chat in view is Yap\'s own too: its answer, the divider, nothing sent to Claude Code', async ({ yap, main }) => {
+  await codeChat(main);
+  const first = await send(yap, main, 'When are the beds watered?');
+  await idle(yap);
+  const conversation = (await agents(yap))[0].conversation;
+  const ask = (text) => yap.invoke('e2e_assistant_ask', { text, listenMs: 0 });
+  // /compact with its words: Claude Code's own compaction of the session, the words its instructions; Yap's answer.
+  await ask('/compact keep the watering plan');
+  await expect(main.locator('.msgs')).toContainText('Compacted: about 54k tokens of context down to 3k', { timeout: 30_000 });
+  expect(jsonLines(COMPACTS).at(-1).args.slice(0, 2)).toEqual(['-p', '/compact keep the watering plan']);
+  expect(argsSeen()).toHaveLength(1);
+  // /clear with words after it: Yap's own clear, its answer above the divider; nothing goes to Claude Code.
+  await ask('/clear the old watering notes');
+  const divider = main.getByTestId('chat-cleared');
+  await expect(divider).toHaveCount(1, { timeout: 20_000 });
+  await expect(main.locator('.msgs')).toContainText('Context cleared: Claude starts afresh from your next message.');
+  expect(argsSeen()).toHaveLength(1);
+  // The next message: a new session, never the old one resumed.
+  const next = await send(yap, main, 'And the herbs?');
+  expect(after(next, '--resume')).toBeUndefined();
+  expect(after(next, '--session-id')).not.toBe(after(first, '--session-id'));
+  await idle(yap);
+  expect((await agents(yap)).filter((a) => a.conversation === conversation)).toHaveLength(2);
+});
+
 test('/compact: Claude Code compacts the session itself, a quiet line while it runs, then what it came to', async ({ yap, main, shot }) => {
   await codeChat(main);
   const first = await send(yap, main, 'When are the beds watered?');
