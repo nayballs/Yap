@@ -258,11 +258,12 @@ test("a Code chat's + menu lists what its Claude Code offers before its first me
   expect(argsSeen()).toHaveLength(0);
   await shot(main, '01-the-code-plus-menu-light');
 
-  // Slash commands ›: the person's own and their plugins', then Claude Code's built-in ones; never a terminal-only one.
+  // Slash commands ›: the person's own and their plugins', then Claude Code's built-in ones (and Yap's own /agents among
+  // them: code-commands.spec.js); never a terminal-only one.
   await menu(main).getByRole('button', { name: 'Slash commands' }).click();
   const cmds = main.getByTestId('code-plus-commands-menu');
   await expect(cmds.locator('.mhead')).toHaveText(['Commands and skills', 'Built in'], { timeout: 15_000 });
-  await expect(cmds.locator('.mcmd')).toHaveText(['/tidy-beds', '/plant-plan', '/garden-tools:water', '/garden-tools:prune', '/seed-log:log', '/compact', '/context']);
+  await expect(cmds.locator('.mcmd')).toHaveText(['/tidy-beds', '/plant-plan', '/garden-tools:water', '/garden-tools:prune', '/seed-log:log', '/agents', '/compact', '/context']);
   // A plugin's own name is off its line.
   await expect(cmds.getByRole('menuitem', { name: /garden-tools:water/ })).toContainText('Water the seedlings on a schedule');
   await expect(cmds.getByRole('menuitem', { name: /garden-tools:water/ })).not.toContainText('(garden-tools)');

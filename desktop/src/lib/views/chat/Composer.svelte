@@ -54,7 +54,21 @@
   import { picked, removePicked } from '../../stores/pickedElements.svelte.js';
   import ConnectorLogo from '../../settings/connectors/ConnectorLogo.svelte';
   // A Code chat's + menu and "/" list (17 Nov 2026, the Claude Code app's: agents/menu.rs).
-  import { CodeMenu, CommandPicker, commandGroups, matchCommands, pluginRows, serverRows, SERVER_STATUS, codeCommand, modelFor, roughTokens } from './codeMenu.svelte.js';
+  import {
+    CodeMenu,
+    CommandPicker,
+    commandGroups,
+    commandQuery as slashBegun,
+    matchCommands,
+    pluginRows,
+    serverRows,
+    SERVER_STATUS,
+    codeCommand,
+    isAgentsCommand,
+    panelAgentFor,
+    modelFor,
+    roughTokens,
+  } from './codeMenu.svelte.js';
   import { loadCatalog, modelsFor } from '../../stores/modelCatalog.svelte.js';
   import { effortLabel, effortNow } from '../../core/effort.js';
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
@@ -97,7 +111,10 @@
   // up to a cap (`boxCap`), then scrolls. Enter sends, Shift+Enter makes a new line, Ctrl+Enter queues it for later;
   // the "@" picker and the "/" Skills menu take their keys first, and an IME's composition is its own.
   function keydown(e) {
-    if (commandKey(e) || chat.mentionKey(e) || chat.skillKey(e)) return;
+    if (commandKey(e) || chat.mentionKey(e)) return;
+    // (/agents typed in full is Yap's own: Enter opens the Agent panel, before a Skill whose command starts with it.)
+    const agentsEnter = e.key === 'Enter' && !e.shiftKey && !e.isComposing && agentsAsked();
+    if (!agentsEnter && chat.skillKey(e)) return;
     // (Enter that confirms an IME's composition: the IME's.)
     if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229 || e.shiftKey) return;
     e.preventDefault();
@@ -163,11 +180,43 @@
   // picker opens.
   /** Enter or Send. */
   function submit(opts) {
+    if (agentsAsked()) return agentsCommand();
     const cmd = code?.current && !chat.attached.length && !chat.files.length && !chat.quote && !chat.sending ? codeCommand(chat.input) : null;
     if (!cmd) return chat.send(opts);
     if (cmd.name === 'model') return modelCommand(cmd.arg);
     if (cmd.name === 'clear') return clearCommand(opts);
     return compactCommand(cmd.arg, opts);
+  }
+  /**
+   * **`/agents` is Yap's own** (18 Nov 2026; codeMenu.svelte.js `AGENTS_COMMAND`): typed on its own and sent, in a Code
+   * chat or a plain one — but a plain chat's own Skill called /agents runs as ever, and so does a message with
+   * screenshots, files or a quote (those are words with things to send).
+   */
+  function agentsAsked() {
+    if (!isAgentsCommand(chat.input) || chat.attached.length || chat.files.length || chat.quote) return false;
+    return !!code?.current || !chat.skills.parse(chat.input);
+  }
+  /**
+   * **`/agents`: the chat's Agent panel** — its tab brought forward if it's in the panel's row, else opened on the chat's
+   * newest agent (the panel lists all of them: a Code chat's helpers, the agents Chat sent). Nothing goes to Claude Code
+   * or Chat's model. No agent in this chat yet: said. The words in the box after a picked `/` stay there.
+   */
+  function agentsCommand() {
+    // (The "/" being typed, or /agents itself, leaves the box; anything else in it stays.)
+    if (isAgentsCommand(chat.input) || slashBegun(chat.input) != null) chat.input = '';
+    commands.close();
+    chat.plusOpen = false;
+    tick().then(() => chat.inputEl?.focus());
+    const id = panelAgentFor(agents.list, chat.activeId ?? null, chat.doc);
+    if (!id) {
+      toast({
+        title: 'No agents yet',
+        description: code?.current ? 'Claude sends one when part of the work needs it: they show in the Agent panel then.' : "Chat hasn't sent an agent in this chat yet.",
+      });
+      return;
+    }
+    const j = agents.list.find((a) => a.id === id);
+    chat.doc.showAgent(j ? { id: j.id, folder: j.folder, status: j.status, mode: j.mode, conversation: j.conversation } : { id });
   }
   /** /model [name]: the chat's model chip switched, as picking it there, its effort kept. */
   async function modelCommand(arg) {
@@ -302,6 +351,8 @@
   /** A command picked (the "/" list, Slash commands ›, a plugin's skill): `/name ` in the box, before any words there. */
   function pickCommand(c) {
     if (!c?.name) return;
+    // (Yap's own /agents takes nothing: picked, it's done — the Agent panel opens.)
+    if (c.yap === 'agents') return agentsCommand();
     chat.plusOpen = false;
     const rest = String(chat.input || '')
       .replace(/^\s*\/[^\s]*\s*/, '')
@@ -1327,6 +1378,10 @@
               {:else}
                 <div class="mhead mnote" role="status">{commandQuery ? `No command holds "${commandQuery}"` : offeredNote || 'Claude Code offers no commands here.'}</div>
               {/each}
+              {#if !commandQuery && commandList.length && !(codeMenu.offered?.commands ?? []).length}
+                <!-- (Yap's own /agents alone so far: what's still to come from Claude Code, said under it.) -->
+                <div class="mhead mnote" role="status">{offeredNote || 'Claude Code offers no commands here.'}</div>
+              {/if}
             </div>
           </div>
         {/if}
