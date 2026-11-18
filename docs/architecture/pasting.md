@@ -139,7 +139,11 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   pasted once the terminal has read the one before (2026-10-29), and at
   least `slices::PACE_MS` (250 ms) after it; a slice that can't go leaves
   the rest of the text on the clipboard (`KeysBlocked`), one not read in
-  time leaves it from that slice on (`NotRead`). **The text box itself**
+  time leaves it from that slice on (`NotRead`), and another window in front
+  than the first slice's (the person went to another app, a dialog came
+  up; `slices_go_on`, pure, 2026-11-18 — before, only robot mode checked,
+  and the rest went into that window) leaves the rest there too
+  (`FocusMoved`: "Paste stopped · the rest is copied"). **The text box itself**
   (2026-10-29): after re-focusing the window, `selection::restore_focus`
   puts the focus back on the element the dictation started in when it
   wandered off within the window to something that takes no text

@@ -68,6 +68,16 @@
 //! extra info); everything else passes by untouched, as if no hook were
 //! there. [`UNHEARD_MARK`] is a key event the hook pretends it never heard
 //! (a key-up lost to the lock screen, staged).
+//!
+//! **Yap's own keys** (the paste, typing, the submit key, edit mode's
+//! Ctrl+C, the modifiers let go and pressed again around them, the menu
+//! mask) carry [`OWN_MARK`] and pass by as if no hook were there
+//! ([`heard_as`]): never a binding's press or release, never "another key"
+//! that makes a hold a chord. Until 2026-11-18 they counted as the
+//! person's: the rewrite shortcut held with nothing selected sent its
+//! Ctrl+C under a second after the press, which made the hold a chord, and
+//! the recording was dropped; a held combo's modifiers, let go around Yap's
+//! keys, ended its press.
 
 // FFI type names match Win32 API conventions (HHOOK, POINT, MSG, etc.)
 #![allow(clippy::upper_case_acronyms)]
@@ -373,6 +383,34 @@ pub const ROBOT_MARK: usize = 0x5941_5052;
 /// A key event the robot sent for the hook to miss (a key-up the lock
 /// screen took): it passes by unheard.
 pub const UNHEARD_MARK: usize = 0x5941_5055;
+/// A key event Yap sent itself (`text_injector.rs`, the menu mask): never
+/// the person's ([`heard_as`]).
+pub const OWN_MARK: usize = 0x5941_504F;
+
+/// What the hook does with an event, by its extra info.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Heard {
+    /// The person's (in robot mode, the robot's): bindings, chords, keys held.
+    Act,
+    /// Passed by as if no hook were there; `heard`: still input the hook
+    /// heard (`held::missed_input` compares it with Windows' last input,
+    /// which counts injected keys too).
+    Pass { heard: bool },
+}
+
+/// What the hook does with an event whose extra info is `extra`
+/// (`robot_only`: robot mode, acting on the robot's keys alone). Yap's own
+/// keys ([`OWN_MARK`]) are never the person's, in any mode: Yap's Ctrl+C
+/// under a second into a hold made it a chord. Pure.
+pub(crate) fn heard_as(extra: usize, robot_only: bool) -> Heard {
+    match extra {
+        OWN_MARK => Heard::Pass { heard: true },
+        ROBOT_MARK if robot_only => Heard::Act,
+        UNHEARD_MARK if robot_only => Heard::Pass { heard: false },
+        _ if robot_only => Heard::Pass { heard: true },
+        _ => Heard::Act,
+    }
+}
 
 /// Whether the hook has `vk` down (pure bookkeeping, any thread).
 /// **The keyboard keys bound now** (every shortcut, its more keys, the
@@ -1418,7 +1456,7 @@ fn send_menu_mask() {
                 scan: 0,
                 flags,
                 time: 0,
-                extra_info: 0,
+                extra_info: OWN_MARK,
             },
         },
     };
@@ -1678,20 +1716,16 @@ fn note_new_key(vkey: u32, scan: u32, now: u64) {
     }
 }
 
-/// Robot mode (debug builds): whether the hook acts on this event — only the
-/// robot's own ([`ROBOT_MARK`]); everything else passes by as if no hook
-/// were there (`Some(true)`: heard, `Some(false)`: an [`UNHEARD_MARK`]
-/// event, not even heard). `None`: act on it.
+/// Whether the hook passes this event by as if no hook were there
+/// ([`heard_as`]): Yap's own keys, and in robot mode (debug builds) all but
+/// the robot's ([`ROBOT_MARK`]) — `Some(true)`: heard, `Some(false)`: an
+/// [`UNHEARD_MARK`] event, not even heard. `None`: act on it.
 #[cfg(target_os = "windows")]
 fn robot_skip(extra: usize) -> Option<bool> {
-    if ROBOT_ONLY.load(Ordering::Relaxed) {
-        return match extra {
-            ROBOT_MARK => None,
-            UNHEARD_MARK => Some(false),
-            _ => Some(true),
-        };
+    match heard_as(extra, ROBOT_ONLY.load(Ordering::Relaxed)) {
+        Heard::Act => None,
+        Heard::Pass { heard } => Some(heard),
     }
-    None
 }
 
 #[cfg(target_os = "windows")]
@@ -2239,6 +2273,30 @@ pub fn start_input_hook(_app_handle: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Yap's own keys never count as the person's: the rewrite shortcut held
+    /// with nothing selected sent Ctrl+C under a second after its press, the
+    /// hook took the Ctrl and the C for another key, and the hold became a
+    /// chord — the recording dropped without a word. A held combo's
+    /// modifiers, let go and pressed again around Yap's keys, ended its press.
+    #[test]
+    fn yaps_own_keys_are_never_the_persons() {
+        // Any mode: passed by (still heard: Windows' last input counts them).
+        assert_eq!(heard_as(OWN_MARK, false), Heard::Pass { heard: true });
+        assert_eq!(heard_as(OWN_MARK, true), Heard::Pass { heard: true });
+        // The person's keys (and other apps' injected ones): acted on.
+        assert_eq!(heard_as(0, false), Heard::Act);
+        assert_eq!(heard_as(0x1234, false), Heard::Act);
+        // Robot mode, as before: the robot's alone.
+        assert_eq!(heard_as(ROBOT_MARK, true), Heard::Act);
+        assert_eq!(heard_as(UNHEARD_MARK, true), Heard::Pass { heard: false });
+        assert_eq!(heard_as(0, true), Heard::Pass { heard: true });
+        // Outside robot mode its marks are nothing special.
+        assert_eq!(heard_as(ROBOT_MARK, false), Heard::Act);
+        assert_eq!(heard_as(UNHEARD_MARK, false), Heard::Act);
+        // Three marks, all different.
+        assert!(OWN_MARK != ROBOT_MARK && OWN_MARK != UNHEARD_MARK);
+    }
 
     #[test]
     fn parse_keyboard_spec() {
