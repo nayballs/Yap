@@ -389,7 +389,7 @@ fn loading(app: &AppHandle, label: &str, navigation: Option<u64>) {
 /// error page ([`load_failed`]).
 fn navigation_ended(app: &AppHandle, label: &str, id: u64, ok: bool, status: i32, cancelled: bool) {
     tracing::debug!(window = %label, id, ok, status, "A window's navigation ended");
-    {
+    let restored = {
         let mut map = pages();
         let Some(p) = map.get_mut(label) else { return };
         let latest = p.navigation.map(|(latest, _, _)| latest);
@@ -401,19 +401,28 @@ fn navigation_ended(app: &AppHandle, label: &str, id: u64, ok: bool, status: i32
             }
             Ended::Cancelled => {
                 // The page it was going to leave is still there.
-                if let Some((_, before, since)) = p.navigation.take() {
-                    if p.stage == Stage::Loading {
+                match p.navigation.take() {
+                    Some((_, before, since)) if p.stage == Stage::Loading => {
                         p.stage = before;
                         p.since = since;
                         p.generation += 1;
+                        Some((p.generation, before))
                     }
+                    _ => None,
                 }
-                return;
             }
-            Ended::Failed => p.navigation = None,
+            Ended::Failed => {
+                p.navigation = None;
+                None
+            }
         }
+    };
+    match restored {
+        // (Watched again as it was: a page still on its way, or in trouble.)
+        Some((generation, before)) => arm(app, label, generation, before),
+        None if !cancelled => load_failed(app, label, status),
+        None => {}
     }
-    load_failed(app, label, status);
 }
 
 /// How a top-level navigation ended, for the watch.
