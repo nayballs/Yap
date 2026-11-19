@@ -260,16 +260,19 @@ fn lower_first(s: &str) -> String {
 /// apps?", each app with what it lets Yap do, the reason, the extras;
 /// **Allow** and **Don't**. Pure.
 pub fn bar_card(id: u64, a: &AccessCard, spoken: bool) -> crate::bar::Card {
-    let mut body: Vec<String> = a.apps.iter().map(|app| format!("{} · {}", app.name, tier_words(&app.tier))).collect();
-    if !a.reason.trim().is_empty() {
-        body.push(a.reason.trim().to_string());
+    // (The bar shows a card's body as one paragraph: sentences.)
+    let apps: Vec<String> = a.apps.iter().map(|app| format!("{} ({})", app.name, tier_words(&app.tier))).collect();
+    let mut body = vec![format!("{}.", apps.join(", "))];
+    let reason = a.reason.trim();
+    if !reason.is_empty() {
+        body.push(if reason.ends_with(['.', '!', '?']) { reason.to_string() } else { format!("{reason}.") });
     }
     let extras: Vec<&str> = [(a.clipboard_read, "read the clipboard"), (a.clipboard_write, "write the clipboard"), (a.system_key_combos, "use system shortcuts")].iter().filter(|(on, _)| *on).map(|(_, w)| *w).collect();
     if !extras.is_empty() {
         body.push(format!("Also: {}.", extras.join(", ")));
     }
     body.push("Esc or your own mouse stops it.".into());
-    let mut card = crate::chat::assistant::spoken_ok::bar_card(id, "Let Yap use your apps?".into(), body.join("\n"), spoken);
+    let mut card = crate::chat::assistant::spoken_ok::bar_card(id, "Let Yap use your apps?".into(), body.join(" "), spoken);
     card.primary = Some(crate::bar::CardAction::new(format!("allow:{id}"), "Allow"));
     card
 }
@@ -386,7 +389,7 @@ mod tests {
         assert!(spoken_line(&a, false).ends_with("It needs a click: press Allow on the Yap bar."));
         let bar = bar_card(7, &a, true);
         assert_eq!(bar.title, "Let Yap use your apps?");
-        assert!(bar.body.contains("Notepad · clicks and typing") && bar.body.contains("Terminal · clicks only") && bar.body.contains("Also: write the clipboard."), "{}", bar.body);
+        assert_eq!(bar.body, "Notepad (clicks and typing), Terminal (clicks only). To write your shopping list. Also: write the clipboard. Esc or your own mouse stops it.");
         assert_eq!(bar.primary.as_ref().map(|p| (p.id.as_str(), p.label.as_str())), Some(("allow:7", "Allow")));
         assert_eq!(bar.secondary.as_ref().map(|p| p.id.as_str()), Some("deny:7"));
         let card = crate::chat::pages::act::confirm::Card { id: 7, act: ACT.into(), state: "asking".into(), access: Some(Box::new(a.clone())), ..Default::default() };
