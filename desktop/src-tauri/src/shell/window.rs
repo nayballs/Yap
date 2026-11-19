@@ -64,13 +64,15 @@ fn fit_to_screen(w: &tauri::WebviewWindow) {
     if w.is_maximized().unwrap_or(false) {
         return;
     }
-    let (Ok(Some(monitor)), Ok(size), Ok(pos)) = (w.current_monitor(), w.outer_size(), w.outer_position())
+    let (Ok(Some(monitor)), Ok(outer), Ok(inner), Ok(pos)) =
+        (w.current_monitor(), w.outer_size(), w.inner_size(), w.outer_position())
     else {
         return;
     };
     let area = monitor.work_area();
-    let fitted = fit_rect(
-        (pos.x, pos.y, size.width, size.height),
+    let fitted = fit_window(
+        (pos.x, pos.y, outer.width, outer.height),
+        (inner.width, inner.height),
         (area.position.x, area.position.y, area.size.width, area.size.height),
     );
     if let Some((x, y, width, height)) = fitted {
@@ -78,6 +80,23 @@ fn fit_to_screen(w: &tauri::WebviewWindow) {
         let _ = w.set_size(tauri::PhysicalSize::new(width, height));
         let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
     }
+}
+
+/// [`fit_rect`] for a real window: its outer rect `(x, y, width, height)` is
+/// fitted, and the size to set comes back as its inner size (`set_size`
+/// sets the inner one), the frame between them kept — `(x, y, inner width,
+/// inner height)`, or `None` when it already fits. 19 Nov 2026: the outer
+/// width was set as the inner one, so every open of the main window grew it
+/// by its frame (16 px), as long as it stayed taller than the work area —
+/// 1541 to 1717 px in a dozen opens. Pure.
+pub(crate) fn fit_window(
+    outer: (i32, i32, u32, u32),
+    inner: (u32, u32),
+    area: (i32, i32, u32, u32),
+) -> Option<(i32, i32, u32, u32)> {
+    let frame = (outer.2.saturating_sub(inner.0), outer.3.saturating_sub(inner.1));
+    let (x, y, width, height) = fit_rect(outer, area)?;
+    Some((x, y, width.saturating_sub(frame.0), height.saturating_sub(frame.1)))
 }
 
 /// A window rect `(x, y, width, height)` moved and shrunk to lie inside the
@@ -537,7 +556,7 @@ pub(crate) fn init_hidden_webview(window: &tauri::WebviewWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::{fit_rect, uncovered_share};
+    use super::{fit_rect, fit_window, uncovered_share};
 
     /// Tauri's `show()` activates the window (tao 0.37.1+): every show of
     /// Yap's windows goes through `show_quietly`, which calls it with the
@@ -602,5 +621,30 @@ mod tests {
         );
         // No work area reported: nothing to fit to.
         assert_eq!(fit_rect((0, 0, 1200, 800), (0, 0, 0, 0)), None);
+    }
+
+    #[test]
+    fn fitting_the_main_window_again_never_grows_it() {
+        // The maintainer's main window, taller than the 2560 × 1392 work
+        // area by its frame (16 px wide, 16 tall: invisible resize edges).
+        let area = (0, 0, 2560, 1392);
+        let mut inner = (1541u32, 1392u32);
+        let frame = (16u32, 16u32);
+        let mut pos = (732, 46);
+        // Each open of the window fits it; the first shrinks it into the work
+        // area, and the next ones find it fits — never wider each time.
+        let mut fitted = 0;
+        for _ in 0..12 {
+            let outer = (pos.0, pos.1, inner.0 + frame.0, inner.1 + frame.1);
+            if let Some((x, y, w, h)) = fit_window(outer, inner, area) {
+                fitted += 1;
+                pos = (x, y);
+                inner = (w, h);
+            }
+        }
+        assert_eq!((pos, inner), ((732, 0), (1541, 1376)));
+        assert_eq!(fitted, 1);
+        // A window that fits is left alone.
+        assert_eq!(fit_window((100, 100, 1216, 816), (1200, 800), area), None);
     }
 }
