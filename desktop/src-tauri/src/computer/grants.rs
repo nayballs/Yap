@@ -274,8 +274,8 @@ pub fn with<R>(conversation: Option<u64>, f: impl FnOnce(&mut Session) -> R) -> 
     f(s)
 }
 
-/// Forgets every chat's session (tests).
-#[cfg(test)]
+/// Forgets every chat's session (tests, and a test run's new stand-in desktop).
+#[cfg(any(test, debug_assertions))]
 pub fn forget_all() {
     *SESSIONS.lock().unwrap_or_else(|p| p.into_inner()) = None;
 }

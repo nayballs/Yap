@@ -337,8 +337,7 @@ test('asked out loud from another app: the access card is said and on the bar, a
   await setConfig(yap, main, { llmScopes: { ...cfg.llmScopes, chat: claude }, speakReplies: true });
   await yap.invoke('tts_e2e_spoken', { clear: true });
   await inAnotherApp(yap);
-  const spoken = async () => (await yap.invoke('tts_e2e_spoken')).map((s) => s.text).join('
-');
+  const spoken = async () => (await yap.invoke('tts_e2e_spoken')).map((s) => s.text).join('\n');
   const barCard = async () => (await yap.invoke('bar_status')).cards.find((c) => c.id === 'askFirst') ?? null;
   try {
     fakeLlm.scriptChat([

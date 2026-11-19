@@ -558,8 +558,9 @@ pub fn e2e_computer_scene(scene: Option<Scene>) -> Result<(), String> {
         return Err("e2e_computer_scene is for test runs (not robot mode)".into());
     }
     set(scene);
-    // A new desktop: nobody holds it, nothing was stopped on it.
+    // A new desktop: nobody holds it, nothing was stopped on it, no app allowed on it yet.
     super::watch::reset();
+    super::grants::forget_all();
     Ok(())
 }
 
