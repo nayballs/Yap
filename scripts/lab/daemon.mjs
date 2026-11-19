@@ -1335,7 +1335,7 @@ const COMPUTER_SCENE = {
       aumid: 'microsoft.windowscalculator_8wekyb3d8bbwe',
       class: 'ApplicationFrameWindow',
       title: 'Calculator',
-      widgets: [W('text', 'Display', 20, 50, 340, 40, '0'), W('button', '7', 20, 120, 80, 60), W('button', '8', 110, 120, 80, 60), W('button', '+', 200, 120, 80, 60), W('button', '=', 290, 120, 70, 60)],
+      widgets: [W('text', 'Display', 20, 50, 340, 40, '0'), W('key', '7', 20, 120, 80, 60), W('key', '8', 110, 120, 80, 60), W('key', '+', 200, 120, 80, 60), W('key', '=', 290, 120, 70, 60), W('key', 'C', 20, 190, 80, 60)],
     },
     {
       x: 300,
