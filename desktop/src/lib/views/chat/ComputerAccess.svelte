@@ -104,7 +104,7 @@
         </div>
       {/if}
       <p class="xwhy">
-        In this chat, Yap’s AI will see these apps’ windows; everything else on your screen stays hidden from it. It can’t click or type in them yet.
+        In this chat, Yap’s AI will see these apps’ windows and may click and type in them; everything else on your screen stays hidden from it. Press Esc or move your mouse to stop it.
       </p>
       <div class="xbtns">
         <button type="button" class="xallow" onclick={() => answer(true)}>Allow</button>

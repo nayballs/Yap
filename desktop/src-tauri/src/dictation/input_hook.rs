@@ -1773,6 +1773,11 @@ unsafe extern "system" fn low_level_keyboard_proc(
         HEARD_TICK.store(win32::GetTickCount(), Ordering::Relaxed);
 
         let is_keydown = msg == win32::WM_KEYDOWN || msg == win32::WM_SYSKEYDOWN;
+        // The person's own key (not injected) while computer use drives the
+        // PC: it takes over (computer/watch.rs; atomics only).
+        if info.flags & 0x10 == 0 {
+            crate::computer::watch::person_key(vkey, is_keydown);
+        }
         // What the person is holding (not injected: LLKHF_INJECTED), for
         // the keys Yap sends (pasting/modifiers.rs).
         crate::pasting::modifiers::note_key(vkey, is_keydown, info.flags & 0x10 != 0);
@@ -1836,6 +1841,13 @@ unsafe extern "system" fn low_level_mouse_proc(
             return win32::CallNextHookEx(0, code, wparam, lparam);
         }
         HEARD_TICK.store(win32::GetTickCount(), Ordering::Relaxed);
+
+        // The person's own mouse (not injected: LLMHF_INJECTED and
+        // LOWER_IL_INJECTED clear) while computer use drives the PC: a
+        // button, the wheel or a real move takes over (computer/watch.rs).
+        if hook_info.flags & 0x03 == 0 {
+            crate::computer::watch::person_mouse(msg, hook_info.pt.x, hook_info.pt.y);
+        }
 
         let (is_press, button_id) = match msg {
             win32::WM_MBUTTONDOWN => (true, Some(3u32)),

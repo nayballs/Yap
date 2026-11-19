@@ -15,8 +15,17 @@ The plan and its phases are in the private repo
 - Built: `request_access` with its card, `list_granted_applications`,
   `screenshot` (one display, every window not allowed masked), `zoom`,
   `switch_display`, `cursor_position`.
-- Not yet: clicks and typing (phase 2), batches, opening apps and the
-  clipboard (phase 3), teach mode (phase 4).
+
+**Phase 2, input (2026-11-20)**:
+- Built: the five clicks with modifiers, `mouse_move`, `left_click_drag`,
+  `left_mouse_down` / `left_mouse_up`, `scroll`, `type`, `key`, `hold_key`,
+  `wait`.
+- Each action goes through the checks before it's sent ([below](#the-checks-before-every-action)).
+- The bar says "Yap is using your PC · Esc to stop", with a border round the
+  display.
+- Esc, or the person's own mouse or keys, stops it.
+- Not yet: batches, opening apps and the clipboard (phase 3), teach mode
+  (phase 4).
 
 ## Modules (`desktop/src-tauri/src/`)
 
@@ -47,8 +56,31 @@ The plan and its phases are in the private repo
   - the display chosen (`choose`);
   - the picture at the frame's size (`picture`);
   - where the pixels come from (`Desk`: this PC, or the stand-in).
-- `computer/sim.rs` (debug builds and tests) — the stand-in desktop: a scene
-  of displays and windows drawn in flat colours (`e2e_computer_scene`).
+- `computer/sim.rs` (debug builds and tests) — the stand-in desktop:
+  - a scene of displays and windows (`e2e_computer_scene`);
+  - buttons, fields, password fields, links and text inside them, drawn with
+    a small built-in font so a model can read them;
+  - input changes it: a click focuses, presses or opens, typing fills the
+    focused field, keys are logged (`e2e_computer_state` reads it back).
+- `computer/act.rs` — the input tools: each call's point read in the last
+  screenshot's frame, the PC taken, the checks, the card, the steps sent,
+  the person's stop.
+- `computer/checks.rs` (pure) — the checks before every action, in order
+  ([below](#the-checks-before-every-action)).
+- `computer/input.rs` — each action as low-level steps (pure), and the steps
+  sent:
+  - `SendInput` with absolute virtual-desktop points, every event marked
+    `OWN_MARK`;
+  - keys by virtual key and scan code;
+  - typing as Unicode keystrokes;
+  - a stop let go of what it pressed.
+- `computer/uia.rs` — UI Automation, time-boxed: the element under a point
+  (a link, a control's name), the focused one (a password field).
+- `computer/watch.rs` — one chat in control at a time (`HOLD`, 10 s), and the
+  person's own input stopping it (fed by `dictation/input_hook.rs`).
+- `computer/indicator.rs` — the bar's line (`bar::set_computer`) and the
+  border round the display (four click-through strips, kept out of every
+  capture).
 - `integrations/claude_live/computer.rs` — the `yap-computer` MCP server for
   a plan chat's or a Code chat's Claude Code.
 
@@ -223,14 +255,76 @@ three gaps:
 - each allowed window named by its app;
 - the desktop and the taskbar called what they are.
 
+## The checks before every action
+
+`computer/checks.rs` `decide`, the first that applies deciding. Before it:
+- a meeting, a call or a dictation (`refused_now`);
+- another chat holding the PC, or the person having taken over this turn
+  (`watch::begin`).
+
+1. **Where it lands.** A pointer action lands on the window under its point
+   (and a drag's end); keys and typing land on the window in front.
+   - **Yap's own:** refused. Yap's window in front counts as nothing in front,
+     so the model is told to click the app first.
+   - **Not an allowed app's**, or nothing there: refused.
+   - **Running as administrator** (`pasting/elevated.rs`): refused, since
+     Windows drops the input (UIPI). The person does it.
+   - Stricter than the desktop app: it checks the window under the point,
+     not only the one in front.
+2. **The tier.**
+   - A browser: nothing but a look.
+   - A terminal or an IDE: a plain left click and a scroll, never typing,
+     keys, right or middle clicks, modifier clicks or drags.
+3. **A system combo** without the `systemKeyCombos` grant: refused. These
+   are the Windows key, Alt+F4, Alt+Tab, Alt+Esc, Ctrl+Esc and
+   Ctrl+Shift+Esc (`input::system_combo`).
+4. **A link under a click** (UI Automation): refused. Its address goes to
+   Yap's browser instead.
+5. **Typing** into a password field, or text with card or bank details
+   (`act/rules.rs` `typed_secret`): refused.
+6. **A click on a control named Send, Pay, Buy, Delete, Sign in…**
+   (`act/rules.rs` `needs_ok`), or Enter in a chat app: **asks first**, on
+   the browser's card ("press ‘Send’ on Example Mail").
+   - In Bypass permissions nothing asks: the action goes ahead, and Claude is
+     told to ask in the chat instead.
+7. **Robot mode:** only the windows the test opened (`shell/realtest.rs`
+   `gate`).
+
+## Driving the PC
+
+- **One chat at a time.** A chat holds the PC for 10 s after its last input
+  action; another chat's actions are refused meanwhile.
+- **The indicator.**
+  - The bar shows "Yap is using your PC", the action's summary and "Esc to
+    stop". It shows bar on or off, never follows the pointer and never takes
+    a click.
+  - A thin red border goes round the display.
+  - Both go 4 s after the last action.
+- **The person takes over.** `dictation/input_hook.rs` reports their real
+  input: anything not injected and not Yap's own. Any of these stops it:
+  - a key (Esc above all);
+  - a button or the wheel;
+  - a move of more than 10 px within one burst, robot mode's thresholds.
+- **What a stop does.**
+  - The action stops between two steps, and what it held is let go.
+  - The indicator goes at once.
+  - The model is told the person took over.
+  - The rest of that turn's input actions are refused, until the person's
+    next message.
+  - ■ Stop drops the turn: the steps stop the same way (`Driving`'s flag on
+    drop).
+- **The bar's own Esc watch** ignores injected keys, so a model's Esc never
+  stops a reading or closes a card.
+
 ## Safety
 
 - **What's on screen** is outside content: a screenshot sets `screen_seen`,
   so `STRONG_LOCKED` holds after it, as after `look_at_screen`.
 - **The logs** carry counts, sizes and timings only: never an app's name, a
   window's title or contents, or the model's reason.
-- **Phase 1 has no input**: no clicks, keys or typing. The system prompt says
-  so, and Claude tells the person what to do instead.
+- **Every input event is Yap's own** (`OWN_MARK`). Yap's own hook lets it
+  by, so a model typing Win+Alt+S never fires a Yap shortcut, and the watch
+  never takes it for the person's.
 
 ## Tests
 
@@ -248,5 +342,16 @@ three gaps:
     back as MCP image content, kept with the question;
   - Don't, after which the screenshot is refused;
   - the Settings switch.
-- **The robot test** (real windows) comes with phase 2's input. Phase 1's
-  capture is Snip's, which its robot tests already cover.
+- **e2e for phase 2:** `computer-input.spec.js`:
+  - a click and typing land in the stand-in app, and the bar shows the
+    indicator, then lets it go;
+  - Send asks first, and Don't presses nothing;
+  - Esc stops a held key, and the rest of the turn is refused.
+- **Unit tests for phase 2:** the checks' table; the steps (combos, a
+  click's modifiers, a drag, what a stop lets go); the watch; the whole of
+  phase 2 on the stand-in desktop.
+- **Robot tests** (real windows, idle PC only):
+  - `computer-see.real.js`: the test pad allowed, an Edge page over it
+    masked;
+  - `computer-input.real.js`: clicks into the pad's box, types, Ctrl+A,
+    types over it, and never types into its password box.

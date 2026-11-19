@@ -93,6 +93,28 @@ pub fn on_screen() -> Vec<Win> {
     Vec::new()
 }
 
+/// **The window in front** (its root), whatever it is.
+#[cfg(windows)]
+pub fn front() -> Option<Win> {
+    win::front()
+}
+
+#[cfg(not(windows))]
+pub fn front() -> Option<Win> {
+    None
+}
+
+/// **The window under a physical point** (its root).
+#[cfg(windows)]
+pub fn at(x: i32, y: i32) -> Option<Win> {
+    win::at(x, y)
+}
+
+#[cfg(not(windows))]
+pub fn at(_x: i32, _y: i32) -> Option<Win> {
+    None
+}
+
 /// The pointer, in physical pixels on the virtual desktop.
 #[cfg(windows)]
 pub fn cursor() -> Option<(i32, i32)> {
@@ -119,7 +141,9 @@ mod win {
     use windows::Win32::System::Com::CoTaskMemFree;
     use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PropVariantToStringAlloc};
     use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
-    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, FindWindowExW, GetClassNameW, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, GWL_EXSTYLE, WS_EX_TRANSPARENT};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, FindWindowExW, GetAncestor, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, WindowFromPoint, GA_ROOT, GWL_EXSTYLE, WS_EX_TRANSPARENT,
+    };
 
     use super::{package_family, shown, Seen, Win};
     use crate::snip::geom::Rect;
@@ -202,6 +226,13 @@ mod win {
         if !shown(&seen) {
             return BOOL(1);
         }
+        let w = read(walk, hwnd, rect);
+        walk.out.push(w);
+        BOOL(1)
+    }
+
+    /// One window as the list has it (its process, exe, app).
+    fn read(walk: &mut Walk, hwnd: HWND, rect: Rect) -> Win {
         let mut pid = pid_of(hwnd);
         let class = class(hwnd);
         if class == "ApplicationFrameWindow" {
@@ -215,8 +246,26 @@ mod win {
             aumid = package_family(&exe).unwrap_or_default();
         }
         let own = pid == walk.own;
-        walk.out.push(Win { hwnd: hwnd.0 as isize, pid, rect, class, exe, aumid, own });
-        BOOL(1)
+        Win { hwnd: hwnd.0 as isize, pid, rect, class, exe, aumid, own }
+    }
+
+    fn one(hwnd: HWND) -> Option<Win> {
+        if hwnd.0.is_null() {
+            return None;
+        }
+        let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
+        let hwnd = if root.0.is_null() { hwnd } else { root };
+        let mut walk = Walk { out: Vec::new(), exes: HashMap::new(), own: std::process::id() };
+        let rect = frame(hwnd).unwrap_or_default();
+        Some(read(&mut walk, hwnd, rect))
+    }
+
+    pub fn front() -> Option<Win> {
+        one(unsafe { GetForegroundWindow() })
+    }
+
+    pub fn at(x: i32, y: i32) -> Option<Win> {
+        one(unsafe { WindowFromPoint(windows::Win32::Foundation::POINT { x, y }) })
     }
 
     pub fn list() -> Vec<Win> {

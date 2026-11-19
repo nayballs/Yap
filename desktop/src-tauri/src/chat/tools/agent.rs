@@ -297,6 +297,9 @@ struct Loop<'a> {
     /// A connector's server answered (`tools/connectors.rs`): outside
     /// content for the rest of the turn, as a page read is.
     connector_seen: bool,
+    /// This turn, for computer use (`computer/watch.rs`: the person taking
+    /// over stops the rest of the turn's input actions): unique per turn.
+    computer_turn: String,
     /// The next step must search ([`FirstStep::MustSearch`]).
     must_search: bool,
     /// A notes search that found nothing has led to the web (once a turn).
@@ -496,6 +499,7 @@ async fn tool_loop(
         screen_seen: extra.web_question,
         agent_seen: false,
         connector_seen: false,
+        computer_turn: crate::computer::new_turn("loop"),
         must_search: must_search_first,
         led_to_web: false,
         rejected: 0,
