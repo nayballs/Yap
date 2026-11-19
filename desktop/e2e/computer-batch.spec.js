@@ -356,7 +356,7 @@ test('asked out loud from another app: the access card is said and on the bar, a
     await expect.poll(barCard, { timeout: 15_000 }).not.toBeNull();
     const card = await barCard();
     expect(card).toMatchObject({ title: 'Let Yap use your apps?', icon: 'assistant' });
-    expect(card.body).toContain('Example Mail · clicks and typing');
+    expect(card.body).toBe('Example Mail (clicks and typing). To write your reply. Esc or your own mouse stops it.');
     expect([card.primary.label, card.secondary.label]).toEqual(['Allow', "Don't"]);
     await expect(yap.overlay.locator('.card').filter({ hasText: 'Let Yap use your apps?' })).toBeVisible();
     await shot(yap.overlay, '02-voice-access-card');

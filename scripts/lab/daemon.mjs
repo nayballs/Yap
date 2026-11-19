@@ -781,7 +781,7 @@ async function answerCard(card, how, pick) {
   } else if (kind === 'approve' && how === 'revise') {
     // A plan sent back with comments (claude_live/approve.rs): Claude Code stays in Plan mode and answers with a new plan.
     answered = await invoke('claude_approve_revise', { id: Number(raw), comments: planCommentsOf(pick) });
-  } else if (kind === 'confirm' && (card.kind === 'question' || card.kind === 'outline') && how === 'said') {
+  } else if (kind === 'confirm' && how === 'said') {
     // Out loud: the Voice Assistant's next question in that chat, its words the answer (spoken_ok.rs).
     await invoke('e2e_assistant_ask', { text: String(pick ?? ''), listenMs: 300 });
     answered = true;
@@ -2055,7 +2055,8 @@ const COMMANDS = {
     if (!card) throw new Error(`No card ${id}: the cards are ${cards.map((c) => c.id).join(', ') || 'none'}`);
     if (how === 'always' && card.kind !== 'connector') throw new Error('Only a connector’s card has Always allow');
     if (how === 'pick' && card.kind !== 'question') throw new Error('Only a question card is answered with pick');
-    if (how === 'said' && card.kind !== 'question' && card.kind !== 'outline') throw new Error('Only a question card or an outline is answered with said');
+    // (A yes-or-no card asked out loud — a page action's, an agent's, computer use's access card — takes a spoken yes or no too.)
+    if (how === 'said' && card.kind !== 'question' && card.kind !== 'outline' && !turn?.spoken) throw new Error('Only a question card or an outline, or any card of a question asked out loud, is answered with said');
     if (how === 'edit' && card.kind !== 'outline') throw new Error('Only an outline is answered with edit');
     if (how === 'revise' && !(card.kind === 'approve' && card.tool === 'ExitPlanMode')) throw new Error("Only an agent's plan card (approve:<n>, ExitPlanMode) is sent back with revise");
     if (how === 'revise' && !planCommentsOf(pick).length) throw new Error('revise with what? answer approve:<n> revise "<words of the plan>::<your comment>|::<a comment on the whole plan>"');
