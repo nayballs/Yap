@@ -35,6 +35,9 @@
   // The kind of window: a Markdown file's are all "doc".
   const kind = label.startsWith('doc-') ? 'doc' : label;
   const view = homeFirst ? Promise.all([VIEWS.settings(), homeFirst]).then(([v]) => v) : (VIEWS[kind] ?? VIEWS.overlay)();
+  // The view's code couldn't be fetched: the window would stay blank, so the
+  // page loads again (index.html's `__yapLoadFailed`, at most twice a minute).
+  view.catch(() => window.__yapLoadFailed?.(`the ${kind} window's view`));
 
   // Settings → General → Appearance (the theme, the reading font and size,
   // Motion) and the bar's colours in every window, following each save live

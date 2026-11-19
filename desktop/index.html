@@ -31,6 +31,43 @@
         root.dataset.yapTheme = dark ? 'dark' : 'light';
         root.dataset.barTheme = bar === 'dark' || bar === 'light' ? bar : dark ? 'dark' : 'light';
       })();
+      // A file of the app's that couldn't be fetched fails the whole page:
+      // a module script's error event fires when any file it imports can't
+      // be loaded, and nothing runs. 19 Nov 2026: one font stylesheet refused
+      // by the dev server as Yap started left the main window blank until a
+      // restart. So the page loads again — at most twice a minute, so a page
+      // that can never load doesn't reload for ever. The window's own view
+      // (App.svelte's `import()`) does the same when it can't load.
+      window.__yapLoadFailed = function (what) {
+        var now = Date.now();
+        try {
+          var key = 'yap.loadRetries';
+          var recent = JSON.parse(sessionStorage.getItem(key) || '[]').filter(function (t) {
+            return now - t < 60000;
+          });
+          if (recent.length >= 2) return;
+          recent.push(now);
+          sessionStorage.setItem(key, JSON.stringify(recent));
+        } catch (e) {
+          if (window.__yapLoadRetried) return;
+          window.__yapLoadRetried = true;
+        }
+        try {
+          console.warn('[yap] ' + what + " couldn't load; loading the page again");
+        } catch (e) {}
+        setTimeout(function () {
+          location.reload();
+        }, 500);
+      };
+      // (A script's error event doesn't bubble: caught on its way down.)
+      document.addEventListener(
+        'error',
+        function (e) {
+          var t = e.target;
+          if (t && t.tagName === 'SCRIPT' && t.type === 'module') window.__yapLoadFailed('the app');
+        },
+        true,
+      );
     </script>
   </head>
   <body>

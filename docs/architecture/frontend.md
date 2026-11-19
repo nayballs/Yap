@@ -647,6 +647,14 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
 - **Page titles** — Insights, Upload, Dictionary, Integrations, Meetings and Tasks
   use the serif display title Settings' pages have (`--yap-font-display`,
   28–30 px; `polish.spec.js` checks the face).
+- **A page that can't load its own code loads again** (19 Nov 2026):
+  `index.html`'s head script catches the entry module script's `error` event,
+  which fires when any file it imports can't be fetched, and App.svelte's
+  view `import()` rejecting. Either way it reloads the page, at most twice a
+  minute (`sessionStorage` `yap.loadRetries`). One font stylesheet the dev
+  server refused as Yap started had left the main window blank until a
+  restart. e2e `page-load-retry.spec.js` (the entry refused once, then
+  always).
 - **One chunk per window** (`App.svelte`, 2026-10-22): each window imports
   only its own view (`VIEWS[label]()`, a dynamic `import()` each — never a
   ternary of imports, which Vite gave one preload list, the last one's, so

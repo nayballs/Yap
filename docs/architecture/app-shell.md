@@ -568,7 +568,11 @@ re-exported by the module, except `local_llm`'s, which callers name
   pure `fit_rect`, unit-tested): a window bigger than its monitor's work area,
   or partly off it, is shrunk and moved inside — 800 px is taller than a
   1080p laptop at 150 % (672 px above the taskbar) or a 1366 × 768 screen,
-  where the centred window's title bar sat above the screen.
+  where the centred window's title bar sat above the screen. Its outer rect
+  is what's fitted, and the size set is that minus its frame (`fit_window`:
+  `set_size` sets the inner size). 19 Nov 2026: the outer width went in as
+  the inner one, so each show of a window taller than its work area grew it
+  by its frame, 16 px a time.
 - **onboarding**: 620×720 (min 520×560), hidden, hide-on-close; fitted to the
   screen the same way (its buttons were under the taskbar on such laptops).
 - **notepad**: the meeting notepad, 560×900 (min 360×480), undecorated (its own
