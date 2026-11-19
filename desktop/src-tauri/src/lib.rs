@@ -250,7 +250,10 @@ pub fn run() {
         // default browser — target=_blank does nothing in a Tauri webview.
         .plugin(tauri_plugin_opener::init())
         // Native file-open dialog for the Upload surface's Browse button.
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        // A window is never left blank: every webview watched from its
+        // creation (page_watch.rs; no commands of its own).
+        .plugin(shell::page_watch::plugin());
 
     // Remember the MAIN window's size/position across launches. Only the
     // "settings" window is managed: the overlay, the notepad and its split
@@ -324,6 +327,8 @@ pub fn run() {
             notices::kinds::notice_allow,
             dictation::mics::offer::mic_offer_respond,
             shell::logging::frontend_log,
+            // A window's page says how it's doing: never left blank (page_watch.rs).
+            shell::page_watch::page_state,
             dictation::commands::model_language_info,
             dictation::commands::configure_hotkey,
             dictation::commands::configure_edit_hotkey,
@@ -1154,6 +1159,8 @@ pub fn run() {
             shell::realtest::commands::realtest_delivered,
             #[cfg(debug_assertions)]
             shell::realtest::commands::realtest_read_selection,
+            #[cfg(debug_assertions)]
+            shell::page_watch::e2e_page_watch,
         ])
         .on_page_load(|webview, payload| {
             // No browser context menu (Back, Refresh, Print, Inspect…) in any
@@ -1163,6 +1170,10 @@ pub fn run() {
             if payload.event() == tauri::webview::PageLoadEvent::Started {
                 shell::context_menu::install(webview);
             }
+            // A window is never left blank: a page that doesn't say its view
+            // is in loads again, as does one whose renderer crashed
+            // (page_watch.rs).
+            shell::page_watch::on_page_load(webview, payload);
             // A meeting window (the notepad, the overlay) that loads while a
             // meeting records leaves screen captures too (capture.rs).
             if payload.event() == tauri::webview::PageLoadEvent::Finished {

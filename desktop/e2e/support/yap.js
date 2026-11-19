@@ -358,6 +358,20 @@ export class YapApp {
    * its whole boot (which ran before we connected) happens under watch.
    */
   async attachPages() {
+    await this.findPages();
+    for (const [label, page] of Object.entries(this.pages)) {
+      // The embedded frontend, not a dev server (which would be someone's Vite).
+      if (!page.url().startsWith('http://tauri.localhost/')) {
+        throw new Error(`The test build loads ${page.url()}, not its embedded frontend (${label})`);
+      }
+    }
+    this.watchPages();
+    await Promise.all(Object.values(this.pages).map((p) => p.reload({ waitUntil: 'load' })));
+    await this.main.getByRole('navigation', { name: 'Main' }).waitFor();
+  }
+
+  /** Each window's webview, by its label, on this connection. */
+  async findPages() {
     const context = this.browser.contexts()[0];
     const labels = ['settings', 'onboarding', 'notepad', 'overlay', 'quick-note'];
     const deadline = Date.now() + 30_000;
@@ -372,19 +386,33 @@ export class YapApp {
     }
     for (const label of labels) {
       if (!this.pages[label]) throw new Error(`Yap's "${label}" webview never showed up`);
-      // The embedded frontend, not a dev server (which would be someone's Vite).
-      if (!this.pages[label].url().startsWith('http://tauri.localhost/')) {
-        throw new Error(`The test build loads ${this.pages[label].url()}, not its embedded frontend`);
-      }
     }
+  }
+
+  /** Every webview's uncaught errors and console errors, kept for the fixtures. */
+  watchPages() {
     for (const [label, page] of Object.entries(this.pages)) {
       page.on('pageerror', (err) => this.pageErrors.push({ label, message: err.stack || String(err) }));
       page.on('console', (msg) => {
         if (msg.type() === 'error') this.consoleErrors.push({ label, message: msg.text() });
       });
     }
-    await Promise.all(Object.values(this.pages).map((p) => p.reload({ waitUntil: 'load' })));
-    await this.main.getByRole('navigation', { name: 'Main' }).waitFor();
+  }
+
+  /**
+   * Connect to the webviews again, as at launch but without reloading
+   * them. Playwright is done with a page whose renderer crashed ("Page
+   * crashed") even once WebView2 has loaded it again
+   * (never-blank.spec.js): a new connection finds it, and every other
+   * window, afresh. The old connection stays open until `stop()`.
+   */
+  async reattach() {
+    this.retired = [...(this.retired ?? []), this.browser];
+    const exited = () => (this.child.exitCode !== null ? { code: this.child.exitCode } : null);
+    this.browser = await connect(path.join(this.runDir, 'webview2'), exited, this.logPath);
+    this.pages = {};
+    await this.findPages();
+    this.watchPages();
   }
 
   /** Call a Tauri command from the main window, like the frontend does. */
@@ -430,6 +458,7 @@ export class YapApp {
   async stop() {
     if (this.stopped) return;
     this.stopped = true;
+    for (const old of this.retired ?? []) await old.close().catch(() => {});
     await this.browser?.close().catch(() => {});
     const { child } = this;
     if (child.exitCode === null && child.signalCode === null) {

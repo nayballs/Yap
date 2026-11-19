@@ -647,14 +647,60 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
 - **Page titles** — Insights, Upload, Dictionary, Integrations, Meetings and Tasks
   use the serif display title Settings' pages have (`--yap-font-display`,
   28–30 px; `polish.spec.js` checks the face).
-- **A page that can't load its own code loads again** (19 Nov 2026):
-  `index.html`'s head script catches the entry module script's `error` event,
-  which fires when any file it imports can't be fetched, and App.svelte's
-  view `import()` rejecting. Either way it reloads the page, at most twice a
-  minute (`sessionStorage` `yap.loadRetries`). One font stylesheet the dev
-  server refused as Yap started had left the main window blank until a
-  restart. e2e `page-load-retry.spec.js` (the entry refused once, then
-  always).
+- **A window is never left blank** (19 Nov 2026): every window (the main
+  window, onboarding, the notepad, the quick note, a Markdown file's, the
+  split preview and the Yap bar) either comes back by itself or says "Yap
+  couldn't show this window" with Reload, and the log says what happened.
+  It began with one font stylesheet the dev server refused as Yap started,
+  which left the main window blank until a restart (a module script runs
+  nothing when a file it imports can't be fetched). The page's half lives in
+  `index.html`'s head script, which runs even when none of the app's own
+  files can be fetched:
+  - **Its code couldn't load** (the entry module script's `error` event,
+    caught on its way down; App.svelte's view `import()` rejecting): the
+    page loads again, at most twice a minute (`__yapLoadFailed`,
+    `sessionStorage` `yap.loadRetries`).
+  - **Its view threw** as it started or rendered, or in an effect after
+    (App.svelte wraps each window's view in a `<svelte:boundary>`), or
+    main.js threw before it mounted the app (an `error` before
+    `__yapStarted`, the last line of main.js), or an `error` or an
+    `unhandledrejection` came before the view was in and it still isn't
+    5 s later: the page loads again once a minute (`__yapViewFailed`,
+    `yap.viewRetries`). The boundary throws the error again from a
+    `setTimeout`, so DevTools and the e2e suite (which fails a test on an
+    uncaught error) still see the bug it caught.
+  - **Then the message**: a full-window "Yap couldn't show this window"
+    with Reload (which forgets both counts) and Close (a `doc` window is
+    closed twice: its first close asks its page, which isn't there), its
+    empty space a drag region (the main window, the notepad and a
+    Markdown file's have no title bar but the page's). A view that comes
+    in after all takes it away. Plain DOM and inline styles, the one place
+    with colours written out: app.css's tokens (`--yap-bg`, `--yap-paper`
+    for the paper windows, `--yap-fg`, `--yap-muted`, `--yap-ink`,
+    `--yap-border`) when they're there, mirrored light and dark for when
+    they aren't, the theme from the head script's `data-yap-theme`.
+  - **Never on the Yap bar or the split preview**: transparent windows,
+    where a box would sit over the screen (yap-bar.md); they load again
+    and log, and Rust's watchdog does the rest.
+  - **No mount at all after 30 s** with nothing said (by then Rust's
+    watchdog has loaded it again and given up): the message.
+  - Each step is a `frontend_log` line at `warn` (`level: "warn"`):
+    `[web] window settings: the settings window's view failed (TypeError at
+    ControlPanel-….js:49); loading the page again` — the window, the step,
+    the error's kind and where in the code, never its message (it can carry
+    what a page shows).
+  - Rust hears how the page is doing (`page_state`: `alive` from the head
+    script, `mounted` from `lib/ui/ViewMounted.svelte` beside the view in
+    the boundary, `reloading` before each reload the page makes of itself,
+    `trouble` with the message), and its watchdog
+    (`shell/page_watch.rs`, [app-shell.md](./app-shell.md)) loads a page
+    again that never says its view is in, and one whose renderer crashed.
+
+  e2e `page-load-retry.spec.js` (the entry refused once, then always) and
+  `never-blank.spec.js` (a view that throws — its own chunk served with its
+  component swapped for one that throws, no hook in the app — main.js
+  throwing, the dark message, Rust's watchdog and its cap, WebView2's error
+  page, a renderer crash, the bar).
 - **One chunk per window** (`App.svelte`, 2026-10-22): each window imports
   only its own view (`VIEWS[label]()`, a dynamic `import()` each — never a
   ternary of imports, which Vite gave one preload list, the last one's, so
