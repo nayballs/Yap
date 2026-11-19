@@ -295,6 +295,7 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
             Err(_) => return failed("Yap couldn't read what's on screen.", "Didn't act").into(),
         }
     };
+    let mut asked = false;
     match verdict {
         Verdict::Go => {}
         Verdict::Refuse { error, chip } => return failed(&error, &chip).into(),
@@ -309,6 +310,7 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
                 };
                 return failed(error, &format!("Didn't {does}: not allowed")).into();
             }
+            asked = true;
         }
     }
     drop(desk);
@@ -342,7 +344,10 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
     }
     super::indicator::done();
     match ran {
-        Ok(Ok(())) => json!({ "success": true, "data": { "done": name }, "note": "Done. Take a screenshot to see what it did.", "displayText": plan.chip }).into(),
+        Ok(Ok(())) => {
+            let note = if asked { "The user allowed it on Yap's card, and it's done. Take a screenshot to see what it did." } else { "Done. Take a screenshot to see what it did." };
+            json!({ "success": true, "data": { "done": name, "askedFirst": asked }, "note": note, "displayText": plan.chip }).into()
+        }
         Ok(Err(None)) => failed("Stopped before it finished (the answer was stopped).", "Stopped").into(),
         Ok(Err(Some(e))) => {
             tracing::info!(tool = name, "Computer use: Windows didn't take the input");

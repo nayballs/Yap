@@ -214,7 +214,16 @@ impl Scene {
                             self.calc(&k);
                             self.log.push(format!("pressed {k}"));
                         }
-                        "button" => self.log.push(format!("pressed {}", name(self, g))),
+                        "button" => {
+                            let b = name(self, g);
+                            // A "Delete …" button empties the window's text fields, so a screenshot shows it worked.
+                            if b.starts_with("Delete") {
+                                for f in self.windows[0].widgets.iter_mut().filter(|f| f.kind == "field") {
+                                    f.text.clear();
+                                }
+                            }
+                            self.log.push(format!("pressed {b}"));
+                        }
                         "link" => self.log.push(format!("opened {}", name(self, g))),
                         _ => self.log.push(format!("clicked {}", name(self, g))),
                     },
@@ -307,10 +316,11 @@ impl Desk for Scene {
         let mut rgba = vec![255u8; (w * h * 4) as usize];
         let local = |r: &Rect| Rect::new(r.x - d.rect.x, r.y - d.rect.y, r.w, r.h);
         paint(&mut rgba, w, h, &local(&d.rect), DESKTOP);
-        // Bottom to top: each window, its title strip, its widgets.
+        // Bottom to top: each window (its colour its own, whatever's raised), its title strip, its widgets.
+        let count = self.windows.len();
         for (n, win) in self.windows.iter().rev().enumerate() {
             let r = local(&Rect::new(win.x, win.y, win.w, win.h));
-            let c = colour_of(n);
+            let c = if win.title.is_empty() { colour_of(n) } else { colour_of(win.title.bytes().fold(count, |h, b| h.wrapping_mul(31).wrapping_add(b as usize))) };
             paint(&mut rgba, w, h, &r, c);
             paint(&mut rgba, w, h, &Rect::new(r.x, r.y, r.w, 24.min(r.h)), c.map(|v| v / 2));
             text(&mut rgba, w, h, r.x + 8, r.y + 5, &win.title, [250, 250, 250]);
