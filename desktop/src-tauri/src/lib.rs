@@ -976,7 +976,13 @@ pub fn run() {
             #[cfg(debug_assertions)]
             computer::sim::e2e_computer_scene,
             #[cfg(debug_assertions)]
+            computer::sim::e2e_computer_state,
+            #[cfg(debug_assertions)]
+            computer::watch::e2e_computer_touch,
+            #[cfg(debug_assertions)]
             computer::e2e_computer_look,
+            #[cfg(debug_assertions)]
+            computer::e2e_computer_do,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip_input,
             #[cfg(debug_assertions)]

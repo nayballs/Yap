@@ -289,7 +289,7 @@ impl Loop<'_> {
                 // Apps on the PC (computer.rs): a screenshot is outside content,
                 // shown with the question as it was taken, its picture with the
                 // next step while it fits.
-                let ctx = crate::computer::Ctx { conversation: self.extra.conversation, live: self.live, provider: self.provider, base_url: self.base_url, unattended: false };
+                let ctx = crate::computer::Ctx { conversation: self.extra.conversation, live: self.live, provider: self.provider, base_url: self.base_url, unattended: false, turn: &self.computer_turn };
                 let run = crate::computer::execute(name, &args, &ctx).await;
                 self.screen_seen |= run.seen;
                 let live = self.live;

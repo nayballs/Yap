@@ -187,7 +187,8 @@ pub fn choose(displays: &[Display], chosen: Option<&str>, allowed: &[Rect], curs
     Some(displays.iter().position(|d| d.primary).unwrap_or(0))
 }
 
-/// **Where the pictures come from**: this PC, or a stand-in.
+/// **Where the pictures come from, and what's where**: this PC, or a
+/// stand-in.
 pub trait Desk: Send + Sync {
     fn displays(&self) -> Vec<Display>;
     /// Every window on screen, topmost first.
@@ -195,6 +196,16 @@ pub trait Desk: Send + Sync {
     /// One display's pixels, RGBA, its own size.
     fn capture(&self, d: &Display) -> Result<(Vec<u8>, u32, u32), String>;
     fn cursor(&self) -> Option<(i32, i32)>;
+    /// The window in front.
+    fn front(&self) -> Option<Win>;
+    /// The window under a physical point.
+    fn window_at(&self, x: i32, y: i32) -> Option<Win>;
+    /// The element under a physical point (UI Automation).
+    fn element_at(&self, x: i32, y: i32) -> Option<super::uia::Element>;
+    /// The element with the keyboard focus.
+    fn focused(&self) -> Option<super::uia::Element>;
+    /// The window runs above Yap (an administrator's): input to it is dropped.
+    fn elevated(&self, w: &Win) -> bool;
 }
 
 /// **This PC** (Windows): its monitors, its windows, a capture with Yap's
@@ -226,6 +237,26 @@ impl Desk for ThisPc {
     fn cursor(&self) -> Option<(i32, i32)> {
         super::windows::cursor()
     }
+
+    fn front(&self) -> Option<Win> {
+        super::windows::front()
+    }
+
+    fn window_at(&self, x: i32, y: i32) -> Option<Win> {
+        super::windows::at(x, y)
+    }
+
+    fn element_at(&self, x: i32, y: i32) -> Option<super::uia::Element> {
+        super::uia::at(x, y)
+    }
+
+    fn focused(&self) -> Option<super::uia::Element> {
+        super::uia::focused()
+    }
+
+    fn elevated(&self, w: &Win) -> bool {
+        crate::pasting::elevated::target_blocked(w.hwnd)
+    }
 }
 
 /// **The desk for now**: a stand-in in a test run (its scene, never the
@@ -233,14 +264,36 @@ impl Desk for ThisPc {
 pub fn desk() -> Result<Box<dyn Desk>, String> {
     #[cfg(debug_assertions)]
     {
-        if let Some(scene) = super::sim::scene() {
-            return Ok(Box::new(scene));
+        if super::sim::scene().is_some() {
+            return Ok(Box::new(super::sim::SimDesk));
         }
         if crate::shell::e2e::active() && !crate::shell::realtest::on() {
             return Err("this test run set no stand-in desktop (e2e_computer_scene)".into());
         }
     }
     Ok(Box::new(ThisPc))
+}
+
+/// **Where input goes now**: the stand-in desktop in a test run, else this
+/// PC's `SendInput`.
+pub fn hands() -> Result<Box<dyn super::input::Hands>, String> {
+    #[cfg(debug_assertions)]
+    {
+        if super::sim::scene().is_some() {
+            return Ok(Box::new(super::sim::SimDesk));
+        }
+        if crate::shell::e2e::active() && !crate::shell::realtest::on() {
+            return Err("this test run set no stand-in desktop (e2e_computer_scene)".into());
+        }
+    }
+    #[cfg(windows)]
+    {
+        Ok(Box::new(super::input::ThisPc))
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Clicking and typing are Windows only for now".into())
+    }
 }
 
 /// A window masked in a screenshot: the part of it that shows, in the
@@ -411,6 +464,7 @@ mod tests {
                 crate::computer::sim::SimWindow { x: 0, y: 0, w: 200, h: 100, exe: r"C:\Windows\explorer.exe".into(), class: "Progman".into(), ..Default::default() },
             ],
             cursor: None,
+            ..Default::default()
         };
         let owner = |w: &Win| w.exe.ends_with("notepad.exe").then(|| "Notepad".to_string());
         let s = take(&scene, None, &owner, 1920).unwrap();
