@@ -31,43 +31,221 @@
         root.dataset.yapTheme = dark ? 'dark' : 'light';
         root.dataset.barTheme = bar === 'dark' || bar === 'light' ? bar : dark ? 'dark' : 'light';
       })();
-      // A file of the app's that couldn't be fetched fails the whole page:
-      // a module script's error event fires when any file it imports can't
-      // be loaded, and nothing runs. 19 Nov 2026: one font stylesheet refused
-      // by the dev server as Yap started left the main window blank until a
-      // restart. So the page loads again — at most twice a minute, so a page
-      // that can never load doesn't reload for ever. The window's own view
-      // (App.svelte's `import()`) does the same when it can't load.
-      window.__yapLoadFailed = function (what) {
-        var now = Date.now();
-        try {
-          var key = 'yap.loadRetries';
-          var recent = JSON.parse(sessionStorage.getItem(key) || '[]').filter(function (t) {
-            return now - t < 60000;
-          });
-          if (recent.length >= 2) return;
-          recent.push(now);
-          sessionStorage.setItem(key, JSON.stringify(recent));
-        } catch (e) {
-          if (window.__yapLoadRetried) return;
-          window.__yapLoadRetried = true;
+      // **A Yap window is never left blank** (19 Nov 2026; frontend.md).
+      // One font stylesheet refused by the dev server as Yap started left
+      // the main window blank until a restart: when a module script can't
+      // fetch a file it imports, none of it runs. So, from here (this script
+      // runs even when none of the app's own files can be fetched):
+      // - the app's code couldn't load (the entry module script's `error`
+      //   event, App.svelte's view `import()` rejecting): the page loads
+      //   again, at most twice a minute (`__yapLoadFailed`);
+      // - the window's view threw as it started or rendered (App.svelte's
+      //   `<svelte:boundary>`), or main.js threw before it mounted the app
+      //   (an `error` before `__yapStarted`), or an error or a rejection came
+      //   before the view was in and it still isn't 5 s later: loaded again
+      //   once a minute (`__yapViewFailed`);
+      // - then "Yap couldn't show this window" and Reload — never on the
+      //   Yap bar or the split preview: transparent windows, where a box
+      //   would sit over the screen (yap-bar.md); they load again and log.
+      // Each step is logged at warn through `frontend_log` (labels, reasons
+      // and counts only), and Rust hears how the page is doing
+      // (`page_state`: alive, mounted, trouble, reloading): its watchdog
+      // (shell/page_watch.rs) loads a page again that never says its view
+      // is in, and one whose renderer crashed.
+      (function () {
+        var root = document.documentElement;
+        var kind = root.dataset.window || '';
+        var seeThrough = kind === 'overlay' || kind === 'split-preview';
+        var internals = window.__TAURI_INTERNALS__;
+        function tell(cmd, args) {
+          try {
+            if (internals && internals.invoke) internals.invoke(cmd, args || {}).catch(function () {});
+          } catch (e) {}
         }
-        try {
-          console.warn('[yap] ' + what + " couldn't load; loading the page again");
-        } catch (e) {}
+        function log(what) {
+          tell('frontend_log', { msg: 'window ' + (kind || '?') + ': ' + what, level: 'warn' });
+          try {
+            console.warn('[yap] ' + what);
+          } catch (e) {}
+        }
+        // An error's kind and where in the app's code (never its message,
+        // which can carry what a page shows): "TypeError at Overlay.svelte:12".
+        function describe(err) {
+          var name = 'an error';
+          try {
+            if (err && err.name) name = String(err.name);
+            else if (err === null || err === undefined) name = String(err);
+            else name = typeof err;
+          } catch (e) {}
+          name = name.replace(/[^\w$.-]/g, '').slice(0, 40) || 'an error';
+          var at = '';
+          try {
+            var m = String((err && err.stack) || '').match(/([\w.-]+\.(?:m?js|svelte|ts))(?:\?[^\s:)]*)?:(\d+)/);
+            if (m) at = ' at ' + m[1] + ':' + m[2];
+          } catch (e) {}
+          return name + at;
+        }
+        // A reload the page makes of itself: at most `max` a minute, counted
+        // in this webview's sessionStorage (kept across its reloads).
+        function spend(key, max) {
+          var now = Date.now();
+          try {
+            var recent = JSON.parse(sessionStorage.getItem(key) || '[]').filter(function (t) {
+              return now - t < 60000;
+            });
+            if (recent.length >= max) return false;
+            recent.push(now);
+            sessionStorage.setItem(key, JSON.stringify(recent));
+            return true;
+          } catch (e) {
+            var flag = '__yapSpent_' + key;
+            if (window[flag]) return false;
+            window[flag] = true;
+            return true;
+          }
+        }
+        var started = false; // main.js ran to its end (the app is mounted)
+        var mounted = false; // the window's view is in
+        var acting = false; // a reload is on its way, or the message is up
+        function again(why) {
+          acting = true;
+          log(why + '; loading the page again');
+          // (Rust watches the load from now: one that hangs is loaded again.)
+          tell('page_state', { state: 'reloading' });
+          setTimeout(function () {
+            location.reload();
+          }, 500);
+        }
+        function giveUp(why) {
+          acting = true;
+          log(why + (seeThrough ? '; leaving it to Yap' : '; showing Reload'));
+          tell('page_state', { state: 'trouble' });
+          if (!seeThrough) show();
+        }
+        window.__yapLoadFailed = function (what) {
+          if (acting) return;
+          var why = what + " couldn't load";
+          if (spend('yap.loadRetries', 2)) again(why);
+          else giveUp(why);
+        };
+        window.__yapViewFailed = function (what, err) {
+          mounted = false;
+          if (acting) return;
+          var why = what + ' failed (' + describe(err) + ')';
+          if (spend('yap.viewRetries', 1)) again(why);
+          else giveUp(why);
+        };
+        window.__yapStarted = function () {
+          started = true;
+        };
+        window.__yapMounted = function () {
+          if (mounted) return;
+          mounted = true;
+          acting = false;
+          hide();
+          tell('page_state', { state: 'mounted' });
+        };
+        // (A script's error event doesn't bubble: caught on its way down.)
+        document.addEventListener(
+          'error',
+          function (e) {
+            var t = e.target;
+            if (t && t.tagName === 'SCRIPT' && t.type === 'module') window.__yapLoadFailed('the app');
+          },
+          true,
+        );
+        // An error or a rejection before the view is in. Before main.js ran
+        // to its end the app was never mounted: at once. After, the view may
+        // still come: 5 s for it.
+        function early(err) {
+          if (mounted || acting) return;
+          if (!started) return window.__yapViewFailed('the app', err);
+          setTimeout(function () {
+            if (!mounted) window.__yapViewFailed('the window, after an early error,', err);
+          }, 5000);
+        }
+        window.addEventListener('error', function (e) {
+          // (A file's error comes to the listener above, not here.)
+          if (e && e.error !== undefined) early(e.error);
+          else if (e && e.message) early(null);
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          early(e && e.reason);
+        });
+        // Its view never in, with nothing said: by now Rust's watchdog has
+        // loaded the page again and given up (page_watch.rs), so the message.
         setTimeout(function () {
-          location.reload();
-        }, 500);
-      };
-      // (A script's error event doesn't bubble: caught on its way down.)
-      document.addEventListener(
-        'error',
-        function (e) {
-          var t = e.target;
-          if (t && t.tagName === 'SCRIPT' && t.type === 'module') window.__yapLoadFailed('the app');
-        },
-        true,
-      );
+          if (!mounted && !acting) giveUp('the window never started');
+        }, 30000);
+
+        // "Yap couldn't show this window", with Reload: plain DOM and inline
+        // styles, as it must show when app.css and the app's code never
+        // loaded — the one place in Yap with colours written out. They are
+        // app.css's tokens (`--yap-*`, used when they're there), mirrored for
+        // when they aren't, light and dark from the theme put on above.
+        var box = null;
+        function show() {
+          if (box) return;
+          if (!document.body) {
+            document.addEventListener('DOMContentLoaded', show);
+            return;
+          }
+          var style = document.createElement('style');
+          style.textContent =
+            '#yap-fallback{--yf-bg:#f0ede7;--yf-fg:#23211b;--yf-muted:#6e6a5f;--yf-ink:#26231c;--yf-ink-fg:#f7f5f0;--yf-border:#dcd7cb;' +
+            'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;' +
+            "background:var(--yap-bg,var(--yf-bg));color:var(--yap-fg,var(--yf-fg));font:14px/1.45 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif;cursor:default;user-select:none;-webkit-user-select:none}" +
+            ":root[data-window='notepad'] #yap-fallback,:root[data-window='quick-note'] #yap-fallback,:root[data-window='doc'] #yap-fallback{--yf-bg:#faf9f6;background:var(--yap-paper,var(--yf-bg))}" +
+            ":root[data-yap-theme='dark'] #yap-fallback{--yf-bg:#161410;--yf-fg:#f2efe8;--yf-muted:#a8a294;--yf-ink:#ece8df;--yf-ink-fg:#1c1a16;--yf-border:#3a352b}" +
+            ":root[data-yap-theme='dark'][data-window='notepad'] #yap-fallback,:root[data-yap-theme='dark'][data-window='quick-note'] #yap-fallback,:root[data-yap-theme='dark'][data-window='doc'] #yap-fallback{--yf-bg:#1c1a16}" +
+            '#yap-fallback .yf-card{max-width:320px;text-align:center}' +
+            '#yap-fallback h1{margin:0 0 6px;font-size:16px;font-weight:600}' +
+            '#yap-fallback p{margin:0 0 16px;color:var(--yap-muted,var(--yf-muted))}' +
+            '#yap-fallback button{font:inherit;font-weight:600;margin:0 4px;padding:6px 16px;border-radius:8px;cursor:pointer;' +
+            'border:1px solid var(--yap-border,var(--yf-border));background:transparent;color:inherit}' +
+            '#yap-fallback .yf-reload{background:var(--yap-ink,var(--yf-ink));border-color:var(--yap-ink,var(--yf-ink));color:var(--yap-ink-fg,var(--yf-ink-fg))}' +
+            '#yap-fallback button:focus-visible{outline:2px solid currentColor;outline-offset:2px}';
+          box = document.createElement('div');
+          box.id = 'yap-fallback';
+          box.setAttribute('role', 'alert');
+          // (Its empty space moves the window: the main window, the notepad
+          // and a Markdown file's have no title bar but the page's.)
+          box.setAttribute('data-tauri-drag-region', '');
+          box.innerHTML =
+            '<div class="yf-card"><h1>Yap couldn’t show this window</h1>' +
+            '<p>Something went wrong as it opened. Reload it to try again.</p>' +
+            '<button type="button" class="yf-reload">Reload</button>' +
+            (internals ? '<button type="button" class="yf-close">Close</button>' : '') +
+            '</div>';
+          box.querySelector('.yf-reload').addEventListener('click', function () {
+            // A fresh start: the page may load itself again as it would.
+            try {
+              sessionStorage.removeItem('yap.loadRetries');
+              sessionStorage.removeItem('yap.viewRetries');
+            } catch (e) {}
+            log('Reload clicked');
+            tell('page_state', { state: 'reloading' });
+            location.reload();
+          });
+          var close = box.querySelector('.yf-close');
+          if (close)
+            close.addEventListener('click', function () {
+              var label = internals.metadata.currentWindow.label;
+              tell('plugin:window|close', { label: label });
+              // (A Markdown file's window asks its page first: a second
+              // close within 8 s closes it.)
+              if (kind === 'doc') tell('plugin:window|close', { label: label });
+            });
+          document.body.appendChild(style);
+          document.body.appendChild(box);
+        }
+        function hide() {
+          if (!box) return;
+          box.remove();
+          box = null;
+        }
+        tell('page_state', { state: 'alive' });
+      })();
     </script>
   </head>
   <body>

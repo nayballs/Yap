@@ -1,5 +1,5 @@
 //! The app shell: the tray, the windows' webviews (context menus, memory,
-//! theme), portable mode, saving stores, Credential Manager's secrets,
+//! theme, never left blank), portable mode, saving stores, Credential Manager's secrets,
 //! helper processes, test and robot mode, and `yap.exe bench`. How it
 //! works: docs/architecture/app-shell.md.
 
@@ -18,6 +18,7 @@ pub mod guide;
 pub mod help;
 pub mod lab;
 pub mod logging;
+pub mod page_watch;
 pub mod portable;
 pub mod procs;
 pub mod realtest;

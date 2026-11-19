@@ -34,5 +34,9 @@ document.addEventListener('click', (e) => {
 });
 
 const app = mount(App, { target: document.getElementById('app') });
+// The app is mounted (its view comes once its chunk is in): an error from
+// here on is the view's, which App.svelte's boundary catches. One before
+// this left the window with nothing (index.html's `__yapStarted`).
+window.__yapStarted?.();
 
 export default app;
