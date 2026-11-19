@@ -12,10 +12,13 @@ export const STAND_INS = { teams: [91, 95, 199], discord: [88, 101, 242] };
 
 /**
  * Write `apps`' stand-ins (app id → [r, g, b]) to
- * test-results/app/fixtures/app-icons-<name>/ and return that folder.
+ * test-results/app/fixtures/app-icons-<name>-<pid>/ and return that folder:
+ * one per worker, as several workers running one spec at once
+ * (`--repeat-each`) emptied and wrote one shared folder under each other
+ * (a test Yap starting with no Teams icon, or a worker's ENOENT).
  */
 export function standInIcons(name, apps = STAND_INS) {
-  const dir = path.join(OUT, 'fixtures', `app-icons-${name}`);
+  const dir = path.join(OUT, 'fixtures', `app-icons-${name}-${process.pid}`);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   for (const [app, rgb] of Object.entries(apps)) {

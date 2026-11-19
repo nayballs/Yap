@@ -17,7 +17,9 @@
 //! - it leaves other processes alone (no "orphaned sidecar" sweep) and never
 //!   reads or writes the installed app's saved window size and position;
 //! - it quits cleanly (tray icon, exit hooks) when the harness closes its
-//!   stdin, which also happens when the harness dies;
+//!   stdin, which also happens when the harness dies (a Yap that restarted
+//!   itself after WebView2 stopped has no harness on its stdin: it goes
+//!   when the harness's process, `YAP_E2E_HARNESS_PID`, does);
 //! - a meeting recording opens no audio device: the "You" and "Them" audio
 //!   comes from `you.wav` / `them.wav` in `YAP_E2E_MEETING_AUDIO` (played
 //!   `YAP_E2E_MEETING_SPEED` times faster than real time), or is silent, and
@@ -1161,6 +1163,18 @@ pub fn start(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+        // A Yap that restarted itself (WebView2 stopped, webview_gone.rs)
+        // has no harness on its stdin: it goes once the harness does
+        // (`YAP_E2E_HARNESS_PID`), or when the harness quits it.
+        #[cfg(windows)]
+        if crate::shell::webview_gone::restarted() {
+            if let Some(harness) = std::env::var("YAP_E2E_HARNESS_PID").ok().and_then(|p| p.trim().parse::<u32>().ok()) {
+                tracing::info!("e2e: restarted Yap; going when the harness does");
+                while crate::shell::procs::created(harness).is_some() {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+            }
+        }
         tracing::info!("e2e: stdin closed, exiting");
         app.exit(0);
     });

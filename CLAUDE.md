@@ -331,6 +331,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `shell/webview_memory.rs` / `shell/theme.rs` / `shell/portable.rs` — hidden webviews' memory; the theme; portable mode.
 - `shell/view_fit.rs` (+ `core/viewFit.js`) — the main window's page fitted to its window again once its size settles, and whenever the page finds itself at another size (a Snap layouts drop left it at the snapped size).
 - `shell/page_watch.rs` (+ `index.html`'s head script, App.svelte's `<svelte:boundary>`) — a window is never left blank: a page that never says its view is in, or whose renderer crashed, is loaded again (3 in 5 minutes, quietly); the page's own "Yap couldn't show this window" with Reload, never on the transparent bar.
+- `shell/webview_gone.rs` — WebView2's browser process exited (every window with it): Restart Yap in the tray, and Yap restarts by itself once nothing would be lost (no dictation, meeting, download, Chat or Voice Assistant turn, Claude at work, routine), then says so once; never by itself in a dev build.
 - `shell/guide.rs` / `shell/help.rs` — getting started (`onboarding.json`); the shortcut sheet.
 - Commands: each module's own, else its area's `commands.rs` (app-shell.md).
 - `shell/window.rs` / `settings.rs` / `autostart.rs` / `logging.rs` / `commands.rs` — the main window (`show_quietly`), config applied, launch at sign-in, the log, links.

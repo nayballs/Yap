@@ -113,6 +113,16 @@ function freePort() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Whether process `pid` still runs. */
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function rmrf(dir) {
   // WebView2's processes can hold their profile for a moment after Yap exits.
   try {
@@ -226,6 +236,9 @@ export async function launchYap({ name, config = {}, env = {}, data = {}, runsDi
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: WEBVIEW2_ARGS,
     NO_COLOR: '1',
     YAP_BRIDGE_FILE: bridgeFile,
+    // A Yap that restarts itself (webview2-exit.spec.js) has no harness on
+    // its stdin: it goes once this process does.
+    YAP_E2E_HARNESS_PID: String(process.pid),
     YAP_MCP_CLIENT_ROOT: path.join(runDir, 'ai-apps'),
     ...env,
   });
@@ -405,14 +418,40 @@ export class YapApp {
    * crashed") even once WebView2 has loaded it again
    * (never-blank.spec.js): a new connection finds it, and every other
    * window, afresh. The old connection stays open until `stop()`.
+   *
+   * `restarted`: Yap restarted itself (webview2-exit.spec.js): the process
+   * this harness started is gone, and the new one — started by it, from the
+   * run folder's copy, on the same stdout and WebView2 profile — is found by
+   * its executable's path, so `stop()` and `kill()` end it too (it goes by
+   * itself once this process does: `YAP_E2E_HARNESS_PID`).
    */
-  async reattach() {
+  async reattach({ restarted = false } = {}) {
     this.retired = [...(this.retired ?? []), this.browser];
-    const exited = () => (this.child.exitCode !== null ? { code: this.child.exitCode } : null);
+    let exited = () => (this.child.exitCode !== null ? { code: this.child.exitCode } : null);
+    if (restarted) {
+      this.restartedPid = await this.findRestarted();
+      exited = () => (alive(this.restartedPid) ? null : { restartedPid: this.restartedPid, gone: true });
+    }
     this.browser = await connect(path.join(this.runDir, 'webview2'), exited, this.logPath);
     this.pages = {};
     await this.findPages();
     this.watchPages();
+  }
+
+  /** The Yap running from this run folder's copy that isn't the one this harness started. */
+  async findRestarted() {
+    const exe = path.join(this.appDir, 'yap.exe');
+    const ps = `Get-CimInstance Win32_Process -Filter "Name='yap.exe'" | Where-Object { $_.ExecutablePath -eq '${exe.replace(/'/g, "''")}' } | ForEach-Object { $_.ProcessId }`;
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const pids = execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { encoding: 'utf8' })
+        .split(/\s+/)
+        .map(Number)
+        .filter((pid) => pid && pid !== this.child.pid);
+      if (pids.length) return pids[0];
+      await sleep(250);
+    }
+    throw new Error(`No restarted Yap running from ${exe}`);
   }
 
   /** Call a Tauri command from the main window, like the frontend does. */
@@ -447,6 +486,9 @@ export class YapApp {
       execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
       await Promise.race([gone, sleep(10_000)]);
     }
+    if (this.restartedPid && alive(this.restartedPid)) {
+      execFileSync('taskkill', ['/PID', String(this.restartedPid), '/T', '/F'], { stdio: 'ignore' });
+    }
     await sleep(500);
   }
 
@@ -458,6 +500,12 @@ export class YapApp {
   async stop() {
     if (this.stopped) return;
     this.stopped = true;
+    // A Yap that restarted itself has no harness on its stdin: quit from
+    // its tray, as a person would (ended below if it doesn't).
+    if (this.restartedPid) {
+      this.main?.evaluate(() => window.__TAURI_INTERNALS__.invoke('e2e_tray', { click: 'quit' })).catch(() => {});
+      await sleep(300);
+    }
     for (const old of this.retired ?? []) await old.close().catch(() => {});
     await this.browser?.close().catch(() => {});
     const { child } = this;
@@ -470,6 +518,17 @@ export class YapApp {
       if (!quit) {
         try {
           execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+    if (this.restartedPid) {
+      const deadline = Date.now() + 10_000;
+      while (alive(this.restartedPid) && Date.now() < deadline) await sleep(200);
+      if (alive(this.restartedPid)) {
+        try {
+          execFileSync('taskkill', ['/PID', String(this.restartedPid), '/T', '/F'], { stdio: 'ignore' });
         } catch {
           /* already gone */
         }

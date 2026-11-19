@@ -1898,7 +1898,9 @@ pub fn bar_debug(app: AppHandle) -> Result<serde_json::Value, String> {
                 rect.top + ((r.y + r.h / 2.0) * scale) as i32,
             )
         });
-        let reaches_bar = pill.map(|p| win::window_at(p) == hwnd as isize);
+        // (Another test Yap's bar on the same spot left out: test runs side
+        // by side.)
+        let reaches_bar = pill.map(|p| win::window_at_besides_other_yaps(p) == hwnd as isize);
         drop(s);
         // Windows' own activation record (tao follows WM_ACTIVATE): the bar
         // must never be the active window; the main window only when it

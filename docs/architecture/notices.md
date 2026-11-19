@@ -170,7 +170,10 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   place minus the Windows notification, for quiet notes — Paste / Copy last
   transcript's "Copied your last dictation", "Nothing to paste yet" (kind
   `lastTranscript`: shown now or within 5 s, else dropped;
-  `pasting/last.rs`) and Recover text's "Copied your dictation".
+  `pasting/last.rs`), Recover text's "Copied your dictation", and "Yap
+  restarted its windows after WebView2 stopped" (kind `windowsRestarted`,
+  once as the new Yap starts, held over a dictation, never dropped:
+  `shell/webview_gone.rs`).
 - **`notices/win_toast.rs`** — the shared Windows-notification plumbing (WinRT
   `ToastNotification`, Windows only): `app_id` (the NSIS shortcut's
   AppUserModelID; dev builds borrow PowerShell's), `logo_xml`, `esc`, and

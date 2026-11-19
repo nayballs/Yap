@@ -82,7 +82,8 @@ pub struct Alert {
     /// cloud model, asked once) | "commandsScreen"
     /// (`dictation/command_screen.rs`: a Command needs the window in front
     /// and its model is a cloud one, asked once) | "lastTranscript" (`last.rs`: "Copied your last dictation",
-    /// shown with [`confirm`]):
+    /// shown with [`confirm`]) | "windowsRestarted" (`shell/webview_gone.rs`:
+    /// Yap restarted after WebView2 stopped, with [`confirm`]):
     /// the bar card's id, the Windows notification's tag (a newer one
     /// replaces it) and its rule in `policy.rs`.
     pub kind: &'static str,
