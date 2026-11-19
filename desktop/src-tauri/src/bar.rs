@@ -711,6 +711,15 @@ fn set_shown(app: &AppHandle, shown: bool) {
     on_main(app, move |app| {
         let Some(w) = window(app) else { return };
         if shown {
+            // Minimised from outside while it was hidden: back first, so it
+            // never shows as Windows' 160 × 28 strip (`place`).
+            #[cfg(windows)]
+            if let Ok(hwnd) = w.hwnd() {
+                if overlay::win::is_iconic(hwnd.0) {
+                    tracing::info!("bar: minimised from outside while hidden; back at its own size");
+                    overlay::win::restore_quietly(hwnd.0);
+                }
+            }
             crate::shell::window::show_quietly(&w);
             overlay::force_topmost(&w);
         } else {
@@ -732,22 +741,38 @@ fn set_click_through(app: &AppHandle, on: bool) {
     });
 }
 
-/// Put the window on `screen`, sized as it is now. A move to a monitor with
-/// another scale makes Windows resize it (`WM_DPICHANGED`, which tao answers
-/// keeping its logical size), so it's placed again with the new size.
+/// Put the window on `screen` at its one size there ([`overlay::size_on`]).
+/// A move to a monitor with another scale makes Windows resize it
+/// (`WM_DPICHANGED`, which tao answers keeping its logical size: the same
+/// size), so it's checked again after.
+///
+/// Never from the size Windows reports (19 Nov 2026): minimised from outside
+/// (Win+M, Show desktop, a shake of another window), the bar's rect is
+/// Windows' 160 × 28 strip for a minimised window. Placing it at that size
+/// moved the strip to the bottom of the screen, and once Windows restored
+/// it, it stayed that size: the page clipped inside, a recording showing
+/// nothing, a hover a small square. Minimised, it's put back first, shown
+/// without activating; hidden (over a fullscreen app), it waits until it's
+/// shown ([`set_shown`]).
 #[cfg(windows)]
 fn place(app: &AppHandle, screen: Screen, edge: Edge, moved_monitor: bool) {
     on_main(app, move |app| {
         let Some(Ok(hwnd)) = window(app).map(|w| w.hwnd()) else { return };
         let hwnd = hwnd.0;
+        if overlay::win::is_iconic(hwnd) {
+            if !lock().shown {
+                return;
+            }
+            tracing::info!("bar: minimised from outside; back at its own size");
+            overlay::win::restore_quietly(hwnd);
+        }
+        let target = overlay::place(&screen, overlay::size_on(&screen), edge);
         let mut rect = overlay::win::window_rect(hwnd);
         for _ in 0..3 {
-            let Some(now) = rect else { break };
-            let target = overlay::place(&screen, (now.width(), now.height()), edge);
-            if target == now {
+            if rect.is_none_or(|now| now == target) {
                 break;
             }
-            overlay::win::move_to(hwnd, target.left, target.top);
+            overlay::win::set_rect(hwnd, target);
             rect = overlay::win::window_rect(hwnd);
         }
         {
@@ -825,7 +850,7 @@ fn poller(app: AppHandle, rx: mpsc::Receiver<()>) {
 #[cfg(windows)]
 fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
     use overlay::win;
-    let (placed, frozen, edge, replace, autohide_due) = {
+    let (placed, put_at, shown, frozen, edge, replace, autohide_due) = {
         let s = lock();
         let watching = s.watching();
         if !watching {
@@ -833,6 +858,8 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
         }
         (
             s.placed,
+            s.rect,
+            s.shown,
             // A dictation, or a question to the assistant until its answer
             // has been said: the bar stays where it started.
             s.dictation == Dictation::Recording
@@ -864,6 +891,12 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
             s
         })
     });
+    // Shown, but not where the bar put it: minimised from outside (Win+M,
+    // Show desktop) or sized by something else (its monitor's scale
+    // changed). Placed again, which puts it back whole (`place`).
+    let astray = shown
+        && put_at.is_some()
+        && win::bar_hwnd().is_some_and(|h| win::is_iconic(h) || win::window_rect(h) != put_at);
     let target = {
         let mut s = lock();
         if autohide_due {
@@ -873,7 +906,7 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
         let mut pending = s.pending;
         let target = follow(placed.as_ref(), current, cursor_screen, &mut pending, frozen, now);
         s.pending = pending;
-        target.or(if replace { current.or(cursor_screen) } else { None })
+        target.or(if replace || astray { current.or(cursor_screen) } else { None })
     };
     if let Some(screen) = target {
         let moved = placed.is_some_and(|p| p.id != screen.id);

@@ -102,6 +102,14 @@ impl Edge {
     }
 }
 
+/// The bar window's one size on `screen` (physical px): [`WIDTH`] ×
+/// [`HEIGHT`] at its scale, rounded as tao rounds a logical size. Never the
+/// window's size as Windows reports it, which for a minimised window is a
+/// 160 × 28 strip. Pure.
+pub fn size_on(screen: &Screen) -> (i32, i32) {
+    ((WIDTH * screen.scale).round() as i32, (HEIGHT * screen.scale).round() as i32)
+}
+
 /// The bar window's rect on `screen` for a window of `size` (physical px):
 /// centred on the work area, its bottom edge on the work area's bottom —
 /// above a docked taskbar, flush with a monitor that has none (Wispr's Flow
@@ -376,6 +384,8 @@ pub mod win {
         fn GetWindowRect(hwnd: HWND, rect: *mut RECT) -> i32;
         fn GetClassNameW(hwnd: HWND, buf: *mut u16, max: i32) -> i32;
         fn IsZoomed(hwnd: HWND) -> i32;
+        fn IsIconic(hwnd: HWND) -> i32;
+        fn ShowWindow(hwnd: HWND, cmd: i32) -> i32;
         fn IsWindow(hwnd: HWND) -> i32;
         fn GetWindowThreadProcessId(hwnd: HWND, pid: *mut u32) -> u32;
         fn GetWindowLongPtrW(hwnd: HWND, index: i32) -> isize;
@@ -424,6 +434,10 @@ pub mod win {
     const WM_STYLECHANGING: u32 = 0x007C;
     const WM_NCDESTROY: u32 = 0x0082;
     const WM_MOUSEACTIVATE: u32 = 0x0021;
+    const WM_SYSCOMMAND: u32 = 0x0112;
+    const SC_MINIMIZE: usize = 0xF020;
+    const SC_MAXIMIZE: usize = 0xF030;
+    const SW_SHOWNOACTIVATE: i32 = 4;
     const MA_NOACTIVATE: isize = 3;
     const WA_INACTIVE: usize = 0;
     const SUBCLASS_ID: usize = 0x59_41_50; // "YAP"
@@ -458,6 +472,11 @@ pub mod win {
                 styles.style_new =
                     super::enforced_ex_style(styles.style_new, CLICK_THROUGH.load(Ordering::Relaxed));
             }
+            // Never minimised or maximised by a command (Win+M, a shake of
+            // another window, a key while it was active): it has one size.
+            // (Windows minimising it without a command is put right by
+            // `bar::place`.)
+            WM_SYSCOMMAND if matches!(wparam & 0xFFF0, SC_MINIMIZE | SC_MAXIMIZE) => return 0,
             // Activated anyway (WebView2 focusing itself): hand the focus back.
             WM_ACTIVATE if wparam & 0xFFFF != WA_INACTIVE => {
                 if let Some(f) = ON_ACTIVATED.get() {
@@ -519,11 +538,24 @@ pub mod win {
         }
     }
 
-    /// Move the window to `left`/`top` (no resize, no activation, no Z-order
+    /// Put the window at `r`, position and size (no activation, no Z-order
     /// change). Call on the main thread.
-    pub fn move_to(hwnd: HWND, left: i32, top: i32) {
+    pub fn set_rect(hwnd: HWND, r: Rect) {
         unsafe {
-            SetWindowPos(hwnd, std::ptr::null_mut(), left, top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hwnd, std::ptr::null_mut(), r.left, r.top, r.width(), r.height(), SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
+
+    /// Minimised (by Win+M, Show desktop, a shake of another window…).
+    pub fn is_iconic(hwnd: HWND) -> bool {
+        unsafe { IsIconic(hwnd) != 0 }
+    }
+
+    /// A minimised window back to its own rect, shown, never activated.
+    /// Call on the main thread.
+    pub fn restore_quietly(hwnd: HWND) {
+        unsafe {
+            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         }
     }
 
@@ -790,8 +822,13 @@ mod tests {
             autohide_bottom: 0,
             autohide_top: 0,
         };
-        let size = ((WIDTH * s.scale) as i32, (HEIGHT * s.scale) as i32);
+        let size = size_on(&s);
         assert_eq!(size, (780, 840));
+        // Its one size at other scales, whatever the window measures now (a
+        // minimised window: 160 × 28).
+        assert_eq!(size_on(&Screen { scale: 1.0, ..s }), (520, 560));
+        assert_eq!(size_on(&Screen { scale: 1.25, ..s }), (650, 700));
+        assert_eq!(size_on(&Screen { scale: 1.75, ..s }), (910, 980));
         let r = place(&s, size, Edge::Bottom);
         assert_eq!(r, Rect::new(-2310, 1248, -1530, 2088));
         assert!(s.monitor.covers(&r));

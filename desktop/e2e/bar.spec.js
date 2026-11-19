@@ -19,7 +19,7 @@ import {
   pressHotkey,
   settingsDialog,
 } from './support/fixtures.js';
-import { windowFacts } from './support/win32.js';
+import { windowFacts, windowPlacement } from './support/win32.js';
 import { standInIcons } from './support/icons.js';
 
 // Teams "installed" (a stand-in: test mode reads no installed apps' icons).
@@ -417,6 +417,40 @@ test('fullscreen: the pill hides; a card shows over a borderless app, waits out 
   await callSim(yap, 'jitsi', false);
   await expect(waited).toHaveCount(0);
   await closeToasts(main);
+});
+
+// The maintainer's bar ended up a 160 × 28 strip (Windows' size for a
+// minimised window) at the bottom of the screen, the page clipped inside it:
+// recording showed nothing and a hover a small square. Minimised from
+// outside (Win+M, Show desktop, a shake), the bar's own placing moved the
+// minimised window and took its 160 × 28 for the bar's size.
+test('minimised from outside (Win+M, Show desktop), it comes back whole, never a 160 × 28 strip', async ({ yap }) => {
+  const bar = yap.overlay;
+  const d = await debug(yap);
+  const whole = { width: d.rect.right - d.rect.left, height: d.rect.bottom - d.rect.top };
+  const back = { iconic: false, visible: true, rect: whole, normal: whole };
+  const placement = () => windowPlacement(d.hwnd);
+  expect(placement()).toMatchObject(back);
+
+  windowPlacement(d.hwnd, { minimise: true });
+  await expect.poll(placement, { timeout: 10_000 }).toMatchObject(back);
+  // Where it was, bottom-centre on the work area, its page filling it.
+  await expect.poll(() => debug(yap).then((x) => x.rect)).toEqual(d.rect);
+  const page = await bar.evaluate(() => [innerWidth * devicePixelRatio, innerHeight * devicePixelRatio]);
+  expect(page.map(Math.round)).toEqual([whole.width, whole.height]);
+  await expect(bar.getByLabel('Yap bar')).toBeVisible();
+
+  // The state it was found in: not minimised, but the strip's size.
+  windowPlacement(d.hwnd, { size: [160, 28] });
+  await expect.poll(placement, { timeout: 10_000 }).toMatchObject(back);
+  await expect.poll(() => debug(yap).then((x) => x.rect)).toEqual(d.rect);
+
+  // Hidden over a fullscreen app and shown again: whole.
+  await simulate(yap, { fullscreen: 'borderless' });
+  await expect.poll(() => debug(yap).then((x) => x.shown)).toBe(false);
+  await simulate(yap, { fullscreen: 'none' });
+  await expect.poll(() => debug(yap).then((x) => x.shown)).toBe(true);
+  expect(placement()).toMatchObject(back);
 });
 
 test('◉ starts meeting notes: the recording pill opens the notepad and ends the meeting', async ({ yap, shot }) => {
