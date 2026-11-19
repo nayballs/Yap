@@ -298,7 +298,9 @@
   false) — 2026-10-29, `chat/assistant/screen.rs`; new fields only: an
   older Yap sharing the folder drops them on its save, so the first comes
   back on (an older Yap never takes the window anyway), the cloud one off
-  and the ask may come once more — no `migrate_once` step +
+  and the ask may come once more — no `migrate_once` step + computer_use
+  ("Let Yap's AI use apps on your PC", false; needs both screen switches;
+  2026-11-19, `computer.rs`: an older Yap drops it, off again) +
   chat_clean_speech ("Clean up what you say in Chat", Settings → Voice
   Assistant: a spoken question in a plain chat cleaned up as an AI prompt,
   word for word, on Dictation cleanup's model, `cleanup_styles::cleans_question`;

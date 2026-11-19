@@ -14,6 +14,7 @@ mod bar;
 mod calendar;
 mod calls;
 mod chat;
+mod computer;
 mod config;
 mod dictation;
 mod dictionary;
@@ -355,6 +356,7 @@ pub fn run() {
             chat::pages::act::confirm::chat_page_confirm,
             chat::pages::act::confirm::chat_connector_confirm,
             chat::cards::ask::chat_question_answer,
+            computer::access::chat_computer_access,
             chat::cards::outline::chat_outline_answer,
             dictation::commands::cancel_recording,
             shell::autostart::set_autostart,
@@ -971,6 +973,10 @@ pub fn run() {
             ai::claude_plan::spare::e2e_claude_spares,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip,
+            #[cfg(debug_assertions)]
+            computer::sim::e2e_computer_scene,
+            #[cfg(debug_assertions)]
+            computer::e2e_computer_look,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip_input,
             #[cfg(debug_assertions)]

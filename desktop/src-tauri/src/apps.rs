@@ -80,8 +80,8 @@
 //! fast path and the answers to Yap's questions), `tools` (the model's
 //! tools, and a model without them) and, on Windows, `win`.
 
-mod index;
-mod matching;
+pub(crate) mod index;
+pub(crate) mod matching;
 mod plan;
 mod tools;
 #[cfg(windows)]
@@ -254,6 +254,11 @@ pub(crate) mod tests {
     /// start with), never this PC's apps.
     pub(crate) fn stand_ins() -> Arc<Vec<App>> {
         Arc::new(STAND_INS.with(|s| s.borrow().clone()))
+    }
+
+    /// The index this thread's unit test sees from now on.
+    pub(crate) fn set_stand_ins(apps: Vec<App>) {
+        STAND_INS.with(|s| *s.borrow_mut() = apps);
     }
 
     /// Opens recorded since the last call (unit tests share one list, so

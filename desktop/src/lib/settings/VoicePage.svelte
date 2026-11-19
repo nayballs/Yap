@@ -132,6 +132,16 @@
       disabled={!cfg.assistantScreen}
     />
   </Row>
+  <!-- Computer use (computer.rs): the apps you allow, on a card in Chat each time; needs both screen switches. -->
+  <Row setting="computer-use">
+    <Toggle
+      bind:checked={cfg.computerUse}
+      label="Let Yap’s AI use apps on your PC"
+      desc="Ask in Chat, and Claude asks on a card which apps it may use; it sees only those apps’ windows, everything else on your screen hidden from it"
+      hint="Needs the two switches above. Claude only, on your plan or an Anthropic key. Never during a meeting, a call or a dictation. For now it sees the apps; clicking and typing come next."
+      disabled={!cfg.assistantScreen || !cfg.assistantScreenCloud}
+    />
+  </Row>
 </Group>
 <!-- Read aloud, anywhere (voice/read_aloud.rs): any selected text, in
      the voice below, with the reading card on the Yap bar. -->

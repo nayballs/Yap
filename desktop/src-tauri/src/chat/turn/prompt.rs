@@ -729,6 +729,11 @@ fn instructions(g: &Gates, profile: &crate::ai::about_you::Profile, memory: bool
             s.push(' ');
             s.push_str(&crate::chat::tools::agents::AGENT_TOOL_INSTRUCTIONS.join(" "));
         }
+        // Apps on the PC the person allows (computer.rs).
+        if g.computer {
+            s.push(' ');
+            s.push_str(crate::computer::INSTRUCTIONS);
+        }
         // Connectors (chat/tools/connectors.rs): Yap's own line, never a
         // server's instructions.
         if g.connectors {
@@ -907,6 +912,7 @@ mod tests {
             screen: Gate::Off,
             screen_takes: Default::default(),
             act: false,
+            computer: false,
             calendar: false,
             agents: false,
             connectors: false,
@@ -1038,6 +1044,7 @@ mod tests {
             screen: Gate::Off,
             screen_takes: Default::default(),
             act: false,
+            computer: false,
             calendar: false,
             agents: false,
             connectors: false,

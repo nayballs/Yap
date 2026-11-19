@@ -284,6 +284,9 @@ pub struct Extra<'a> {
     /// `can_act`: the strong cloud models and the on-device ones the browse
     /// evaluation passed; a typed Chat turn with the web on).
     pub act: bool,
+    /// **Computer use** (computer.rs): `request_access`, `screenshot`,
+    /// `zoom`… for the apps the person allows.
+    pub computer: bool,
     /// A cloud model searching with its provider's own search
     /// (`web::Turn::own_search`): `web_search` only, never Yap's
     /// `read_page`; `find_pictures` for its pictures, as a Claude's.

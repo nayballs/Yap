@@ -406,7 +406,7 @@ fn a_code_chats_own_session_has_yaps_browser_acting_on_its_pages_and_the_screen_
     let mut spec = RunSpec::new("garden-planner", Tools::Agent);
     spec.reads = true;
     // Acting on its pages too (14 Nov 2026, as Claude Code's own app's browser).
-    spec.eyes = super::eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
+    spec.eyes = super::eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off, computer: false };
     let h = ep.register(spec).unwrap();
     let mut c = Client::of(&h);
     let listed = names(&c.request("tools/list", json!({})));
@@ -424,7 +424,7 @@ fn a_code_chats_own_session_has_yaps_browser_acting_on_its_pages_and_the_screen_
     assert!(h.allowed_tools().contains(&"mcp__yap__browser_navigate".to_string()));
     // An agent Chat sent out: none of it, whatever its spec asks.
     let mut sent = RunSpec::new("garden-planner", Tools::Agent);
-    sent.eyes = super::eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
+    sent.eyes = super::eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off, computer: false };
     let sent = ep.register(sent).unwrap();
     let out = names(&Client::of(&sent).request("tools/list", json!({})));
     assert!(!out.iter().any(|n| n.starts_with("browser_") || n == "look_at_screen"), "{out:?}");
@@ -434,7 +434,7 @@ fn a_code_chats_own_session_has_yaps_browser_acting_on_its_pages_and_the_screen_
     // Bypass permissions: Yap asks no one, so Claude is told to ask in the chat before anything that buys.
     let mut bypass = RunSpec::new("garden-planner", Tools::Agent);
     bypass.reads = true;
-    bypass.eyes = super::eyes::Eyes { screen: Gate::Off, pictures: Gate::Look, act: true, files: Gate::Off };
+    bypass.eyes = super::eyes::Eyes { screen: Gate::Off, pictures: Gate::Look, act: true, files: Gate::Off, computer: false };
     bypass.approval = Some(super::Approval { run: "ab12".into(), conversation: None, origin: super::Origin::Typed, unattended: true });
     let by = ep.register(bypass).unwrap();
     let told = Client::of(&by).request("initialize", json!({ "protocolVersion": "2025-11-25" }))["result"]["instructions"].as_str().unwrap().to_string();
@@ -869,7 +869,7 @@ fn a_plan_chats_run_with_documents_lists_and_allows_the_rich_set_and_runs_it_onl
 fn a_chat_run_offered_the_screen_and_pages_lists_and_allows_them_and_refuses_them_where_the_tool_loop_would() {
     use crate::chat::pictures::Gate;
     let (ep, _) = endpoint(Duration::from_secs(5));
-    let sees = eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
+    let sees = eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off, computer: false };
     let plain = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
     let h = ep.register(RunSpec::new("Plan chat", Tools::Chat).with_eyes(sees)).unwrap();
     // Not offered: neither listed, allowed nor run.

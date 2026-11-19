@@ -232,6 +232,7 @@ export const FIELD_DEFAULTS = {
   assistantScreen: true,
   assistantScreenCloud: false,
   assistantScreenAsked: false,
+  computerUse: false,
   // "Clean up what you say in Chat": a spoken question cleaned up as an AI
   // prompt, word for word, on Dictation cleanup's model (cleanup_styles.rs).
   chatCleanSpeech: true,
