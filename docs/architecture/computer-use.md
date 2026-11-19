@@ -24,8 +24,15 @@ The plan and its phases are in the private repo
 - The bar says "Yap is using your PC · Esc to stop", with a border round the
   display.
 - Esc, or the person's own mouse or keys, stops it.
-- Not yet: batches, opening apps and the clipboard (phase 3), teach mode
-  (phase 4).
+
+**Phase 3, batches, apps, the clipboard, an API key, any app (2026-11-20)**:
+- Built: `computer_batch`, `open_application`, `read_clipboard` and
+  `write_clipboard` ([below](#phase-3-batches-apps-and-the-clipboard)).
+- Claude on an Anthropic key gets the API's own computer toolset
+  ([below](#an-api-key-the-apis-own-toolset)).
+- The Voice Assistant uses apps from any app, its cards on the bar
+  ([below](#from-any-app-the-voice-assistant)).
+- Not yet: teach mode (phase 4).
 
 ## Modules (`desktop/src-tauri/src/`)
 
@@ -74,6 +81,14 @@ The plan and its phases are in the private repo
   - keys by virtual key and scan code;
   - typing as Unicode keystrokes;
   - a stop let go of what it pressed.
+- `computer/batch.rs` — `computer_batch`: the actions read first, run in
+  order through the same executor, stopped at the first error, coordinates
+  from the screenshot before it.
+- `computer/open.rs` — `open_application`: an allowed app's window raised
+  (restored if minimised), else the app started from its Start-menu entry
+  and its first window brought forward.
+- `computer/clipboard.rs` — `read_clipboard` / `write_clipboard`, each with
+  its grant.
 - `computer/uia.rs` — UI Automation, time-boxed: the element under a point
   (a link, a control's name), the focused one (a password field).
 - `computer/watch.rs` — one chat in control at a time (`HOLD`, 10 s), and the
@@ -101,7 +116,8 @@ Frontend:
 - **Which models:** Claude only, on the plan (`claude-plan`) or an Anthropic
   key (`computer::may`). Other cloud models come once evaluations say so,
   and never a model on this PC.
-- **Where it's asked:** in Chat, typed or out loud with Chat in view. Never a
+- **Where it's asked:** typed in Chat, or out loud with the Voice
+  Assistant's shortcut from any app (`computer::in_chat`; phase 3). Never a
   phone's question, a routine's (`Gates::unattended`) or a question across
   the meetings.
 - **Code chats:** a Code chat's own session gets it with the switch on
@@ -215,8 +231,89 @@ None on that display: the note says so and names the other displays.
 - **The masked capture** of the display at its own resolution, in the session
   (`grants::Last`), for `zoom`.
 
-**`zoom`** crops that capture: the region is given in the screenshot's
-pixels, and the crop is sent at up to the frame's long side.
+**`zoom`** looks at the screen as it is now: the display is captured and
+masked again, the region is given in the last screenshot's pixels, and the
+crop is sent at up to the frame's long side. If the display changed since
+(another size, another display), it crops the last capture instead and says
+so.
+
+## Phase 3: batches, apps and the clipboard
+
+**`computer_batch`** (`computer/batch.rs`) runs several actions in one call,
+so a sequence Claude can predict costs one round trip.
+- The actions are the desktop contract's: `key`, `type`, the clicks,
+  `mouse_move`, `left_click_drag`, `scroll`, `hold_key`, `screenshot`,
+  `zoom`, `cursor_position`, `left_mouse_down` / `up` and `wait`. At most 50.
+- They're all read first. An unknown action or a missing field refuses the
+  batch, and nothing runs.
+- Each runs through the same executor and checks as on its own: the window
+  under the point, the tier, the ask-first card, the person taking over.
+- It **stops at the first error**: "Batch stopped at actions[2]
+  (left_click): … 2 completed, 3 remaining."
+- **Coordinates**, clicks and zoom regions alike, refer to the screenshot
+  taken before the batch, never one taken inside it. After the batch, the
+  last screenshot it took is the reference.
+- A screenshot or zoom inside it comes back in place, in order; each action's
+  summary is its own chip.
+
+**`open_application`** (`computer/open.rs`) brings an allowed app to the
+front, at any tier, since bringing an app forward only shows it.
+- A window of it on screen, or minimised, is raised.
+- Otherwise the app starts from its own Start-menu entry (`apps::open`, never
+  a path the model wrote), and its first window comes forward once it's up
+  (8 s at most).
+- It never raises the desktop or the taskbar for File Explorer.
+- Yap has no background app mode: an app opened is in front, as under the
+  desktop app's full-screen control.
+- A test run starts nothing: `apps::open` records it, and the stand-in
+  desktop gets a window for it.
+
+**`read_clipboard` / `write_clipboard`** (`computer/clipboard.rs`) each need
+their grant from the access card (`clipboardRead`, `clipboardWrite`).
+- Up to 100,000 characters each way.
+- What's read is outside content for the turn's safety rule.
+- The logs carry lengths only.
+- `type` still types new lines as Enter; the clipboard is Claude's to use
+  for a long text (write it, then Ctrl+V).
+
+## An API key: the API's own toolset
+
+Claude 5 models on an Anthropic key (`computer::takes_toolset`: Opus, Sonnet
+and Haiku 5.5, Fable) get Anthropic's own computer toolset, from its public
+docs.
+- **The request** (`ai/llm/anthropic.rs` `body`): `{"type":
+  "computer_toolset_20260801"}` goes in place of its 17 members
+  (`computer::MEMBERS`) as function tools. The desktop contract's other
+  tools stay ordinary tools beside it: `request_access`,
+  `list_granted_applications`, `switch_display`, `open_application`, the
+  clipboard, `computer_batch`.
+- **Its calls:** Claude calls a member by its name with `toolset_name:
+  "computer"`, and the same executor runs it.
+- **Their results** echo `toolset_name` (`toolset_result`). A screenshot's or
+  a zoom's picture goes inside its own result
+  (`chat/tools/agent/fold.rs`), and a failure is `is_error`.
+- **Several in one step** are a batch. After one fails, the rest answer "Not
+  executed: an earlier computer action in this turn failed."
+  (`chat/tools/agent/calls.rs`).
+- **Refused:** if the API refuses the toolset (the account or the model),
+  the step is asked again with the members as function tools, and those are
+  used for the rest of the run (`computer::refuse_toolset`).
+- **Screenshots** are never removed from a turn's history: the 5.5 models'
+  thinking is tied to them.
+
+## From any app: the Voice Assistant
+
+A question asked with the Voice Assistant's shortcut from any app may use
+apps too (phase 3).
+- **The access card** is said in one line ("Let me use Example Mail, to
+  write your reply? Say yes, or press Allow.") and put on the bar: "Let Yap
+  use your apps?", each app with what it lets Yap do, the reason, the
+  extras, then **Allow** and **Don't** (`access::spoken_line`, `bar_card`).
+- **A spoken yes** in that conversation allows it, as for every card that
+  asks out loud (`chat/assistant/spoken_ok.rs`).
+- **The cards that ask first** (Send, Pay, Delete…) are the page actions'
+  ones, said and on the bar. Delete and pay take a click.
+- In Bypass permissions nothing asks, so nothing is said.
 
 ## Plan chats and Code chats
 
@@ -350,6 +447,20 @@ three gaps:
 - **Unit tests for phase 2:** the checks' table; the steps (combos, a
   click's modifiers, a drag, what a stop lets go); the watch; the whole of
   phase 2 on the stand-in desktop.
+- **e2e for phase 3:** `computer-batch.spec.js`:
+  - a plan chat's batch (two clicks, typing and a screenshot that comes back
+    in place), `write_clipboard`, and `open_application` of an app not on
+    screen, which opens from its Start-menu entry;
+  - a batch stopped at its first error, nothing after it run, and the
+    clipboard refused without its grant;
+  - Claude on an Anthropic key (the fake server): the toolset in place of
+    its members, `toolset_name` on calls and results, a screenshot's picture
+    in its own result;
+  - the Voice Assistant from another app: the access card said and on the
+    bar, a spoken yes, then the action done.
+- **Unit tests for phase 3:** a batch read whole first; a batch, the
+  clipboard and `open_application` on the stand-in desktop; the request
+  with the toolset; which models take it; the access card said out loud.
 - **Robot tests** (real windows, idle PC only):
   - `computer-see.real.js`: the test pad allowed, an Edge page over it
     masked;

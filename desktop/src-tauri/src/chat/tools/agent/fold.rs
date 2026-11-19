@@ -56,6 +56,19 @@ impl Loop<'_> {
         // Within what the request has left (a long page read on an 8K
         // model, several notes): never past the model's context.
         let content = self.room.fit(&result, &self.messages, looks);
+        // A computer toolset member's picture, in its own result (the API
+        // wants a screenshot's or a zoom's image there).
+        let pictures = std::mem::take(&mut self.toolset_looks);
+        let content = if pictures.is_empty() {
+            json!(content)
+        } else {
+            let mut parts = vec![json!({ "type": "text", "text": content })];
+            for look in pictures {
+                parts.push(json!({ "type": "text", "text": look.text }));
+                parts.push(look.part);
+            }
+            Value::Array(parts)
+        };
         self.messages.push(json!({
             "role": "tool",
             "tool_call_id": id,

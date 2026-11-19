@@ -225,10 +225,24 @@ pub fn left_down(done: &[Step]) -> Vec<Step> {
     down
 }
 
-/// **Where steps go**: this PC, or the stand-in desktop.
+/// **Where steps go**: this PC, or the stand-in desktop — and the rest of
+/// what changes things there (phase 3): the clipboard, an app opened.
 pub trait Hands: Send + Sync {
     /// One step (blocking): an error when Windows took none of it.
     fn send(&self, step: &Step) -> Result<(), String>;
+    /// The clipboard's text (`None`: nothing on it as text). Blocking.
+    fn clipboard(&self) -> Result<Option<String>, String> {
+        Err("the clipboard isn't reachable here".into())
+    }
+    /// The clipboard set to `text` (checked it took). Blocking.
+    fn set_clipboard(&self, _text: &str) -> Result<(), String> {
+        Err("the clipboard isn't reachable here".into())
+    }
+    /// **An allowed app to the front** (`g`; `app`: its entry in the Start
+    /// menu's index): a window of it raised, else the app started. Blocking.
+    fn open(&self, _g: &super::grants::Granted, _app: Option<&crate::apps::App>) -> Result<super::open::Opened, String> {
+        Err("apps can't be opened here".into())
+    }
 }
 
 /// **Sends `steps`**, checking `stop` before each: stopped, whatever is
@@ -321,6 +335,22 @@ pub struct ThisPc;
 impl Hands for ThisPc {
     fn send(&self, step: &Step) -> Result<(), String> {
         win::send(step)
+    }
+
+    fn clipboard(&self) -> Result<Option<String>, String> {
+        Ok(crate::pasting::text_injector::clip::read_text())
+    }
+
+    fn set_clipboard(&self, text: &str) -> Result<(), String> {
+        if crate::pasting::text_injector::clip::put_text_verified(text, false) {
+            Ok(())
+        } else {
+            Err("the clipboard stayed busy".into())
+        }
+    }
+
+    fn open(&self, g: &super::grants::Granted, app: Option<&crate::apps::App>) -> Result<super::open::Opened, String> {
+        super::open::on_this_pc(g, app)
     }
 }
 

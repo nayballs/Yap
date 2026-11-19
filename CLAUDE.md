@@ -206,10 +206,11 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `chat/made/pages.rs` — `save_page`: pages Yap keeps (the artifacts', local only), a version each change with its id, beside the chat in the same sandbox; in the chat's Outputs; its ⋯ Save as… and Open in browser (`outside_document`: a temp copy, swept after a day).
 
 **Computer use** — [computer-use.md](./docs/architecture/computer-use.md)
-- `computer.rs` — Chat's model sees and drives the apps the person allows, the Claude desktop app's tools (`request_access`, `screenshot`, `zoom`…), one executor for the tool loop and Claude Code (`claude_live/computer.rs`, a `yap-computer` server); Claude only, never in a meeting, a call or a dictation.
+- `computer.rs` — Chat's model sees and drives the apps the person allows, the Claude desktop app's tools (`request_access`, `screenshot`, `zoom`…), one executor for the tool loop and Claude Code (`claude_live/computer.rs`, a `yap-computer` server); Claude only, typed in Chat or asked out loud from any app (its cards on the bar), never in a meeting, a call or a dictation.
 - `computer/access.rs` / `computer/grants.rs` — the access card (act "access"); the apps allowed per chat, in memory, each one's tier (browsers read only, terminals and IDEs clicks only); never Yap or a password manager.
 - `computer/windows.rs` / `computer/shot.rs` / `computer/frame.rs` / `computer/sim.rs` — whose each window is; one display captured with every other window masked (Yap's too); screenshot ↔ physical pixels; the stand-in desktop for tests (widgets that take clicks and typing).
 - `computer/act.rs` / `computer/checks.rs` / `computer/input.rs` / `computer/uia.rs` — the input tools; the checks before each (where it lands, the tier, system combos, links, passwords, a Send asked first); `SendInput` marked as Yap's own; what's under the point.
+- `computer/batch.rs` / `computer/open.rs` / `computer/clipboard.rs` — `computer_batch` (stops at the first error, coordinates from the screenshot before it); `open_application` (an allowed app raised, else started from its Start-menu entry); the clipboard with its grants. On an Anthropic key the API's own `computer_toolset_20260801` in place of its members (`ai/llm/anthropic.rs`).
 - `computer/watch.rs` / `computer/indicator.rs` — one chat drives at a time, and Esc or the person's own mouse or keys stop it (fed by `input_hook`); "Yap is using your PC" on the bar and a border round the display.
 
 **Snip to Chat** — [snip.md](./docs/architecture/snip.md)

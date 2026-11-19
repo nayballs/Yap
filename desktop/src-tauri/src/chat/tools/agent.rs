@@ -300,6 +300,13 @@ struct Loop<'a> {
     /// This turn, for computer use (`computer/watch.rs`: the person taking
     /// over stops the rest of the turn's input actions): unique per turn.
     computer_turn: String,
+    /// Computer use through the API's own toolset (Claude on an Anthropic
+    /// key, `computer.rs` `TOOLSET`): its members' pictures go in their
+    /// own results.
+    computer_toolset: bool,
+    /// The pictures of the toolset call being folded (its screenshot or
+    /// zoom), for its own result.
+    toolset_looks: Vec<crate::chat::pictures::Look>,
     /// The next step must search ([`FirstStep::MustSearch`]).
     must_search: bool,
     /// A notes search that found nothing has led to the web (once a turn).
@@ -500,6 +507,8 @@ async fn tool_loop(
         agent_seen: false,
         connector_seen: false,
         computer_turn: crate::computer::new_turn("loop"),
+        computer_toolset: crate::ai::llm::anthropic::speaks_messages(provider, model) && extra.computer,
+        toolset_looks: Vec::new(),
         must_search: must_search_first,
         led_to_web: false,
         rejected: 0,

@@ -96,6 +96,8 @@ pub struct Scene {
     /// The last button press: where, when, and how many in a row there.
     #[serde(skip)]
     pub last_down: Option<((i32, i32), std::time::Instant, u32)>,
+    /// The clipboard's text.
+    pub clipboard: Option<String>,
 }
 
 static SCENE: Mutex<Option<Scene>> = Mutex::new(None);
@@ -419,6 +421,48 @@ impl Hands for SimDesk {
     fn send(&self, step: &Step) -> Result<(), String> {
         with(|s| s.apply(step)).ok_or_else(|| "no stand-in desktop".to_string())
     }
+
+    fn clipboard(&self) -> Result<Option<String>, String> {
+        with(|s| s.clipboard.clone()).ok_or_else(|| "no stand-in desktop".to_string())
+    }
+
+    fn set_clipboard(&self, text: &str) -> Result<(), String> {
+        with(|s| {
+            s.clipboard = Some(text.to_string());
+            s.log.push(format!("copied {} characters", text.chars().count()));
+        })
+        .ok_or_else(|| "no stand-in desktop".to_string())
+    }
+
+    fn open(&self, g: &crate::computer::grants::Granted, app: Option<&crate::apps::App>) -> Result<crate::computer::open::Opened, String> {
+        // (A test run's open is recorded, never launched: `e2e_opened_apps`.)
+        if let Some(app) = app {
+            crate::apps::open(app)?;
+        }
+        with(|s| s.open(g)).ok_or_else(|| "no stand-in desktop".to_string())
+    }
+}
+
+impl Scene {
+    /// **An allowed app opened**: a window of it raised, else a new one in
+    /// front (its title the app's name).
+    fn open(&mut self, g: &crate::computer::grants::Granted) -> crate::computer::open::Opened {
+        use crate::computer::open::Opened;
+        let shell = |w: &Win| crate::computer::windows::SHELL_CLASSES.contains(&w.class.as_str());
+        if let Some(i) = (0..self.windows.len()).find(|&i| {
+            let w = self.win(i);
+            g.owns(&w) && !shell(&w)
+        }) {
+            self.raise(i);
+            self.log.push(format!("brought {} to the front", g.name));
+            return Opened::Brought;
+        }
+        let (exe, aumid) = g.stand_in();
+        let at = self.displays.first().map(|d| (d.x + 160, d.y + 120)).unwrap_or((160, 120));
+        self.windows.insert(0, SimWindow { x: at.0, y: at.1, w: 640, h: 420, exe, aumid, title: g.name.clone(), ..Default::default() });
+        self.log.push(format!("opened {}", g.name));
+        Opened::Started
+    }
 }
 
 fn paint(rgba: &mut [u8], w: u32, h: u32, r: &Rect, c: [u8; 3]) {
@@ -514,8 +558,9 @@ pub fn e2e_computer_scene(scene: Option<Scene>) -> Result<(), String> {
         return Err("e2e_computer_scene is for test runs (not robot mode)".into());
     }
     set(scene);
-    // A new desktop: nobody holds it, nothing was stopped on it.
+    // A new desktop: nobody holds it, nothing was stopped on it, no app allowed on it yet.
     super::watch::reset();
+    super::grants::forget_all();
     Ok(())
 }
 

@@ -25,9 +25,14 @@ pub(super) enum Step {
 /// Claude's own web tools for the turn (`web::Turn::server_tools`), and its
 /// tool search when the connectors' tools are deferred behind it
 /// (`tools/connectors.rs`, past their budget).
-fn native(web: Option<&crate::web::Turn>, connectors: Option<&crate::chat::tools::connectors::Turn>) -> crate::ai::llm::anthropic::Native {
+fn native(web: Option<&crate::web::Turn>, connectors: Option<&crate::chat::tools::connectors::Turn>, computer: bool) -> crate::ai::llm::anthropic::Native {
     let mut server_tools = web.and_then(crate::web::Turn::server_tools).unwrap_or_default();
     server_tools.extend(connectors.and_then(crate::chat::tools::connectors::Turn::server_tool));
+    // Computer use on an API key: the API's own toolset (computer.rs), in
+    // place of its members as function tools.
+    if computer {
+        server_tools.push(crate::computer::toolset_entry());
+    }
     crate::ai::llm::anthropic::Native { server_tools }
 }
 
@@ -48,7 +53,7 @@ impl Loop<'_> {
         if !self.native_chat {
             return None;
         }
-        let native = native(self.web.as_deref(), self.extra.connectors);
+        let native = native(self.web.as_deref(), self.extra.connectors, self.computer_toolset && crate::computer::takes_toolset(self.model));
         if self.claude_tools.as_ref().is_some_and(|before| *before != native.server_tools) {
             let gone = crate::ai::llm::anthropic::forget_thinking(&mut self.messages);
             tracing::info!(blocks = gone, "Chat: Claude's own tools changed this turn; its earlier thinking is left out from here");

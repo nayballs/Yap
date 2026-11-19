@@ -143,18 +143,26 @@ fn push_user(out: &mut Vec<Value>, blocks: Vec<Value>) {
 pub fn body(req: &ChatRequest, server: &[Value], stream: bool) -> Value {
     let mut system: Vec<String> = Vec::new();
     let mut messages: Vec<Value> = Vec::new();
+    // Computer use through the API's own toolset (computer.rs): its members
+    // aren't function tools, their calls and results carry `toolset_name`.
+    let toolset = server.iter().any(|t| t["type"] == crate::computer::TOOLSET);
+    let mut toolset_calls: std::collections::HashSet<String> = std::collections::HashSet::new();
     for m in req.messages.as_array().into_iter().flatten() {
         match m["role"].as_str().unwrap_or("") {
             // The system prompt; a note in Yap's voice later on goes as the user's.
             "system" | "developer" if messages.is_empty() => system.push(text_of(&m["content"])),
             "system" | "developer" => push_user(&mut messages, user_blocks(&json!(text_of(&m["content"])))),
             "user" => push_user(&mut messages, user_blocks(&m["content"])),
+            "tool" if toolset_calls.contains(m["tool_call_id"].as_str().unwrap_or("")) => push_user(&mut messages, vec![toolset_result(m)]),
             "tool" => push_user(
                 &mut messages,
                 vec![json!({ "type": "tool_result", "tool_use_id": m["tool_call_id"], "content": text_of(&m["content"]) })],
             ),
             "assistant" => {
                 if let Some(own) = m["yap_anthropic"].as_array().filter(|b| !b.is_empty()) {
+                    for b in own.iter().filter(|b| b["type"] == "tool_use" && b["toolset_name"].is_string()) {
+                        toolset_calls.insert(b["id"].as_str().unwrap_or("").to_string());
+                    }
                     messages.push(json!({ "role": "assistant", "content": own }));
                     continue;
                 }
@@ -169,7 +177,12 @@ pub fn body(req: &ChatRequest, server: &[Value], stream: bool) -> Value {
                         v @ Value::Object(_) => v.clone(),
                         _ => json!({}),
                     };
-                    blocks.push(json!({ "type": "tool_use", "id": c["id"], "name": c["function"]["name"], "input": args }));
+                    let mut block = json!({ "type": "tool_use", "id": c["id"], "name": c["function"]["name"], "input": args });
+                    if toolset && crate::computer::MEMBERS.contains(&c["function"]["name"].as_str().unwrap_or("")) {
+                        block["toolset_name"] = json!(crate::computer::TOOLSET_NAME);
+                        toolset_calls.insert(c["id"].as_str().unwrap_or("").to_string());
+                    }
+                    blocks.push(block);
                 }
                 if !blocks.is_empty() {
                     messages.push(json!({ "role": "assistant", "content": blocks }));
@@ -185,6 +198,8 @@ pub fn body(req: &ChatRequest, server: &[Value], stream: bool) -> Value {
         .into_iter()
         .flatten()
         .filter(|t| t["function"]["name"].is_string())
+        // (The toolset's members are the toolset's, not function tools.)
+        .filter(|t| !(toolset && crate::computer::MEMBERS.contains(&t["function"]["name"].as_str().unwrap_or(""))))
         .map(|t| {
             let f = &t["function"];
             let mut tool = json!({ "name": f["name"], "description": f["description"].as_str().unwrap_or(""), "input_schema": f["parameters"] });
@@ -233,6 +248,26 @@ pub fn body(req: &ChatRequest, server: &[Value], stream: bool) -> Value {
     }
     if stream {
         b["stream"] = json!(true);
+    }
+    b
+}
+
+/// **A computer toolset member's result** (`m`: the loop's tool message):
+/// `toolset_name` echoed, its text and any picture (a screenshot's, a
+/// zoom's) as blocks, `is_error` when it failed. Pure.
+fn toolset_result(m: &Value) -> Value {
+    let first = match &m["content"] {
+        Value::Array(parts) => parts.first().and_then(|p| p["text"].as_str()).unwrap_or("").to_string(),
+        other => text_of(other),
+    };
+    let failed = serde_json::from_str::<Value>(&first).is_ok_and(|v| v["success"] == json!(false));
+    let mut content = user_blocks(&m["content"]);
+    if content.is_empty() {
+        content.push(json!({ "type": "text", "text": "OK" }));
+    }
+    let mut b = json!({ "type": "tool_result", "tool_use_id": m["tool_call_id"], "content": content, "toolset_name": crate::computer::TOOLSET_NAME });
+    if failed {
+        b["is_error"] = json!(true);
     }
     b
 }
@@ -678,6 +713,17 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
                     }
                 }
             }
+            // The computer toolset refused (the account or the model doesn't
+            // take it): the same step with its members as function tools,
+            // and those from then on.
+            if status == 400 && said(&detail).contains(crate::computer::TOOLSET) && native.server_tools.iter().any(|t| t["type"] == crate::computer::TOOLSET) {
+                crate::computer::refuse_toolset(&req.model);
+                let server: Vec<Value> = native.server_tools.iter().filter(|t| t["type"] != crate::computer::TOOLSET).cloned().collect();
+                body = self::body(req, &server, streaming);
+                crate::ai::eval::adjust_body(&mut body);
+                tracing::info!("Chat: Anthropic refused the computer toolset; asking again with its actions as tools");
+                continue;
+            }
             // Fast mode refused (not on this account's plan, or the model
             // no longer has it): the same step at standard speed.
             if status == 400 && said(&detail).to_ascii_lowercase().contains("speed") && body.as_object_mut().and_then(|b| b.remove("speed")).is_some() {
@@ -907,6 +953,41 @@ mod tests {
         let b = body(&req, &[], false);
         assert!(!b["messages"].to_string().contains("thinking"), "{}", b["messages"]);
         assert_eq!(b["messages"].as_array().unwrap().len(), 4);
+    }
+
+    /// Computer use on an API key: the API's own toolset in place of its
+    /// members as function tools; a member's call and result carry
+    /// `toolset_name`, its picture in its own result, a failure `is_error`.
+    #[test]
+    fn computer_use_on_a_key_speaks_the_apis_own_toolset() {
+        let png = crate::chat::budget::png_url_for_test(1920, 1080);
+        let messages = json!([
+            { "role": "system", "content": "You are Yap." },
+            { "role": "user", "content": "Type a list in Notepad." },
+            { "role": "assistant", "content": null, "tool_calls": [], "yap_anthropic": [
+                { "type": "tool_use", "id": "t1", "name": "screenshot", "input": {}, "toolset_name": "computer" },
+                { "type": "tool_use", "id": "t2", "name": "left_click", "input": { "coordinate": [10, 10] }, "toolset_name": "computer" },
+                { "type": "tool_use", "id": "t3", "name": "request_access", "input": { "apps": ["Notepad"], "reason": "A list" } }
+            ] },
+            { "role": "tool", "tool_call_id": "t1", "content": [{ "type": "text", "text": "{\"success\":true}" }, { "type": "text", "text": "Display 1" }, { "type": "image_url", "image_url": { "url": png } }] },
+            { "role": "tool", "tool_call_id": "t2", "content": "{\"success\":false,\"error\":\"Not allowed\"}" },
+            { "role": "tool", "tool_call_id": "t3", "content": "{\"success\":true}" }
+        ]);
+        let tools = json!([function("screenshot"), function("left_click"), function("request_access")]);
+        let req = req(messages, Some(tools));
+        let b = body(&req, &[crate::computer::toolset_entry()], false);
+        let names: Vec<Value> = b["tools"].as_array().unwrap().iter().map(|t| t["name"].clone()).collect();
+        assert_eq!(names, [json!("request_access"), Value::Null], "the members go, the toolset comes: {}", b["tools"]);
+        assert_eq!(b["tools"][1]["type"], crate::computer::TOOLSET);
+        let results = b["messages"][2]["content"].as_array().unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!((results[0]["toolset_name"].as_str(), results[0]["content"][2]["type"].as_str()), (Some("computer"), Some("image")));
+        assert!(results[0].get("is_error").is_none());
+        assert_eq!((results[1]["toolset_name"].as_str(), results[1]["is_error"].as_bool()), (Some("computer"), Some(true)));
+        assert!(results[2].get("toolset_name").is_none(), "an ordinary tool's result");
+        // Without the toolset (another model, or refused): the members are function tools again.
+        let plain = body(&req, &[], false);
+        assert_eq!(plain["tools"].as_array().unwrap().len(), 3);
     }
 
     #[test]

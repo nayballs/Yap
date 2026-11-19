@@ -137,12 +137,16 @@ fn summary_or(args: &Value, otherwise: &str) -> String {
 }
 
 /// **The call read**: its act, where, its steps. `frame`: the last
-/// screenshot's; `cursor`: the pointer now (physical). Pure.
-fn plan(name: &str, args: &Value, frame: &super::frame::Frame, cursor: Option<(i32, i32)>) -> Result<Plan, (String, String)> {
+/// screenshot's (only a call with coordinates needs one: keys and typing
+/// don't, as in the desktop app); `cursor`: the pointer now (physical). Pure.
+fn plan(name: &str, args: &Value, frame: Option<&super::frame::Frame>, cursor: Option<(i32, i32)>) -> Result<Plan, (String, String)> {
     let map = |key: &str| -> Result<Option<(i32, i32)>, (String, String)> {
         match &args[key] {
             Value::Null => Ok(None),
             v => {
+                let Some(frame) = frame else {
+                    return Err(("Take a screenshot first: coordinates are its pixels.".to_string(), "Didn't act: no screenshot yet".to_string()));
+                };
                 let (x, y) = xy(v).ok_or_else(|| (format!("{key} must be [x, y]."), "Didn't act: no point given".to_string()))?;
                 frame.on_screen(x, y).map(Some).ok_or_else(|| {
                     (format!("[{x}, {y}] isn't on the last screenshot ({}×{}): coordinates are its pixels.", frame.w, frame.h), "Didn't act: that point isn't on the screenshot".to_string())
@@ -237,15 +241,12 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
     if apps.is_empty() {
         return failed("No apps are allowed in this chat yet: call request_access first.", "Didn't act: no apps allowed").into();
     }
-    let Some(last) = last else {
-        return failed("Take a screenshot first: coordinates are its pixels.", "Didn't act: no screenshot yet").into();
-    };
     let desk = match shot::desk() {
         Ok(d) => d,
         Err(e) => return failed(&format!("Yap can't act here ({e})."), "Didn't act").into(),
     };
     let cursor = desk.cursor();
-    let plan = match plan(name, args, &last.frame, cursor) {
+    let plan = match plan(name, args, last.as_ref().map(|l| &l.frame), cursor) {
         Ok(p) => p,
         Err((error, chip)) => return failed(&error, &chip).into(),
     };
@@ -315,7 +316,7 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
     }
     drop(desk);
     // The steps, the indicator up; the person's input and ■ stop them.
-    super::indicator::driving(&plan.chip, Some(last.frame.display));
+    super::indicator::driving(&plan.chip, last.as_ref().map(|l| l.frame.display));
     let hands = match shot::hands() {
         Ok(h) => h,
         Err(e) => {
@@ -365,24 +366,28 @@ mod tests {
     #[test]
     fn a_calls_point_is_read_in_the_screenshots_frame() {
         let frame = super::super::frame::Frame::fit(Rect::new(0, 0, 3840, 2160), 1920);
-        let p = plan(LEFT_CLICK, &json!({ "coordinate": [100, 50], "action_summary": "Opens the File menu" }), &frame, None).ok().unwrap();
+        let p = plan(LEFT_CLICK, &json!({ "coordinate": [100, 50], "action_summary": "Opens the File menu" }), Some(&frame), None).ok().unwrap();
         assert_eq!(p.at, Some((201, 101)));
         assert_eq!(p.chip, "Opens the File menu");
         assert_eq!(p.act, Act::Click { button: Button::Left, mods: false });
-        assert!(plan(LEFT_CLICK, &json!({ "coordinate": [5000, 50] }), &frame, None).is_err());
-        assert!(plan(LEFT_CLICK, &json!({}), &frame, None).is_err());
-        let shift = plan(LEFT_CLICK, &json!({ "coordinate": [1, 1], "text": "shift" }), &frame, None).ok().unwrap();
+        assert!(plan(LEFT_CLICK, &json!({ "coordinate": [5000, 50] }), Some(&frame), None).is_err());
+        assert!(plan(LEFT_CLICK, &json!({}), Some(&frame), None).is_err());
+        let shift = plan(LEFT_CLICK, &json!({ "coordinate": [1, 1], "text": "shift" }), Some(&frame), None).ok().unwrap();
         assert_eq!(shift.act, Act::Click { button: Button::Left, mods: true });
-        let drag = plan(DRAG, &json!({ "coordinate": [10, 10] }), &frame, Some((4, 4))).ok().unwrap();
+        let drag = plan(DRAG, &json!({ "coordinate": [10, 10] }), Some(&frame), Some((4, 4))).ok().unwrap();
         assert_eq!((drag.at, drag.end), (Some((4, 4)), Some((21, 21))));
-        assert!(plan(DRAG, &json!({ "coordinate": [10, 10] }), &frame, None).is_err(), "no start, no pointer");
-        let k = plan(KEY, &json!({ "text": "alt+F4" }), &frame, None).ok().unwrap();
+        assert!(plan(DRAG, &json!({ "coordinate": [10, 10] }), Some(&frame), None).is_err(), "no start, no pointer");
+        let k = plan(KEY, &json!({ "text": "alt+F4" }), Some(&frame), None).ok().unwrap();
         assert_eq!(k.act, Act::Key { system: true, enter: false });
-        let enter = plan(KEY, &json!({ "text": "ctrl+Return" }), &frame, None).ok().unwrap();
+        let enter = plan(KEY, &json!({ "text": "ctrl+Return" }), Some(&frame), None).ok().unwrap();
         assert_eq!(enter.act, Act::Key { system: false, enter: true });
-        assert!(plan(KEY, &json!({ "text": "" }), &frame, None).is_err());
-        assert!(plan(TYPE, &json!({ "text": "x".repeat(TYPE_MAX + 1) }), &frame, None).is_err());
+        assert!(plan(KEY, &json!({ "text": "" }), Some(&frame), None).is_err());
+        assert!(plan(TYPE, &json!({ "text": "x".repeat(TYPE_MAX + 1) }), Some(&frame), None).is_err());
         assert_eq!(definitions().len(), NAMES.len());
+        // Keys and typing need no screenshot; a point does.
+        assert!(plan(KEY, &json!({ "text": "ctrl+s" }), None, None).is_ok());
+        assert!(plan(TYPE, &json!({ "text": "hi" }), None, None).is_ok());
+        assert!(plan(LEFT_CLICK, &json!({ "coordinate": [1, 1] }), None, None).err().is_some_and(|e| e.0.contains("screenshot first")));
     }
 
     /// Phase 2 whole on the stand-in desktop: a click focuses, typing fills,
