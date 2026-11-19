@@ -379,6 +379,60 @@ re-exported by the module, except `local_llm`'s, which callers name
   at an older size; `e2e_main_window` minimises, restores or ends a title-bar
   drag without taking the focus). What the snap itself does to WebView2 was
   not found.
+- **`shell/page_watch.rs`** — **the windows' pages watched: a window is never
+  left blank** (19 Nov 2026; the page's own half, index.html and
+  App.svelte's boundary, in [frontend.md](./frontend.md)). Every webview is
+  watched from its creation (`page_watch::plugin()`, a plugin of Yap's own
+  with no commands: `on_webview_ready` hooks its WebView2 events and arms a
+  check, so a first load that never gets anywhere counts too), each load
+  from WebView2's `NavigationStarting` (WebView2 waits for that handler, so
+  no word of the new page's reaches Rust before it: `on_page_load`'s
+  `ContentLoading` can come after the page has said it's in, and a watch
+  started there reloaded the bar mid-test), its `NavigationCompleted`
+  matched by `NavigationId` (`ended`, pure: only the latest counts — one
+  another replaced reports a failure too, which once blanked the bar as Yap
+  started; a cancelled one puts back how the page was doing), and each page says how it's doing
+  (`page_state`: `alive` as its head script runs, `mounted` once its view is
+  in, `trouble` when its view failed or its code couldn't load, `reloading`
+  as it loads itself again: a retry that hangs before any content counts
+  too). A page that hasn't mounted in time is loaded again (`allowance`,
+  pure): its head script not even run 10 s after its load started (the dev
+  server down, a load that hangs), run but no view 20 s after (a page whose script
+  runs looks after itself first; a busy PC at sign-in is slow), WebView2's
+  own error page 3 s after (`NavigationCompleted` failing, other than a
+  load another one replaced), its view failed 10 s after it said so.
+  **Renderer processes** (`ProcessFailed`, which neither wry 0.57 nor
+  tauri-runtime-wry 2.12 handles): one that exited (a crash, out of memory:
+  WebView2's "This page is having a problem") is loaded again 300 ms later;
+  one WebView2 keeps calling unresponsive (it says so every few seconds while
+  input waits) once that has lasted 15 s (`unresponsive`, pure); a frame's
+  renderer (a chat's visual), the GPU's and the helpers' are WebView2's to
+  restart, only logged; the browser process exiting takes every webview
+  with it (WebView2 says to make them again, which Tauri can't): an error
+  in the log, once. **The cap** (`Budget`, pure): 3 reloads of a window in
+  5 minutes, whatever the reason, then it's left (logged once), the page's
+  message covering the rest; two checks of one load reload it once (each
+  load a generation). A reload is a `navigate` to Yap's own page (the last
+  load of one seen, else the dev server or `http://tauri.localhost/`), so a
+  crashed, error or blank page all go back; never a show or a focus, so
+  hidden windows (onboarding, the notepad, the quick note load hidden at
+  start) are loaded again quietly. **The see-through windows** (the bar, the
+  split preview): WebView2's error page there is swapped for `about:blank`
+  at once (transparent; an opaque "can't reach this page" over the screen
+  otherwise) and the watchdog loads Yap's page again after; giving up on one
+  whose page isn't running leaves it blank; and each load of the bar forgets
+  its clickable regions (`bar_regions([])`) until the new page says where
+  they are, so a page that never comes leaves it click-through. The log, at
+  `warn`: `Reloading a window's page (1 of 3 in 5 minutes) window=settings
+  reason="its view failed"`, `A window's page stopped: its renderer exited
+  window=settings reason="crashed"`, `A window's page couldn't load
+  (WebView2's error page)`, and at `info` `A window's page is back after a
+  reload`. Debug builds in test mode: `e2e_page_watch {allowanceMs?,
+  reset?}` reports every window's stage, loads, reloads, crashes and
+  whether it gave up, puts one allowance in place of every stage's but a
+  running page's, and forgets the cap. Unit tests: the cap, the
+  allowances, which `ProcessFailed` kinds reload, the unresponsive run, Yap's
+  own URLs and the see-through windows. e2e `never-blank.spec.js`.
 - **`shell/webview_memory.rs`** — hidden webviews keep less in memory (2026-10-22):
   a watcher thread reads each window's visibility every 3 s (`target`, pure:
   hidden or minimised → low) and gives an off-screen window's webview
@@ -497,7 +551,9 @@ re-exported by the module, except `local_llm`'s, which callers name
   address, command line, variable, header, token or secret, nothing a server
   says about itself, no call's input or answer, nor the connector's name:
   [integrations.md](./integrations.md#connectors-and-your-data-wave-8)); the
-  webviews' `frontend_log` lines follow the same rule.
+  webviews' `frontend_log` lines follow the same rule (`level: "warn"` for
+  something that went wrong, else `info`: a window that couldn't show its
+  view, `page_watch.rs`).
 - **`privacy/net.rs`** / **`privacy/diagnostics.rs`** — the network receipts (every request
   goes out through `net::Recorded::send_for`; `net::init` in setup names
   `connections.json`, `net::flush` in `shutdown_cleanup`) and Report a

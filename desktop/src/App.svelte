@@ -1,6 +1,7 @@
 <script>
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import ContextMenuHost from './lib/ui/ContextMenuHost.svelte';
+  import ViewMounted from './lib/ui/ViewMounted.svelte';
   import { initAppearance } from './lib/core/appearance.js';
   import { prefetchHome } from './lib/views/home/homeData.js';
 
@@ -38,6 +39,21 @@
   // The view's code couldn't be fetched: the window would stay blank, so the
   // page loads again (index.html's `__yapLoadFailed`, at most twice a minute).
   view.catch(() => window.__yapLoadFailed?.(`the ${kind} window's view`));
+  // The view threw as it started or rendered (the boundary below: an error
+  // in its script, its template or an effect): the page loads again once,
+  // then says "Yap couldn't show this window" with Reload, never a blank
+  // window (index.html's `__yapViewFailed`; the Yap bar only loads again).
+  // Once it's in, the page says so (`__yapMounted`; Rust's watchdog,
+  // shell/page_watch.rs, loads a page again that never does).
+  const viewFailed = (error) => {
+    window.__yapViewFailed?.(`the ${kind} window's view`, error);
+    // Still uncaught as far as DevTools and the e2e suite (which fails a
+    // test on one) can tell: the boundary would otherwise hide the bug.
+    setTimeout(() => {
+      throw error;
+    });
+  };
+  const viewMounted = () => window.__yapMounted?.();
 
   // Settings → General → Appearance (the theme, the reading font and size,
   // Motion) and the bar's colours in every window, following each save live
@@ -65,7 +81,10 @@
      docked beside a call (meetings/notepad.rs), split-preview, quick-note → the
      quick note (notes/quick_note.rs), else the Yap bar. -->
 {#await view then { default: View }}
-  <View />
+  <svelte:boundary onerror={viewFailed}>
+    <View />
+    <ViewMounted onmount={viewMounted} />
+  </svelte:boundary>
 {/await}
 
 {#if isSettings || isOnboarding || isNotepad || isQuickNote || isDoc}

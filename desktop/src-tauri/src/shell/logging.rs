@@ -181,10 +181,16 @@ pub fn open_logs_folder() -> Result<(), String> {
 /// Frontend → log-file bridge: webviews call this to land diagnostics in the
 /// same rolling `yap.log` as the backend (webview consoles are invisible in
 /// normal runs, which made the onboarding event-delivery bug nearly
-/// undebuggable — see 2026-07-05).
+/// undebuggable — see 2026-07-05). `level` "warn" for something that went
+/// wrong (a window that couldn't show its view: index.html), else `info`.
+/// Labels, reasons and counts only, never anything a page shows.
 #[tauri::command]
-pub fn frontend_log(msg: String) {
-    tracing::info!("[web] {}", msg);
+pub fn frontend_log(msg: String, level: Option<String>) {
+    if level.as_deref() == Some("warn") {
+        tracing::warn!("[web] {}", msg);
+    } else {
+        tracing::info!("[web] {}", msg);
+    }
 }
 
 #[cfg(test)]
