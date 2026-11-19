@@ -51,7 +51,8 @@
 //                                 came up — DevTools — closed again
 //                                 (WM_CLOSE)
 //   yaprobot place <hwnd> <nonce> <x> <y>   move a window titled with the
-//                                 nonce to (x, y), physical pixels (its size
+//                                 nonce (or pid:<n>, the test pad's process)
+//                                 to (x, y), physical pixels (its size
 //                                 kept; Windows rescales it for that
 //                                 monitor's DPI)
 //   yaprobot contentrect <hwnd>   a browser window's page area on screen
@@ -69,6 +70,7 @@
 //                                 overlay is in front (the pointer first moved
 //                                 to (x, y), only onto that overlay); says
 //                                 what was in front
+//   yaprobot winrect <hwnd>       any window's rect (a child's too), physical pixels
 //   yaprobot framerect <hwnd>     a window's visible frame (DWM's extended
 //                                 frame bounds), physical pixels
 //   yaprobot keystate             which modifier keys Windows says are down
@@ -241,6 +243,7 @@ static class Program {
                         : SnipKey(uint.Parse(args[1]), args[2]));
                     return 0;
                 case "framerect": Print(FrameRect(new IntPtr(long.Parse(args[1])))); return 0;
+                case "winrect": Print(WinRect(new IntPtr(long.Parse(args[1])))); return 0;
                 case "keystate": Print(KeyState()); return 0;
                 case "modkey": Print(ModKey(new IntPtr(long.Parse(args[1])), args[2], args[3], args[4])); return 0;
                 case "clipreader": return ClipReader.Run(int.Parse(args[1]), int.Parse(args[2]));
@@ -597,10 +600,27 @@ static class Program {
     /// Move a window the test opened (titled with the nonce) to (x, y).
     static Dictionary<string, object> Place(IntPtr h, string nonce, int x, int y) {
         Native.SetProcessDpiAwarenessContext(new IntPtr(-4));
-        if (nonce.Length < 12 || !Native.Title(h).Contains(nonce)) return Obj("ok", false, "reason", "not the test's window");
+        bool ours;
+        if (nonce.StartsWith("pid:")) {
+            // The test pad: its process (its title has no nonce).
+            uint pid;
+            Native.GetWindowThreadProcessId(h, out pid);
+            ours = Native.IsWindow(h) && pid.ToString() == nonce.Substring(4);
+        } else {
+            ours = nonce.Length >= 12 && Native.Title(h).Contains(nonce);
+        }
+        if (!ours) return Obj("ok", false, "reason", "not the test's window");
         bool ok = Native.SetWindowPos(h, IntPtr.Zero, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010); // NOSIZE | NOZORDER | NOACTIVATE
         Thread.Sleep(300);
         return Obj("ok", ok);
+    }
+
+    /// Any window's rect (a child's too), physical pixels.
+    static Dictionary<string, object> WinRect(IntPtr h) {
+        Native.SetProcessDpiAwarenessContext(new IntPtr(-4));
+        Native.RECT r;
+        if (!Native.GetWindowRect(h, out r)) return Obj("error", "no such window");
+        return Obj("x", r.Left, "y", r.Top, "w", r.Right - r.Left, "h", r.Bottom - r.Top);
     }
 
     /// A browser window's page area on screen (physical pixels): its
@@ -1128,6 +1148,12 @@ class TestPad : Form {
                 var field = Field(req);
                 ActiveControl = field;
                 field.Focus();
+                break;
+            }
+            case "control": {
+                // A field's own window (computer use's robot test reads its place with `winrect`, in
+                // physical pixels, and clicks it).
+                reply["hwnd"] = (long)Field(req).Handle;
                 break;
             }
             case "get": {

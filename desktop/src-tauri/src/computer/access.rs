@@ -363,7 +363,7 @@ mod tests {
         let _scene = super::super::tests::LOCK.lock().unwrap_or_else(|p| p.into_inner());
         grants::forget_all();
         crate::apps::tests::set_stand_ins(vec![app("Microsoft.WindowsNotepad_8wekyb3d8bbwe!App", "Notepad", "")]);
-        let ctx = super::super::Ctx { conversation: Some(41), live: None, provider: "anthropic", base_url: "https://api.anthropic.com/v1", unattended: false };
+        let ctx = super::super::Ctx { conversation: Some(41), live: None, provider: "anthropic", base_url: "https://api.anthropic.com/v1", unattended: false, turn: "t" };
         confirm::answer_in_test(Some(false));
         let no = request(&json!({ "apps": ["Notepad"], "reason": "To write a note" }), &ctx).await;
         assert_eq!(no["success"], false);

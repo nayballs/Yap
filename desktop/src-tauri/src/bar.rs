@@ -254,6 +254,10 @@ struct Visibility {
     /// Text is being read aloud, or the reading card has a note
     /// (`read_aloud.rs`): the card shows, bar on or off.
     reading: bool,
+    /// Computer use is driving the PC (`computer/indicator.rs`): "Yap is
+    /// using your PC · Esc to stop" shows, bar on or off, and the bar never
+    /// takes a click (the model's pointer would hit it).
+    computer: bool,
     /// A meeting is recording.
     meeting: bool,
     /// "Hide the bar for 1 hour" is running.
@@ -273,7 +277,7 @@ struct Visibility {
 /// — though a card still shows over a borderless one (Wispr's call card
 /// appears over a game), just not the idle pill.
 fn shows(v: Visibility) -> bool {
-    if v.dictation != Dictation::Idle || v.assistant || v.reading {
+    if v.dictation != Dictation::Idle || v.assistant || v.reading || v.computer {
         return true;
     }
     if !v.enabled {
@@ -311,7 +315,7 @@ fn seen_now(v: Visibility) -> bool {
 /// while a dictation or the assistant shows (its ✕ / ✓, Undo and ■ work
 /// with the bar off too).
 fn clickable(v: Visibility, shown: bool, on_region: bool) -> bool {
-    (v.enabled || v.dictation != Dictation::Idle || v.assistant || v.reading) && shown && on_region
+    !v.computer && (v.enabled || v.dictation != Dictation::Idle || v.assistant || v.reading) && shown && on_region
 }
 
 /// A monitor change waiting out [`FOLLOW_AFTER_MS`].
@@ -384,6 +388,9 @@ struct State {
     assistant: crate::chat::assistant::Phase,
     /// The reading card is up (`read_aloud.rs`).
     reading: bool,
+    /// Computer use is driving the PC: the latest action's summary
+    /// (`computer/indicator.rs`).
+    computer: Option<String>,
     meeting: bool,
     /// What's fullscreen on the bar's monitor (whatever the setting).
     fullscreen: Fullscreen,
@@ -441,6 +448,7 @@ impl Default for State {
             dictation: Dictation::Idle,
             assistant: crate::chat::assistant::Phase::Idle,
             reading: false,
+            computer: None,
             meeting: false,
             fullscreen: Fullscreen::None,
             over_yap: false,
@@ -482,7 +490,7 @@ impl State {
     /// Something to watch the cursor for: the bar is on, or something shows
     /// with it off (a dictation, the assistant, the reading card).
     fn watching(&self) -> bool {
-        self.enabled || self.busy() || self.reading
+        self.enabled || self.busy() || self.reading || self.computer.is_some()
     }
 
     fn visibility(&self, now: u64) -> Visibility {
@@ -491,6 +499,7 @@ impl State {
             dictation: self.dictation,
             assistant: self.assistant != crate::chat::assistant::Phase::Idle,
             reading: self.reading,
+            computer: self.computer.is_some(),
             meeting: self.meeting,
             hidden: self.hidden_until > now,
             fullscreen: self.fullscreen(),
@@ -612,6 +621,9 @@ pub struct Status {
     assistant: crate::chat::assistant::Phase,
     /// The reading card is up (its content: `yap-read`, `read_aloud.rs`).
     reading: bool,
+    /// Computer use is driving the PC: its latest action's summary
+    /// (`computer/indicator.rs`), "Yap is using your PC · Esc to stop".
+    computer: Option<String>,
     /// The card on screen (none or one: `notices/policy.rs` shows them one at a
     /// time)…
     cards: Vec<Card>,
@@ -665,6 +677,7 @@ pub fn status() -> Status {
         call,
         assistant: s.assistant,
         reading: s.reading,
+        computer: s.computer.clone(),
         cards: s.front_card().cloned().into_iter().collect(),
         waiting: s
             .cards
@@ -864,7 +877,9 @@ fn follow_cursor(app: &AppHandle, cursor: Option<(i32, i32)>, now: u64) {
             // has been said: the bar stays where it started.
             s.dictation == Dictation::Recording
                 || s.dictation == Dictation::Processing
-                || s.assistant != crate::chat::assistant::Phase::Idle,
+                || s.assistant != crate::chat::assistant::Phase::Idle
+                // Computer use: the model's pointer moves, the bar stays put.
+                || s.computer.is_some(),
             s.edge,
             s.replace,
             now.saturating_sub(s.autohide_at) >= AUTOHIDE_EVERY_MS,
@@ -1262,6 +1277,27 @@ pub fn set_reading(app: &AppHandle, on: bool) {
         let mut s = lock();
         let changed = s.reading != on;
         s.reading = on;
+        changed
+    };
+    if changed {
+        apply(app);
+        emit(app);
+        wake();
+    }
+}
+
+/// **Computer use is driving the PC** (`Some`: its latest action's
+/// summary) or not (`None`): the window shows while it is, bar on or off,
+/// never follows the pointer and never takes a click.
+pub fn set_computer(app: &AppHandle, doing: Option<String>) {
+    let changed = {
+        let mut s = lock();
+        let changed = s.computer != doing;
+        s.computer = doing;
+        if s.computer.is_some() {
+            s.interactive = false;
+            s.pointer = None;
+        }
         changed
     };
     if changed {
@@ -1975,7 +2011,9 @@ mod escape_watch {
     unsafe extern "system" fn hook(code: i32, wparam: usize, lparam: isize) -> isize {
         if code >= 0 && (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN) {
             let info = &*(lparam as *const KbdLlHook);
-            if info.vk_code == VK_ESCAPE {
+            // The person's own Esc only (LLKHF_INJECTED clear): computer use's
+            // model pressing Esc in an app never stops the bar's reading or card.
+            if info.vk_code == VK_ESCAPE && info.flags & 0x10 == 0 {
                 if let Some(f) = ON_ESC.get() {
                     f();
                 }

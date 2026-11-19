@@ -92,6 +92,8 @@
     phone: null,
     // One of Yap's own windows in front under "1 agent working" (bar/overlay.rs `yap_under_chip`): it steps aside.
     overYap: false,
+    // Computer use driving the PC (computer/indicator.rs): its latest action's summary, or null.
+    computer: null,
   });
   // The --bar-* colours (app.css): `data-bar-theme`, Match app resolved with
   // the theme of Yap's windows (lib/core/appearance.js, which also follows it as
@@ -458,6 +460,13 @@
 
 <div class="stage" class:top={bar.edge === 'top'} class:pop={popping} onpointermove={onStageMove} role="presentation">
   <div class="cards" style={`${bar.edge === 'top' ? 'top' : 'bottom'}:${8 + Math.max(dockH, 20) + 20}px`}>
+    {#if bar.computer}
+      <!-- Computer use driving the PC (computer/indicator.rs): never clickable (the model's pointer would hit it);
+           Esc, or the person's own mouse or keys, stop it (computer/watch.rs). -->
+      <div class="computerline" data-testid="bar-computer" role="status" aria-live="polite" transition:fade={{ duration: motionMs(140) }}>
+        <span class="cdot" aria-hidden="true"></span><strong>Yap is using your PC</strong><span class="cdoing">{bar.computer}</span><span class="cesc">Esc to stop</span>
+      </div>
+    {/if}
     {#if agentsLine}
       <!-- Agents at work (agents/): a quiet line nearest the pill; a click opens Chat on the newest. -->
       <button
@@ -762,6 +771,49 @@
   }
   /* "1 agent working": a small chip of the bar's own surface (no shadow: a
      transparent window), nearest the pill. */
+  .computerline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 480px;
+    height: 26px;
+    margin-bottom: -6px;
+    padding: 0 12px 0 10px;
+    border: 1px solid var(--bar-border);
+    border-radius: 13px;
+    background: var(--bar-surface);
+    color: var(--bar-text);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .stage.top .computerline {
+    margin-bottom: 0;
+    margin-top: -6px;
+  }
+  .computerline strong {
+    font-weight: 650;
+  }
+  .cdoing {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--bar-text-soft);
+  }
+  .cesc {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    border: 1px solid var(--bar-border);
+    border-radius: 6px;
+    color: var(--bar-text-soft);
+    font-size: 11px;
+  }
+  .cdot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--bar-recording);
+  }
   .agentsline {
     display: inline-flex;
     align-items: center;

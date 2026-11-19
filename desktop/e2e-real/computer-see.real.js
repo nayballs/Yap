@@ -31,7 +31,7 @@ test('a screenshot keeps the allowed app and masks the window over it', async ({
     await startPage({ nonce: robot.nonce, dir: path.join(robot.dir, 'computer-page'), title: `Yap robot computer page - ${robot.nonce}`, body: '<div style="height:100vh;background:#e53935"></div>' }),
   );
   // The pad, then the page over its right half.
-  const padAt = helper('place', pad.hwnd, robot.nonce, 120, 120);
+  const padAt = helper('place', pad.hwnd, `pid:${pad.pid}`, 120, 120);
   expect(padAt.ok, 'the pad placed').toBe(true);
   await pad.focus();
   const padFrame = helper('framerect', pad.hwnd);

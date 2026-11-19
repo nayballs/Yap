@@ -1296,21 +1296,61 @@ const COMPUTER_START_MENU = [
   { id: 'C:\Program Files\Vaultkeeper\KeePass.exe', name: 'KeePass', target: 'C:\Program Files\Vaultkeeper\KeePass.exe' },
 ];
 
-/** `set --computer on`'s desktop (computer/sim.rs): two displays, test windows topmost first, the desktop last. */
+/** `set --computer on`'s desktop (computer/sim.rs): two displays, test windows topmost first, the desktop last.
+ * Each app has things to click and type into (computer use's phase 2): Notepad a note, Save, Delete and a
+ * link; Calculator its keys; a Terminal (clicks only); a sign-in box with a password field. */
+const W = (kind, name, x, y, w = 220, h = 34, text = '') => ({ kind, name, x, y, w, h, text });
 const COMPUTER_SCENE = {
   displays: [
     { x: 0, y: 0, w: 1920, h: 1080, primary: true },
     { x: 1920, y: 0, w: 1280, h: 720 },
   ],
   windows: [
-    { x: 1250, y: 560, w: 560, h: 420, own: true, class: 'Tauri Window' },
-    { x: 980, y: 140, w: 560, h: 380, exe: 'C:\Program Files\Example Mail\mail.exe', class: 'MailWindow' },
-    { x: 140, y: 90, w: 940, h: 640, exe: 'C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.2410.21.0_x64__8wekyb3d8bbwe\Notepad\Notepad.exe', aumid: 'microsoft.windowsnotepad_8wekyb3d8bbwe', class: 'Notepad' },
-    { x: 1500, y: 60, w: 380, h: 560, exe: 'C:\Program Files\WindowsApps\Microsoft.WindowsCalculator_11.2410.0.0_x64__8wekyb3d8bbwe\CalculatorApp.exe', aumid: 'microsoft.windowscalculator_8wekyb3d8bbwe', class: 'ApplicationFrameWindow' },
-    { x: 300, y: 790, w: 900, h: 250, exe: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe', class: 'Chrome_WidgetWin_1' },
-    { x: 2000, y: 60, w: 1000, h: 600, exe: 'C:\Program Files\WindowsApps\Microsoft.Paint_11.2410.0.0_x64__8wekyb3d8bbwe\PaintApp\mspaint.exe', aumid: 'microsoft.paint_8wekyb3d8bbwe', class: 'MSPaintApp' },
-    { x: 0, y: 1040, w: 1920, h: 40, exe: 'C:\Windows\explorer.exe', class: 'Shell_TrayWnd' },
-    { x: 0, y: 0, w: 1920, h: 1080, exe: 'C:\Windows\explorer.exe', class: 'Progman' },
+    { x: 1250, y: 600, w: 560, h: 380, own: true, class: 'Tauri Window', title: 'Yap' },
+    { x: 980, y: 140, w: 480, h: 300, exe: 'C:\\Program Files\\Example Mail\\mail.exe', class: 'MailWindow', title: 'Mail' },
+    {
+      x: 140,
+      y: 90,
+      w: 820,
+      h: 560,
+      exe: 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2410.21.0_x64__8wekyb3d8bbwe\\Notepad\\Notepad.exe',
+      aumid: 'microsoft.windowsnotepad_8wekyb3d8bbwe',
+      class: 'Notepad',
+      title: 'Shopping list - Notepad',
+      widgets: [
+        W('field', 'Note', 20, 50, 760, 40, 'Milk, eggs'),
+        W('button', 'Save', 20, 110, 120),
+        W('button', 'Delete note', 160, 110, 180),
+        W('link', 'Recipe ideas (www.example.com)', 20, 180, 420, 20),
+        W('field', 'Shop PIN', 20, 230, 220, 36),
+        W('password', 'Password', 20, 290, 220, 36),
+      ],
+    },
+    {
+      x: 1500,
+      y: 60,
+      w: 380,
+      h: 520,
+      exe: 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_11.2410.0.0_x64__8wekyb3d8bbwe\\CalculatorApp.exe',
+      aumid: 'microsoft.windowscalculator_8wekyb3d8bbwe',
+      class: 'ApplicationFrameWindow',
+      title: 'Calculator',
+      widgets: [W('text', 'Display', 20, 50, 340, 40, '0'), W('button', '7', 20, 120, 80, 60), W('button', '8', 110, 120, 80, 60), W('button', '+', 200, 120, 80, 60), W('button', '=', 290, 120, 70, 60)],
+    },
+    {
+      x: 300,
+      y: 700,
+      w: 900,
+      h: 300,
+      exe: 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsTerminal_1.21.3231.0_x64__8wekyb3d8bbwe\\WindowsTerminal.exe',
+      aumid: 'microsoft.windowsterminal_8wekyb3d8bbwe',
+      class: 'CASCADIA_HOSTING_WINDOW_CLASS',
+      title: 'Terminal',
+      widgets: [W('field', 'Prompt', 20, 50, 840, 34, 'PS C:\\Users\\Sam>')],
+    },
+    { x: 2000, y: 60, w: 1000, h: 600, exe: 'C:\\Program Files\\WindowsApps\\Microsoft.Paint_11.2410.0.0_x64__8wekyb3d8bbwe\\PaintApp\\mspaint.exe', aumid: 'microsoft.paint_8wekyb3d8bbwe', class: 'MSPaintApp', title: 'Paint' },
+    { x: 0, y: 1040, w: 1920, h: 40, exe: 'C:\\Windows\\explorer.exe', class: 'Shell_TrayWnd' },
+    { x: 0, y: 0, w: 1920, h: 1080, exe: 'C:\\Windows\\explorer.exe', class: 'Progman' },
   ],
   cursor: [600, 400],
 };
