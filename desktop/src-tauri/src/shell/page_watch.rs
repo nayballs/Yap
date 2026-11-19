@@ -261,6 +261,9 @@ struct Page {
     reason: Option<&'static str>,
     streak: Option<Streak>,
     crashes: u32,
+    /// The latest top-level navigation (WebView2's id), with how the page
+    /// was doing before it, until it completes.
+    navigation: Option<(u64, Stage, Instant)>,
 }
 
 impl Page {
@@ -277,6 +280,7 @@ impl Page {
             reason: None,
             streak: None,
             crashes: 0,
+            navigation: None,
         }
     }
 }
@@ -320,48 +324,124 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         .build()
 }
 
-/// From `on_page_load` in lib.rs, for every webview: a load whose content
-/// started is watched (and the webview's WebView2 events hooked, once).
+/// From `on_page_load` in lib.rs, for every webview: a new document's
+/// content is coming (WebView2's `ContentLoading`; the old one is gone).
+/// Where Yap's page is noted, the bar's clickable regions forgotten, the
+/// webview's WebView2 events hooked (once). On Windows the load was
+/// watched from its `NavigationStarting` already: never from here, as the
+/// page's own first word (`alive`, even `mounted`) can reach Rust before
+/// this event does — a load seen to start after its page said it was in
+/// would be loaded again for nothing.
 pub fn on_page_load(webview: &Webview, payload: &PageLoadPayload<'_>) {
     if payload.event() != PageLoadEvent::Started {
         return;
     }
     let url = payload.url();
-    // The blank page a see-through window gets instead of an error page:
-    // the check armed with it loads Yap's page again.
+    // The blank page a see-through window gets instead of an error page.
     if url.scheme() == "about" {
         return;
     }
-    #[cfg(windows)]
-    win::install(webview);
-    loading(webview.app_handle(), webview.label(), Some(url));
-}
-
-/// A load of `label`'s page starts (`url`: where, once its content is
-/// coming): watched from now, its allowance [`NOT_STARTED`].
-fn loading(app: &AppHandle, label: &str, url: Option<&Url>) {
-    let generation = {
+    let label = webview.label();
+    {
         let mut map = pages();
         let p = map.entry(label.to_string()).or_insert_with(Page::new);
-        p.generation += 1;
-        p.stage = Stage::Loading;
-        p.since = Instant::now();
-        if let Some(url) = url {
-            p.loads += 1;
-            if is_ours(url) {
-                p.home = Some(url.clone());
-            }
+        p.loads += 1;
+        if is_ours(url) {
+            p.home = Some(url.clone());
         }
-        p.generation
-    };
+    }
     // The bar's clickable spots were the last page's: none until the new
     // page says where its own are (a page that never comes leaves the bar
     // click-through, never an invisible spot that swallows clicks).
     if label == crate::bar::overlay::LABEL {
         crate::bar::bar_regions(Vec::new());
     }
-    tracing::debug!(window = %label, "A window's page started loading");
+    #[cfg(windows)]
+    win::install(webview);
+    #[cfg(not(windows))]
+    loading(webview.app_handle(), label, None);
+}
+
+/// A load of `label`'s page starts: watched from now, its allowance
+/// [`NOT_STARTED`]. `navigation`: WebView2's id for it, when known (its
+/// completion is matched to it).
+fn loading(app: &AppHandle, label: &str, navigation: Option<u64>) {
+    let generation = {
+        let mut map = pages();
+        let p = map.entry(label.to_string()).or_insert_with(Page::new);
+        p.generation += 1;
+        if let Some(id) = navigation {
+            let before = (p.stage, p.since);
+            p.navigation = Some((id, before.0, before.1));
+        }
+        p.stage = Stage::Loading;
+        p.since = Instant::now();
+        p.generation
+    };
+    tracing::debug!(window = %label, generation, "A window's page started loading");
     arm(app, label, generation, Stage::Loading);
+}
+
+/// A top-level navigation of `label`'s webview ended (WebView2's
+/// `NavigationCompleted`, `id` its `NavigationId`): only the latest one
+/// counts (one another replaced reports a failure too). Cancelled — a page
+/// that stays as it was: back to how it was doing. Failed — WebView2's own
+/// error page ([`load_failed`]).
+fn navigation_ended(app: &AppHandle, label: &str, id: u64, ok: bool, status: i32, cancelled: bool) {
+    tracing::debug!(window = %label, id, ok, status, "A window's navigation ended");
+    {
+        let mut map = pages();
+        let Some(p) = map.get_mut(label) else { return };
+        let latest = p.navigation.map(|(latest, _, _)| latest);
+        match ended(latest, id, ok, cancelled) {
+            Ended::Older => return,
+            Ended::Loaded => {
+                p.navigation = None;
+                return;
+            }
+            Ended::Cancelled => {
+                // The page it was going to leave is still there.
+                if let Some((_, before, since)) = p.navigation.take() {
+                    if p.stage == Stage::Loading {
+                        p.stage = before;
+                        p.since = since;
+                        p.generation += 1;
+                    }
+                }
+                return;
+            }
+            Ended::Failed => p.navigation = None,
+        }
+    }
+    load_failed(app, label, status);
+}
+
+/// How a top-level navigation ended, for the watch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ended {
+    /// Not the latest one (another replaced it; it reports a failure too),
+    /// or none was seen to start: nothing to go by.
+    Older,
+    /// Its page is coming: the page says the rest.
+    Loaded,
+    /// Cancelled: the page it would have replaced is still there.
+    Cancelled,
+    /// WebView2's own error page.
+    Failed,
+}
+
+/// Pure: navigation `id` ended (`ok`, or `cancelled`), the latest one seen
+/// to start being `latest`.
+pub fn ended(latest: Option<u64>, id: u64, ok: bool, cancelled: bool) -> Ended {
+    if latest != Some(id) {
+        Ended::Older
+    } else if ok {
+        Ended::Loaded
+    } else if cancelled {
+        Ended::Cancelled
+    } else {
+        Ended::Failed
+    }
 }
 
 /// Check `label`'s page once its stage's allowance is up.
@@ -568,9 +648,10 @@ fn process_failed(app: &AppHandle, label: &str, kind: i32, reason: i32, exit_cod
     }
 }
 
-/// A load of `label`'s page ended on WebView2's error page (`status`:
-/// `COREWEBVIEW2_WEB_ERROR_STATUS`): loaded again [`ERROR_PAGE`] later; a
-/// see-through window's swapped for a blank page at once.
+/// The latest load of `label`'s page ended on WebView2's error page
+/// (`status`: `COREWEBVIEW2_WEB_ERROR_STATUS`): loaded again
+/// [`ERROR_PAGE`] later; a see-through window's swapped for a blank page at
+/// once.
 fn load_failed(app: &AppHandle, label: &str, status: i32) {
     let generation = {
         let mut map = pages();
@@ -648,8 +729,8 @@ mod win {
         ICoreWebView2, ICoreWebView2Controller, ICoreWebView2ProcessFailedEventArgs2, COREWEBVIEW2_PROCESS_FAILED_KIND,
         COREWEBVIEW2_PROCESS_FAILED_REASON, COREWEBVIEW2_WEB_ERROR_STATUS, COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED,
     };
-    use webview2_com::{NavigationCompletedEventHandler, ProcessFailedEventHandler};
-    use windows::core::{IUnknown, Interface, BOOL};
+    use webview2_com::{take_pwstr, NavigationCompletedEventHandler, NavigationStartingEventHandler, ProcessFailedEventHandler};
+    use windows::core::{IUnknown, Interface, BOOL, PWSTR};
 
     thread_local! {
         /// The webviews hooked so far, by label (WebView2 lives on the main
@@ -663,8 +744,9 @@ mod win {
         HOOKED.with(|h| h.borrow_mut().remove(label));
     }
 
-    /// Hook `webview`'s `ProcessFailed` and `NavigationCompleted`, once per
-    /// WebView2 instance (called on every load).
+    /// Hook `webview`'s `NavigationStarting`, `NavigationCompleted` and
+    /// `ProcessFailed`, once per WebView2 instance (called as it's made and
+    /// on every load).
     pub fn install(webview: &Webview) {
         let label = webview.label().to_string();
         let app = webview.app_handle().clone();
@@ -702,19 +784,42 @@ mod win {
             Ok(())
         }));
         unsafe { core.add_ProcessFailed(&failed, &mut token)? };
+        // A load starts: watched from here. WebView2 waits for this handler
+        // before the navigation goes on, so no word of the new page's can
+        // reach Rust ahead of it (wry's handler, made first, has said
+        // whether it's cancelled).
+        let (a, l) = (app.clone(), label.to_string());
+        let starting = NavigationStartingEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut cancel = BOOL(0);
+            let mut id = 0u64;
+            let mut uri = PWSTR::null();
+            unsafe {
+                let _ = args.Cancel(&mut cancel);
+                let _ = args.NavigationId(&mut id);
+                let _ = args.Uri(&mut uri);
+            }
+            let uri = take_pwstr(uri);
+            // (The blank page a see-through window gets for an error page.)
+            if !cancel.as_bool() && !uri.starts_with("about:") {
+                super::loading(&a, &l, Some(id));
+            }
+            Ok(())
+        }));
+        unsafe { core.add_NavigationStarting(&starting, &mut token)? };
         let (a, l) = (app.clone(), label.to_string());
         let completed = NavigationCompletedEventHandler::create(Box::new(move |_, args| {
             let Some(args) = args else { return Ok(()) };
             let mut ok = BOOL(1);
             let mut status = COREWEBVIEW2_WEB_ERROR_STATUS(0);
+            let mut id = 0u64;
             unsafe {
                 let _ = args.IsSuccess(&mut ok);
                 let _ = args.WebErrorStatus(&mut status);
+                let _ = args.NavigationId(&mut id);
             }
-            // (A load another one replaced isn't a failure.)
-            if !ok.as_bool() && status != COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
-                super::load_failed(&a, &l, status.0);
-            }
+            let cancelled = status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED;
+            super::navigation_ended(&a, &l, id, ok.as_bool(), status.0, cancelled);
             Ok(())
         }));
         unsafe { core.add_NavigationCompleted(&completed, &mut token)? };
@@ -783,6 +888,16 @@ mod tests {
         let (run, stuck) = unresponsive(Some(run), t0 + Duration::from_secs(12));
         assert!(!stuck);
         assert_eq!(run.first, t0 + Duration::from_secs(12));
+    }
+
+    #[test]
+    fn only_the_latest_navigation_ending_counts() {
+        // One another replaced reports a failure (aborted): never an error page.
+        assert_eq!(ended(Some(7), 6, false, false), Ended::Older);
+        assert_eq!(ended(None, 6, false, false), Ended::Older, "none seen to start (before the hooks)");
+        assert_eq!(ended(Some(7), 7, true, false), Ended::Loaded);
+        assert_eq!(ended(Some(7), 7, false, true), Ended::Cancelled, "the old page stays");
+        assert_eq!(ended(Some(7), 7, false, false), Ended::Failed);
     }
 
     #[test]

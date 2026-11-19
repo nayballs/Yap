@@ -385,7 +385,13 @@ re-exported by the module, except `local_llm`'s, which callers name
   watched from its creation (`page_watch::plugin()`, a plugin of Yap's own
   with no commands: `on_webview_ready` hooks its WebView2 events and arms a
   check, so a first load that never gets anywhere counts too), each load
-  from `on_page_load` (lib.rs), and each page says how it's doing
+  from WebView2's `NavigationStarting` (WebView2 waits for that handler, so
+  no word of the new page's reaches Rust before it: `on_page_load`'s
+  `ContentLoading` can come after the page has said it's in, and a watch
+  started there reloaded the bar mid-test), its `NavigationCompleted`
+  matched by `NavigationId` (`ended`, pure: only the latest counts — one
+  another replaced reports a failure too, which once blanked the bar as Yap
+  started; a cancelled one puts back how the page was doing), and each page says how it's doing
   (`page_state`: `alive` as its head script runs, `mounted` once its view is
   in, `trouble` when its view failed or its code couldn't load, `reloading`
   as it loads itself again: a retry that hangs before any content counts
