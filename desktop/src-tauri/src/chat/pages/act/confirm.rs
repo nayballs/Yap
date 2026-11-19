@@ -155,6 +155,12 @@ pub struct Card {
     /// the title as its label).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outline: Option<Box<crate::chat::cards::outline::OutlineCard>>,
+    /// **Apps on the PC, asked for** (act "access", `computer/access.rs`):
+    /// the apps, why, the extras — and once answered, the extras given. An
+    /// older Yap's save drops it (the card stays, with the apps' names as
+    /// its label).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access: Option<Box<crate::computer::access::AccessCard>>,
 }
 
 /// **The connector's tool a card asks about** (act "connector"): "Use
@@ -391,6 +397,7 @@ async fn ask_with(live: Option<crate::chat::stream::Live<'_>>, what: Ask<'_>, co
             key: what.key.to_string(),
             agent: what.agent.clone(),
             connector: connector.clone().map(Box::new),
+            access: None,
             question: None,
             outline: None,
         })

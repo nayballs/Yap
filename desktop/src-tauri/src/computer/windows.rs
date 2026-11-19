@@ -1,0 +1,265 @@
+//! **The windows on screen, and whose they are**: every top-level window
+//! that draws something (visible, not minimised, not cloaked on another
+//! virtual desktop, not click-through), top to bottom, each with its frame
+//! in physical pixels (`DWMWA_EXTENDED_FRAME_BOUNDS`, as Snip's window pick
+//! reads it: `snip/pick.rs`), its process's exe and the app it belongs to —
+//! what masking a screenshot ([`super::shot`]) and the allowlist
+//! ([`super::grants`]) decide from.
+//!
+//! - **A Store app's window** belongs to `ApplicationFrameHost.exe`; the
+//!   app itself is the process of its hosted `Windows.UI.Core.CoreWindow`.
+//! - **A packaged app** (MSIX: the new Notepad, Terminal, Paint…) runs from
+//!   `…\WindowsApps\<package full name>\…`; its package family
+//!   ([`package_family`]) is the AppUserModelID's part before the `!`.
+//! - **A window's own AppUserModelID**, where the app set one (its property
+//!   store), names it too.
+//!
+//! Never a window's title or contents: rectangles, classes and exe paths only.
+
+use crate::snip::geom::Rect;
+
+/// **One window on screen**, topmost first in a list.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Win {
+    pub hwnd: isize,
+    pub pid: u32,
+    /// Its visible frame, physical pixels on the virtual desktop.
+    pub rect: Rect,
+    pub class: String,
+    /// The exe's full path, lower case ("" when Windows won't say).
+    pub exe: String,
+    /// Its AppUserModelID, lower case: the window's own, else its package's
+    /// family for a packaged app ("microsoft.windowsnotepad_8wekyb3d8bbwe").
+    pub aumid: String,
+    /// One of Yap's own windows.
+    pub own: bool,
+}
+
+impl Win {
+    /// The exe's name without its folder and ".exe" ("notepad").
+    pub fn stem(&self) -> String {
+        crate::pasting::app_kind::exe_stem(&self.exe)
+    }
+}
+
+/// The desktop behind every window (`Progman` / `WorkerW`: the wallpaper and
+/// its icons) and the taskbar: File Explorer's, whatever process draws them.
+pub const SHELL_CLASSES: &[&str] = &["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"];
+
+/// **A packaged app's family**, from its exe's path under `WindowsApps`
+/// ("…\WindowsApps\Microsoft.WindowsNotepad_11.2410.21.0_x64__8wekyb3d8bbwe\…"
+/// → "microsoft.windowsnotepad_8wekyb3d8bbwe"): the package's name and its
+/// publisher's id, the part of its AppUserModelID before the `!`. `None`:
+/// not a packaged app. Pure.
+pub fn package_family(exe: &str) -> Option<String> {
+    let lower = exe.to_lowercase().replace('/', "\\");
+    let (_, rest) = lower.split_once("\\windowsapps\\")?;
+    let full = rest.split('\\').next()?;
+    // name_version_arch_resource_publisher: the resource id is often empty ("__").
+    let name = full.split('_').next()?;
+    let publisher = full.rsplit('_').next()?;
+    (!name.is_empty() && !publisher.is_empty() && full.matches('_').count() >= 4).then(|| format!("{name}_{publisher}"))
+}
+
+/// What [`shown`] decides from: the window as Windows reports it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Seen {
+    pub visible: bool,
+    pub minimized: bool,
+    pub cloaked: bool,
+    pub click_through: bool,
+    pub rect: Rect,
+}
+
+/// **Whether a window is drawn on screen**, as far as a screenshot is
+/// concerned: visible, not minimised, not cloaked (another virtual desktop,
+/// a suspended Store app, Windows' hidden helpers), at least 6 px each way,
+/// and not click-through — a click-through window is an overlay that
+/// covers a whole display and draws little (a game's, a recorder's): masked
+/// whole, it would hide everything. Pure.
+pub fn shown(s: &Seen) -> bool {
+    s.visible && !s.minimized && !s.cloaked && !s.click_through && s.rect.w >= crate::snip::geom::MIN_SIDE && s.rect.h >= crate::snip::geom::MIN_SIDE
+}
+
+/// **Every window on screen, topmost first** (blocking: one enumeration,
+/// well under a few milliseconds).
+#[cfg(windows)]
+pub fn on_screen() -> Vec<Win> {
+    win::list()
+}
+
+#[cfg(not(windows))]
+pub fn on_screen() -> Vec<Win> {
+    Vec::new()
+}
+
+/// The pointer, in physical pixels on the virtual desktop.
+#[cfg(windows)]
+pub fn cursor() -> Option<(i32, i32)> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let mut p = POINT::default();
+    unsafe { GetCursorPos(&mut p) }.ok()?;
+    Some((p.x, p.y))
+}
+
+#[cfg(not(windows))]
+pub fn cursor() -> Option<(i32, i32)> {
+    None
+}
+
+#[cfg(windows)]
+mod win {
+    use std::collections::HashMap;
+    use std::ffi::c_void;
+
+    use windows::core::{BOOL, PCWSTR};
+    use windows::Win32::Foundation::{HWND, LPARAM, PROPERTYKEY, RECT};
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PropVariantToStringAlloc};
+    use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, FindWindowExW, GetClassNameW, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, GWL_EXSTYLE, WS_EX_TRANSPARENT};
+
+    use super::{package_family, shown, Seen, Win};
+    use crate::snip::geom::Rect;
+
+    /// `PKEY_AppUserModel_ID` ({9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}, 5).
+    const AUMID_KEY: PROPERTYKEY = PROPERTYKEY { fmtid: windows::core::GUID::from_u128(0x9F4C2855_9F79_4B39_A8D0_E1D42DE1D5F3), pid: 5 };
+
+    fn frame(hwnd: HWND) -> Option<Rect> {
+        let mut r = RECT::default();
+        unsafe { DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &mut r as *mut RECT as *mut _, std::mem::size_of::<RECT>() as u32) }.ok()?;
+        Some(Rect::new(r.left, r.top, r.right - r.left, r.bottom - r.top))
+    }
+
+    fn class(hwnd: HWND) -> String {
+        let mut buf = [0u16; 128];
+        let n = unsafe { GetClassNameW(hwnd, &mut buf) };
+        String::from_utf16_lossy(&buf[..n.max(0) as usize])
+    }
+
+    fn cloaked(hwnd: HWND) -> bool {
+        let mut v: u32 = 0;
+        unsafe { DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut v as *mut u32 as *mut _, 4) }.is_ok() && v != 0
+    }
+
+    fn pid_of(hwnd: HWND) -> u32 {
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+        pid
+    }
+
+    /// The window's own AppUserModelID, lower case ("" when it set none).
+    fn own_aumid(hwnd: HWND) -> String {
+        let Ok(store) = (unsafe { SHGetPropertyStoreForWindow::<IPropertyStore>(hwnd) }) else { return String::new() };
+        // SAFETY: the value the shell filled, read as a string (freed once
+        // read), then cleared.
+        unsafe {
+            let Ok(mut value) = store.GetValue(&AUMID_KEY) else { return String::new() };
+            let s = match PropVariantToStringAlloc(&value) {
+                Ok(p) => {
+                    let s = p.to_string().unwrap_or_default();
+                    CoTaskMemFree(Some(p.0 as *const c_void));
+                    s
+                }
+                Err(_) => String::new(),
+            };
+            let _ = PropVariantClear(&mut value);
+            s.to_lowercase()
+        }
+    }
+
+    /// A Store app's frame: the process of its hosted CoreWindow.
+    fn hosted_pid(hwnd: HWND) -> Option<u32> {
+        let class: Vec<u16> = "Windows.UI.Core.CoreWindow\0".encode_utf16().collect();
+        let child = unsafe { FindWindowExW(Some(hwnd), None, PCWSTR(class.as_ptr()), PCWSTR::null()) }.ok()?;
+        let pid = pid_of(child);
+        (pid != 0).then_some(pid)
+    }
+
+    struct Walk {
+        out: Vec<Win>,
+        exes: HashMap<u32, String>,
+        own: u32,
+    }
+
+    impl Walk {
+        fn exe(&mut self, pid: u32) -> String {
+            self.exes.entry(pid).or_insert_with(|| crate::shell::procs::image_path(pid).unwrap_or_default().to_lowercase()).clone()
+        }
+    }
+
+    unsafe extern "system" fn each(hwnd: HWND, lp: LPARAM) -> BOOL {
+        let walk = unsafe { &mut *(lp.0 as *mut Walk) };
+        let visible = unsafe { IsWindowVisible(hwnd) }.as_bool();
+        if !visible {
+            return BOOL(1);
+        }
+        let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+        let rect = frame(hwnd).unwrap_or_default();
+        let seen = Seen { visible, minimized: unsafe { IsIconic(hwnd) }.as_bool(), cloaked: cloaked(hwnd), click_through: ex & WS_EX_TRANSPARENT.0 != 0, rect };
+        if !shown(&seen) {
+            return BOOL(1);
+        }
+        let mut pid = pid_of(hwnd);
+        let class = class(hwnd);
+        if class == "ApplicationFrameWindow" {
+            if let Some(hosted) = hosted_pid(hwnd) {
+                pid = hosted;
+            }
+        }
+        let exe = walk.exe(pid);
+        let mut aumid = own_aumid(hwnd);
+        if aumid.is_empty() {
+            aumid = package_family(&exe).unwrap_or_default();
+        }
+        let own = pid == walk.own;
+        walk.out.push(Win { hwnd: hwnd.0 as isize, pid, rect, class, exe, aumid, own });
+        BOOL(1)
+    }
+
+    pub fn list() -> Vec<Win> {
+        let mut walk = Walk { out: Vec::new(), exes: HashMap::new(), own: std::process::id() };
+        unsafe {
+            let _ = EnumWindows(Some(each), LPARAM(&mut walk as *mut Walk as isize));
+        }
+        walk.out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_packaged_apps_family_comes_from_its_folder() {
+        assert_eq!(
+            package_family(r"C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.2410.21.0_x64__8wekyb3d8bbwe\Notepad\Notepad.exe").as_deref(),
+            Some("microsoft.windowsnotepad_8wekyb3d8bbwe")
+        );
+        assert_eq!(
+            package_family(r"c:\program files\windowsapps\Microsoft.WindowsTerminal_1.21.3231.0_x64__8wekyb3d8bbwe\WindowsTerminal.exe").as_deref(),
+            Some("microsoft.windowsterminal_8wekyb3d8bbwe")
+        );
+        assert_eq!(package_family(r"C:\Program Files\Mozilla Firefox\firefox.exe"), None);
+        assert_eq!(package_family(r"C:\Program Files\WindowsApps\odd\x.exe"), None);
+        assert_eq!(package_family(""), None);
+    }
+
+    #[test]
+    fn only_windows_that_draw_something_count() {
+        let w = Seen { visible: true, rect: Rect::new(0, 0, 800, 600), ..Default::default() };
+        assert!(shown(&w));
+        for not in [
+            Seen { visible: false, ..w.clone() },
+            Seen { minimized: true, ..w.clone() },
+            Seen { cloaked: true, ..w.clone() },
+            Seen { click_through: true, ..w.clone() },
+            Seen { rect: Rect::new(0, 0, 5, 600), ..w.clone() },
+        ] {
+            assert!(!shown(&not), "{not:?}");
+        }
+        assert_eq!(Win { exe: r"c:\windows\system32\notepad.exe".into(), ..Default::default() }.stem(), "notepad");
+    }
+}

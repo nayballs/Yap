@@ -80,6 +80,12 @@ const NEVER_READ: &[&str] = &[
     "nordpass", "proton pass", "protonpass",
 ];
 
+/// **A password manager**, by its exe or its name (lower case): never read
+/// here, never looked at or driven by computer use (`computer/grants.rs`).
+pub(crate) fn password_manager(lower: &str) -> bool {
+    NEVER_READ.iter().any(|p| lower.contains(p))
+}
+
 /// What a dictation got from the screen: the terms (the most frequent
 /// first) and the near-miss targets made of them.
 #[derive(Debug, Default)]

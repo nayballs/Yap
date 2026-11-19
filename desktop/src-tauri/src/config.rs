@@ -982,6 +982,13 @@ pub struct YapConfig {
     /// The one ask about the cloud has been shown.
     #[serde(default)]
     pub assistant_screen_asked: bool,
+    /// **"Let Yap's AI use apps on your PC"** (Settings → Voice Assistant,
+    /// under the screen's switches; `computer.rs`): Chat's model may ask to
+    /// use apps (`request_access`, the person's card) and see the ones
+    /// allowed. Needs "Let Yap's AI see your screen" and "…with cloud models
+    /// too". Off by default; an older Yap drops it: off again.
+    #[serde(default)]
+    pub computer_use: bool,
     /// "Read aloud" (Settings → Voice Assistant → Spoken replies): how much
     /// of an answer Yap reads out by itself — the assistant shortcut's and
     /// Chat's voice replies — "short" (a sentence or two), "30s", "1m" (the
@@ -1754,6 +1761,7 @@ impl Default for YapConfig {
             assistant_screen: true,
             assistant_screen_cloud: false,
             assistant_screen_asked: false,
+            computer_use: false,
             spoken_length: default_spoken_length(),
             chat_clean_speech: true,
             chat_outline_review: true,

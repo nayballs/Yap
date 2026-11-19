@@ -296,6 +296,9 @@ fn session_eyes(t: &Asked<'_>, code: bool) -> crate::integrations::claude_live::
         pictures,
         act: pictures != Gate::Off && !t.meetings && crate::chat::pages::act::can_act(provider, model),
         files,
+        // Apps on the PC (computer.rs): wherever the switch is on and a turn of this session could be
+        // asked in Chat; each turn may use them where its gates say (`turn_eyes`).
+        computer: t.cfg.computer_use && !t.meetings && t.gates.tools && crate::computer::may(provider, model),
     }
 }
 
@@ -305,7 +308,7 @@ fn session_eyes(t: &Asked<'_>, code: bool) -> crate::integrations::claude_live::
 /// only — `t.gates.screen_takes`, the run's `Context::takes`; never a
 /// phone's question), never more than the session lists.
 fn turn_eyes(t: &Asked<'_>, session: crate::integrations::claude_live::eyes::Eyes) -> crate::integrations::claude_live::eyes::Eyes {
-    crate::integrations::claude_live::eyes::Eyes { screen: t.gates.screen, pictures: t.gates.pictures, act: t.gates.act, files: t.gates.files }.within(session)
+    crate::integrations::claude_live::eyes::Eyes { screen: t.gates.screen, pictures: t.gates.pictures, act: t.gates.act, files: t.gates.files, computer: t.gates.computer }.within(session)
 }
 
 /// The question's line when the session sees but this turn can't (asked
@@ -524,6 +527,11 @@ fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude
     if eyes.any() {
         s.push(' ');
         s.push_str(&eyes_lines(eyes));
+    }
+    // Apps on the PC (computer.rs, over the `computer-use` server).
+    if eyes.computer {
+        s.push(' ');
+        s.push_str(crate::integrations::claude_live::computer::LINES);
     }
     // Visuals in the chat itself (chat/made.rs, 15 Nov 2026): the session always lists the tool.
     s.push(' ');
@@ -1394,7 +1402,7 @@ mod tests {
         assert_ne!(fingerprint("p", true, false, Eyes::default(), "", 0), fingerprint("p", true, false, Eyes::default(), r"D:\Projects\garden-planner", 0));
         assert_ne!(fingerprint("p", true, false, Eyes::default(), r"D:\Projects\garden-planner", 0), fingerprint("p", true, false, Eyes::default(), r"D:\Projects\recipe-box", 0));
         // The screen's and the pages' tools switched: listed once, so a new process.
-        let sees = Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
+        let sees = Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off, computer: false };
         assert_ne!(fingerprint("p", true, false, Eyes::default(), "", 0), fingerprint("p", true, false, sees, "", 0));
         assert_ne!(fingerprint("p", true, false, sees, "", 0), fingerprint("p", true, false, Eyes { screen: Gate::Off, ..sees }, "", 0));
         // The connectors' list changed (one on or off, a tool's setting): listed once, so a new process.
@@ -1541,7 +1549,7 @@ mod tests {
 
     #[test]
     fn a_plan_chat_is_told_it_can_look_at_the_screen_and_open_pages_by_claude_codes_names() {
-        let all = eyes_lines(Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off });
+        let all = eyes_lines(Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off, computer: false });
         for name in crate::integrations::claude_live::eyes::all_names() {
             // The browser's by the family's name (each one's own description says what it does).
             let named = if name.starts_with("browser_") { all.contains("each browser_* tool is mcp__yap__browser_*") } else { all.contains(&format!("mcp__yap__{name}")) };
@@ -1556,13 +1564,13 @@ mod tests {
         assert!(all.contains(&crate::chat::pictures::instructions(Gate::Look, true)));
         assert!(all.contains("web_search means your WebSearch"));
         // A session that may not act: told it reads and looks only.
-        let reads = eyes_lines(Eyes { screen: Gate::Look, pictures: Gate::Look, act: false, files: Gate::Off });
+        let reads = eyes_lines(Eyes { screen: Gate::Look, pictures: Gate::Look, act: false, files: Gate::Off, computer: false });
         assert!(reads.contains("never click or type on them") && !reads.contains("browser_click"));
         // The screen alone (the web off): nothing about pages.
-        let screen = eyes_lines(Eyes { screen: Gate::Look, pictures: Gate::Off, act: false, files: Gate::Off });
+        let screen = eyes_lines(Eyes { screen: Gate::Look, pictures: Gate::Off, act: false, files: Gate::Off, computer: false });
         assert!(screen.contains("mcp__yap__look_at_screen") && !screen.contains("browser_navigate"));
         // The pages alone: no look at the screen.
-        let pages = eyes_lines(Eyes { screen: Gate::Off, pictures: Gate::Look, act: true, files: Gate::Off });
+        let pages = eyes_lines(Eyes { screen: Gate::Off, pictures: Gate::Look, act: true, files: Gate::Off, computer: false });
         assert!(!pages.contains("look_at_screen") && pages.contains("mcp__yap__browser_screenshot"));
         // Picture files alone (the web and the screen off): just that, by a path.
         let files = eyes_lines(Eyes { files: Gate::Look, ..Eyes::default() });
@@ -1574,11 +1582,11 @@ mod tests {
         let both = eyes_lines(Eyes { screen: Gate::Look, files: Gate::Look, ..Eyes::default() });
         assert!(both.contains("mcp__yap__look_at_screen") && both.contains("mcp__yap__show_picture") && both.contains(crate::chat::pictures::file_instructions(Gate::Look)) && !both.contains("browser_navigate"));
         // The web on: as before, whatever the files' gate.
-        let web = Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
+        let web = Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off, computer: false };
         assert_eq!(eyes_lines(Eyes { files: Gate::Look, ..web }), eyes_lines(web));
         // A question asked away from Chat, on a session that sees: told so.
         use crate::chat::see_screen::Takes;
-        let sees = Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
+        let sees = Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off, computer: false };
         assert!(away_line(sees, Eyes::default(), Takes::Screen).is_some_and(|l| l.contains("answer in words")));
         assert_eq!(away_line(sees, sees, Takes::Screen), None);
         assert_eq!(away_line(Eyes::default(), Eyes::default(), Takes::Screen), None);

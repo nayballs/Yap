@@ -1,7 +1,7 @@
 use super::super::turn::{test_begin_seeing, Context};
 use super::*;
 
-const LOOK: Eyes = Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
+const LOOK: Eyes = Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off, computer: false };
 
 #[test]
 fn the_tools_are_the_tool_loops_with_the_same_schemas() {
@@ -40,17 +40,17 @@ fn each_gate_offers_what_the_tool_loop_offers() {
     assert!(names(Eyes::default()).is_empty() && definitions(Eyes::default()).is_empty());
     assert!(!Eyes::default().any());
     // The screen alone (the web off): only the look.
-    assert_eq!(names(Eyes { screen: Gate::Look, pictures: Gate::Off, act: false, files: Gate::Off }), [see_screen::LOOK]);
+    assert_eq!(names(Eyes { screen: Gate::Look, pictures: Gate::Off, act: false, files: Gate::Off, computer: false }), [see_screen::LOOK]);
     // The pages alone: no look at the screen.
-    assert_eq!(names(Eyes { screen: Gate::Off, pictures: Gate::Look, act: true, files: Gate::Off }), all_names()[1..]);
+    assert_eq!(names(Eyes { screen: Gate::Off, pictures: Gate::Look, act: true, files: Gate::Off, computer: false }), all_names()[1..]);
     // A model that can't see: no shot, zoom or look at a picture; no point clicks.
-    let blind = names(Eyes { screen: Gate::Show, pictures: Gate::Show, act: true, files: Gate::Off });
+    let blind = names(Eyes { screen: Gate::Show, pictures: Gate::Show, act: true, files: Gate::Off, computer: false });
     assert!(!blind.contains(&pages::SCREENSHOT) && !blind.contains(&pages::ZOOM) && !blind.contains(&pictures::LOOK) && blind.contains(&act::CLICK));
     // A session that may not act: reading and looking only.
     let reads = names(Eyes { act: false, ..LOOK });
     assert!(reads.contains(&pages::SCREENSHOT) && !reads.iter().any(|n| pages::acts(n)));
     // A turn never gets more than its session lists.
-    let away = Eyes { screen: Gate::Off, pictures: Gate::Off, act: false, files: Gate::Off };
+    let away = Eyes { screen: Gate::Off, pictures: Gate::Off, act: false, files: Gate::Off, computer: false };
     assert_eq!(LOOK.within(away), away);
     assert_eq!(LOOK.within(LOOK), LOOK);
     assert_eq!(away.within(LOOK), away);
@@ -122,7 +122,7 @@ fn refused_in_a_meeting_and_away_from_chat_before_anything_runs() {
     assert_eq!(refused(pages::READ, reads, false), None);
     assert_eq!(refused(act::TYPE, reads, false).unwrap()["displayText"], "Didn't act on the page: not for this question");
     // A shot for a model that can't see: not offered.
-    assert!(refused(pages::SCREENSHOT, Eyes { screen: Gate::Show, pictures: Gate::Show, act: true, files: Gate::Off }, false).is_some());
+    assert!(refused(pages::SCREENSHOT, Eyes { screen: Gate::Show, pictures: Gate::Show, act: true, files: Gate::Off, computer: false }, false).is_some());
     assert_eq!(refused(see_screen::LOOK, LOOK, false), None);
     assert_eq!(refused(act::CLICK, LOOK, false), None);
 }

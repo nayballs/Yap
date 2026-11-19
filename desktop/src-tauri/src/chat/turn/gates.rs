@@ -59,6 +59,11 @@ pub(super) struct Gates {
     /// `assistant/spoken_ok.rs`). Never across the meetings, nor a phone's
     /// question or one from another app (no panel: no pages).
     pub act: bool,
+    /// **Computer use** (computer.rs): "Let Yap's AI use apps on your PC"
+    /// on, Claude, a question asked in Chat (typed, or out loud with Chat
+    /// in view); never a phone's, a routine's or one across the meetings.
+    /// A plan chat's goes over Yap's run endpoint (`claude_live/computer.rs`).
+    pub computer: bool,
     /// The calendar (chat/tools/calendar.rs): a tool while one is connected
     /// (not across the meetings, whose passages are numbered on their own).
     pub calendar: bool,
@@ -158,6 +163,7 @@ impl Gates {
         Gates {
             screen: Gate::Off,
             act: false,
+            computer: false,
             apps: false,
             agents: false,
             connectors: false,
@@ -192,6 +198,7 @@ impl Gates {
             (Gate::Off, crate::chat::see_screen::Takes::Screen)
         };
         let act = pictures != Gate::Off && matches!(scope, None | Some("assistant")) && !meetings && crate::chat::pages::act::can_act(provider, model);
+        let computer = crate::computer::offered(cfg, tools, provider, model, crate::computer::in_chat(chat_in_view, scope, meetings), cfg.computer_use && (here.phone)());
         let calendar = !meetings && (here.calendar)();
         let agents = tools && !meetings && (here.yap_code)();
         // (An evaluation's connectors scenario gives any model that calls
@@ -202,7 +209,7 @@ impl Gates {
         // (A new document's outline is shown first where a question could be asked: chat/cards/outline.rs.)
         let cards = crate::chat::cards::Cards::for_turn(tools, meetings, scope, chat_in_view, (here.phone)()).with_outline(cfg.chat_outline_review);
         let visuals = crate::chat::made::offered(tools, strong, scope, meetings, chat_in_view);
-        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, screen_takes, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true, cards, visuals, project_files: false };
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, screen_takes, act, computer, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true, cards, visuals, project_files: false };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();
         }
@@ -269,6 +276,7 @@ impl Gates {
             screen: self.screen,
             screen_takes: self.screen_takes,
             act: self.act,
+            computer: self.computer && self.tools,
             own_search: self.own_search,
             web_question: false,
             agents: self.agents.then_some(agents),

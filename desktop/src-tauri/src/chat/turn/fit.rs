@@ -500,6 +500,7 @@ mod tests {
             screen: Gate::Show,
             screen_takes: Default::default(),
             act: false,
+            computer: false,
             calendar: false,
             agents: true,
             connectors: false,
@@ -523,6 +524,7 @@ mod tests {
             pictures: Gate::Look,
             screen: Gate::Look,
             act: true,
+            computer: false,
             calendar: true,
             visuals: true,
             ..small_model()

@@ -119,6 +119,10 @@ pub struct Eyes {
     /// the turn's `files` gate): `show_picture` and `look_at_picture` by a
     /// path only. Off whenever `pictures` is on (those take paths there).
     pub files: Gate,
+    /// **Computer use** (`computer.rs`): apps on the PC the person allows,
+    /// on a server of its own (`super::computer`, `computer-use`). Not in
+    /// [`Eyes::any`]: its own lines and its own tools.
+    pub computer: bool,
 }
 
 impl Eyes {
@@ -131,7 +135,7 @@ impl Eyes {
     pub fn within(self, session: Eyes) -> Eyes {
         let clamp = |turn: Gate, listed: Gate| if listed == Gate::Off { Gate::Off } else { turn };
         let pictures = clamp(self.pictures, session.pictures);
-        Eyes { screen: clamp(self.screen, session.screen), pictures, act: self.act && session.act && pictures != Gate::Off, files: clamp(self.files, session.files) }
+        Eyes { screen: clamp(self.screen, session.screen), pictures, act: self.act && session.act && pictures != Gate::Off, files: clamp(self.files, session.files), computer: self.computer && session.computer }
     }
 
     /// Only picture files (the web off): `show_picture` and `look_at_picture`

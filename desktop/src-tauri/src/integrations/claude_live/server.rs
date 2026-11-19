@@ -178,6 +178,7 @@ impl Endpoint {
         let segs: Vec<&str> = path.trim_matches('/').split('/').collect();
         let (run, route) = match segs.as_slice() {
             ["mcp", run] => (*run, Route::Mcp),
+            ["mcp", run, super::computer::PATH] => (*run, Route::Computer),
             _ => return Err((404, "Not found")),
         };
         let run = self.run(run).ok_or((404, "Not found"))?;
@@ -205,21 +206,26 @@ impl Endpoint {
             return;
         }
         match route {
-            Route::Mcp => match super::rpc::handle(self, run, &body) {
-                super::rpc::Reply::Json(status, v) => {
-                    let _ = request.respond(json(status, &v));
+            Route::Mcp | Route::Computer => {
+                let reply = if route == Route::Computer { super::computer::handle(run, &body) } else { super::rpc::handle(self, run, &body) };
+                match reply {
+                    super::rpc::Reply::Json(status, v) => {
+                        let _ = request.respond(json(status, &v));
+                    }
+                    super::rpc::Reply::Accepted => {
+                        let _ = request.respond(Response::empty(202));
+                    }
                 }
-                super::rpc::Reply::Accepted => {
-                    let _ = request.respond(Response::empty(202));
-                }
-            },
+            }
         }
     }
 }
 
-/// What an admitted request asks for.
+/// What an admitted request asks for: Yap's server, or its computer-use one.
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Route {
     Mcp,
+    Computer,
 }
 
 fn accept(server: Arc<Server>, endpoint: Weak<Endpoint>) {

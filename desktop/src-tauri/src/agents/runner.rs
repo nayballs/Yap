@@ -1131,7 +1131,9 @@ fn direct_eyes(cfg: &crate::config::YapConfig, model: &str, phone: bool) -> clau
     // pages on — never a phone's turn (no panel there to watch), never in a
     // meeting or a call (`eyes::refused`).
     let act = pictures != Gate::Off && !phone && crate::chat::pages::act::can_act(provider, model);
-    claude_live::eyes::Eyes { screen, pictures, act, files }
+    // **Apps on the PC** (computer.rs): with "Let Yap's AI use apps on your PC" on, never a phone's turn.
+    let computer = cfg.computer_use && !phone;
+    claude_live::eyes::Eyes { screen, pictures, act, files, computer }
 }
 
 /// **Its browser turn's context**: the person's message this turn, their
