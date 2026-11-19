@@ -163,6 +163,15 @@ impl Granted {
         Granted { name: stem.clone(), id: path.to_string(), tier: tier_of(std::slice::from_ref(&stem), ""), exes: vec![lower], stems: vec![stem], aumid: String::new(), explorer: false }
     }
 
+    /// **A stand-in window's exe and AppUserModelID** that this app owns
+    /// (the stand-in desktop's `open_application`).
+    #[cfg(any(test, debug_assertions))]
+    pub fn stand_in(&self) -> (String, String) {
+        let stem = self.stems.first().cloned().unwrap_or_else(|| self.name.to_lowercase().replace(' ', ""));
+        let exe = self.exes.first().cloned().unwrap_or_else(|| format!("c:\\stand-in\\{stem}.exe"));
+        (exe, self.aumid.clone())
+    }
+
     /// Whether Yap can tell this app's windows at all.
     pub fn knows_its_windows(&self) -> bool {
         !self.exes.is_empty() || !self.stems.is_empty() || !self.aumid.is_empty() || self.explorer

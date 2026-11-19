@@ -115,6 +115,31 @@ pub fn at(_x: i32, _y: i32) -> Option<Win> {
     None
 }
 
+/// **Every minimised window** (visible, not cloaked), for
+/// `open_application` to bring back (blocking).
+#[cfg(windows)]
+pub fn minimised() -> Vec<Win> {
+    win::minimised()
+}
+
+#[cfg(not(windows))]
+pub fn minimised() -> Vec<Win> {
+    Vec::new()
+}
+
+/// **A window to the front**: restored if it's minimised, then given the
+/// focus (`text_injector::focus`: Windows' focus rules respected). Whether
+/// it's in front now (blocking).
+#[cfg(windows)]
+pub fn raise(hwnd: isize) -> bool {
+    win::raise(hwnd)
+}
+
+#[cfg(not(windows))]
+pub fn raise(_hwnd: isize) -> bool {
+    false
+}
+
 /// The pointer, in physical pixels on the virtual desktop.
 #[cfg(windows)]
 pub fn cursor() -> Option<(i32, i32)> {
@@ -274,6 +299,36 @@ mod win {
             let _ = EnumWindows(Some(each), LPARAM(&mut walk as *mut Walk as isize));
         }
         walk.out
+    }
+
+    unsafe extern "system" fn each_minimised(hwnd: HWND, lp: LPARAM) -> BOOL {
+        let walk = unsafe { &mut *(lp.0 as *mut Walk) };
+        if unsafe { IsWindowVisible(hwnd) }.as_bool() && unsafe { IsIconic(hwnd) }.as_bool() && !cloaked(hwnd) {
+            let w = read(walk, hwnd, frame(hwnd).unwrap_or_default());
+            walk.out.push(w);
+        }
+        BOOL(1)
+    }
+
+    pub fn minimised() -> Vec<Win> {
+        let mut walk = Walk { out: Vec::new(), exes: HashMap::new(), own: std::process::id() };
+        unsafe {
+            let _ = EnumWindows(Some(each_minimised), LPARAM(&mut walk as *mut Walk as isize));
+        }
+        walk.out
+    }
+
+    pub fn raise(hwnd: isize) -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_RESTORE};
+        let h = HWND(hwnd as *mut c_void);
+        if unsafe { IsIconic(h) }.as_bool() {
+            let _ = unsafe { ShowWindow(h, SW_RESTORE) };
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+        crate::pasting::text_injector::focus(hwnd);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let front = unsafe { GetAncestor(GetForegroundWindow(), GA_ROOT) };
+        front == h
     }
 }
 
