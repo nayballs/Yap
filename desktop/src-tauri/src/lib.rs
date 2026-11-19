@@ -1167,6 +1167,8 @@ pub fn run() {
             shell::realtest::commands::realtest_read_selection,
             #[cfg(debug_assertions)]
             shell::page_watch::e2e_page_watch,
+            #[cfg(debug_assertions)]
+            shell::webview_gone::e2e_webview2_gone,
         ])
         .on_page_load(|webview, payload| {
             // No browser context menu (Back, Refresh, Print, Inspect…) in any
@@ -1203,6 +1205,9 @@ pub fn run() {
             privacy::net::init(&handle);
             // A store's save that fails is said from now on (saving.rs).
             shell::saving::init(&handle);
+            // A restart after WebView2's browser process exited, said once
+            // the windows are up (webview_gone.rs).
+            shell::webview_gone::init(&handle);
             // Edit mode's Ctrl+C says when it left the clipboard alone (text_injector.rs).
             pasting::text_injector::init(&handle);
             // Temp files a crash mid-write left behind (config.rs): Yap's

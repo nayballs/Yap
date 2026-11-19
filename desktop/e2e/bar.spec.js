@@ -127,14 +127,16 @@ test('hovering opens the pill and makes just that clickable, with tooltips', asy
   await expect(bar.getByRole('button', { name: 'More' })).toBeVisible();
 
   // Clickable now: WS_EX_TRANSPARENT is cleared, and a click on the pill
-  // reaches the bar (asked of Windows from outside too).
+  // reaches the bar (asked of Windows from outside too). Another test Yap's
+  // bar on the same spot is left out: with several test Yaps side by side,
+  // the one made clickable last is on top (3 of 4 failed so, 19 Nov 2026).
   const d = await debug(yap);
   expect(d.exStyle.transparent).toBe(false);
   expect(d.exStyle.noActivate).toBe(true);
   expect(d.clickOnPillReachesBar).toBe(true);
   const outside = windowFacts(d.hwnd, d.pillPoint);
   expect(outside.transparent).toBe(false);
-  expect(outside.windowAtPoint).toBe(d.hwnd);
+  expect(outside.windowAtPointBesideOtherYaps).toBe(d.hwnd);
   await bar.waitForTimeout(350); // the open animation
   await shot(bar, '02-expanded');
 
@@ -744,13 +746,18 @@ test('while dictating, ✓ stops and pastes; the capsule takes clicks without ac
   await expect(done).toBeVisible();
   await bar.waitForTimeout(1_200); // some audio, and the waveform
   await shot(bar, '18-dictating-cancel-and-done');
+  // The active window of Yap's UI thread before the click: the click must
+  // leave it as it is. (With four test Yaps at once, 3 of 4 bars were it
+  // already as this test began, left so by the tests before — on main
+  // before #196 as often as after, 19 Nov 2026 — never by this click.)
+  const was = (await debug(yap)).threadActive;
 
   // ✓: stopped and transcribed, as the hotkey's second press would.
   await done.click();
   await expectStore(yap, 'history.json', (h) => h.filter((e) => e.status !== 'cancelled').length === before + 1 && JSON.stringify(h).includes('STT stub'));
   const d = await debug(yap);
   expect(d.barActive).toBe(false);
-  expect(d.threadActiveIsBar).toBe(false);
+  expect(d.threadActive).toBe(was);
   expect(d.barInFront).toBe(false);
   await dictationOver(yap);
   await pointerAway(yap);

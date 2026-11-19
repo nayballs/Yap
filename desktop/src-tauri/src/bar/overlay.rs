@@ -741,6 +741,64 @@ pub mod win {
             }
         }
     }
+
+    /// [`window_at`], another Yap's windows left out: several test Yaps run
+    /// side by side, each bar on the same spot, and whichever was made
+    /// clickable last is on top. Walks the windows above, top first, past
+    /// those (and past click-through and cloaked ones) to the first that
+    /// would take the click. (The bar's debug report, `bar_debug`.)
+    pub fn window_at_besides_other_yaps(point: (i32, i32)) -> isize {
+        let first = window_at(point);
+        if first == 0 || !another_yap(first as HWND) {
+            return first;
+        }
+        use windows::Win32::Foundation::HWND as WinHwnd;
+        use windows::Win32::UI::WindowsAndMessaging::{GetTopWindow, GetWindow, IsWindowVisible, GW_HWNDNEXT};
+        const WS_EX_TRANSPARENT: u32 = 0x0000_0020;
+        let mut next = unsafe { GetTopWindow(None) }.ok();
+        while let Some(h) = next {
+            let raw = h.0;
+            let takes_it = unsafe { IsWindowVisible(h) }.as_bool()
+                && window_rect(raw).is_some_and(|r| r.contains(point.0, point.1))
+                && ex_style(raw) & WS_EX_TRANSPARENT == 0
+                && !cloaked(raw)
+                && !another_yap(raw);
+            if takes_it {
+                return raw as isize;
+            }
+            next = unsafe { GetWindow(WinHwnd(raw), GW_HWNDNEXT) }.ok();
+        }
+        0
+    }
+
+    /// A window DWM keeps off the screen (Yap's hidden windows are cloaked).
+    fn cloaked(hwnd: HWND) -> bool {
+        use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+        let mut value = 0u32;
+        let got = unsafe {
+            DwmGetWindowAttribute(
+                windows::Win32::Foundation::HWND(hwnd),
+                DWMWA_CLOAKED,
+                &mut value as *mut u32 as *mut c_void,
+                std::mem::size_of::<u32>() as u32,
+            )
+        };
+        got.is_ok() && value != 0
+    }
+
+    /// A window of another process of this same program (another Yap: a
+    /// test Yap beside this one).
+    fn another_yap(hwnd: HWND) -> bool {
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        if pid == 0 || pid == unsafe { GetCurrentProcessId() } {
+            return false;
+        }
+        let name = |p: &std::path::Path| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase());
+        let mine = std::env::current_exe().ok().and_then(|p| name(&p));
+        let theirs = crate::shell::procs::image_path(pid).and_then(|p| name(std::path::Path::new(&p)));
+        mine.is_some() && mine == theirs
+    }
 }
 
 #[cfg(test)]

@@ -34,21 +34,50 @@ public static class YapWin {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L; public int T; public int R; public int B; }
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern IntPtr GetTopWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int value, int size);
+  public static uint Pid(IntPtr h) { uint pid; GetWindowThreadProcessId(h, out pid); return pid; }
+  // Another Yap (a test Yap beside this one): the same program, another process.
+  public static bool OtherYap(IntPtr h, uint mine) {
+    uint pid = Pid(h);
+    if (pid == 0 || pid == mine) return false;
+    try { return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName.ToLower() == "yap"; } catch { return false; }
+  }
+  // The window a click at (x, y) reaches, other Yaps' windows left out: walks
+  // the windows from the top, past click-through, cloaked and other Yaps' ones.
+  public static long AtBesideOtherYaps(int x, int y, uint mine) {
+    for (IntPtr h = GetTopWindow(IntPtr.Zero); h != IntPtr.Zero; h = GetWindow(h, 2)) {
+      if (!IsWindowVisible(h)) continue;
+      RECT r; if (!GetWindowRect(h, out r) || x < r.L || x >= r.R || y < r.T || y >= r.B) continue;
+      if (((long)GetWindowLongPtrW(h, -20) & 0x20) != 0) continue;
+      int cloaked; if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) continue;
+      if (OtherYap(h, mine)) continue;
+      return (long)h;
+    }
+    return 0;
+  }
 }
 '@
 [void][YapWin]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $h = [IntPtr][Int64]${Number(hwnd)}
 $ex = [Int64][YapWin]::GetWindowLongPtrW($h, -20)
 $at = 0
+$beside = 0
 if (${point ? '$true' : '$false'}) {
   $p = New-Object YapWin+POINT
   $p.X = ${Math.round(x)}; $p.Y = ${Math.round(y)}
   $at = [Int64][YapWin]::GetAncestor([YapWin]::WindowFromPoint($p), 2)
+  $mine = [YapWin]::Pid($h)
+  $beside = $at
+  if ($at -ne 0 -and [YapWin]::OtherYap([IntPtr]$at, $mine)) { $beside = [YapWin]::AtBesideOtherYaps($p.X, $p.Y, $mine) }
 }
 $fg = [YapWin]::GetForegroundWindow()
 $fgPid = [uint32]0
 [void][YapWin]::GetWindowThreadProcessId($fg, [ref]$fgPid)
-@{ ex = $ex; visible = [YapWin]::IsWindowVisible($h); at = $at; fgPid = $fgPid } | ConvertTo-Json -Compress
+@{ ex = $ex; visible = [YapWin]::IsWindowVisible($h); at = $at; beside = $beside; fgPid = $fgPid } | ConvertTo-Json -Compress
 `;
   const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
     encoding: 'utf8',
@@ -62,6 +91,11 @@ $fgPid = [uint32]0
     visible: !!r.visible,
     /** The top-level window a click at `point` would reach (0 without one). */
     windowAtPoint: Number(r.at),
+    /**
+     * The same, another Yap's windows left out: test Yaps side by side put
+     * their bars on one spot, the one made clickable last on top.
+     */
+    windowAtPointBesideOtherYaps: Number(r.beside),
     foregroundPid: Number(r.fgPid),
   };
 }

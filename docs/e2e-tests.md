@@ -167,11 +167,20 @@ into shards instead (below). What lets several run side by side on one PC:
   `solo` project in `playwright.config.js`: one at a time, beside the rest.
   A new spec that needs such a thing (a fixed port) goes on that list.
 - **The one real screen**: every test Yap's bar is a topmost window at the
-  same spot above the taskbar, so bar.spec's checks from outside the app
-  (which window a click at the pill reaches, `WindowFromPoint`) can meet
-  another test Yap's bar that is open at that moment (it did once in three
-  runs, 16 Nov; its retry passed). Your own Yap's bar could always do the
-  same. Running bar.spec alone would need it after everything else.
+  same spot above the taskbar, and whichever was made clickable last is on
+  top. bar.spec's checks of which window a click at the pill reaches leave
+  other Yaps' windows out (19 Nov 2026): `bar_debug`'s
+  `clickOnPillReachesBar` (`overlay::win::window_at_besides_other_yaps`)
+  and `windowFacts(…).windowAtPointBesideOtherYaps` (win32.js) walk the
+  windows from the top past another process of the same program, past
+  click-through and cloaked ones. "…takes clicks without activating the
+  bar" checks the click leaves the active window of Yap's UI thread as it
+  was: with four bar.spec copies at once, 3 of 4 bars were that window
+  already as the test began, left so by the tests before. Measured with
+  `bar.spec.js --repeat-each 4 --workers 4 --retries 0`, ten runs each:
+  main before #196 failed "hovering opens the pill" 27 times in 40 and
+  "…without activating the bar" 12 times; main after it 28 and 8; with these
+  checks, none. Your own Yap's bar could always cover a test Yap's too.
 - **One retry, as on CI**: a test that fails is run once more on a fresh
   test Yap; one that passes then is listed as **flaky** in the summary
   (read those too: each is a race somewhere, in the app or in the spec).
@@ -185,8 +194,9 @@ into shards instead (below). What lets several run side by side on one PC:
   it), the bar's menu (its fade needs frames).
 - **`--repeat-each` with several workers**: copies of a spec run side by
   side, so whatever a spec keeps on disk is a worker's own (`-w<N>` folders:
-  meeting-crash's run folder, chat-files' and code-chat-files' files) and the
-  screenshots a copy's own (`screenshots/<spec>-repeat<N>/`).
+  meeting-crash's run folder, chat-files' and code-chat-files' files; the
+  call apps' stand-in icons, `standInIcons`, a folder per worker process)
+  and the screenshots a copy's own (`screenshots/<spec>-repeat<N>/`).
 - **Files a stand-in is still writing**: the fake Claude and fake MCP
   servers append a JSON line in more than one write, so a spec reading one
   while it polls can catch half a line. `jsonLines(file)` (fixtures.js)
@@ -269,6 +279,7 @@ then open `screenshots/` (Claude can read the PNGs directly) or
 |------|----------|-------|
 | `desktop/e2e/app.spec.js` | default | Home renders in portable mode · every sidebar view · every Settings page, and the nav's group names · a setting saved to `config.json` and read back after a reload · a new note survives a view switch · a dictionary entry is saved · a snippet added (multi-line text), kept across a view switch, edited, still a snippet after a Settings auto-save, removed · "Say “press enter” to send" on by default, saved off and on, the key picker with it · Account signed out with the service unreachable · onboarding opens on its first step · a stub dictation lands in the Home feed (skipped without a microphone). (What snippets and the voice command do to a dictation is unit-tested: the stub's text can't say them.) |
 | `desktop/e2e/page-load-retry.spec.js`, `desktop/e2e/never-blank.spec.js` | default; never-blank its own instance (`never-blank`) | a window is never left blank (frontend.md, app-shell.md `page_watch.rs`): the main window's code refused once loads again and Home is there; refused every time, the page stops after two loads a minute and says "Yap couldn't show this window", Reload bringing it back · a view that throws as it starts (its own chunk served with its component swapped for one that throws: no hook in the app) loads again once, then the message, the log's `[web] window settings: … (TypeError at ControlPanel-….js:49)` lines and never the error's words; main.js throwing before it mounts the app the same; the message on the dark frame with none of the app's code loaded · Rust's watchdog (`e2e_page_watch`: its waits cut to 1.5 s, its cap forgotten): a page whose code is refused on every load comes back once it can load; it gives up at 3 reloads in 5 minutes with the message up; WebView2's error page (the page itself refused) comes back; a load that hangs before any content (the page's own retry, never answered) is loaded again; a renderer crashed with CDP's `Page.crash` comes back by itself (the suite connects again: Playwright is done with a crashed page, `yap.reattach()`) · the Yap bar: a view that throws paints nothing (no message, transparent, click-through) and comes back; WebView2's error page there is `about:blank` at once, then the bar again. Requests are refused and replaced with CDP's `Fetch` on a session of the test's own (`support/intercept.js`): Playwright's `page.route` held nothing at all on these pages in 3 test Yaps of 4 |
+| `desktop/e2e/webview2-exit.spec.js` | two test Yaps of its own (`webview2-gone-wait`, `webview2-gone-crash`) | WebView2's browser process exiting (`shell/webview_gone.rs`). Simulated (`e2e_webview2_gone`, the windows still up): the tray's **Restart Yap: its windows stopped** right under the version line and its tooltip line; with a meeting recording Yap waits (the log's "Not restarting Yap yet: a meeting recording would be lost", still the same process 7 s on); the meeting paused, it restarts by itself — a new process from the run folder's copy on the same stdin and stdout, found by `yap.reattach({ restarted: true })` — and says "Yap restarted its windows after WebView2 stopped" once (the note in Data/ gone), the meeting's note kept. For real: CDP's `Browser.crash` (the browser process ended from outside should a runtime refuse it), the log's error and the tray's line, the restart and the notice |
 | `desktop/e2e/paste.spec.js` | seeded history (two dictations, then an Upload) | "Paste last transcript" (`paste_last_transcript`) returns the newest dictation — never the newer Upload — and pastes nothing in a test run (the log says so); after a deleted entry, the one before; after Clear history, "Nothing to paste yet" · Settings → Dictation → Typing into apps: "Match the text around the cursor" on by default, "Append trailing space" saying it's only for fields Yap can't read, the Win+V line, and switching it off and on saved to `config.json` · "Leave the full stop off chat messages" and "Safer pasting into terminals" on by default, auto-submit's line saying where it doesn't press Enter, each switched off and on saved to `config.json`. (The paste itself, the clipboard's privacy formats and the reading of real text fields are Rust tests: `smart_insert`, and the `--ignored` `private_clipboard_round_trip` / `reads_real_text_fields`; so are telling terminals, coding CLIs and chat apps apart and what that does to a dictation: `app_kind`, with an `--ignored` `this_machines_windows` over the PC's real windows.) |
 | `desktop/e2e/dictionary.spec.js` | own instance (`dictionary`: a seeded dictionary and `dictionary_usage.json`) | the Dictionary view for hundreds of entries: a search filtering as you type (words, how they're heard, snippets' text; Esc; a row added mid-search), Ctrl+F the page's but Settings' while Settings is open · a star saved (and kept by a Settings auto-save), the four sorts, "Most used" counts, the sort remembered over a reload, Star in the row's menu · checkboxes, Shift-click, Ctrl+A, Esc, a section's box, ≈ on/off for the selection, Delete… asked and undone back in place, the Delete key, Undo after leaving the view · Import… (`e2e_dictionary_file` in place of the dialog): the preview's counts, unticking, the file's spelling, what's left out and why, Add, Undo; a text file; no file → said · Export… everything as CSV, the selection as text · 2,000 entries: open, search, a keystroke timed, more rows on scroll, Ctrl+A, a bulk delete undone · the same in the dark theme (screenshots) |
 | `desktop/e2e/dictionary-list.spec.js` | none (no app) | the Dictionary view's pure parts (`views/dictionary/dictionaryList.js`, `dictionaryFile.js`): search, the sorts, CSV (quotes, `""`, line breaks, `;`/tab, headers or none) and text (`→ -> =>`, words, notes, bullets) parsing, the import's plan (new, already there, spelled differently, said twice) and choices, export round trips, both Undos |

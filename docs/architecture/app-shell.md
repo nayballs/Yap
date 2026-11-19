@@ -308,6 +308,9 @@ re-exported by the module, except `local_llm`'s, which callers name
   update adds **"Restart to update to X"** under the version line (replacing
   "Check for updates…"; portable: "Get Yap X on GitHub…"), a green dot on the icon
   and "· Update X ready" in the tooltip (`tray::refresh`, driven by updates.rs).
+  WebView2's browser process gone (every window with it, `webview_gone.rs`):
+  **"Restart Yap: its windows stopped"** first in every menu, a red dot (it
+  wins over the green one) and a first tooltip line (`tray::windows_gone`).
   A live call Yap asks about, while nothing records, puts **"Record this Teams
   call"** above it (`meeting_detect::tray_item`; the click runs
   `on_tray_record` on a worker thread). The calendar's **next meeting**
@@ -408,8 +411,9 @@ re-exported by the module, except `local_llm`'s, which callers name
   input waits) once that has lasted 15 s (`unresponsive`, pure); a frame's
   renderer (a chat's visual), the GPU's and the helpers' are WebView2's to
   restart, only logged; the browser process exiting takes every webview
-  with it (WebView2 says to make them again, which Tauri can't): an error
-  in the log, once. **The cap** (`Budget`, pure): 3 reloads of a window in
+  with it (WebView2 says to make them again, which Tauri can't):
+  `shell/webview_gone.rs` (below) restarts Yap, and no page is loaded
+  again from then. **The cap** (`Budget`, pure): 3 reloads of a window in
   5 minutes, whatever the reason, then it's left (logged once), the page's
   message covering the rest; two checks of one load reload it once (each
   load a generation). A reload is a `navigate` to Yap's own page (the last
@@ -433,6 +437,39 @@ re-exported by the module, except `local_llm`'s, which callers name
   running page's, and forgets the cap. Unit tests: the cap, the
   allowances, which `ProcessFailed` kinds reload, the unresponsive run, Yap's
   own URLs and the see-through windows. e2e `never-blank.spec.js`.
+- **`shell/webview_gone.rs`** — **WebView2's browser process exiting**
+  (19 Nov 2026). Every window dies with it while the Rust core goes on (the
+  hotkey, a meeting's recorder, the tray); WebView2 says to make the webviews
+  again, which Tauri can't, so Yap restarts. When `ProcessFailed` says so
+  (`page_watch.rs`; each webview reports it, the first counts): an `error`
+  in the log; the tray shows it (`tray::windows_gone`: a red dot on the icon,
+  "Yap's windows stopped. Restart Yap brings them back." first in the
+  tooltip, **Restart Yap: its windows stopped** at the top of the idle and
+  the recording menu, which restarts now); and Yap waits until nothing would
+  be lost (`in_the_way`, pure, over `Work`): no dictation recording or
+  transcribing, nor a cancelled one kept for Undo; no meeting recording, nor
+  its audio transcribed again; no speech model downloading (those three are
+  the updater's own check, `updates::busy_reason`); no Chat turn answering
+  (`stream::answering_ids`); no Voice Assistant question (its phase not
+  idle); no Code chat's Claude or agent at work (`agents::store::live_ids`)
+  and no ▶ Run command (`run_block::running_chats`): their Claude Code
+  children die with Yap; no routine running (`routines::running`). It looks
+  again every 5 s, as long as it takes, saying in the log what it waits for
+  when that changes ("Not restarting Yap yet: a meeting recording would be
+  lost"), then restarts (`AppHandle::request_restart`: Yap's exit cleanup
+  runs first), leaving `webview2_restart.json` in the data folder (when,
+  by whom, whether the main window was open). The new Yap reads and deletes
+  it (`init`, fresh for 10 minutes), shows the main window again if it was
+  open (`show_quietly`: no focus) and says once, quietly (`alert::confirm`,
+  kind `windowsRestarted`: a toast or a bar card, never a Windows
+  notification, held over a dictation): "Yap restarted its windows after
+  WebView2 stopped". **Dev builds** (`tauri dev`, `restarts_by_itself`)
+  never restart by themselves — a restart there leaves the dev process
+  tree — only the tray's item does. Debug builds in test mode:
+  `e2e_webview2_gone` goes through it all without a crash. Unit tests: what
+  a restart would lose, the dev rule, the note. e2e `webview2-exit.spec.js`
+  (simulated: the tray, the wait over a meeting, the restart and the notice;
+  for real: CDP `Browser.crash`).
 - **`shell/webview_memory.rs`** — hidden webviews keep less in memory (2026-10-22):
   a watcher thread reads each window's visibility every 3 s (`target`, pure:
   hidden or minimised → low) and gives an off-screen window's webview

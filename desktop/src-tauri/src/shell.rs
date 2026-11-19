@@ -27,5 +27,6 @@ pub mod settings;
 pub mod theme;
 pub mod tray;
 pub mod view_fit;
+pub mod webview_gone;
 pub mod webview_memory;
 pub mod window;

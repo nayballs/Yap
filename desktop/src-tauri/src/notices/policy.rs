@@ -190,6 +190,10 @@ pub fn rule(kind: &str) -> Rule {
         // (pasting/last.rs): the answer to the person's own press, now or
         // not at all.
         "lastTranscript" => Rule { hold_dictation: false, max_wait_ms: Some(5_000), ..info },
+        // "Yap restarted its windows after WebView2 stopped"
+        // (shell/webview_gone.rs), once as the new Yap starts: never over a
+        // dictation, never dropped.
+        "windowsRestarted" => Rule { hold_dictation: true, max_wait_ms: None, ..info },
         // Ready to install: waits for a dictation or a meeting to end, as
         // long as it takes.
         "update" => Rule { hold_meeting: true, max_wait_ms: None, yields: true, ..info },
