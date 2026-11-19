@@ -34,6 +34,9 @@ impl Loop<'_> {
         // The pictures this step looked at (`look_at_picture`): one user
         // message after its tool results carries them (chat/pictures.rs).
         let mut looks: Vec<crate::chat::pictures::Look> = Vec::new();
+        // The API's computer toolset runs a step's calls as a batch: after
+        // one fails, the rest answer "Not executed" (computer.rs).
+        let mut toolset_failed = false;
         for call in calls {
             let id = call["id"].as_str().unwrap_or("");
             let name = call["function"]["name"].as_str().unwrap_or("");
@@ -52,13 +55,16 @@ impl Loop<'_> {
             }
             // (An agent after outside content isn't refused here: its own
             // card asks, `tools/agents.rs`.)
+            let member = self.toolset_member(name);
             let result = match gate(name, &args, hold_web, self.seen(), &self.extra) {
+                _ if member && toolset_failed => serde_json::json!({ "success": false, "error": crate::computer::NOT_EXECUTED, "data": Value::Null, "displayText": "Not done: an earlier action failed" }),
                 Some(refusal) => refusal,
                 None => {
                     let source = Source::of(name, self.web.is_some(), &self.extra, self.claude_web, self.open_apps);
                     self.dispatch(source, name, args, &mut looks).await
                 }
             };
+            toolset_failed |= member && result["success"] != serde_json::json!(true);
             notes_found_nothing &= self.fold(id, name, &ran_with, result, &looks);
         }
         self.after_calls(&looks, notes_found_nothing).await;

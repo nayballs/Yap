@@ -106,6 +106,69 @@ pub fn new_turn(prefix: &str) -> String {
     format!("{prefix}:{}", TURNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
 }
 
+/// **The API's own computer toolset** (Anthropic's public docs, read 19 Nov
+/// 2026): for Claude on an Anthropic key, Chat declares
+/// `{"type": "computer_toolset_20260801"}` in place of the [`MEMBERS`] as
+/// function tools (`ai/llm/anthropic.rs`); Claude calls each member by name
+/// with `toolset_name: "computer"`, every result echoes it, and the same
+/// executor runs them. The desktop contract's other tools (`request_access`,
+/// `open_application`, the clipboard, `computer_batch`…) stay ordinary
+/// tools beside it.
+pub const TOOLSET: &str = "computer_toolset_20260801";
+/// The toolset's name on its calls and results.
+pub const TOOLSET_NAME: &str = "computer";
+/// The toolset's 17 members: the same actions, with the same fields, as
+/// the desktop contract's.
+pub const MEMBERS: &[&str] = &[
+    SCREENSHOT,
+    ZOOM,
+    act::LEFT_CLICK,
+    act::RIGHT_CLICK,
+    act::MIDDLE_CLICK,
+    act::DOUBLE_CLICK,
+    act::TRIPLE_CLICK,
+    act::DRAG,
+    act::MOUSE_MOVE,
+    act::MOUSE_DOWN,
+    act::MOUSE_UP,
+    CURSOR,
+    act::SCROLL,
+    act::TYPE,
+    act::KEY,
+    act::HOLD_KEY,
+    act::WAIT,
+];
+/// The answer to a member called after one that failed in the same step
+/// (the toolset runs a step's calls as a batch).
+pub const NOT_EXECUTED: &str = "Not executed: an earlier computer action in this turn failed.";
+
+/// Models whose API refused the toolset this run: their function tools from then on.
+static NO_TOOLSET: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// **Whether Chat declares the toolset for `model`** on Anthropic's API:
+/// the Claude 5 family (Opus, Sonnet and Haiku 5.5, and Fable, take only
+/// the toolset; Opus 5 takes both), unless the API refused it this run.
+pub fn takes_toolset(model: &str) -> bool {
+    static FAMILY: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"claude-(?:opus|sonnet|haiku|fable)-(\d+)").expect("static regex"));
+    let id = model.to_lowercase();
+    let five = FAMILY.captures(&id).and_then(|c| c[1].parse::<u32>().ok()).is_some_and(|major| major >= 5);
+    five && !NO_TOOLSET.lock().unwrap_or_else(|p| p.into_inner()).contains(&id)
+}
+
+/// The API refused the toolset for `model`: its function tools for the rest of this run.
+pub fn refuse_toolset(model: &str) {
+    let mut no = NO_TOOLSET.lock().unwrap_or_else(|p| p.into_inner());
+    let id = model.to_lowercase();
+    if !no.contains(&id) {
+        no.push(id);
+    }
+}
+
+/// The toolset's entry in a request's tools.
+pub fn toolset_entry() -> Value {
+    json!({ "type": TOOLSET })
+}
+
 /// The longest side a screenshot is sent at: about 1080p, Anthropic's
 /// balance of accuracy and cost for computer use (never over the
 /// provider's own limit).
@@ -118,10 +181,13 @@ pub fn may(provider: &str, model: &str) -> bool {
     provider == crate::ai::claude_plan::PROVIDER || (provider == "anthropic" && model.to_lowercase().starts_with("claude"))
 }
 
-/// **Asked in Chat**: typed there, or out loud with Chat in view (`scope`:
-/// None for Chat, "assistant"…), never across the meetings. Pure.
+/// **Asked in Chat, or out loud**: typed in Chat, or asked with the Voice
+/// Assistant's shortcut from any app (phase 3: its access card and the
+/// cards that ask first come up on the bar, answered by voice or a click;
+/// `scope`: None for Chat, "assistant"…) — never across the meetings, a
+/// routine's or a phone's. Pure.
 pub fn in_chat(chat_in_view: bool, scope: Option<&str>, meetings: bool) -> bool {
-    chat_in_view && matches!(scope, None | Some("assistant")) && !meetings
+    !meetings && (scope == Some("assistant") || (chat_in_view && scope.is_none()))
 }
 
 /// **Whether a turn is offered computer use** (`tools`: the model calls
@@ -533,13 +599,26 @@ pub(crate) mod tests {
         assert!(!offered(&on, true, "openai", "gpt-5", chat, false), "Claude only at first");
         assert!(!offered(&on, true, "custom", "qwen3-4b", chat, false));
         assert!(!offered(&on, false, plan, "opus", chat, false), "a model without tools");
-        assert!(!in_chat(false, Some("assistant"), false), "from another app");
+        assert!(in_chat(false, Some("assistant"), false), "out loud from another app (phase 3)");
+        assert!(!in_chat(false, None, false), "Chat not in view");
+        assert!(!in_chat(true, Some("routine"), false), "a routine's");
         assert!(!in_chat(true, Some("meetings"), true), "across the meetings");
         assert!(!offered(&on, true, plan, "opus", chat, true), "a phone's question");
         assert_eq!(definitions(false), json!([]));
         let names: Vec<String> = definitions(true).as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap().to_string()).collect();
         assert_eq!(names, NAMES);
         assert!(offers(true, SCREENSHOT) && !offers(false, SCREENSHOT) && !offers(true, "look_at_screen"));
+    }
+
+    #[test]
+    fn the_claude_5_family_takes_the_apis_toolset() {
+        assert!(takes_toolset("claude-opus-5-5") && takes_toolset("claude-sonnet-5-5") && takes_toolset("claude-haiku-5-5") && takes_toolset("claude-fable-5-2"));
+        assert!(takes_toolset("claude-opus-5"));
+        assert!(!takes_toolset("claude-opus-4-8") && !takes_toolset("claude-haiku-4-5") && !takes_toolset("gpt-5"));
+        refuse_toolset("claude-test-only-opus-5-9");
+        assert!(!takes_toolset("claude-test-only-opus-5-9"), "refused this run");
+        assert_eq!(MEMBERS.len(), 17);
+        assert!(MEMBERS.iter().all(|m| NAMES.contains(m)), "every member is one of Yap's tools");
     }
 
     #[test]

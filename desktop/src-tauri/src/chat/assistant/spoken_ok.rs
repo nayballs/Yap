@@ -227,6 +227,12 @@ pub fn asking(card: &Card, meeting: bool) -> Option<Asking> {
             let o = card.outline.as_deref()?;
             Some(Asking { line: crate::chat::cards::outline::spoken_line(o), bar: crate::chat::cards::outline::bar_card(card.id, o), spoken: !meeting })
         }
+        // Computer use's access card (computer/access.rs), from any app.
+        crate::computer::access::ACT => {
+            let a = card.access.as_deref().filter(|a| !a.bypass)?;
+            let spoken = !meeting;
+            Some(Asking { line: crate::computer::access::spoken_line(a, spoken), bar: crate::computer::access::bar_card(card.id, a, spoken), spoken })
+        }
         "" | "press" | "enter" | "open" | "type" | "drag" => {
             let spoken = !meeting && !CLICK_ONLY.contains(&card.does.as_str());
             Some(Asking { line: page_line(card, spoken), bar: page_card(card, spoken), spoken })

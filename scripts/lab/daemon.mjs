@@ -1291,9 +1291,11 @@ const COMPUTER_START_MENU = [
   { id: 'Microsoft.WindowsCalculator_8wekyb3d8bbwe!App', name: 'Calculator' },
   { id: 'Microsoft.Paint_8wekyb3d8bbwe!App', name: 'Paint' },
   { id: 'Microsoft.Windows.Explorer', name: 'File Explorer' },
-  { id: 'MSEdge', name: 'Microsoft Edge', target: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe' },
+  { id: 'MSEdge', name: 'Microsoft Edge', target: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe' },
   { id: 'Microsoft.WindowsTerminal_8wekyb3d8bbwe!App', name: 'Terminal' },
-  { id: 'C:\Program Files\Vaultkeeper\KeePass.exe', name: 'KeePass', target: 'C:\Program Files\Vaultkeeper\KeePass.exe' },
+  { id: 'C:\\Program Files\\Vaultkeeper\\KeePass.exe', name: 'KeePass', target: 'C:\\Program Files\\Vaultkeeper\\KeePass.exe' },
+  // Not on screen: open_application starts it (the stand-in desktop gets a window for it).
+  { id: 'Microsoft.MicrosoftStickyNotes_8wekyb3d8bbwe!App', name: 'Sticky Notes' },
 ];
 
 /** `set --computer on`'s desktop (computer/sim.rs): two displays, test windows topmost first, the desktop last.

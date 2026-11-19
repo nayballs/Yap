@@ -315,8 +315,9 @@ function messagesBlocks(step, record) {
     if (step.cite) block.citations = step.cite.map((c) => ({ type: 'web_search_result_location', url: c.url, title: c.title, cited_text: c.text ?? '' }));
     blocks.push(block);
   }
-  for (const { name, args } of step.tools ?? []) {
-    blocks.push({ type: 'tool_use', id: `toolu_fake_${++callSeq}`, name, input: typeof args === 'function' ? args(record) : args });
+  for (const { name, args, toolset } of step.tools ?? []) {
+    // (`toolset`: a member of the API's computer toolset, called by its name with `toolset_name`.)
+    blocks.push({ type: 'tool_use', id: `toolu_fake_${++callSeq}`, name, input: typeof args === 'function' ? args(record) : args, ...(toolset ? { toolset_name: 'computer' } : {}) });
   }
   return blocks;
 }

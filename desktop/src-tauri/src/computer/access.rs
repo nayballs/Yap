@@ -216,6 +216,64 @@ fn settle(reply: Option<Reply>, asked: &Request) -> (&'static str, bool, bool, b
     }
 }
 
+/// What an app's tier lets Yap do, in a few words.
+fn tier_words(tier: &str) -> &'static str {
+    match tier {
+        "read" => "looks only",
+        "click" => "clicks only",
+        _ => "clicks and typing",
+    }
+}
+
+/// The apps asked for, as a list said out loud ("Notepad and Paint"). Pure.
+fn said_list(apps: &[AccessApp]) -> String {
+    let names: Vec<&str> = apps.iter().map(|a| a.name.as_str()).collect();
+    match names.as_slice() {
+        [] => "your apps".into(),
+        [one] => (*one).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// **The line Yap says** for an access card asked out loud (the Voice
+/// Assistant from any app; `spoken`: a spoken yes may answer it): "Let me
+/// use Notepad and Paint, to write your shopping list? Say yes, or press
+/// Allow." Pure.
+pub fn spoken_line(a: &AccessCard, spoken: bool) -> String {
+    let why = a.reason.trim().trim_end_matches('.');
+    let why = if why.is_empty() { String::new() } else { format!(", {}", lower_first(why)) };
+    let ending = if spoken { " Say yes, or press Allow." } else { " It needs a click: press Allow on the Yap bar." };
+    format!("Let me use {}{why}?{ending}", said_list(&a.apps))
+}
+
+fn lower_first(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        // ("To write…" reads on as "to write…"; a name stays as it is.)
+        Some(f) if c.clone().next().is_some_and(char::is_lowercase) => f.to_lowercase().chain(c).collect(),
+        Some(f) => std::iter::once(f).chain(c).collect(),
+        None => String::new(),
+    }
+}
+
+/// **The bar's card** for an access card asked out loud: "Let Yap use your
+/// apps?", each app with what it lets Yap do, the reason, the extras;
+/// **Allow** and **Don't**. Pure.
+pub fn bar_card(id: u64, a: &AccessCard, spoken: bool) -> crate::bar::Card {
+    let mut body: Vec<String> = a.apps.iter().map(|app| format!("{} · {}", app.name, tier_words(&app.tier))).collect();
+    if !a.reason.trim().is_empty() {
+        body.push(a.reason.trim().to_string());
+    }
+    let extras: Vec<&str> = [(a.clipboard_read, "read the clipboard"), (a.clipboard_write, "write the clipboard"), (a.system_key_combos, "use system shortcuts")].iter().filter(|(on, _)| *on).map(|(_, w)| *w).collect();
+    if !extras.is_empty() {
+        body.push(format!("Also: {}.", extras.join(", ")));
+    }
+    body.push("Esc or your own mouse stops it.".into());
+    let mut card = crate::chat::assistant::spoken_ok::bar_card(id, "Let Yap use your apps?".into(), body.join("\n"), spoken);
+    card.primary = Some(crate::bar::CardAction::new(format!("allow:{id}"), "Allow"));
+    card
+}
+
 /// **`request_access`** for a chat (`ctx`): resolve the apps, ask on the
 /// card (or not, in Bypass), and keep what's allowed in the chat's session.
 pub async fn request(args: &Value, ctx: &super::Ctx<'_>) -> Value {
@@ -312,6 +370,30 @@ mod tests {
 
     fn app(id: &str, name: &str, target: &str) -> App {
         App::linked(id, name, target, "")
+    }
+
+    /// The Voice Assistant from any app: the access card said in one line
+    /// and put on the bar (Allow / Don't), a spoken yes answering it.
+    #[test]
+    fn an_access_card_asked_out_loud() {
+        let a = AccessCard {
+            apps: vec![AccessApp { name: "Notepad".into(), id: "n".into(), tier: "full".into() }, AccessApp { name: "Terminal".into(), id: "t".into(), tier: "click".into() }],
+            reason: "To write your shopping list.".into(),
+            clipboard_write: true,
+            ..Default::default()
+        };
+        assert_eq!(spoken_line(&a, true), "Let me use Notepad and Terminal, to write your shopping list? Say yes, or press Allow.");
+        assert!(spoken_line(&a, false).ends_with("It needs a click: press Allow on the Yap bar."));
+        let bar = bar_card(7, &a, true);
+        assert_eq!(bar.title, "Let Yap use your apps?");
+        assert!(bar.body.contains("Notepad · clicks and typing") && bar.body.contains("Terminal · clicks only") && bar.body.contains("Also: write the clipboard."), "{}", bar.body);
+        assert_eq!(bar.primary.as_ref().map(|p| (p.id.as_str(), p.label.as_str())), Some(("allow:7", "Allow")));
+        assert_eq!(bar.secondary.as_ref().map(|p| p.id.as_str()), Some("deny:7"));
+        let card = crate::chat::pages::act::confirm::Card { id: 7, act: ACT.into(), state: "asking".into(), access: Some(Box::new(a.clone())), ..Default::default() };
+        let asking = crate::chat::assistant::spoken_ok::asking(&card, false).expect("asked out loud");
+        assert!(asking.spoken && asking.line.starts_with("Let me use Notepad"));
+        let bypass = crate::chat::pages::act::confirm::Card { access: Some(Box::new(AccessCard { bypass: true, ..a })), ..card };
+        assert!(crate::chat::assistant::spoken_ok::asking(&bypass, false).is_none(), "allowed without asking: nothing to say");
     }
 
     #[test]

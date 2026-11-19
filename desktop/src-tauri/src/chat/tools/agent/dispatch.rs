@@ -104,6 +104,12 @@ impl Source {
 }
 
 impl Loop<'_> {
+    /// Whether `name` is a member of the API's computer toolset in this
+    /// turn (Claude on an Anthropic key: `computer.rs` `TOOLSET`).
+    pub(super) fn toolset_member(&self, name: &str) -> bool {
+        self.computer_toolset && crate::computer::MEMBERS.contains(&name) && crate::computer::takes_toolset(self.model)
+    }
+
     /// **One call run** where its `source` says, with `args` as fixed
     /// (`args.rs`): its result, for the model. A picture or the screen
     /// looked at goes in `looks` while it fits in what the request has left
@@ -299,16 +305,22 @@ impl Loop<'_> {
                     }
                 });
                 let mut fits = true;
+                // The API's toolset: a member's picture goes in its own result.
+                let own = self.toolset_member(name);
                 for look in run.looks {
-                    if self.room.takes_picture(&self.messages, looks, &look) {
-                        looks.push(look);
-                    } else {
+                    let pending: Vec<crate::chat::pictures::Look> = looks.iter().chain(self.toolset_looks.iter()).cloned().collect();
+                    if !self.room.takes_picture(&self.messages, &pending, &look) {
                         fits = false;
+                    } else if own {
+                        self.toolset_looks.push(look);
+                    } else {
+                        looks.push(look);
                     }
                 }
                 if fits {
                     run.result
                 } else {
+                    self.toolset_looks.clear();
                     tracing::info!(provider = self.provider, "Chat: no room left in the model's context for a computer-use picture");
                     tool_error(crate::chat::budget::NO_ROOM_TO_LOOK.to_string(), Value::Null, "Didn't look: no room left in the model's context".to_string())
                 }
