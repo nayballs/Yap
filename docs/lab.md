@@ -430,6 +430,17 @@ opens (`e2e_workspace`); Yap's own folder rules still check it.
 {"ok":true,"config":{"webSearch":true},"files":["pictures/sun.png","notes.md"]}
 ```
 
+`--computer on|off` (19 Nov 2026): **computer use on a stand-in desktop** (`computer/sim.rs`). Two
+displays of test windows the test Yap draws itself:
+- Notepad, Calculator, a browser and an Explorer desktop and taskbar on the first display, with a mail
+  window and one of Yap's own over them;
+- Paint on the second display.
+
+Its Start menu is a stand-in list of test apps (`YAP_E2E_APPS`, written then), with a password manager
+among them. Computer use's switch and the two screen switches go on. The real screen, mouse and
+keyboard are never touched (test mode), so the Claude inside Yap can be asked to use apps and the
+tools compared one for one with the desktop app's (the private plan's parity pass).
+
 Two more (16 Nov 2026), for a Code chat summary's Changes (`summary` below):
 
 - `--gh on|off`: **the lab's read-only `gh`** (`agents/prs/lab.rs`, only in a live lab:

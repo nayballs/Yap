@@ -172,7 +172,7 @@ pub fn result_of(state: &str, allowed: &[Granted], denied: &[DeniedApp], every: 
         Tier::Click => "clicks only: a left click and scrolling, never typing or keys",
         Tier::Full => "full",
     };
-    let granted: Vec<Value> = every.apps.iter().map(|g| json!({ "name": g.name, "tier": g.tier.as_str(), "means": tier_note(g.tier) })).collect();
+    let granted: Vec<Value> = every.apps.iter().map(|g| json!({ "name": g.name, "id": g.id, "tier": g.tier.as_str(), "means": tier_note(g.tier) })).collect();
     let denied_v: Vec<Value> = denied.iter().map(|d| json!({ "name": d.name, "why": d.why })).collect();
     let data = json!({
         "granted": granted,
@@ -180,7 +180,7 @@ pub fn result_of(state: &str, allowed: &[Granted], denied: &[DeniedApp], every: 
         "clipboardRead": every.clipboard_read,
         "clipboardWrite": every.clipboard_write,
         "systemKeyCombos": every.system_keys,
-        "screenshotFiltering": "masked",
+        "screenshotFiltering": "mask",
     });
     let names = |v: &[Granted]| v.iter().map(|g| g.name.as_str()).collect::<Vec<_>>().join(", ");
     match state {

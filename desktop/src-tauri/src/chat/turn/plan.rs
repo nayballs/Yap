@@ -528,7 +528,7 @@ fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude
         s.push(' ');
         s.push_str(&eyes_lines(eyes));
     }
-    // Apps on the PC (computer.rs, over the `computer-use` server).
+    // Apps on the PC (computer.rs, over the `yap-computer` server).
     if eyes.computer {
         s.push(' ');
         s.push_str(crate::integrations::claude_live::computer::LINES);

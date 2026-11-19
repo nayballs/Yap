@@ -243,13 +243,42 @@ pub fn desk() -> Result<Box<dyn Desk>, String> {
     Ok(Box::new(ThisPc))
 }
 
-/// A window masked in a screenshot, in its pixels.
+/// A window masked in a screenshot: the part of it that shows, in the
+/// screenshot's pixels (the parity pass, 19 Nov 2026: the desktop behind
+/// everything, listed whole, read as "the whole screen is masked").
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Masked {
     #[serde(flatten)]
     pub rect: Rect,
-    /// "not allowed" or "Yap".
+    /// "not allowed", "Yap", or the desktop's and the taskbar's own words
+    /// (File Explorer's, not allowed): never another app's name.
     pub what: &'static str,
+}
+
+/// One of the allowed apps' windows in a screenshot: the app, and the part
+/// of the window that shows (the parity pass: Claude couldn't tell which
+/// window was which app).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Seen {
+    pub app: String,
+    #[serde(flatten)]
+    pub rect: Rect,
+}
+
+/// What a masked window is called: Yap's own, the desktop or the taskbar
+/// (File Explorer's), else an app not allowed. Pure.
+fn masked_as(win: &Win, paint: Paint) -> &'static str {
+    match (paint, win.class.as_str()) {
+        (Paint::Yap, _) => "Yap",
+        (_, "Progman" | "WorkerW") => "the desktop (File Explorer, not allowed)",
+        (_, "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") => "the taskbar (File Explorer, not allowed)",
+        _ => "not allowed",
+    }
+}
+
+/// The smallest rectangle round `parts`. Pure.
+fn bounds(parts: &[Rect]) -> Rect {
+    parts.iter().fold(Rect::default(), |acc, p| acc.union(p))
 }
 
 /// **A screenshot taken**: the frame its coordinates are in, the picture,
@@ -261,17 +290,18 @@ pub struct Shot {
     pub display: Display,
     pub others: Vec<Display>,
     pub masked: Vec<Masked>,
-    /// How many windows of the allowed apps are in it.
-    pub shown: usize,
+    /// The allowed apps' windows in it, topmost first.
+    pub windows: Vec<Seen>,
 }
 
 /// **Takes a screenshot** of the display `chosen` (else automatic) with
-/// every window not of `owner`'s apps masked, its frame at most `edge`
-/// pixels long (blocking).
-pub fn take(desk: &dyn Desk, chosen: Option<&str>, owner: &dyn Fn(&Win) -> bool, edge: u32) -> Result<Shot, String> {
+/// every window not of an allowed app (`owner`: the app's name, if it's one
+/// of theirs) masked, its frame at most `edge` pixels long (blocking).
+pub fn take(desk: &dyn Desk, chosen: Option<&str>, owner: &dyn Fn(&Win) -> Option<String>, edge: u32) -> Result<Shot, String> {
     let displays = desk.displays();
     let wins = desk.windows();
-    let allowed: Vec<Rect> = wins.iter().filter(|w| owner(w)).map(|w| w.rect).collect();
+    let apps: Vec<Option<String>> = wins.iter().map(|w| if w.own { None } else { owner(w) }).collect();
+    let allowed: Vec<Rect> = wins.iter().zip(&apps).filter(|(_, a)| a.is_some()).map(|(w, _)| w.rect).collect();
     let i = choose(&displays, chosen, &allowed, desk.cursor()).ok_or("no display found")?;
     let display = displays[i].clone();
     let others: Vec<Display> = displays.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, d)| d.clone()).collect();
@@ -281,10 +311,11 @@ pub fn take(desk: &dyn Desk, chosen: Option<&str>, owner: &dyn Fn(&Win) -> bool,
     }
     let painted: Vec<(Rect, Paint)> = wins
         .iter()
-        .map(|win| {
+        .zip(&apps)
+        .map(|(win, app)| {
             let paint = if win.own {
                 Paint::Yap
-            } else if owner(win) {
+            } else if app.is_some() {
                 Paint::Keep
             } else {
                 Paint::Mask
@@ -297,21 +328,15 @@ pub fn take(desk: &dyn Desk, chosen: Option<&str>, owner: &dyn Fn(&Win) -> bool,
     // What's masked, as the model sees it: each window's frame on the screenshot (only where it shows).
     let shows = pieces(display.rect, &painted);
     let mut masked = Vec::new();
-    let mut shown = 0;
-    for ((win, (_, paint)), parts) in wins.iter().zip(&painted).zip(&shows) {
-        if parts.is_empty() {
-            continue;
-        }
-        match paint {
-            Paint::Keep => shown += 1,
-            Paint::Mask | Paint::Yap => {
-                if let Some(r) = frame.rect_in(&win.rect.intersect(&display.rect)) {
-                    masked.push(Masked { rect: r, what: if *paint == Paint::Yap { "Yap" } else { "not allowed" } });
-                }
-            }
+    let mut windows = Vec::new();
+    for (((win, (_, paint)), parts), app) in wins.iter().zip(&painted).zip(&shows).zip(&apps) {
+        let Some(r) = (!parts.is_empty()).then(|| frame.rect_in(&bounds(parts))).flatten() else { continue };
+        match (paint, app) {
+            (Paint::Keep, Some(app)) => windows.push(Seen { app: app.clone(), rect: r }),
+            _ => masked.push(Masked { rect: r, what: masked_as(win, *paint) }),
         }
     }
-    Ok(Shot { frame, full, display, others, masked, shown })
+    Ok(Shot { frame, full, display, others, masked, windows })
 }
 
 /// **The picture the model gets**: the display's masked pixels at the
@@ -373,6 +398,24 @@ mod tests {
         let parts = pieces(display, &wins);
         assert_eq!(parts[0], vec![Rect::new(-90, 5, 30, 20)]);
         assert!(parts[2].iter().all(|r| r.x >= -40 || r.y >= 50), "{:?}", parts[2]);
+    }
+
+    /// The parity pass (19 Nov 2026): an allowed window by its app, and the
+    /// desktop behind it called what it is, not "the whole screen masked".
+    #[test]
+    fn a_screenshot_names_the_allowed_windows_and_the_desktop() {
+        let scene = crate::computer::sim::Scene {
+            displays: vec![crate::computer::sim::SimDisplay { x: 0, y: 0, w: 200, h: 100, primary: true }],
+            windows: vec![
+                crate::computer::sim::SimWindow { x: 10, y: 10, w: 50, h: 50, exe: r"C:\Windows\notepad.exe".into(), ..Default::default() },
+                crate::computer::sim::SimWindow { x: 0, y: 0, w: 200, h: 100, exe: r"C:\Windows\explorer.exe".into(), class: "Progman".into(), ..Default::default() },
+            ],
+            cursor: None,
+        };
+        let owner = |w: &Win| w.exe.ends_with("notepad.exe").then(|| "Notepad".to_string());
+        let s = take(&scene, None, &owner, 1920).unwrap();
+        assert_eq!(s.windows, vec![Seen { app: "Notepad".into(), rect: Rect::new(10, 10, 50, 50) }]);
+        assert_eq!(s.masked, vec![Masked { rect: Rect::new(0, 0, 200, 100), what: "the desktop (File Explorer, not allowed)" }]);
     }
 
     #[test]

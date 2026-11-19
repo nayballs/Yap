@@ -206,7 +206,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `chat/made/pages.rs` — `save_page`: pages Yap keeps (the artifacts', local only), a version each change with its id, beside the chat in the same sandbox; in the chat's Outputs; its ⋯ Save as… and Open in browser (`outside_document`: a temp copy, swept after a day).
 
 **Computer use** — [computer-use.md](./docs/architecture/computer-use.md)
-- `computer.rs` — Chat's model sees (from phase 2: drives) the apps the person allows, the Claude desktop app's tools (`request_access`, `screenshot`, `zoom`…), one executor for the tool loop and Claude Code (`claude_live/computer.rs`, a `computer-use` server); Claude only, never in a meeting, a call or a dictation.
+- `computer.rs` — Chat's model sees (from phase 2: drives) the apps the person allows, the Claude desktop app's tools (`request_access`, `screenshot`, `zoom`…), one executor for the tool loop and Claude Code (`claude_live/computer.rs`, a `yap-computer` server); Claude only, never in a meeting, a call or a dictation.
 - `computer/access.rs` / `computer/grants.rs` — the access card (act "access"); the apps allowed per chat, in memory, each one's tier (browsers read only, terminals and IDEs clicks only); never Yap or a password manager.
 - `computer/windows.rs` / `computer/shot.rs` / `computer/frame.rs` / `computer/sim.rs` — whose each window is; one display captured with every other window masked (Yap's too); screenshot ↔ physical pixels; the stand-in desktop for tests.
 

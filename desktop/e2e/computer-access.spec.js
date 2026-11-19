@@ -1,12 +1,12 @@
 // Computer use, phase 1: seeing and permission (desktop/src-tauri/src/computer.rs,
 // computer/access.rs, integrations/claude_live/computer.rs). A plan chat's Claude Code asks for
-// apps with mcp__computer-use__request_access on Yap's `computer-use` server; the person answers
-// on the access card in the thread; then mcp__computer-use__screenshot shows one display with
+// apps with mcp__yap-computer__request_access on Yap's `yap-computer` server; the person answers
+// on the access card in the thread; then mcp__yap-computer__screenshot shows one display with
 // every window of an app not allowed masked, its picture back as MCP image content and kept
 // with the question.
 //
 // Claude Code is this build's stand-in (`yap.exe fake-claude`, ai/claude_code/fake.rs): `_mcp`
-// with `server: "computer-use"` calls Yap's endpoint as Claude Code would and writes what it got
+// with `server: "yap-computer"` calls Yap's endpoint as Claude Code would and writes what it got
 // to a file this spec reads. The desktop is computer use's stand-in (`e2e_computer_scene`,
 // computer/sim.rs) and the Start menu a stand-in list (YAP_E2E_APPS): nothing of the real screen,
 // the person's apps or their Claude Code. Fictional apps and paths only.
@@ -20,7 +20,7 @@ const HERE = path.join(RUNS, 'computer-access-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
 const SID = '{{session_id}}';
 const MODEL = 'claude-haiku-5-5';
-const SERVER = 'computer-use';
+const SERVER = 'yap-computer';
 
 // ---- the stand-in's script ----
 
@@ -30,7 +30,7 @@ const CHAT_INIT = {
   subtype: 'init',
   cwd: '{{cwd}}',
   session_id: SID,
-  tools: ['WebFetch', 'WebSearch', 'mcp__computer-use__request_access', 'mcp__computer-use__screenshot'],
+  tools: ['WebFetch', 'WebSearch', 'mcp__yap-computer__request_access', 'mcp__yap-computer__screenshot'],
   mcp_servers: [
     { name: 'yap', status: 'connected' },
     { name: SERVER, status: 'connected' },
@@ -63,7 +63,7 @@ const calls = (msg, id, name, input) => [
   whole(msg, [{ type: 'tool_use', id, name, input }], 'tool_use'),
   ev({ type: 'message_stop' }),
 ];
-/** One of Yap's computer-use tools: its call, Yap's computer-use server called with it, the answer its tool result. */
+/** One of Yap's computer-use tools: its call, Yap's yap-computer server called with it, the answer its tool result. */
 const computerCall = (msg, id, tool, input, dump) => [...calls(msg, id, `mcp__${SERVER}__${tool}`, input), { _mcp: { tool, arguments: input, result_for: id, dump, server: SERVER } }];
 const answers = (msg, text) => [
   ev({ type: 'message_start', message: { id: msg, type: 'message', role: 'assistant', model: MODEL, content: [] } }),
@@ -182,7 +182,7 @@ test('a plan chat asks to use apps on a card; allowed, its screenshot shows only
   expect(resultOf(access).data.denied.map((d) => d.name)).toEqual(['KeePass', 'Paintbrush Deluxe']);
   expect(taken).toMatchObject({ tool: 'screenshot', isError: false });
   const shotResult = resultOf(taken);
-  expect(shotResult).toMatchObject({ success: true, data: { display: 'Display 1', frame: { w: 1280, h: 720 }, allowedWindows: 1 } });
+  expect(shotResult).toMatchObject({ success: true, data: { display: 'Display 1', frame: { w: 1280, h: 720 }, windows: [{ app: 'Notepad', x: 100, y: 80, w: 700, h: 500 }] } });
   expect(shotResult.data.masked.map((m) => m.what).sort()).toEqual(['Yap', 'not allowed']);
   expect(imagesIn(taken)).toHaveLength(1);
   expect(imagesIn(taken)[0].mimeType).toBe('image/png');

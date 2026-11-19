@@ -49,7 +49,7 @@ The plan and its phases are in the private repo
   - where the pixels come from (`Desk`: this PC, or the stand-in).
 - `computer/sim.rs` (debug builds and tests) — the stand-in desktop: a scene
   of displays and windows drawn in flat colours (`e2e_computer_scene`).
-- `integrations/claude_live/computer.rs` — the `computer-use` MCP server for
+- `integrations/claude_live/computer.rs` — the `yap-computer` MCP server for
   a plan chat's or a Code chat's Claude Code.
 
 Frontend:
@@ -169,9 +169,10 @@ Yap's own windows are never anyone's.
 - the picture, in the next step for the tool loop, or as MCP image content
   for Claude Code;
 - the display and the other displays;
-- each masked window's rectangle, labelled "not allowed" or "Yap", never an
-  app's name;
-- how many of the allowed apps' windows are in it.
+- each allowed app's window, by its app and where it shows (`windows`);
+- each masked area where it shows, labelled "not allowed", "Yap", "the
+  desktop" or "the taskbar" (File Explorer's), never another app's name
+  (`masked`).
 
 None on that display: the note says so and names the other displays.
 
@@ -188,11 +189,14 @@ pixels, and the crop is sent at up to the frame's long side.
 ## Plan chats and Code chats
 
 **The second server.** `RunHandle::mcp_config` lists a second server,
-`computer-use`, beside `yap`, whenever the run's `Eyes::computer` is on:
+`yap-computer`, beside `yap`, whenever the run's `Eyes::computer` is on:
 - the same run, key and checks, at `/mcp/<run>/computer`
   (`server.rs` `Route::Computer`);
-- Claude Code sees `mcp__computer-use__request_access` and the rest, the
-  desktop contract's names;
+- Claude Code sees `mcp__yap-computer__request_access` and the rest: the
+  desktop contract's tools under Yap's own server name. It can't be
+  `computer-use`: Claude Code 2.1.296 keeps that name for itself and drops
+  a server given it without a word. Its init lists every other server but
+  not that one (checked on this PC, 19 Nov 2026);
 - they're in `--allowedTools`, so Claude Code's own prompt never asks; Yap's
   card is the ask.
 
@@ -204,6 +208,20 @@ pixels, and the crop is sent at up to the frame's long side.
 **What Claude is told:** the plan's system prompt gets a line
 (`claude_live::computer::LINES`), and the server's `instructions` say the
 same in short.
+
+## The parity pass (Yap Lab against the desktop app's own tools)
+
+Every phase ends with the same tasks run two ways:
+- Claude inside Yap, in Yap Lab on the stand-in desktop (`set --computer on`);
+- Claude in the desktop app, through its own computer-use tools, on a test
+  app only.
+
+Each tool is compared. The table of what matches, what differs on purpose
+and the gaps fixed is in the private plan. Phase 1's pass (19 Nov 2026) fixed
+three gaps:
+- the server's name (`computer-use` is Claude Code's own);
+- each allowed window named by its app;
+- the desktop and the taskbar called what they are.
 
 ## Safety
 

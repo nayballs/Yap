@@ -120,7 +120,7 @@ pub struct Eyes {
     /// path only. Off whenever `pictures` is on (those take paths there).
     pub files: Gate,
     /// **Computer use** (`computer.rs`): apps on the PC the person allows,
-    /// on a server of its own (`super::computer`, `computer-use`). Not in
+    /// on a server of its own (`super::computer`, `yap-computer`). Not in
     /// [`Eyes::any`]: its own lines and its own tools.
     pub computer: bool,
 }
