@@ -983,6 +983,7 @@ pub fn run() {
             computer::e2e_computer_look,
             #[cfg(debug_assertions)]
             computer::e2e_computer_do,
+            computer::teach::e2e_computer_teach,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip_input,
             #[cfg(debug_assertions)]

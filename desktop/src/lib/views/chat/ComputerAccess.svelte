@@ -9,7 +9,8 @@
   // itself, a password manager, one not in the Start menu) are listed with
   // why. A Code chat in Bypass permissions shows it already allowed. No
   // answer in five minutes is a no. Kept with the answer, answered
-  // (ChatMessage.confirms). In PageConfirm's chunk.
+  // (ChatMessage.confirms). In PageConfirm's chunk. `request_teach_access`'s
+  // (`access.teach`): the same card worded as a guided tour (no extras).
   import { invoke } from '@tauri-apps/api/core';
 
   /** `card`: the confirm event (`{id, state, access: {apps: [{name, id, tier}], reason, clipboardRead, clipboardWrite, systemKeyCombos, denied: [{name, why}], bypass}}`). */
@@ -65,7 +66,9 @@
 
   const names = $derived(apps.map((x) => x.name).join(', '));
   const done = (s) =>
-    s === 'allowed'
+    s === 'allowed' && a.teach
+      ? `Guiding you in: ${names}.`
+      : s === 'allowed'
       ? a.bypass
         ? `Allowed in this chat (Bypass permissions): ${names}.`
         : `Allowed in this chat: ${names}.`
@@ -79,7 +82,11 @@
     ><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg
   >
   <div class="xbody">
-    <p class="xq">{st === 'asking' ? 'Let Yap’s AI use these apps on your PC?' : 'Apps on your PC'}</p>
+    {#if a.teach}
+      <p class="xq">{st === 'asking' ? 'Let Yap’s AI guide you through this?' : 'A guided tour'}</p>
+    {:else}
+      <p class="xq">{st === 'asking' ? 'Let Yap’s AI use these apps on your PC?' : 'Apps on your PC'}</p>
+    {/if}
     {#if a.reason}<p class="xreason" data-testid="chat-computer-reason">{a.reason}</p>{/if}
     <ul class="xapps" data-testid="chat-computer-apps">
       {#each apps as app (app.id || app.name)}
@@ -104,7 +111,11 @@
         </div>
       {/if}
       <p class="xwhy">
-        In this chat, Yap’s AI will see these apps’ windows and may click and type in them; everything else on your screen stays hidden from it. Press Esc or move your mouse to stop it.
+        {#if a.teach}
+          Yap’s window steps aside and a tooltip shows each step beside what it’s about. Press Next to let Yap do that step, or Exit (or Esc) to stop. Everything but these apps stays hidden from it.
+        {:else}
+          In this chat, Yap’s AI will see these apps’ windows and may click and type in them; everything else on your screen stays hidden from it. Press Esc or move your mouse to stop it.
+        {/if}
       </p>
       <div class="xbtns">
         <button type="button" class="xallow" onclick={() => answer(true)}>Allow</button>

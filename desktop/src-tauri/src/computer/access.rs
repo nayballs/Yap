@@ -76,6 +76,9 @@ pub struct AccessCard {
     pub denied: Vec<DeniedApp>,
     /// Allowed without asking: a Code chat in Bypass permissions.
     pub bypass: bool,
+    /// Asked by `request_teach_access`: a guided tour (no extras).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub teach: bool,
 }
 
 /// What the call asks for.
@@ -241,8 +244,12 @@ fn said_list(apps: &[AccessApp]) -> String {
 /// Allow." Pure.
 pub fn spoken_line(a: &AccessCard, spoken: bool) -> String {
     let why = a.reason.trim().trim_end_matches('.');
-    let why = if why.is_empty() { String::new() } else { format!(", {}", lower_first(why)) };
     let ending = if spoken { " Say yes, or press Allow." } else { " It needs a click: press Allow on the Yap bar." };
+    if a.teach {
+        let what = if why.is_empty() { "this".to_string() } else { lower_first(why) };
+        return format!("Shall I guide you through {what}, in {}?{ending}", said_list(&a.apps));
+    }
+    let why = if why.is_empty() { String::new() } else { format!(", {}", lower_first(why)) };
     format!("Let me use {}{why}?{ending}", said_list(&a.apps))
 }
 
@@ -272,7 +279,8 @@ pub fn bar_card(id: u64, a: &AccessCard, spoken: bool) -> crate::bar::Card {
         body.push(format!("Also: {}.", extras.join(", ")));
     }
     body.push("Esc or your own mouse stops it.".into());
-    let mut card = crate::chat::assistant::spoken_ok::bar_card(id, "Let Yap use your apps?".into(), body.join(" "), spoken);
+    let title = if a.teach { "Let Yap guide you?" } else { "Let Yap use your apps?" };
+    let mut card = crate::chat::assistant::spoken_ok::bar_card(id, title.into(), body.join(" "), spoken);
     card.primary = Some(crate::bar::CardAction::new(format!("allow:{id}"), "Allow"));
     card
 }
@@ -280,6 +288,12 @@ pub fn bar_card(id: u64, a: &AccessCard, spoken: bool) -> crate::bar::Card {
 /// **`request_access`** for a chat (`ctx`): resolve the apps, ask on the
 /// card (or not, in Bypass), and keep what's allowed in the chat's session.
 pub async fn request(args: &Value, ctx: &super::Ctx<'_>) -> Value {
+    request_for(args, ctx, false).await
+}
+
+/// [`request`], or `request_teach_access`'s (`teach`: the card worded as a
+/// guided tour; the apps allowed as `request_access` allows them).
+pub async fn request_for(args: &Value, ctx: &super::Ctx<'_>, teach: bool) -> Value {
     let asked = request_of(args);
     if asked.apps.is_empty() {
         return json!({ "success": false, "error": "request_access needs apps: the Start menu's names of the apps you need, and a reason.", "data": Value::Null, "displayText": "Didn't ask: no apps named" });
@@ -301,7 +315,8 @@ pub async fn request(args: &Value, ctx: &super::Ctx<'_>) -> Value {
         (new, extras)
     });
     let session_now = || grants::with(conversation, |s| s.allowed());
-    if new.is_empty() && !extras_new {
+    // (A tour asks again for apps already allowed: the person says yes to the tour.)
+    if new.is_empty() && !extras_new && !(teach && !found.is_empty() && !super::teach::on(conversation)) {
         let state = if found.is_empty() { "none" } else { "already" };
         return result_of(state, &[], &denied, &session_now());
     }
@@ -313,7 +328,7 @@ pub async fn request(args: &Value, ctx: &super::Ctx<'_>) -> Value {
             does: ACT.into(),
             state: state.into(),
             act: ACT.into(),
-            access: Some(Box::new(AccessCard { apps: card_apps(&new), reason: asked.reason.clone(), clipboard_read: cr, clipboard_write: cw, system_key_combos: sk, denied: denied.clone(), bypass })),
+            access: Some(Box::new(AccessCard { apps: card_apps(&new), reason: asked.reason.clone(), clipboard_read: cr, clipboard_write: cw, system_key_combos: sk, denied: denied.clone(), bypass, teach })),
             ..Default::default()
         })
     };

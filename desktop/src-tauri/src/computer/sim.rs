@@ -561,6 +561,7 @@ pub fn e2e_computer_scene(scene: Option<Scene>) -> Result<(), String> {
     // A new desktop: nobody holds it, nothing was stopped on it, no app allowed on it yet.
     super::watch::reset();
     super::grants::forget_all();
+    super::teach::reset();
     Ok(())
 }
 

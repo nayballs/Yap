@@ -374,6 +374,18 @@ own, in use meanwhile. `--clear` forgets them after reading. Asks the model noth
 {"ok":true,"copied":["Pack layers, a waterproof and a flask."]}
 ```
 
+### `teach [next|exit]`
+
+Computer use's guided tour (20 Nov 2026, `computer/teach.rs`, with `set --computer on`): the
+tooltip a `teach_step` or `teach_batch` shows (a test Yap never puts it on the real screen),
+and Next or Exit pressed on it as the person would. The turn waits on the tooltip, so ask
+with a short `--timeout`, then `teach next` for each step and `wait` for the answer. Asks
+the model nothing.
+
+```json
+{"ok":true,"tip":{"explanation":"This is the note box.","nextPreview":"Next: I'll select its text.","step":1,"of":1,"anchor":[620,160],"display":{"x":0,"y":0,"w":1920,"h":1080}},"pressed":true,"placed":null,"tour":{"conversation":3,"mainHidden":true,"exited":false}}
+```
+
 ### `type --window main|thread|panel [--css <selector>] [--text <words>] [--press <keys>]`
 
 Types into the test Yap's own window as the person would (16 Nov 2026, for the sheet
