@@ -91,7 +91,21 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   on it, bottom-centre on the work area (`overlay::place`: taskbars on any
   edge, an auto-hidden one kept clear, per-monitor DPI with a re-place after
   a DPI-changing move, unplugged monitors), frozen while a dictation records
-  or transcribes. **Fullscreen** (`bar_hide_fullscreen`, on;
+  or transcribes. **One size, never minimised** (19 Nov 2026): the window is
+  always placed at `overlay::size_on` (520×560 at the monitor's scale), never
+  at the size Windows reports — minimised from outside (Win+M, Show desktop,
+  a shake of another window), that's a 160×28 strip, and placing it at that
+  size once left the bar a strip at the bottom of the screen, its page
+  clipped inside (a recording showed nothing, a hover a small square). It
+  has no minimise/maximise box (`minimizable`/`maximizable` false), the
+  subclass refuses `SC_MINIMIZE`/`SC_MAXIMIZE`, and the poller's slow tick
+  places it again whenever it's shown but not where `place` put it (minimised,
+  or sized by something else): restored without activating
+  (`SW_SHOWNOACTIVATE`), then sized and moved in one `SetWindowPos`. Hidden
+  over a fullscreen app it waits; `set_shown` restores it first. e2e
+  `bar.spec.js` "minimised from outside" (`support/win32.js`
+  `windowPlacement`: minimised and sized from outside, as Windows sees it).
+  **Fullscreen** (`bar_hide_fullscreen`, on;
   `overlay::fullscreen_on` = the foreground window covering the whole monitor
   and not maximised/shell/Yap's own, or `SHQueryUserNotificationState`
   D3D-exclusive / presentation mode): the idle pill hides; a card still shows
@@ -181,11 +195,13 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   unless a spec asks (`e2e_bar_pointer`, as for someone who has never
   dictated). Unit tests; e2e `bar-pointer.spec.js`.
 - **`bar/overlay.rs`** — the bar window's Win32 side + its pure, unit-tested maths:
-  `place` (work-area placement), `fullscreen_on` (None / Borderless /
+  `place` (work-area placement), `size_on` (the window's one size on a
+  monitor), `fullscreen_on` (None / Borderless /
   Exclusive), `region_at` (hit-testing with slack), `enforced_ex_style`, and
   `win::` (subclass install, click-through toggle, monitors via
   `MonitorFromPoint`/`GetMonitorInfoW`/`GetDpiForMonitor`, auto-hidden taskbars
-  via `ABM_GETAUTOHIDEBAREX`, the foreground window, `force_topmost`).
+  via `ABM_GETAUTOHIDEBAREX`, the foreground window, `force_topmost`,
+  `set_rect`, `is_iconic`, `restore_quietly`).
 
 ## The bar's page
 

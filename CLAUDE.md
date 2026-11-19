@@ -261,7 +261,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `calendar.rs` (+ `calendar/`: `brief.rs`, `codes.rs`, `filing.rs`, `filing/companies.rs`) — Google/iCal sync, reminders, pre-meeting briefs, folder rules.
 
 **Yap bar** — [yap-bar.md](./docs/architecture/yap-bar.md)
-- `bar.rs` (+ `bar/overlay.rs`) — the bar: click-through, never focused, one card at a time.
+- `bar.rs` (+ `bar/overlay.rs`) — the bar: click-through, never focused, one card at a time; one size (`overlay::size_on`), never placed at what Windows reports (a minimised window's 160 × 28).
 - `bar/pointer.rs` / `bar/menu.rs` — first-use pointers; the ^ menu's extras.
 
 **Notices** — [notices.md](./docs/architecture/notices.md)
