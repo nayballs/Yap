@@ -29,6 +29,8 @@ pub(super) enum Source {
     Made,
     /// `look_at_screen` (`chat/see_screen.rs`).
     Screen,
+    /// Computer use (`computer.rs`): `request_access`, `screenshot`, `zoom`…
+    Computer,
     /// The browser beside the chat (`chat/pages.rs`: going, reading,
     /// looking, and — for the models that may — acting).
     Pages,
@@ -75,6 +77,8 @@ impl Source {
             Source::Made
         } else if crate::chat::see_screen::offers(extra.screen, name) {
             Source::Screen
+        } else if crate::computer::offers(extra.computer, name) {
+            Source::Computer
         } else if web && crate::chat::pages::offers(extra.pictures, extra.act, name) {
             Source::Pages
         } else if extra.memory && MEMORY_TOOL_NAMES.contains(&name) {
@@ -279,6 +283,34 @@ impl Loop<'_> {
                 } else {
                     tracing::info!(provider = self.provider, "Chat: no room left in the model's context for the screen");
                     tool_error(crate::chat::budget::NO_ROOM_TO_LOOK.to_string(), Value::Null, "Didn't look at your screen: no room left in the model's context".to_string())
+                }
+            }
+            Source::Computer => {
+                // Apps on the PC (computer.rs): a screenshot is outside content,
+                // shown with the question as it was taken, its picture with the
+                // next step while it fits.
+                let ctx = crate::computer::Ctx { conversation: self.extra.conversation, live: self.live, provider: self.provider, base_url: self.base_url, unattended: false };
+                let run = crate::computer::execute(name, &args, &ctx).await;
+                self.screen_seen |= run.seen;
+                let live = self.live;
+                crate::computer::show(&run, self.extra.conversation, &|e| {
+                    if let Some(live) = live {
+                        live.sink.send(e);
+                    }
+                });
+                let mut fits = true;
+                for look in run.looks {
+                    if self.room.takes_picture(&self.messages, looks, &look) {
+                        looks.push(look);
+                    } else {
+                        fits = false;
+                    }
+                }
+                if fits {
+                    run.result
+                } else {
+                    tracing::info!(provider = self.provider, "Chat: no room left in the model's context for a computer-use picture");
+                    tool_error(crate::chat::budget::NO_ROOM_TO_LOOK.to_string(), Value::Null, "Didn't look: no room left in the model's context".to_string())
                 }
             }
             Source::Memory => {

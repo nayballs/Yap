@@ -120,9 +120,9 @@
   const offers = $derived(m.role === 'assistant' ? (m.offers?.length ? m.offers : m.liveOffers || []) : []);
   // The files it shared into the conversation (chat/shares.rs): the same.
   const shared = $derived(m.role === 'assistant' ? (m.files?.length ? m.files : m.liveFiles || []) : []);
-  // Its cards that ask: a question of the model's own and a document's outline before the writing (above the
-  // answer, where it asked), and the rest (under it).
-  const above = (c) => c.act === 'question' || c.act === 'outline';
+  // Its cards that ask: a question of the model's own, a document's outline before the writing and apps on the
+  // PC asked for (above the answer, where it asked), and the rest (under it).
+  const above = (c) => c.act === 'question' || c.act === 'outline' || c.act === 'access';
   const asked = $derived(m.role === 'assistant' ? (m.confirms || []).filter(above) : []);
   const acts = $derived(m.role === 'assistant' ? (m.confirms || []).filter((c) => !above(c)) : []);
 

@@ -27,6 +27,9 @@ const LAB = path.resolve(process.argv[2] ?? '');
 const START = JSON.parse(fs.readFileSync(path.join(LAB, 'start.json'), 'utf8'));
 const CONTROL = path.join(LAB, 'control.json');
 const RECORD = path.join(LAB, 'record.jsonl');
+// Computer use's stand-in Start menu (apps/index.rs: test mode reads YAP_E2E_APPS at each look): written by
+// `set --computer on`, empty (no file) until then.
+const START_MENU = path.join(LAB, 'computer-start-menu.json');
 const RUNS = path.join(LAB, 'runs');
 const TURNS = path.join(LAB, 'turns');
 const SHOTS = path.join(LAB, 'shots');
@@ -1263,9 +1266,54 @@ async function setThings(a) {
     if (!path.resolve(workspace.path).startsWith(path.resolve(LAB) + path.sep)) throw new Error(`set only seeds the lab's scratch workspace, not ${workspace.path}`);
     done.files = files.map((f) => seedFile(workspace.path, f));
   }
-  if (!Object.keys(done).length) throw new Error('Nothing to set: --web, --yap-code, --connectors, --bypass, --gh, --git, --clock, --folder-pick, config or files');
+  // Computer use (computer.rs, 19 Nov 2026) on a stand-in desktop: test windows drawn by the test Yap itself
+  // (computer/sim.rs), never the real screen, mouse or keyboard; its Start menu a stand-in list of test apps.
+  if (a.computer !== undefined) {
+    const on = onOff(a.computer, false, 'computer');
+    if (on) {
+      fs.writeFileSync(START_MENU, JSON.stringify(COMPUTER_START_MENU, null, 2));
+      await invoke('e2e_computer_scene', { scene: COMPUTER_SCENE });
+      await patchConfig({ computerUse: true, assistantScreen: true, assistantScreenCloud: true, assistantScreenAsked: true });
+    } else {
+      fs.rmSync(START_MENU, { force: true });
+      await invoke('e2e_computer_scene', { scene: null });
+      await patchConfig({ computerUse: false });
+    }
+    done.computer = on ? { apps: COMPUTER_START_MENU.map((a) => a.name), displays: COMPUTER_SCENE.displays.length, windows: COMPUTER_SCENE.windows.length } : 'off';
+  }
+  if (!Object.keys(done).length) throw new Error('Nothing to set: --web, --yap-code, --connectors, --bypass, --gh, --git, --clock, --folder-pick, --computer, config or files');
   return done;
 }
+
+/** `set --computer on`'s Start menu: test apps only (made-up paths; nothing is ever launched in test mode). */
+const COMPUTER_START_MENU = [
+  { id: 'Microsoft.WindowsNotepad_8wekyb3d8bbwe!App', name: 'Notepad' },
+  { id: 'Microsoft.WindowsCalculator_8wekyb3d8bbwe!App', name: 'Calculator' },
+  { id: 'Microsoft.Paint_8wekyb3d8bbwe!App', name: 'Paint' },
+  { id: 'Microsoft.Windows.Explorer', name: 'File Explorer' },
+  { id: 'MSEdge', name: 'Microsoft Edge', target: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe' },
+  { id: 'Microsoft.WindowsTerminal_8wekyb3d8bbwe!App', name: 'Terminal' },
+  { id: 'C:\Program Files\Vaultkeeper\KeePass.exe', name: 'KeePass', target: 'C:\Program Files\Vaultkeeper\KeePass.exe' },
+];
+
+/** `set --computer on`'s desktop (computer/sim.rs): two displays, test windows topmost first, the desktop last. */
+const COMPUTER_SCENE = {
+  displays: [
+    { x: 0, y: 0, w: 1920, h: 1080, primary: true },
+    { x: 1920, y: 0, w: 1280, h: 720 },
+  ],
+  windows: [
+    { x: 1250, y: 560, w: 560, h: 420, own: true, class: 'Tauri Window' },
+    { x: 980, y: 140, w: 560, h: 380, exe: 'C:\Program Files\Example Mail\mail.exe', class: 'MailWindow' },
+    { x: 140, y: 90, w: 940, h: 640, exe: 'C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.2410.21.0_x64__8wekyb3d8bbwe\Notepad\Notepad.exe', aumid: 'microsoft.windowsnotepad_8wekyb3d8bbwe', class: 'Notepad' },
+    { x: 1500, y: 60, w: 380, h: 560, exe: 'C:\Program Files\WindowsApps\Microsoft.WindowsCalculator_11.2410.0.0_x64__8wekyb3d8bbwe\CalculatorApp.exe', aumid: 'microsoft.windowscalculator_8wekyb3d8bbwe', class: 'ApplicationFrameWindow' },
+    { x: 300, y: 790, w: 900, h: 250, exe: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe', class: 'Chrome_WidgetWin_1' },
+    { x: 2000, y: 60, w: 1000, h: 600, exe: 'C:\Program Files\WindowsApps\Microsoft.Paint_11.2410.0.0_x64__8wekyb3d8bbwe\PaintApp\mspaint.exe', aumid: 'microsoft.paint_8wekyb3d8bbwe', class: 'MSPaintApp' },
+    { x: 0, y: 1040, w: 1920, h: 40, exe: 'C:\Windows\explorer.exe', class: 'Shell_TrayWnd' },
+    { x: 0, y: 0, w: 1920, h: 1080, exe: 'C:\Windows\explorer.exe', class: 'Progman' },
+  ],
+  cursor: [600, 400],
+};
 
 /** `set --clock`'s time: "now" (or nothing) → null; "HH:MM" → today then; else any date `Date` reads. */
 function clockAt(v) {
@@ -2071,7 +2119,8 @@ async function start() {
     for (const name of fs.readdirSync(SHOTS)) if (/^\d{3,}$/.test(name)) fs.rmSync(path.join(SHOTS, name), { recursive: true, force: true });
   }
   // The main window's size (shell/lab.rs): the same in every run, so shots compare.
-  const env = { YAP_LAB: '1', YAP_LAB_RECORD: RECORD, YAP_LAB_WINDOW: START.size ?? '1280x860' };
+  const env = { YAP_LAB: '1', YAP_LAB_RECORD: RECORD, YAP_LAB_WINDOW: START.size ?? '1280x860', YAP_E2E_APPS: START_MENU };
+  fs.rmSync(START_MENU, { force: true });
   // The real web and the person's own Claude Code — but with `--fake`, the
   // stand-ins (`--fake --live-web`: the fake AI on the real web, for the
   // lab's own checks; a stand-in for Claude Code still wins: YAP_CLAUDE_EXE).

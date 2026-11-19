@@ -54,6 +54,10 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
     if let (Some(all), Some(screen)) = (tools.as_array_mut(), crate::chat::see_screen::definitions(extra.screen, extra.screen_takes).as_array()) {
         all.extend(screen.iter().cloned());
     }
+    // Apps on the PC the person allows (computer.rs).
+    if let (Some(all), Some(computer)) = (tools.as_array_mut(), crate::computer::definitions(extra.computer).as_array()) {
+        all.extend(computer.iter().cloned());
+    }
     if let (Some(all), Some(memory_tools)) = (tools.as_array_mut(), memory_definitions(extra).as_array()) {
         all.extend(memory_tools.iter().cloned());
     }

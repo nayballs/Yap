@@ -34,16 +34,16 @@ pub enum Reply {
     Accepted,
 }
 
-const PARSE_ERROR: i64 = -32700;
-const INVALID_REQUEST: i64 = -32600;
-const METHOD_NOT_FOUND: i64 = -32601;
-const INVALID_PARAMS: i64 = -32602;
+pub(super) const PARSE_ERROR: i64 = -32700;
+pub(super) const INVALID_REQUEST: i64 = -32600;
+pub(super) const METHOD_NOT_FOUND: i64 = -32601;
+pub(super) const INVALID_PARAMS: i64 = -32602;
 
-fn error(id: Value, code: i64, message: &str) -> Value {
+pub(super) fn error(id: Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
-fn ok(id: Value, result: Value) -> Value {
+pub(super) fn ok(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 

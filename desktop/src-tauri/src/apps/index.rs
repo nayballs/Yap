@@ -60,13 +60,13 @@ pub struct App {
 
 impl App {
     #[cfg(test)]
-    pub(super) fn new(id: &str, name: &str) -> App {
+    pub(crate) fn new(id: &str, name: &str) -> App {
         App { id: id.into(), name: name.into(), ..Default::default() }
     }
 
     /// A stand-in with what its shortcut points at.
     #[cfg(test)]
-    pub(super) fn linked(id: &str, name: &str, target: &str, args: &str) -> App {
+    pub(crate) fn linked(id: &str, name: &str, target: &str, args: &str) -> App {
         App { target: target.into(), args: args.into(), ..App::new(id, name) }
     }
 

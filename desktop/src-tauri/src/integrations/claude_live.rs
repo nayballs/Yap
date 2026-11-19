@@ -79,6 +79,7 @@
 
 mod approve;
 mod cards;
+pub mod computer;
 pub mod connectors;
 pub mod documents;
 pub mod eyes;
@@ -330,18 +331,19 @@ impl RunHandle {
     }
 
     /// **`--mcp-config`** (with `--strict-mcp-config`): Yap's server only,
-    /// its key named, never written ([`RunHandle::env`]).
+    /// its key named, never written ([`RunHandle::env`]) — and, offered
+    /// computer use, Yap's `yap-computer` server beside it (the same run and
+    /// key, its own path: [`computer`]), so Claude Code sees the desktop
+    /// contract's tools under Yap's own server name (`mcp__yap-computer__screenshot`;
+    /// `computer-use` is Claude Code's own name, a server given it dropped).
     pub fn mcp_config(&self) -> Value {
-        json!({
-            "mcpServers": {
-                SERVER: {
-                    "type": "http",
-                    "url": self.mcp_url(),
-                    "headers": { "Authorization": authorization() },
-                    "timeout": TOOL_TIMEOUT_MS,
-                }
-            }
-        })
+        let server = |url: String| json!({ "type": "http", "url": url, "headers": { "Authorization": authorization() }, "timeout": TOOL_TIMEOUT_MS });
+        let mut servers = serde_json::Map::new();
+        servers.insert(SERVER.into(), server(self.mcp_url()));
+        if self.eyes.computer {
+            servers.insert(computer::SERVER.into(), server(format!("{}/{}", self.mcp_url(), computer::PATH)));
+        }
+        json!({ "mcpServers": servers })
     }
 
     /// **`--settings`**: nothing of Yap's (`{}`; there was a backup hook
@@ -366,6 +368,7 @@ impl RunHandle {
             .map(str::to_string)
             .chain(self.connectors.iter().cloned())
             .map(|n| format!("mcp__{SERVER}__{n}"))
+            .chain(computer::names(self.eyes.computer).iter().map(|n| format!("mcp__{}__{n}", computer::SERVER)))
             .collect()
     }
 
