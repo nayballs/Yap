@@ -25,6 +25,10 @@
 //!   on the selection (or the last dictation) in the app you were in.
 //! - **New quick note** (notes/quick_note.rs): the quick-note window on a
 //!   new note.
+//! - **Restart Yap** (webview_gone.rs): WebView2's browser process exited
+//!   and every window with it — a red dot on the icon, a line in the
+//!   tooltip and "Restart Yap" at the top of every menu, which restarts now
+//!   (Yap also restarts by itself once nothing would be lost).
 //! - **Left-click** opens Settings.
 //!
 //! The tray is rebuilt on every `yap-state` change via [`update_tray`], and on
@@ -42,6 +46,12 @@ use tauri::{AppHandle, Manager, Wry};
 
 /// Stable tray id — the app-registry key used by `tray_by_id`/`remove_tray_by_id`.
 const TRAY_ID: &str = "yap-tray";
+/// The menu item that restarts Yap after WebView2 stopped (webview_gone.rs).
+const RESTART_ID: &str = "restart_yap";
+/// Its words.
+const RESTART_LABEL: &str = "Restart Yap: its windows stopped";
+/// The tooltip's line meanwhile.
+const RESTART_NOTE: &str = "Yap's windows stopped. Restart Yap brings them back.";
 
 /// Long-lived tray menus, swapped on state change instead of rebuilt.
 /// Rebuilding native menus on EVERY `yap-state` event (the old behaviour)
@@ -73,6 +83,10 @@ fn tooltip() -> String {
         Some(note) => format!("{} · {}", version_label(), note),
         None => version_label(),
     };
+    // WebView2 stopped (webview_gone.rs): first, on a line of its own.
+    if crate::shell::webview_gone::is_gone() {
+        tip = format!("{RESTART_NOTE}\n{tip}");
+    }
     // "Next: Weekly sync in 12 min" (calendar.rs), on a line of its own.
     if let Some(next) = crate::calendar::tray_tooltip() {
         tip = format!("{tip}\n{next}");
@@ -87,9 +101,15 @@ fn tooltip() -> String {
 /// Build the Yap "pac" tray icon (open-mouth circle + sound waves on a
 /// transparent background) for the given state. The body colour signals state:
 /// brand amber idle (matches `desktop/src/assets/yap-logo.svg`), red recording, bright
-/// amber processing, grey needs-model. `badge` adds a green dot top-right (an
-/// update is ready). Drawn at 128px so Windows can scale it down crisply.
-fn state_icon(state: &str, badge: bool) -> Image<'static> {
+/// amber processing, grey needs-model. `badge` adds a dot top-right: green
+/// (an update is ready) or red (Yap's windows stopped). Drawn at 128px so
+/// Windows can scale it down crisply.
+fn state_icon(state: &str, badge: Badge) -> Image<'static> {
+    let dot = match badge {
+        Badge::None => None,
+        Badge::Update => Some((34.0f32, 197.0f32, 94.0f32)), // #22c55e
+        Badge::Trouble => Some((239.0f32, 68.0f32, 68.0f32)), // #ef4444
+    };
     let (br, bg, bb) = match state {
         "recording" => (239.0f32, 68.0, 68.0), // red
         "processing" | "processing-slow" => (245.0f32, 158.0, 11.0), // amber
@@ -148,16 +168,16 @@ fn state_icon(state: &str, badge: bool) -> Image<'static> {
                 }
             }
 
-            // Update badge: a green dot in a warm-ink ring, composited on top
-            // (the ring keeps it legible on light and dark taskbars alike).
-            if badge {
+            // The badge: a dot in a warm-ink ring, composited on top (the
+            // ring keeps it legible on light and dark taskbars alike).
+            if let Some((gr, gg, gb)) = dot {
                 let bd = ((px - 106.0).powi(2) + (py - 22.0).powi(2)).sqrt();
                 let ring = clamp01(21.0 - bd + 0.5);
                 let dot = clamp01(15.0 - bd + 0.5);
                 if ring > 0.0 {
-                    // Ink ring (logo #1f1c16) → green dot (#22c55e).
-                    let mix = |ink: f32, green: f32| ink * (1.0 - dot) + green * dot;
-                    let (dr, dg, db) = (mix(31.0, 34.0), mix(28.0, 197.0), mix(22.0, 94.0));
+                    // Ink ring (logo #1f1c16) → the dot's colour.
+                    let mix = |ink: f32, colour: f32| ink * (1.0 - dot) + colour * dot;
+                    let (dr, dg, db) = (mix(31.0, gr), mix(28.0, gg), mix(22.0, gb));
                     cr = cr * (1.0 - ring) + dr * ring;
                     cg = cg * (1.0 - ring) + dg * ring;
                     cb = cb * (1.0 - ring) + db * ring;
@@ -173,6 +193,27 @@ fn state_icon(state: &str, badge: bool) -> Image<'static> {
         }
     }
     Image::new_owned(rgba, size as u32, size as u32)
+}
+
+/// The icon's dot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Badge {
+    None,
+    /// An update is ready (green).
+    Update,
+    /// Yap's windows stopped: WebView2 exited (red; it wins).
+    Trouble,
+}
+
+/// The dot the icon carries now.
+fn badge() -> Badge {
+    if crate::shell::webview_gone::is_gone() {
+        Badge::Trouble
+    } else if crate::updates::tray_badge() {
+        Badge::Update
+    } else {
+        Badge::None
+    }
 }
 
 /// Build the context menu for the given state.
@@ -192,13 +233,24 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     let sep = || PredefinedMenuItem::separator(app);
 
     let recording = matches!(state, "recording" | "processing" | "processing-slow");
+    // WebView2 stopped (webview_gone.rs): Restart Yap first, in every menu.
+    let restart = crate::shell::webview_gone::is_gone()
+        .then(|| MenuItem::with_id(app, RESTART_ID, RESTART_LABEL, true, None::<&str>))
+        .transpose()?;
 
     if recording {
         let cancel = MenuItem::with_id(app, "cancel", "Cancel", true, None::<&str>)?;
-        return Menu::with_items(
-            app,
-            &[&version, &sep()?, &cancel, &sep()?, &settings, &sep()?, &quit],
-        );
+        let (sep_a, sep_b, sep_c) = (sep()?, sep()?, sep()?);
+        let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&version, &sep_a];
+        if let Some(restart) = &restart {
+            items.push(restart);
+        }
+        items.push(&cancel);
+        items.push(&sep_b);
+        items.push(&settings);
+        items.push(&sep_c);
+        items.push(&quit);
+        return Menu::with_items(app, &items);
     }
 
     // Idle: a model submenu listing the installed models (checkmark = active).
@@ -275,6 +327,11 @@ fn build_menu(app: &AppHandle, state: &str) -> tauri::Result<Menu<Wry>> {
     }
     let (sep_update, sep_models, sep_quit) = (sep()?, sep()?, sep()?);
     let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&version, &sep_update];
+    let sep_restart = sep()?;
+    if let Some(restart) = &restart {
+        items.push(restart);
+        items.push(&sep_restart);
+    }
     if let Some(call) = &call {
         items.push(call);
     }
@@ -388,6 +445,8 @@ fn on_menu_event(app: &AppHandle, id: &str) {
             }
         }
         "quit" => app.exit(0),
+        // WebView2 stopped: restart now (webview_gone.rs).
+        RESTART_ID => crate::shell::webview_gone::restart(app, crate::shell::webview_gone::By::Tray),
         "cancel" => {
             if let Some(st) = app.try_state::<AppState>() {
                 if let Ok(guard) = st.pipeline.lock() {
@@ -455,7 +514,8 @@ fn idle_menu_key() -> String {
     let cfg = config::load();
     let transforms: Vec<String> = crate::dictation::transforms::list(&cfg).iter().map(|t| format!("{}={}", t.id, t.name())).collect();
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        crate::shell::webview_gone::is_gone(),
         cfg.model_size,
         installed.join(","),
         update,
@@ -473,7 +533,7 @@ fn idle_menu_key() -> String {
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app, "idle")?;
     TrayIconBuilder::with_id(TRAY_ID)
-        .icon(state_icon("idle", crate::updates::tray_badge()))
+        .icon(state_icon("idle", badge()))
         .tooltip(tooltip())
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -532,6 +592,24 @@ pub fn update_tray(app: &AppHandle, state: &str) {
     });
 }
 
+/// **WebView2 stopped** (webview_gone.rs): both menus built again with
+/// Restart Yap, the red dot, the tooltip's line. Main thread, like
+/// [`update_tray`].
+pub fn windows_gone(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        *MENUS.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        LAST_ICON_STATE.lock().unwrap_or_else(|p| p.into_inner()).clear();
+        if let Some(tray) = handle.tray_by_id(TRAY_ID) {
+            let _ = tray.set_tooltip(Some(tooltip()));
+        }
+        let state = LAST_STATE.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let mut guard = MENUS.lock().unwrap_or_else(|p| p.into_inner());
+        apply(&handle, &mut guard, if state.is_empty() { "idle" } else { &state });
+        tracing::info!("tray: Yap's windows stopped: Restart Yap offered");
+    });
+}
+
 /// Re-apply the update and call items, icon dot and tooltip after an
 /// update-status change (updates.rs) or a call-detection change
 /// (meeting_detect.rs), for the current pipeline state. Main thread, like
@@ -556,8 +634,8 @@ fn apply(app: &AppHandle, guard: &mut Option<MenuCache>, state: &str) {
 
     // Icon: `yap-state` repeats states; only touch the tray when it changed.
     {
-        let badge = crate::updates::tray_badge();
-        let key = format!("{state}|{badge}");
+        let badge = badge();
+        let key = format!("{state}|{badge:?}");
         let mut last = LAST_ICON_STATE.lock().unwrap_or_else(|p| p.into_inner());
         if *last != key {
             let _ = tray.set_icon(Some(state_icon(state, badge)));

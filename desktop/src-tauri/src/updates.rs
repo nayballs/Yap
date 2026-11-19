@@ -520,7 +520,7 @@ fn maybe_announce(app: &AppHandle) {
 // ---- busy guard ------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Busy {
+pub(crate) enum Busy {
     Dictation,
     Meeting,
     ModelDownload,
@@ -529,7 +529,9 @@ enum Busy {
 /// What would a restart interrupt right now? Locks the pipeline mutex, so it
 /// must never run inside a `yap-state` listener (those can fire while the
 /// emitter holds that lock) — hence the spawns in [`on_pipeline_state`].
-fn busy_reason(app: &AppHandle) -> Option<Busy> {
+/// (Also what Yap's restart after WebView2 stopped waits for:
+/// `shell/webview_gone.rs`.)
+pub(crate) fn busy_reason(app: &AppHandle) -> Option<Busy> {
     // (A meeting transcribed again, the refine after one: a restart would
     // lose it.)
     if crate::meetings::recorder::is_recording() || crate::meetings::audio::any_job_running() {

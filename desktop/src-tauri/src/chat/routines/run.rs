@@ -93,6 +93,12 @@ pub(super) fn forget_queued(id: &str) {
     }
 }
 
+/// **A routine is running now** (one waiting its turn isn't): Yap doesn't
+/// restart itself under it (`shell/webview_gone.rs`).
+pub(super) fn running() -> bool {
+    !RUNNING.lock().unwrap_or_else(|p| p.into_inner()).is_empty()
+}
+
 /// The routines with a run waiting or running.
 pub(super) fn busy_ids() -> Vec<String> {
     let mut out: Vec<String> = QUEUE.lock().unwrap_or_else(|p| p.into_inner()).iter().map(|p| p.routine.clone()).collect();

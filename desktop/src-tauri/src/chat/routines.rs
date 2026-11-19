@@ -45,6 +45,12 @@
 pub mod schedule;
 mod run;
 
+/// **A routine is running now**: Yap doesn't restart itself under it
+/// (`shell/webview_gone.rs`).
+pub fn running() -> bool {
+    run::running()
+}
+
 #[cfg(not(test))]
 use std::sync::Mutex;
 use std::sync::OnceLock;

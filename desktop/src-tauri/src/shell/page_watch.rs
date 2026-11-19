@@ -30,7 +30,8 @@
 //! renderer (a chat's visual), the GPU's and the helpers' are WebView2's to
 //! restart, only logged. The browser process itself exiting takes every
 //! webview with it (WebView2 says to make them again, which Tauri can't):
-//! logged as an error, once.
+//! `webview_gone.rs` offers Restart Yap in the tray and restarts Yap by
+//! itself once nothing would be lost; no page is loaded again from then.
 //!
 //! **The cap**: at most [`MAX_RELOADS`] reloads of one window in [`BUDGET`]
 //! (3 in 5 minutes, [`Budget`]), whatever the reason, then it's left alone
@@ -498,6 +499,11 @@ fn check(app: &AppHandle, label: &str, generation: u64) {
 /// load a check was armed for (two checks of one load — its start's and its
 /// trouble's — reload it once).
 fn reload(app: &AppHandle, label: &str, why: &'static str, of: Option<u64>) {
+    // (With WebView2's browser process gone, no page loads again: Yap
+    // restarts instead, webview_gone.rs.)
+    if crate::shell::webview_gone::is_gone() {
+        return;
+    }
     let now = Instant::now();
     let (home, count, generation) = {
         let mut map = pages();
@@ -616,12 +622,9 @@ fn process_failed(app: &AppHandle, label: &str, kind: i32, reason: i32, exit_cod
     let what = kind_words(kind);
     let why = reason_words(reason);
     match response(kind) {
-        Response::AllGone => {
-            static ONCE: std::sync::Once = std::sync::Once::new();
-            ONCE.call_once(|| {
-                tracing::error!(reason = why, exit_code, "WebView2's browser process exited: every Yap window's page is gone until Yap restarts");
-            });
-        }
+        // Every webview with it: the tray's Restart Yap, and a restart by
+        // itself once nothing would be lost (webview_gone.rs).
+        Response::AllGone => crate::shell::webview_gone::gone(app, why, exit_code),
         Response::Log => {
             tracing::info!(window = %label, reason = why, exit_code, "WebView2: {what}");
         }
