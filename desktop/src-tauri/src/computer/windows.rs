@@ -247,6 +247,22 @@ mod tests {
         assert_eq!(package_family(""), None);
     }
 
+    /// The real list on this PC: read only, counts only (never a title, an
+    /// exe or an app's name in the output).
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "this machine's windows"]
+    fn this_machine() {
+        let t = std::time::Instant::now();
+        let list = on_screen();
+        let with_exe = list.iter().filter(|w| !w.exe.is_empty()).count();
+        let with_aumid = list.iter().filter(|w| !w.aumid.is_empty()).count();
+        let own = list.iter().filter(|w| w.own).count();
+        let shell = list.iter().filter(|w| SHELL_CLASSES.contains(&w.class.as_str())).count();
+        println!("{} windows in {:.1} ms: {with_exe} with an exe, {with_aumid} with an AppUserModelID, {own} of Yap's, {shell} of the shell's", list.len(), t.elapsed().as_secs_f64() * 1000.0);
+        assert!(list.iter().all(|w| !w.rect.is_empty()));
+    }
+
     #[test]
     fn only_windows_that_draw_something_count() {
         let w = Seen { visible: true, rect: Rect::new(0, 0, 800, 600), ..Default::default() };
