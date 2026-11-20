@@ -20,6 +20,9 @@ const STOPPED: &str = "Research stopped before the report was written.";
 /// The most the read pages' own titles may take, all at once, before the
 /// report ([`crate::web::title_read_pages`]): those not back keep their address.
 const TITLES_WITHIN: std::time::Duration = std::time::Duration::from_secs(8);
+/// The most read pages titled that way, all fetched at once (a research
+/// reads as many pages as it needs): the rest keep their address.
+const TITLES_MOST: usize = 40;
 
 /// **Does this turn research?** The Research switch, or a message that
 /// plainly asks ([`research::asks`]) — typed (or dictated) in Chat, never a
@@ -49,13 +52,18 @@ fn day_of(t: &Asked<'_>) -> String {
 
 /// **The plan step**: one call with no tools ([`research::PLAN_PROMPT`]) on
 /// Chat's model (your Claude plan's one-shot run too), counted in the turn's
-/// usage. Its reply read ([`research::parse_plan`]); a call that fails is a
-/// plan from the question alone.
+/// usage, with the question's screenshots as every call of the turn has
+/// them (`snip::turn::attach`; until 20 Nov 2026 it had only the words, so
+/// "is this true? research it" with a screenshot was "nothing to research"
+/// and answered as any turn). Its reply read ([`research::parse_plan`]); a
+/// call that fails is a plan from the question alone.
 async fn make_plan(t: &Asked<'_>, fitted: &Fitted) -> Planned {
-    let messages = serde_json::json!([
-        { "role": "system", "content": research::PLAN_PROMPT },
-        { "role": "user", "content": research::plan_request(&t.text, &fitted.history, &day_of(t)) },
-    ]);
+    let mut messages = vec![
+        serde_json::json!({ "role": "system", "content": research::PLAN_PROMPT }),
+        serde_json::json!({ "role": "user", "content": research::plan_request(&t.text, &fitted.history, &day_of(t)) }),
+    ];
+    crate::snip::turn::attach(&mut messages);
+    let messages = serde_json::Value::Array(messages);
     let here = crate::ai::ai_model::runs_here(&t.ep.provider, &t.ep.base_url);
     let opts = crate::ai::llm::ChatOptions {
         temperature: 0.3,
@@ -137,9 +145,11 @@ pub(super) async fn answer(
         Ok(Review::Again { said }) => plan.note = said,
         Ok(Review::Unasked) => {}
     }
-    // 3. The loop, within its caps (pages sized to what the model's request holds).
+    // 3. The loop, uncapped: as many searches and pages as it needs (Yap's
+    // tool loop: as many pages as the model's request holds; your Claude
+    // plan's Claude Code keeps its own context, so no limit at all).
     let page = if t.gates.claude_in_chat { crate::web::native::FETCH_TOKENS as usize } else { crate::web::PAGE_TOKENS };
-    let caps = Caps::for_request(Some(fitted.budget.request), page);
+    let caps = Caps::for_request((!on_plan).then_some(fitted.budget.request), page);
     let budget = Budget::start(caps);
     built.prompt.context.push(research::instructions(&plan, &caps, on_plan));
     built.writes_doc = false;
@@ -163,7 +173,7 @@ pub(super) async fn answer(
     let mut found = found;
     if !found.stopped {
         let ep = crate::web::Endpoints::current();
-        let titled = crate::web::title_read_pages(&ep, &mut found.sources, caps.reads, TITLES_WITHIN);
+        let titled = crate::web::title_read_pages(&ep, &mut found.sources, caps.reads.min(TITLES_MOST), TITLES_WITHIN);
         // (■ now: the report's written; it's kept, as its pages had them.)
         if let Err(Halt::Superseded) = unless_stopped(titled, Some(t.stop)).await {
             return Err(superseded());

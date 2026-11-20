@@ -6879,10 +6879,20 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   (`research::scoped`, a task-local).
 - **The model decides, in its plan step** (`PLAN_PROMPT`, one call with no
   tools on Chat's model — your Claude plan's one-shot run too —, counted as
-  any): JSON `{research, title, summary, sections: [{key, intent}]}`, 3 to 6
+  any, **with the question's screenshots**: `snip::turn::attach`, as every
+  call of the turn has them): JSON `{research, title, summary, sections: [{key, intent}]}`, 3 to 6
   parts (at most `MAX_PARTS`), each a question the research answers; `{"research":
-  false}` for a greeting, a thanks, a question about the chat — then the
-  turn goes on as any other. A reply with no plan (or a failed call): a plan
+  false}` only for a greeting, a thanks or a change to something already
+  written in the chat — then the turn goes on as any other. A picture with
+  the message is part of it ("is this true?" asks about what it shows). Until
+  20 Nov 2026 the plan step had only the words and was told a question
+  "about this chat itself" wasn't research: a screenshot of a message and
+  "Is this true? Research it", Research on, on your Claude plan, was planned
+  `{"research": false}` and answered as any turn (2 searches, 4 pages)
+  while the Claude app researched the same for 4 minutes over 309 sources. The Claude app's help pages make the switch what starts
+  Research and the person's words only steer it ("Claude, please use the
+  research tool to…"), so Yap has no rule of its own on top: the plan step,
+  seeing the picture, decides. A reply with no plan (or a failed call): a plan
   from the question's words (`fallback_plan`: "Background", "What the
   sources say", "What it means").
 - **The plan the person sees first**: the outline card's
@@ -6912,7 +6922,7 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   were offered there and then refused, while the plan's session could use
   them) (`research::allows`; anything else — an app, the clipboard, memory, a
   note, a document, an agent, a page click — refused with
-  `research::refusal`); `STEPS` (40) steps; a first step that answers before
+  `research::refusal`); `STEPS` (400) steps; a first step that answers before
   any search is asked once to search first (`SEARCH_FIRST`); past its time
   and `GRACE` the last call has no tools and says `WRITE_NOW`. **Your Claude
   plan** (`plan::answer` with a `Budget`): the conversation's warm Claude Code
@@ -6926,17 +6936,32 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   time — a timer of its own —, or the tokens: `Mapper::tokens`, the
   session's calls so far, plus the turn's), interrupts it, counts its usage,
   and asks for the report on the same session (`write_now_after`), chip
-  "Stopped researching: research limit: 20 searches".
-- **Hard caps** (`research::Caps`): `SEARCHES` 20, `READS` 12 (as many as half
-  the model's request holds in pages of 3,000 tokens, or Claude's fetch's
-  8,000: at least `MIN_READS` 4), `TIME` 10 minutes (+ `GRACE` 3 for the
-  report), `TOKENS` 1,000,000 read and written by the turn's calls together —
-  every call counted where `ai/usage.rs` counts it (`llm::post_chat_request`'s
-  `usage::record_response`), its turn's sum `usage::turn_tokens` (the
-  `tallied` turn's every call, a provider's search sub-call too). A search or
-  read past a cap is refused with what ran out and "write the report now…"
-  (`Spent::line`), its chip "Didn't search for "…": research limit: 20
-  searches".
+  "Stopped researching: research limit: 45 minutes".
+- **Uncapped** (20 Nov 2026, the maintainer: "should be uncapped if research is
+  enabled", as the Claude app's, whose help pages give it no limit on
+  searches, sources or tool calls; until then 20 searches, 12 pages, 10
+  minutes, 1M tokens): `Caps::USUAL` has no limit on searches, page reads
+  or tokens (`UNCAPPED`, `u64::MAX`). The loop is told there's no limit
+  and that Research mode is for depth: searches of its own for every part of
+  the plan (two or three at least, from different angles), the leads they
+  turn up followed, each important fact confirmed in more than one
+  independent source, never stopping because the first pages agree; and to
+  make the searches and reads that don't depend on each other at once
+  (several tool calls in one step). On Opus on the plan in Yap Lab
+  (`research-screenshot`): told only to scale the effort, 6 searches and 10
+  pages in 91 s; told this, 11 searches and 14 pages in 2 min 14 s (the
+  Claude app, its own subagents in parallel: 4 min, "309 sources", which
+  counts every result it saw — Yap's Sources row counts pages read). Two bounds remain, neither a cap on how far it goes: **Yap's
+  tool loop** reads as many pages as half the model's request holds
+  (`Caps::for_request`: pages of 3,000 tokens, or Claude's fetch's 8,000;
+  at least `MIN_READS` 4; 33 on a 200K model), since each request carries
+  every page read — your Claude plan's Claude Code keeps its own context, so
+  none there; and `TIME`, **45 minutes** (+ `GRACE` 3 for the report), the
+  longest Anthropic says its own Research takes, so a loop that never ends
+  is asked for its report. The tool loop's `STEPS` is 400 (its time ends
+  it). The cap machinery stays (`spent`, `past`, `Spent::line`): a read
+  past what the model holds is refused with "write the report now…", its
+  chip "Stopped researching: the 33 pages the model holds".
 - **Progress**: the report's words never stream into the thread
   (`research::Quiet`, over the page's stream): the activity line says what's
   under way with the count so far ("Reading en.wikipedia.org/wiki/QWERTY ·
@@ -6981,7 +7006,7 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   (`web::title_read_pages`, `web/page.rs`): its `og:title`, else its
   `<title>` (`title_in`), from its first 160 KB read on this PC with a page
   read's guards (a page Yap read in the last minutes: from the cache, nothing
-  fetched), at most the research's reads at once, each within 8 s
+  fetched), at most 40 at once (`TITLES_MOST`; the rest keep their address), each within 8 s
   (`TITLES_WITHIN`; one not back keeps its address); never after a ■. The
   Sources row and the report's ## Sources then name it. Decided against a
   read for every plan answer's fetched pages: only Research, whose turn is

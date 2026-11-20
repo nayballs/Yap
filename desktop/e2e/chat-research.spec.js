@@ -241,7 +241,7 @@ test('Research: the plan first, then searches and page reads on the free sources
   const loop = fakeLlm.requests.slice(before).find((r) => r.tools.includes('web_search'));
   expect(loop.user).toContain('This is a research turn');
   expect(loop.user).toContain('1. Origins — where it came from');
-  expect(loop.user).toContain('up to 20 searches (web_search)');
+  expect(loop.user).toContain("There's no limit on searches or pages");
   midway.open();
 
   // The report: beside the chat, its citations only to the pages read.
@@ -331,6 +331,44 @@ test('a greeting with Research on is answered as ever; with web search off the s
   await main.keyboard.press('Escape');
   await expect(menuRow(main)).toHaveCount(0);
   await setConfig(yap, main, { webSearch: true });
+});
+
+test('"Is this true? Research it" with a screenshot: the plan step sees the picture, so it plans a research and never calls it nothing to research', async ({ main, fakeLlm }) => {
+  // (Until 20 Nov 2026 the plan step had only the words: "nothing to research", answered as any turn.)
+  fakeLlm.reply('researchPlan', () =>
+    JSON.stringify({
+      research: true,
+      title: 'Are bananas radioactive?',
+      summary: 'Whether the claim in the message holds up.',
+      sections: [{ key: 'Is it true', intent: 'what the sources say' }],
+    })
+  );
+  fakeLlm.scriptChat(loopOf('Are bananas radioactive?'));
+  await freshChat(main);
+  await research(main, true);
+  // A message screenshot pasted into the box (Ctrl+V of a picture copied in another app).
+  await box(main).click();
+  await box(main).evaluate(async (el) => {
+    const c = document.createElement('canvas');
+    c.width = 120;
+    c.height = 24;
+    c.getContext('2d').fillRect(0, 0, 120, 24);
+    const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], 'image.png', { type: 'image/png' }));
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await expect(main.getByTestId('chat-attachments')).toContainText('120 × 24');
+  const before = fakeLlm.requests.length;
+  await ask(main, 'Is this true? Research it');
+  await expect(card(main)).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
+  await expect(card(main).locator('.otitle')).toContainText('Are bananas radioactive?');
+  const planCall = plans(fakeLlm, before)[0];
+  expect(planCall.images, 'the screenshot goes with the plan step').toHaveLength(1);
+  expect(planCall.system).toContain('A picture with the message (a screenshot) is part of it');
+  expect(planCall.system).toContain('reply {"research": false} only for a greeting, thanks, or a change to something already written');
+  await card(main).getByRole('button', { name: 'Start research' }).click();
+  await expect(lastAnswer(main)).toContainText('The full report is open on the right.', { timeout: 30_000 });
 });
 
 /** A research loop on the fake: one search, then the report titled `title`. */
