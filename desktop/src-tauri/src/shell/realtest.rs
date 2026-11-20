@@ -33,11 +33,13 @@
 //! Release builds compile robot mode out: [`on`] is always `false`, [`gate`]
 //! always [`Gate::Go`] (a normal run) and the commands don't exist.
 
-/// **Yap Lab on the real screen** (`lab start --real-screen`: robot mode and
-/// `YAP_LAB_REAL_SCREEN=1`, debug builds only): computer use acts on the
-/// person's real apps, its own grants the only gate (never just the robot's
-/// windows), and an app it opens from its Start menu (the Lab's list in
-/// `YAP_E2E_APPS`) is really started. Everything else stays robot mode's.
+/// **Yap Lab on the real screen** (`lab start --real-screen on`: robot mode
+/// and `YAP_LAB_REAL_SCREEN=1`, debug builds only): the person's own windows
+/// are fair game, as in a real run — computer use acts on their apps (its own
+/// grants the only gate), the Voice Assistant reads their selection, a paste
+/// goes into them ([`gate`], [`permits`] and [`recheck_foreground`] let them
+/// by) — and an app computer use opens from its Start menu (the Lab's list
+/// in `YAP_E2E_APPS`) is really started. Everything else stays robot mode's.
 /// Opt-in per run, for a real-world pass of computer use; the Lab's input
 /// watcher (`yaprobot watch`) ends the run at the person's first touch.
 pub fn lab_screen() -> bool {
@@ -86,6 +88,10 @@ pub fn gate(hwnd: Option<isize>, what: &str) -> Gate {
     }
     #[cfg(debug_assertions)]
     {
+        // Yap Lab on the real screen: the person's own windows, as in a real run.
+        if lab_screen() {
+            return Gate::Go;
+        }
         match robot::verdict(hwnd) {
             Ok(_) => Gate::Go,
             Err(why) => Gate::Refused(robot::refuse(what, &why)),
@@ -151,7 +157,7 @@ pub fn permits(hwnd: Option<isize>) -> bool {
     }
     #[cfg(debug_assertions)]
     {
-        on() && robot::verdict(hwnd).is_ok()
+        on() && (lab_screen() || robot::verdict(hwnd).is_ok())
     }
     #[cfg(not(debug_assertions))]
     {
@@ -173,6 +179,9 @@ pub fn recheck_foreground(expected: Option<isize>, what: &str) -> Result<(), Str
     }
     #[cfg(debug_assertions)]
     {
+        if lab_screen() {
+            return Ok(());
+        }
         robot::recheck(expected).map_err(|why| robot::refuse(what, &why))
     }
     #[cfg(not(debug_assertions))]
