@@ -108,9 +108,9 @@ const fn p(input: f64, output: f64, cache_read: f64, cache_write: f64) -> Price 
 /// **The price table** (savvy-progress's `PRICES`, list prices as of
 /// 2026-10-10): the first row any of whose words is in a model's id wins,
 /// so a release sits above its family. Its input and output agree with Yap's
-/// own table (`ai/usage/prices.rs`, a test holds them together); cache
-/// writes are at the 1-hour rate (2× input), which Claude Code writes on a
-/// subscription.
+/// own table (`ai/usage/prices.rs`, a test holds them together, cache reads
+/// and 1-hour writes too); cache writes are at the 1-hour rate (2× input),
+/// which Claude Code writes on a subscription.
 pub const PRICES: &[(&[&str], Price)] = &[
     // Fable 5.2 (10 Nov 2026): $8 / $40, cache reads $0.20, 1-hour writes $16.
     (&["fable-5-2", "mythos-5-2"], p(8.0, 40.0, 0.2, 16.0)),
@@ -320,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn the_table_agrees_with_yaps_own_on_input_and_output() {
+    fn the_table_agrees_with_yaps_own_on_input_output_and_cache_reads() {
         use crate::ai::usage::prices;
         for (model, prompt) in [
             ("claude-fable-5-2", 0),
@@ -339,6 +339,9 @@ mod tests {
             let ours = prices::price("anthropic", model, "2026-11-08", prompt).unwrap_or_else(|| panic!("{model}"));
             let theirs = price_of(model, prompt);
             assert_eq!((theirs.input, theirs.output), (ours.input, ours.output), "{model} at {prompt}");
+            // Cache reads too (Anthropic's pricing page, checked 2026-11-20); writes here are the 1-hour rate.
+            let cached = ours.cached.unwrap_or_else(|| panic!("{model}: no cache rates"));
+            assert_eq!((theirs.cache_read, theirs.cache_write), (cached.read, cached.write_1h), "{model} at {prompt}");
         }
     }
 

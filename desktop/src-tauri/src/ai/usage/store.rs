@@ -91,9 +91,9 @@ impl Row {
         let cost = if here {
             None
         } else if provider == crate::ai::claude_plan::PROVIDER {
-            r.said_cost_micros().or_else(|| super::prices::cost_micros("anthropic", model, day, prompt, answer))
+            r.said_cost_micros().or_else(|| super::prices::cost_micros_cached("anthropic", model, day, prompt, r.cached, answer))
         } else {
-            super::prices::cost_micros(provider, model, day, prompt, answer)
+            super::prices::cost_micros_cached(provider, model, day, prompt, r.cached, answer)
         };
         Row {
             provider: provider.to_string(),
@@ -613,7 +613,7 @@ mod tests {
     }
 
     fn reported(prompt: u64, answer: u64) -> Reported {
-        Reported { prompt: Some(prompt), answer: Some(answer), total: Some(prompt + answer), speed: Speed::default(), cost_usd: None }
+        Reported { prompt: Some(prompt), answer: Some(answer), total: Some(prompt + answer), speed: Speed::default(), cost_usd: None, cached: Default::default() }
     }
 
     fn call(provider: &str, model: &str, here: bool, feature: Feature, r: Reported, day: &str) -> Row {
@@ -748,7 +748,7 @@ mod tests {
     #[test]
     fn the_on_device_speed_is_its_tokens_over_its_time_each_day() {
         let mut s = Store::default();
-        let fast = Reported { prompt: Some(1_000), answer: Some(240), total: None, speed: Speed { read_tokens: 1_000, read_ms: 500, gen_tokens: 240, gen_ms: 2_000 }, cost_usd: None };
+        let fast = Reported { prompt: Some(1_000), answer: Some(240), total: None, speed: Speed { read_tokens: 1_000, read_ms: 500, gen_tokens: 240, gen_ms: 2_000 }, cost_usd: None, cached: Default::default() };
         let slow = Reported { speed: Speed { read_tokens: 0, read_ms: 0, gen_tokens: 60, gen_ms: 2_000 }, ..fast };
         s.add("2026-10-24", &Row::of_call("ondevice", "q", true, Feature::Chat, &fast, "2026-10-24"));
         s.add("2026-10-25", &Row::of_call("ondevice", "q", true, Feature::Chat, &fast, "2026-10-25"));

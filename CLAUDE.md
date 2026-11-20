@@ -168,7 +168,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `ai/ai_model.rs` — which model a scope's next call goes to.
 - `ai/effort.rs` — effort per cloud model; Fast mode.
 - `ai/model_catalog.rs` — providers' live model lists, cached a day.
-- `ai/usage.rs` (+ `usage/`) — every AI call's tokens, counted in one place (`llm::post_chat_request`).
+- `ai/usage.rs` (+ `usage/`) — every AI call's tokens, counted in one place (`llm::post_chat_request`); cached prompt tokens priced at their own rates (`usage/prices.rs`).
 - `ai/eval.rs` (+ `ai/eval/`) — model evaluations (`yap.exe eval`) through the real Chat code.
 
 **Chat and the Voice Assistant** — [chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)

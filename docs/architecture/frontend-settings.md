@@ -717,7 +717,9 @@ on an element that also has a `settings.css` class (`set-note`,
   banner when one is missing, the provider pills (Groq, Anthropic, **ChatGPT**,
   Gemini, OpenRouter, Custom), the masked API key with "Get
   your API key", the model list (`ModelPicker.svelte`, the curated list merged
-  with the provider's live one, `modelCatalog.js`), a self-hosted or custom
+  with the provider's live one, `modelCatalog.js`; a provider switched to picks
+  `defaultFrom`'s model: the first it offers, or for Anthropic the newest Haiku,
+  ai-models.md `ai/model_catalog.rs`), a self-hosted or custom
   endpoint's fields (`EndpointModels.svelte` suggests its server's models),
   Local's on-device model browser (Recommended for this PC, the one upgrade
   offer, the slow-on-this-PC line, the Context control `LocalContext.svelte`,

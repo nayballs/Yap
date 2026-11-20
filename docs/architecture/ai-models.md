@@ -1385,6 +1385,17 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
 - **`ai/model_catalog.rs`** — **the AI providers' live model lists**
   (2026-10-18), so a model Google or Groq releases tomorrow shows up in
   Yap's pickers without a Yap update and a retired one stops being offered.
+  **An Anthropic key's default model** (20 Nov 2026, `ppModels.js`
+  `defaultFamily: 'haiku'`, `modelCatalog.js` `defaultFrom`,
+  `latestModels.js` `newestOfFamily`) is the newest Haiku the provider
+  offers, curated or in its live list, never one being retired. It's used
+  wherever Settings or onboarding picks a model for a scope switched to
+  Anthropic: Chat (computer use with it), the Voice Assistant, cleanup and
+  onboarding's cleanup step. It was Haiku 4.5, first in the list, at ten
+  times Haiku 5.5's price and without the API's computer toolset. A model
+  the person picked is never changed. Saved configs aren't migrated
+  either: Yap saves only the model's id, so a Haiku 4.5 that was the old
+  default can't be told from one the person chose.
   Asks **the provider itself, with the key already saved** (`key_for`: the
   scope's own, `provider_api_key`'s shared one, else any scope's or cleanup
   profile's; only providers with a key, `keyed`; never a catalog of Yap's
@@ -1522,8 +1533,23 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   OpenAI's `gpt-4o-mini-tts` text $0.60 / audio $12, Gemini's 3.8 Flash TTS
   $0.50 / $9 and Flash-Lite TTS $0.50 / $6, both doubling on 1 Jan 2027); a dated snapshot costs what its model does
   (`base_id`). The cost is worked out when a call is recorded (millionths
-  of a dollar). Pages say it's an estimate: free plans cost nothing, cached
-  prompts cost less. `usage/context.rs` — Chat's context ring
+  of a dollar). Pages say it's an estimate: free plans cost nothing.
+  **Cached prompt tokens at their own rates** (20 Nov 2026, `prices::Cached`,
+  `cost_micros_cached`). `usage::parse` keeps a call's cached part of its
+  prompt apart: Anthropic's cache reads, and its writes by how long they're
+  kept (`cache_creation`'s 5-minute and 1-hour counts, else all 5 minutes);
+  OpenAI's `prompt_tokens_details.cached_tokens`.
+  - Claude's rows (`claude(...)`) carry its pricing page's cache rates,
+    checked 2026-11-20: reads 0.1× input (0.05× on Opus and Sonnet 5.5,
+    0.025× on Fable 5.1 and 5.2), writes 1.25× (5 minutes) and 2× (an hour).
+  - Haiku 5.5's tier is chosen by the whole prompt, cached tokens counted.
+  - A provider whose cached rate isn't in the table keeps its cached tokens
+    at the input price, as before (OpenAI, Gemini, Groq today).
+  - Before, a long computer-use run on Haiku 4.5 came out at about $63
+    against the $8 it cost (`prices.rs` tests).
+  - `agents/usage.rs`' table for Claude Code runs agrees on cache reads
+    and 1-hour writes (a test).
+  `usage/context.rs` — Chat's context ring
   ([chat-and-assistant.md](./chat-and-assistant.md#the-context-ring-2026-10-25)).
   **The turn's last call**: `usage::tallied` around a Chat turn keeps its
   last model call (`last_call`), which `chat_turn` keeps with the answer

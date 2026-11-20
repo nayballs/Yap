@@ -7,6 +7,7 @@ import brandGoogle from '../../assets/brands/google.svg';
 import brandQwen from '../../assets/brands/qwen.svg';
 import brandOllama from '../../assets/brands/ollama.svg';
 import brandOpenrouter from '../../assets/brands/openrouter.svg';
+import { defaultFrom, mergeModels } from '../core/modelCatalog.js';
 
 // Brand badges (superwhisper-style coloured squares). `icon` = white SVG
 // (simple-icons, CC0); brands without one fall back to a letter badge.
@@ -38,7 +39,7 @@ export function brandForModel(id) {
 // so it plugs into Yap's existing cleanup client like any other provider.
 export const CLOUD_PROVIDERS = [
   { value: 'groq', label: 'Groq (free tier)', brand: BRANDS.groq, baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-20b' },
-  { value: 'anthropic', label: 'Anthropic (Claude)', brand: BRANDS.anthropic, baseUrl: 'https://api.anthropic.com/v1', model: 'claude-haiku-4-5' },
+  { value: 'anthropic', label: 'Anthropic (Claude)', brand: BRANDS.anthropic, baseUrl: 'https://api.anthropic.com/v1', model: defaultFrom(mergeModels('anthropic'), 'anthropic') },
   { value: 'openai', label: 'OpenAI', brand: BRANDS.openai, baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
   { value: 'openrouter', label: 'OpenRouter', brand: BRANDS.openrouter, baseUrl: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.1-8b-instruct' },
   { value: 'local', label: 'My own server (Ollama · LM Studio)', brand: BRANDS.ollama, baseUrl: 'http://localhost:11434/v1', model: 'llama3.1' },

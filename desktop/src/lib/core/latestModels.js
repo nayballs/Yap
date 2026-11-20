@@ -215,6 +215,27 @@ function picks(provider, rows) {
   return out;
 }
 
+/**
+ * **The newest usable model of one family** of `provider`'s (`family`: a
+ * family's id, "haiku", "opus"…) among `rows`, compared as Latest compares
+ * them, or null. A provider's default model is one (modelCatalog.js
+ * `defaultFrom`: Anthropic's newest Haiku), so a new release takes its place
+ * and an older one never comes first again.
+ */
+export function newestOfFamily(provider, family, rows = []) {
+  const f = familiesOf(provider).find((x) => x.id === family);
+  if (!f) return null;
+  let best = null;
+  for (const row of rows) {
+    if (!usable(row)) continue;
+    const k = f.read(row.model);
+    if (!k) continue;
+    const d = best ? cmpKey(k, best.k) || (row.created ?? 0) - (best.row.created ?? 0) || Number(variant(best.row.model)) - Number(variant(row.model)) : 1;
+    if (d > 0) best = { row, k };
+  }
+  return best?.row ?? null;
+}
+
 /** Newest first: by the provider's dates when every row has one, else by the version in the id. */
 export function newestFirst(provider, list) {
   const dated = list.length > 0 && list.every((r) => r.created);

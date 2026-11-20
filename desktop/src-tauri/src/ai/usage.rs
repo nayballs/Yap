@@ -211,6 +211,10 @@ pub struct Reported {
     /// What the call would cost on the API, as the caller says it (Claude
     /// Code's `total_cost_usd` on a Claude plan), in dollars.
     pub cost_usd: Option<f64>,
+    /// The prompt's cached tokens (in `prompt`, never on top): read from the
+    /// cache, written to it for 5 minutes or an hour — priced at their own
+    /// rates where `prices.rs` knows them.
+    pub cached: prices::Cached,
 }
 
 impl Reported {
@@ -249,10 +253,20 @@ pub fn parse(v: &Value) -> Reported {
         if let Some(p) = n(&usage["prompt_tokens"]) {
             r.prompt = Some(p);
             r.answer = n(&usage["completion_tokens"]);
+            // OpenAI's (and compatible endpoints') cached part of the prompt.
+            r.cached.read = n(&usage["prompt_tokens_details"]["cached_tokens"]).unwrap_or(0);
         } else if let Some(i) = n(&usage["input_tokens"]) {
-            let cache = n(&usage["cache_read_input_tokens"]).unwrap_or(0) + n(&usage["cache_creation_input_tokens"]).unwrap_or(0);
-            r.prompt = Some(i + cache);
+            let read = n(&usage["cache_read_input_tokens"]).unwrap_or(0);
+            let written = n(&usage["cache_creation_input_tokens"]).unwrap_or(0);
+            r.prompt = Some(i + read + written);
             r.answer = n(&usage["output_tokens"]);
+            // Anthropic's writes by how long they're kept (`cache_creation`), else all for 5 minutes (the default).
+            let by_ttl = &usage["cache_creation"];
+            let (w5, w1) = match (n(&by_ttl["ephemeral_5m_input_tokens"]), n(&by_ttl["ephemeral_1h_input_tokens"])) {
+                (None, None) => (written, 0),
+                (a, b) => (a.unwrap_or(0), b.unwrap_or(0)),
+            };
+            r.cached = prices::Cached { read, write_5m: w5, write_1h: w1 };
         }
         r.total = n(&usage["total_tokens"]);
     } else if v["usageMetadata"].is_object() {
@@ -328,7 +342,7 @@ pub fn call_cost(provider: &str, model: &str, here: bool, r: &Reported) -> Optio
         (p, a) => (p.unwrap_or(0), a.unwrap_or(0)),
     };
     let priced_as = if provider == crate::ai::claude_plan::PROVIDER { "anthropic" } else { provider };
-    r.said_cost_micros().or_else(|| prices::cost_micros(priced_as, model, &store::day_key(store::today()), prompt, answer))
+    r.said_cost_micros().or_else(|| prices::cost_micros_cached(priced_as, model, &store::day_key(store::today()), prompt, r.cached, answer))
 }
 
 /// [`record_response`] for search by meaning's embeddings: the tracker
@@ -413,9 +427,20 @@ mod tests {
         // Groq's stream: x_groq.usage.
         let r = parse(&json!({ "x_groq": { "usage": { "prompt_tokens": 40, "completion_tokens": 2, "total_tokens": 42 } } }));
         assert_eq!((r.prompt, r.answer), (Some(40), Some(2)));
-        // Anthropic's own API: its cache's tokens are prompt tokens too.
+        // Anthropic's own API: its cache's tokens are prompt tokens too, and
+        // kept apart for their own price (writes for 5 minutes by default).
         let r = parse(&json!({ "usage": { "input_tokens": 100, "cache_read_input_tokens": 900, "cache_creation_input_tokens": 50, "output_tokens": 70 } }));
         assert_eq!((r.prompt, r.answer, r.total_tokens()), (Some(1050), Some(70), 1120));
+        assert_eq!(r.cached, prices::Cached { read: 900, write_5m: 50, write_1h: 0 });
+        // …by how long they're kept, when it says.
+        let r = parse(&json!({ "usage": { "input_tokens": 10, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 300, "cache_creation": { "ephemeral_5m_input_tokens": 100, "ephemeral_1h_input_tokens": 200 }, "output_tokens": 5 } }));
+        assert_eq!((r.prompt, r.cached), (Some(310), prices::Cached { read: 0, write_5m: 100, write_1h: 200 }));
+        // OpenAI's cached part of the prompt.
+        let r = parse(&json!({ "usage": { "prompt_tokens": 1200, "completion_tokens": 30, "prompt_tokens_details": { "cached_tokens": 1024 } } }));
+        assert_eq!((r.prompt, r.cached.read), (Some(1200), 1024));
+        // A call priced from what it read: Claude Haiku 4.5, 1M read from the cache = $0.10, not $1.
+        let r = parse(&json!({ "usage": { "input_tokens": 0, "cache_read_input_tokens": 1_000_000, "output_tokens": 0 } }));
+        assert_eq!(call_cost("anthropic", "claude-haiku-4-5", false, &r), Some(100_000));
         // Gemini's own API: thinking counts as the answer.
         let r = parse(&json!({ "usageMetadata": { "promptTokenCount": 30, "candidatesTokenCount": 25, "thoughtsTokenCount": 5, "totalTokenCount": 60 } }));
         assert_eq!((r.prompt, r.answer, r.total), (Some(30), Some(30), Some(60)));
