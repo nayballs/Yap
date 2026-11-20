@@ -60,6 +60,8 @@ const CARD_SETTLE_MS: u64 = 1_500;
 /// went (ms on the hook's clock; 0: none yet). The app's, for every thread;
 /// a unit test's own thread's, so another test's card never reaches it.
 mod cards {
+    pub use imp::*;
+
     #[cfg(not(test))]
     mod imp {
         use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -72,7 +74,8 @@ mod cards {
             WAITING.fetch_add(1, Ordering::Relaxed);
         }
         pub fn down(now: u64) {
-            let _ = WAITING.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| Some(n.saturating_sub(1)));
+            // (Each one up, then down: never below none.)
+            WAITING.fetch_sub(1, Ordering::Relaxed);
             GONE.store(now, Ordering::Relaxed);
         }
         pub fn gone() -> u64 {
@@ -107,7 +110,6 @@ mod cards {
             GONE.with(|g| g.set(0));
         }
     }
-    pub use imp::*;
 }
 
 /// What the person did.
@@ -362,7 +364,8 @@ impl Drop for Driving {
     fn drop(&mut self) {
         // A turn's future dropped mid-action (■): the blocking steps stop too.
         self.halted.store(true, Ordering::Relaxed);
-        let _ = ACTIONS.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| Some(n.saturating_sub(1)));
+        // (Each one `begin` counted.)
+        ACTIONS.fetch_sub(1, Ordering::Relaxed);
         if let Some(h) = HOLDER.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
             h.last = Instant::now();
         }
