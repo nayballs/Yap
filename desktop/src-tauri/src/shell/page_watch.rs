@@ -355,7 +355,7 @@ pub fn on_page_load(webview: &Webview, payload: &PageLoadPayload<'_>) {
     // page says where its own are (a page that never comes leaves the bar
     // click-through, never an invisible spot that swallows clicks).
     if label == crate::bar::overlay::LABEL {
-        crate::bar::bar_regions(Vec::new());
+        crate::bar::bar_regions(Vec::new(), Some(true));
     }
     #[cfg(windows)]
     win::install(webview);
