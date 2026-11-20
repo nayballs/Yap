@@ -120,9 +120,10 @@ pub const LAST_FOR: Duration = Duration::from_secs(30 * 60);
 static OPENED: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 
 /// Open `app` — an entry of the index, never anything a model wrote. A test
-/// run never launches anything: it records the open (`e2e_opened_apps`).
+/// run never launches anything: it records the open (`e2e_opened_apps`) —
+/// but Yap Lab on the real screen (`realtest::lab_screen`) starts it.
 pub fn open(app: &App) -> Result<(), String> {
-    if cfg!(test) || crate::shell::e2e::active() {
+    if cfg!(test) || (crate::shell::e2e::active() && !crate::shell::realtest::lab_screen()) {
         tracing::info!(app = %app.name, "Opening an app (test run: recorded, not launched)");
         OPENED.lock().unwrap_or_else(|p| p.into_inner()).push((app.id.clone(), app.name.clone()));
         return Ok(());

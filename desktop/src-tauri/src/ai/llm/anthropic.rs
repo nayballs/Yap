@@ -884,6 +884,10 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
             calls = message["tool_calls"].as_array().map_or(0, Vec::len),
             searches = message["yap_web"]["searches"].as_array().map_or(0, Vec::len),
             pages = message["yap_web"]["fetches"].as_array().map_or(0, Vec::len),
+            // The prompt's tokens as billed (counts only): read from the cache, written to it, neither.
+            cache_read = value["usage"]["cache_read_input_tokens"].as_u64().unwrap_or(0),
+            cache_write = value["usage"]["cache_creation_input_tokens"].as_u64().unwrap_or(0),
+            uncached = value["usage"]["input_tokens"].as_u64().unwrap_or(0),
             "Chat: Claude answered on the Messages API"
         );
         return Ok(message);

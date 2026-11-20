@@ -243,6 +243,11 @@ pub trait Hands: Send + Sync {
     fn open(&self, _g: &super::grants::Granted, _app: Option<&crate::apps::App>) -> Result<super::open::Opened, String> {
         Err("apps can't be opened here".into())
     }
+    /// **A window back in front** (after the person answered a card in
+    /// Yap's own window): whether it is. Blocking.
+    fn raise(&self, _hwnd: isize) -> bool {
+        false
+    }
 }
 
 /// **Sends `steps`**, checking `stop` before each: stopped, whatever is
@@ -351,6 +356,10 @@ impl Hands for ThisPc {
 
     fn open(&self, g: &super::grants::Granted, app: Option<&crate::apps::App>) -> Result<super::open::Opened, String> {
         super::open::on_this_pc(g, app)
+    }
+
+    fn raise(&self, hwnd: isize) -> bool {
+        super::windows::raise(hwnd)
     }
 }
 

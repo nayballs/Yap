@@ -42,7 +42,8 @@ pub enum Act {
     Press,
     Scroll { mods: bool },
     Type,
-    Key { system: bool, enter: bool },
+    /// `delete`: the last key is Delete (in File Explorer, files go).
+    Key { system: bool, enter: bool, delete: bool },
     Hold { system: bool },
 }
 
@@ -64,6 +65,8 @@ pub struct Target {
     pub elevated: bool,
     /// A chat app (`pasting/app_kind.rs`): Enter sends.
     pub messaging: bool,
+    /// File Explorer (by its app id, whatever the language): the Delete key deletes files.
+    pub files: bool,
 }
 
 /// **What's true now** for one action.
@@ -114,10 +117,18 @@ fn landing(t: Option<&Target>, keys: bool) -> Result<(String, Tier), Verdict> {
         });
     }
     let Some((app, tier)) = t.app.clone() else {
-        return Err(refuse(
-            "That window belongs to an app the user hasn't allowed (masked in the screenshot). Ask for it with request_access if you need it.",
-            "Didn't act: an app you haven't allowed",
-        ));
+        return Err(if keys {
+            // (Acting by element or an answered card leaves the window in front as it was: a real run, 20 Nov 2026.)
+            refuse(
+                "The window in front belongs to an app the user hasn't allowed, so keys and typing would go to it: bring the app you're working in to the front first (open_application, or click into its window), then press the keys.",
+                "Didn't type: another app is in front",
+            )
+        } else {
+            refuse(
+                "That window belongs to an app the user hasn't allowed (masked in the screenshot). Ask for it with request_access if you need it.",
+                "Didn't act: an app you haven't allowed",
+            )
+        });
     };
     if t.elevated {
         return Err(refuse(
@@ -200,6 +211,13 @@ pub fn decide(act: Act, f: &Facts<'_>) -> Verdict {
                 return Verdict::Ask { act: "enter", label: "Enter".into(), app, does: "send" };
             }
         }
+        // The Delete key in File Explorer deletes what's selected, as its Delete button does (that one asks
+        // through the element's name): a real run on 20 Nov 2026 found the key went unasked.
+        if let Act::Key { delete: true, .. } = act {
+            if f.front.as_ref().is_some_and(|t| t.files) {
+                return Verdict::Ask { act: "press", label: "Delete".into(), app, does: "delete" };
+            }
+        }
     }
     Verdict::Go
 }
@@ -234,6 +252,10 @@ mod tests {
         // Keys go to the window in front: Yap's own there is "click the app first".
         let front_yap = Facts { front: Some(Target { yap: true, ..Default::default() }), ..Default::default() };
         assert!(error(decide(Act::Type, &front_yap)).contains("click the app's window first"));
+        // Another app in front for keys: bring the app back, not "ask for it" (a real run, 20 Nov 2026).
+        let front_other = Facts { front: Some(Target::default()), ..Default::default() };
+        assert!(error(decide(Act::Type, &front_other)).contains("bring the app you're working in to the front first"));
+        assert!(error(decide(left(), &Facts { under: Some(Target::default()), front: Some(Target::default()), ..Default::default() })).contains("request_access"));
         // A drag's end must be allowed too.
         let drag = Facts { under: allowed("Explorer", Tier::Full), end: Some(Target::default()), ..Default::default() };
         assert!(error(decide(Act::Drag { mods: false }, &drag)).contains("hasn't allowed"));
@@ -248,7 +270,7 @@ mod tests {
         assert!(error(decide(Act::Scroll { mods: false }, &at(Tier::Read))).contains("read only"));
         assert_eq!(decide(left(), &at(Tier::Click)), Verdict::Go);
         assert_eq!(decide(Act::Scroll { mods: false }, &at(Tier::Click)), Verdict::Go);
-        for act in [Act::Type, Act::Key { system: false, enter: false }, Act::Click { button: Button::Right, mods: false }, Act::Click { button: Button::Middle, mods: false }, Act::Click { button: Button::Left, mods: true }, Act::Drag { mods: false }, Act::Press] {
+        for act in [Act::Type, Act::Key { system: false, enter: false, delete: false }, Act::Click { button: Button::Right, mods: false }, Act::Click { button: Button::Middle, mods: false }, Act::Click { button: Button::Left, mods: true }, Act::Drag { mods: false }, Act::Press] {
             let mut f = at(Tier::Click);
             f.end = allowed("App", Tier::Click);
             assert!(error(decide(act, &f)).contains("clicks only"), "{act:?}");
@@ -259,9 +281,14 @@ mod tests {
     #[test]
     fn system_shortcuts_need_their_grant() {
         let f = Facts { front: allowed("Notepad", Tier::Full), ..Default::default() };
-        assert!(error(decide(Act::Key { system: true, enter: false }, &f)).contains("systemKeyCombos"));
-        assert_eq!(decide(Act::Key { system: true, enter: false }, &Facts { system_keys: true, ..f.clone() }), Verdict::Go);
-        assert_eq!(decide(Act::Key { system: false, enter: false }, &f), Verdict::Go);
+        assert!(error(decide(Act::Key { system: true, enter: false, delete: false }, &f)).contains("systemKeyCombos"));
+        assert_eq!(decide(Act::Key { system: true, enter: false, delete: false }, &Facts { system_keys: true, ..f.clone() }), Verdict::Go);
+        assert_eq!(decide(Act::Key { system: false, enter: false, delete: false }, &f), Verdict::Go);
+        // The Delete key: asked first in File Explorer (files go), not in any other app (a character goes).
+        assert_eq!(decide(Act::Key { system: false, enter: false, delete: true }, &f), Verdict::Go);
+        let explorer = Facts { front: Some(Target { files: true, ..allowed("File Explorer", Tier::Full).unwrap() }), ..Default::default() };
+        assert!(matches!(decide(Act::Key { system: false, enter: false, delete: true }, &explorer), Verdict::Ask { does: "delete", .. }));
+        assert_eq!(decide(Act::Key { system: false, enter: false, delete: true }, &Facts { unattended: true, ..explorer.clone() }), Verdict::Go);
     }
 
     #[test]
@@ -283,7 +310,7 @@ mod tests {
         let plain = Facts { element: Some(Element { kind: Kind::Control, name: "Bold".into(), password: false }), ..send.clone() };
         assert_eq!(decide(left(), &plain), Verdict::Go);
         let chat = Facts { front: Some(Target { messaging: true, ..allowed("Chat", Tier::Full).unwrap() }), ..Default::default() };
-        assert!(matches!(decide(Act::Key { system: false, enter: true }, &chat), Verdict::Ask { does: "send", .. }));
-        assert_eq!(decide(Act::Key { system: false, enter: true }, &Facts { front: allowed("Notepad", Tier::Full), ..Default::default() }), Verdict::Go);
+        assert!(matches!(decide(Act::Key { system: false, enter: true, delete: false }, &chat), Verdict::Ask { does: "send", .. }));
+        assert_eq!(decide(Act::Key { system: false, enter: true, delete: false }, &Facts { front: allowed("Notepad", Tier::Full), ..Default::default() }), Verdict::Go);
     }
 }

@@ -215,7 +215,8 @@ fn plan(name: &str, args: &Value, frame: Option<&super::frame::Frame>, cursor: O
             }
             let repeat = args["repeat"].as_f64().unwrap_or(1.0).clamp(1.0, 100.0) as u32;
             let enter = keys.last().is_some_and(|k| k == "return");
-            Ok(Plan { act: Act::Key { system, enter }, at: None, end: None, steps: input::key(&keys, repeat), text: String::new(), chip: summary_or(args, &format!("Pressed {combo}")) })
+            let delete = keys.last().is_some_and(|k| k == "delete" || k == "del");
+            Ok(Plan { act: Act::Key { system, enter, delete }, at: None, end: None, steps: input::key(&keys, repeat), text: String::new(), chip: summary_or(args, &format!("Pressed {combo}")) })
         }
         _ => Err((format!("{name} isn't one of Yap's input tools."), format!("Unknown tool: {name}"))),
     }
@@ -227,7 +228,8 @@ pub(super) fn target(w: Option<super::windows::Win>, apps: &[grants::Granted], d
     let app = (!w.own).then(|| apps.iter().find(|g| g.owns(&w)).map(|g| (g.name.clone(), g.tier))).flatten();
     let messaging = crate::pasting::app_kind::classify(Some(&w.exe), &w.class, "") == crate::pasting::app_kind::AppKind::Messaging;
     let elevated = app.is_some() && desk.elevated(&w);
-    Some(Target { yap: w.own, app, elevated, messaging })
+    let files = (!w.own) && apps.iter().any(|g| g.id == "Microsoft.Windows.Explorer" && g.owns(&w));
+    Some(Target { yap: w.own, app, elevated, messaging, files })
 }
 
 /// **One input call** for the chat `ctx` says.
@@ -257,7 +259,7 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
     };
     // What's there now, and the checks.
     let facts_desk = desk;
-    let (verdict, desk) = {
+    let (verdict, desk, front_hwnd) = {
         let apps = apps.clone();
         let p = (plan.act, plan.at, plan.end, plan.text.clone());
         let unattended = ctx.unattended;
@@ -272,13 +274,14 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
             let focus = if act == Act::Type { d.focused() } else { None };
             let front = d.front();
             // Robot mode: only the windows the test opened, whatever's allowed (shell/realtest.rs).
-            if crate::shell::realtest::on() {
+            if crate::shell::realtest::on() && !crate::shell::realtest::lab_screen() {
                 let pointer = matches!(act, Act::Click { .. } | Act::Drag { .. } | Act::Press | Act::Scroll { .. });
                 let landing = if pointer { under.clone().flatten() } else { front.clone() };
                 if let crate::shell::realtest::Gate::Refused(why) = crate::shell::realtest::gate(landing.map(|w| w.hwnd), "use an app (computer use)") {
-                    return (Verdict::Refuse { error: why, chip: "Didn't act: robot mode".into() }, d);
+                    return (Verdict::Refuse { error: why, chip: "Didn't act: robot mode".into() }, d, None);
                 }
             }
+            let front_hwnd = front.as_ref().map(|w| w.hwnd);
             let f = Facts {
                 front: target(front, &apps, d.as_ref()),
                 under: under.and_then(|w| target(w, &apps, d.as_ref())),
@@ -289,7 +292,7 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
                 text: &text,
                 unattended,
             };
-            (checks::decide(act, &f), d)
+            (checks::decide(act, &f), d, front_hwnd)
         };
         match tauri::async_runtime::spawn_blocking(read).await {
             Ok(r) => r,
@@ -328,7 +331,14 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
     let steps = plan.steps.clone();
     // The person's input, read between steps (the hook's atomics).
     let probe = driving.probe();
+    // Keys after the person answered Yap's card: Yap's own window took the focus for it, so the app that was in
+    // front comes back first (a real run, 20 Nov 2026: the keys went nowhere).
+    let keys = matches!(plan.act, Act::Type | Act::Key { .. } | Act::Hold { .. });
+    let raise_first = if asked && keys { front_hwnd } else { None };
     let ran = tauri::async_runtime::spawn_blocking(move || {
+        if let Some(h) = raise_first {
+            hands.raise(h);
+        }
         let stop = || probe.stopped() || halted.load(std::sync::atomic::Ordering::Relaxed);
         input::run(hands.as_ref(), &steps, &stop)
     })
@@ -378,9 +388,9 @@ mod tests {
         assert_eq!((drag.at, drag.end), (Some((4, 4)), Some((21, 21))));
         assert!(plan(DRAG, &json!({ "coordinate": [10, 10] }), Some(&frame), None).is_err(), "no start, no pointer");
         let k = plan(KEY, &json!({ "text": "alt+F4" }), Some(&frame), None).ok().unwrap();
-        assert_eq!(k.act, Act::Key { system: true, enter: false });
+        assert_eq!(k.act, Act::Key { system: true, enter: false, delete: false });
         let enter = plan(KEY, &json!({ "text": "ctrl+Return" }), Some(&frame), None).ok().unwrap();
-        assert_eq!(enter.act, Act::Key { system: false, enter: true });
+        assert_eq!(enter.act, Act::Key { system: false, enter: true, delete: false });
         assert!(plan(KEY, &json!({ "text": "" }), Some(&frame), None).is_err());
         assert!(plan(TYPE, &json!({ "text": "x".repeat(TYPE_MAX + 1) }), Some(&frame), None).is_err());
         assert_eq!(definitions().len(), NAMES.len());

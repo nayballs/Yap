@@ -300,6 +300,9 @@ struct Loop<'a> {
     /// This turn, for computer use (`computer/watch.rs`: the person taking
     /// over stops the rest of the turn's input actions): unique per turn.
     computer_turn: String,
+    /// The turn used an app on the PC (computer use): it may take up to
+    /// `computer::TURN_STEPS` steps, one action each.
+    computer_used: bool,
     /// Computer use through the API's own toolset (Claude on an Anthropic
     /// key, `computer.rs` `TOOLSET`): its members' pictures go in their
     /// own results.
@@ -507,6 +510,7 @@ async fn tool_loop(
         agent_seen: false,
         connector_seen: false,
         computer_turn: crate::computer::new_turn("loop"),
+        computer_used: false,
         computer_toolset: crate::ai::llm::anthropic::speaks_messages(provider, model) && extra.computer,
         toolset_looks: Vec::new(),
         must_search: must_search_first,
@@ -524,7 +528,14 @@ async fn tool_loop(
     // A research turn has more steps, and past its time the report with no
     // tools (chat/research.rs).
     let steps = if extra.research.is_some() { crate::chat::research::STEPS } else { MAX_TOOL_STEPS };
-    for _step in 0..steps {
+    let mut taken = 0;
+    loop {
+        // A turn using apps on the PC takes a step an action (a click, a key, a look): it may go on longer.
+        let limit = if turn.computer_used { steps.max(crate::computer::TURN_STEPS) } else { steps };
+        if taken >= limit {
+            break;
+        }
+        taken += 1;
         if extra.research.is_some_and(|b| b.overdue()) {
             tracing::info!("Chat: the research is past its time; the report now");
             break;
@@ -705,6 +716,24 @@ mod tests {
                 "function": { "name": name, "arguments": args.to_string() },
             })).collect::<Vec<_>>(),
         })
+    }
+
+    /// A turn using apps on the PC takes a step an action: past the loop's
+    /// 20 it goes on (`computer::TURN_STEPS`), and the model's own answer
+    /// comes back, never the "answer now" note. (A real run, 20 Nov 2026,
+    /// was cut off mid-task at 20.)
+    #[tokio::test]
+    async fn a_turn_using_apps_on_the_pc_goes_past_twenty_steps() {
+        let mut steps: Vec<Value> = (0..25).map(|_| calls(&[("wait", json!({ "duration": 0 }))])).collect();
+        steps.push(json!({ "role": "assistant", "content": "All done." }));
+        let fake = fake_server(steps, Value::Null);
+        let base = format!("{}/v1", fake.base);
+        let extra = Extra { computer: true, conversation: Some(4242), ..Default::default() };
+        let (reply, _) = run_tool_loop_with("You are helpful.", &[], "Sort my folder", &[], &base, "", "fake-chat", "custom", false, false, &|_| {}, None, FirstStep::Model, extra, None).await.expect("an answer");
+        assert_eq!(reply, "All done.");
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 26, "25 steps of actions, then the answer");
+        assert!(requests.iter().all(|r| r.1["messages"].as_array().unwrap().last().unwrap()["content"] != ANSWER_NOW_NOTE));
     }
 
     #[tokio::test]

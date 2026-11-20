@@ -471,15 +471,31 @@ three gaps:
 5. **Typing** into a password field, or text with card or bank details
    (`act/rules.rs` `typed_secret`): refused.
 6. **A click on a control named Send, Pay, Buy, Delete, Sign in…**
-   (`act/rules.rs` `needs_ok`), or Enter in a chat app: **asks first**, on
-   the browser's card ("press ‘Send’ on Example Mail").
+   (`act/rules.rs` `needs_ok`), Enter in a chat app, or **the Delete key in
+   File Explorer** (by its app id, whatever the language: files go, as with
+   its Delete button; 20 Nov 2026): **asks first**, on the browser's card
+   ("press ‘Send’ on Example Mail").
    - In Bypass permissions nothing asks: the action goes ahead, and Claude is
      told to ask in the chat instead.
-7. **Robot mode:** only the windows the test opened (`shell/realtest.rs`
-   `gate`).
+   - **Keys after the card:** the person answered it in Yap's window, so Yap
+     is in front; the app that was in front comes back first
+     (`Hands::raise`), or the keys would land nowhere.
+7. **Keys with another app in front** (one not allowed): refused, telling
+   the model to bring its own app forward first (`open_application`, or a
+   click into it). Acting by element, or a card answered, leaves the front
+   as it was.
+8. **Robot mode:** only the windows the test opened (`shell/realtest.rs`
+   `gate`). Yap Lab on the real screen (`realtest::lab_screen`, debug only)
+   lets the person's own windows by, as a real run does.
 
 ## Driving the PC
 
+- **A turn's steps.** Chat's tool loop takes 20 steps a turn
+  (`chat/tools.rs` `MAX_TOOL_STEPS`). Once a turn has used an app, it may
+  take `computer::TURN_STEPS` (100), since computer use is a step an action
+  and a real task (sorting a folder, a letter printed to PDF) takes far more
+  than 20. The real-screen pass on 20 Nov 2026 found turns cut off mid-task.
+  Esc, ■ Stop and the model's context still end it.
 - **One chat at a time.** A chat holds the PC for 10 s after its last input
   action; another chat's actions are refused meanwhile.
 - **The indicator.**

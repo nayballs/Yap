@@ -191,7 +191,19 @@ pub fn result_of(state: &str, allowed: &[Granted], denied: &[DeniedApp], every: 
             "success": true,
             "data": data,
             "note": "Allowed. Take a screenshot to see their windows; anything else on screen is masked.",
-            "displayText": format!("Allowed to use {}", names(allowed)),
+            // A card for extras alone (system shortcuts, the clipboard) names them, not an empty list of apps.
+            "displayText": if allowed.is_empty() {
+                let mut extras = Vec::new();
+                if every.system_keys {
+                    extras.push("system shortcuts");
+                }
+                if every.clipboard_read || every.clipboard_write {
+                    extras.push("the clipboard");
+                }
+                if extras.is_empty() { "Allowed".to_string() } else { format!("Allowed {}", extras.join(" and ")) }
+            } else {
+                format!("Allowed to use {}", names(allowed))
+            },
         }),
         "already" => json!({ "success": true, "data": data, "note": "Already allowed in this chat.", "displayText": "Apps already allowed" }),
         "timedOut" => json!({ "success": false, "error": format!("Nobody answered within {} minutes: nothing was allowed. Ask the user in words whether they want you to use those apps.", WAIT.as_secs() / 60), "data": data, "displayText": "Not allowed: no answer" }),

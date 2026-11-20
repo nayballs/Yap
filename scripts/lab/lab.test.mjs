@@ -709,7 +709,8 @@ describe('a --fake run, end to end', { timeout: 900_000 }, () => {
   });
 
   test('logs, and stop leaves the lab folder', () => {
-    const logs = ok(lab('logs', '--grep', 'test mode on'), 'logs');
+    // The whole log (`--since 0`): without it `logs` reads the last 200 lines, and a run's start can be further back.
+    const logs = ok(lab('logs', '--grep', 'test mode on', '--since', '0'), 'logs');
     assert.equal(logs.lines.length, 1);
     const stopped = ok(lab('stop'), 'stop');
     assert.equal(stopped.stopped, true);

@@ -297,6 +297,7 @@ impl Loop<'_> {
                 // next step while it fits.
                 let ctx = crate::computer::Ctx { conversation: self.extra.conversation, live: self.live, provider: self.provider, base_url: self.base_url, unattended: false, turn: &self.computer_turn };
                 let run = crate::computer::execute(name, &args, &ctx).await;
+                self.computer_used = true;
                 self.screen_seen |= run.seen;
                 let live = self.live;
                 crate::computer::show(&run, self.extra.conversation, &|e| {
