@@ -1268,10 +1268,10 @@ async function setThings(a) {
   }
   // Computer use (computer.rs, 19 Nov 2026) on a stand-in desktop: test windows drawn by the test Yap itself
   // (computer/sim.rs), never the real screen, mouse or keyboard; its Start menu a stand-in list of test apps.
-  // `--computer real` (a lab started with --real-screen, 20 Nov 2026): the person's real screen, mouse and
+  // `--computer real` (a lab started with --real-screen on, 20 Nov 2026): the person's real screen, mouse and
   // keyboard, Windows' own apps only on its Start menu; computer use's own grants and cards the only gate.
   if (a.computer === 'real') {
-    if (!START.realScreen) throw new Error('--computer real needs a lab started with --real-screen');
+    if (!START.realScreen) throw new Error('--computer real needs a lab started with --real-screen on');
     fs.writeFileSync(START_MENU, JSON.stringify(REAL_START_MENU, null, 2));
     await invoke('e2e_computer_scene', { scene: null });
     await patchConfig({ computerUse: true, assistantScreen: true, assistantScreenCloud: true, assistantScreenAsked: true });

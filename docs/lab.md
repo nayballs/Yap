@@ -453,7 +453,7 @@ among them. Computer use's switch and the two screen switches go on. The real sc
 keyboard are never touched (test mode), so the Claude inside Yap can be asked to use apps and the
 tools compared one for one with the desktop app's (the private plan's parity pass).
 
-`--computer real` (20 Nov 2026, a lab started with `start --real-screen`): **computer use on the
+`--computer real` (20 Nov 2026, a lab started with `start --real-screen on`): **computer use on the
 person's real screen, mouse and keyboard**, for a real-world pass. The test Yap runs in robot mode
 with `YAP_LAB_REAL_SCREEN=1` (`shell/realtest.rs` `lab_screen`):
 - computer use's own grants and cards are the only gate (robot mode's "only the test's own windows"
