@@ -69,7 +69,8 @@ pub struct Placed {
 
 static PLACED: std::sync::Mutex<Option<Placed>> = std::sync::Mutex::new(None);
 
-/// Where the tooltip shows now.
+/// Where the tooltip shows now (test and robot runs read it).
+#[cfg(debug_assertions)]
 pub fn placed() -> Option<Placed> {
     *PLACED.lock().unwrap_or_else(|p| p.into_inner())
 }
