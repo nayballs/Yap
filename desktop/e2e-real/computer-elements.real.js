@@ -16,7 +16,7 @@ test("the pad read by ref: its box filled through its own pattern, its password 
   const { yap, pad } = robot;
   expect(helper('place', pad.hwnd, `pid:${pad.pid}`, 180, 180).ok, 'the pad placed').toBe(true);
   await pad.set('box', '');
-  await pad.focus();
+  await pad.focus('box');
   const read = await run(yap, 'read_window', {});
   expect(read.result.success, JSON.stringify(read.result)).toBe(true);
   const tree = read.result.data.tree;
