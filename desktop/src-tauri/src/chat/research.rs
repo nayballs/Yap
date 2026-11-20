@@ -17,10 +17,12 @@
 //!   research / Edit), and nothing is looked up until the person answers.
 //! - **The loop** (`turn/research.rs`): the turn's own tool loop (or, on the
 //!   Claude plan, the conversation's Claude Code session) with the plan and
-//!   [`instructions`] in the question's context: searches and page reads up
-//!   to [`Caps`], time and tokens included ([`Budget`]). A cap reached is a
-//!   refusal saying to write the report now ([`Spent::line`]); past the time
-//!   and [`GRACE`] the loop asks for the report with no tools. Progress shows
+//!   [`instructions`] in the question's context: as many searches and page
+//!   reads as it needs ([`UNCAPPED`], since 20 Nov 2026; Yap's tool loop's
+//!   reads what the model's request holds), [`TIME`] its backstop
+//!   ([`Budget`]). A cap reached is a refusal saying to write the report now
+//!   ([`Spent::line`]); past the time and [`GRACE`] the loop asks for the
+//!   report with no tools. Progress shows
 //!   on the activity line ([`Quiet`]: "… · 6 searches, 3 pages read"); the
 //!   report's own words never stream into the thread.
 //! - **The report** ([`report`]): a document beside the chat, its citations
@@ -44,25 +46,27 @@ use crate::chat::cards::outline::Section;
 use crate::chat::chats::Source;
 use crate::chat::stream::{Event, Sink};
 
-/// The most searches a research makes.
-pub const SEARCHES: usize = 20;
-/// The most pages it reads (fewer when the model's request holds fewer:
-/// [`Caps::for_request`]), and the fewest.
-pub const READS: usize = 12;
+/// **No cap** (20 Nov 2026, the maintainer: Research uncapped, as the Claude app's,
+/// whose help pages give it no limit on searches, sources or tool calls): a
+/// research makes as many searches, and reads as many pages, as the
+/// question needs. Until then: 20 searches, 12 pages, 10 minutes, 1M tokens.
+pub const UNCAPPED: usize = usize::MAX;
+/// The fewest pages a research in Yap's tool loop may read
+/// ([`Caps::for_request`]).
 pub const MIN_READS: usize = 4;
-/// How long it may look things up.
-pub const TIME: Duration = Duration::from_secs(10 * 60);
+/// **Not a cap on how far it goes**: a research still looking things up
+/// after 45 minutes — the longest Anthropic says its own Research takes —
+/// is asked for its report (a loop that never ends would otherwise run on).
+pub const TIME: Duration = Duration::from_secs(45 * 60);
 /// After [`TIME`], how long the report may take before the loop asks for it
 /// with no tools at all.
 pub const GRACE: Duration = Duration::from_secs(3 * 60);
-/// The most tokens its model calls may read and write together, every call
-/// of the turn counted as `ai/usage.rs` counts it (a provider's search
-/// sub-call too; on the Claude plan, the session's own calls so far).
-pub const TOKENS: u64 = 1_000_000;
-/// The tool loop's steps for a research (every other turn: 20).
-pub const STEPS: usize = 40;
+/// The tool loop's steps for a research (every other turn: 20): its
+/// [`TIME`] is what ends it.
+pub const STEPS: usize = 400;
 
-/// **How far a research may go**: searches, page reads, time and tokens.
+/// **How far a research may go**: searches, page reads, time and tokens
+/// ([`UNCAPPED`] and `u64::MAX`: no limit).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Caps {
     pub searches: usize,
@@ -72,13 +76,18 @@ pub struct Caps {
 }
 
 impl Caps {
-    pub const USUAL: Caps = Caps { searches: SEARCHES, reads: READS, time: TIME, tokens: TOKENS };
+    /// A research's: no limit on searches, pages or tokens; [`TIME`] its
+    /// backstop.
+    pub const USUAL: Caps = Caps { searches: UNCAPPED, reads: UNCAPPED, time: TIME, tokens: u64::MAX };
 
     /// [`Caps::USUAL`] with as many page reads as half the model's request
-    /// holds in pages of `page` tokens (`request`: its tokens, `None`: no
-    /// limit known), from [`MIN_READS`] to [`READS`]. Pure.
+    /// holds in pages of `page` tokens (`request`: its tokens; `None`, no
+    /// limit — your Claude plan's Claude Code keeps its own context), at
+    /// least [`MIN_READS`]: Yap's tool loop carries every page it read in
+    /// each request, so its reads are what the model can hold, never fewer
+    /// for being a research. Pure.
     pub fn for_request(request: Option<u64>, page: usize) -> Caps {
-        let reads = request.map_or(READS, |r| ((r / 2) / page.max(1) as u64) as usize).clamp(MIN_READS, READS);
+        let reads = request.map_or(UNCAPPED, |r| (((r / 2) / page.max(1) as u64) as usize).max(MIN_READS));
         Caps { reads, ..Caps::USUAL }
     }
 
@@ -102,7 +111,7 @@ impl Spent {
     pub fn line(self, caps: &Caps) -> String {
         let what = match self {
             Spent::Searches => format!("You've made the {} searches this research may make", caps.searches),
-            Spent::Reads => format!("You've read the {} pages this research may read", caps.reads),
+            Spent::Reads => format!("You've read the {} pages your context holds", caps.reads),
             Spent::Time => format!("This research has had its {} minutes", caps.time.as_secs() / 60),
             Spent::Tokens => "This research has used the tokens it may use".to_string(),
         };
@@ -113,7 +122,7 @@ impl Spent {
     pub fn chip(self, caps: &Caps) -> String {
         match self {
             Spent::Searches => format!("research limit: {} searches", caps.searches),
-            Spent::Reads => format!("research limit: {} pages", caps.reads),
+            Spent::Reads => format!("the {} pages the model holds", caps.reads),
             Spent::Time => format!("research limit: {} minutes", caps.time.as_secs() / 60),
             Spent::Tokens => "research limit: tokens".to_string(),
         }
@@ -277,7 +286,8 @@ pub enum Planned {
 pub const PLAN_PROMPT: &str = "You plan web research for Yap's Research mode, before anything is looked up. Read the user's latest message (and the chat before it, for what it points back to) and reply with JSON only, no other words:\n\
 {\"research\": true, \"title\": \"the report's title, a few words\", \"summary\": \"one sentence: what the report will find out\", \"sections\": [{\"key\": \"a short heading\", \"intent\": \"what this part will find out, in one line\"}]}\n\
 Give 3 to 6 sections, in the order the report will take them; each a question the research will answer, not a filler like \"Introduction\" or \"Conclusion\". \
-If the message isn't something to research on the web (a greeting, thanks, a question about this chat itself, a change to something already written), reply {\"research\": false}.";
+A picture with the message (a screenshot) is part of it: \"is this true?\" asks about what the picture shows or says, so research that. \
+The user turned Research on, or asked for it: reply {\"research\": false} only for a greeting, thanks, or a change to something already written in this chat.";
 
 /// The plan step's message: the chat's last few messages (`earlier`, (role,
 /// text)), today, and the question. Pure.
@@ -391,14 +401,13 @@ pub fn instructions(plan: &Plan, caps: &Caps, claude_code: bool) -> String {
         out.push_str(&format!("\nTheir note for the research, to follow throughout: \"{}\"", plan.note));
     }
     out.push_str(&format!(
-        "\n\nResearch it on the web with many searches that build on each other: start broad, then follow what you find — names, dates, claims to check, the other side of a question — and read the pages your facts come from ({read}; a search result's snippet isn't a source). \
-You may make up to {} searches ({search}) and read up to {} pages ({read}) in about {} minutes; Yap stops the searches there. Search for each part of the plan, and where sources disagree, say so.\n\n\
-When you have enough, stop calling tools and write the report as your answer, in markdown: a # title; then ## Summary, two to four sentences that answer the question; then a ## section for each part of the plan, in its order (add one only for something important the plan didn't foresee). \
+        "\n\nResearch it thoroughly on the web ({search}), as a careful researcher would, with many searches that build on each other: start broad, then follow what you find — names, dates, claims to check, the other side of a question — and read the pages your facts come from ({read}; a search result's snippet isn't a source). \
+There's no limit on searches or pages: search each part of the plan from several angles, and scale the effort to the question — a single claim to check still deserves several sources that agree, a broad question dozens of searches. \
+Make the searches and reads that don't depend on each other at once (several tool calls in one step).{} Where sources disagree, say so.\n\n\
+When every part of the plan is well answered, stop calling tools and write the report as your answer, in markdown: a # title; then ## Summary, two to four sentences that answer the question; then a ## section for each part of the plan, in its order (add one only for something important the plan didn't foresee). \
 Every fact from a page: {cite}. Cite only pages you read with {read}, never a page you only saw in search results. No list of sources at the end (Yap adds it), no offer to do more. \
 Don't make a note or a document yourself: Yap puts your report in a document beside the chat.",
-        caps.searches,
-        caps.reads,
-        caps.time.as_secs() / 60,
+        if caps.reads == UNCAPPED { String::new() } else { format!(" You can read up to {} pages in all: what your context holds.", caps.reads) },
     ));
     out
 }
@@ -892,20 +901,27 @@ mod tests {
 
     #[test]
     fn the_caps_stop_time_and_tokens_first_then_searches_then_reads() {
+        // A research's own: no limit on searches, pages or tokens; 45 minutes its backstop.
         let caps = Caps::USUAL;
         let min = Duration::from_secs(60);
+        assert_eq!((caps.searches, caps.reads, caps.tokens, caps.time), (UNCAPPED, UNCAPPED, u64::MAX, Duration::from_secs(45 * 60)));
         assert_eq!(spent(&caps, 0, 0, min, 0), None);
-        assert_eq!(spent(&caps, SEARCHES - 1, READS - 1, min, TOKENS - 1), None);
-        assert_eq!(spent(&caps, SEARCHES, 0, min, 0), Some(Spent::Searches));
-        assert_eq!(spent(&caps, 0, READS, min, 0), Some(Spent::Reads));
-        assert_eq!(spent(&caps, SEARCHES, READS, min, 0), Some(Spent::Searches));
+        assert_eq!(spent(&caps, 5_000, 5_000, Duration::from_secs(44 * 60), 50_000_000), None, "thousands of searches and pages, 50M tokens: still going");
         assert_eq!(spent(&caps, 0, 0, TIME, 0), Some(Spent::Time));
-        assert_eq!(spent(&caps, 0, 0, min, TOKENS), Some(Spent::Tokens));
-        assert_eq!(spent(&caps, SEARCHES, READS, TIME, TOKENS), Some(Spent::Time));
+        // Caps the tests set (and a tool loop's reads, sized to its model): in that order.
+        let caps = Caps { searches: 20, reads: 12, time: TIME, tokens: 1_000_000 };
+        assert_eq!(spent(&caps, 19, 11, min, 999_999), None);
+        assert_eq!(spent(&caps, 20, 0, min, 0), Some(Spent::Searches));
+        assert_eq!(spent(&caps, 0, 12, min, 0), Some(Spent::Reads));
+        assert_eq!(spent(&caps, 20, 12, min, 0), Some(Spent::Searches));
+        assert_eq!(spent(&caps, 0, 0, TIME, 0), Some(Spent::Time));
+        assert_eq!(spent(&caps, 0, 0, min, 1_000_000), Some(Spent::Tokens));
+        assert_eq!(spent(&caps, 20, 12, TIME, 1_000_000), Some(Spent::Time));
         // A budget: only time and tokens stop it (the web turn counts the searches).
         let b = Budget::started_ago(caps, Duration::from_secs(30));
         assert_eq!(b.out(0), None);
-        assert_eq!(b.out(TOKENS), Some(Spent::Tokens));
+        assert_eq!(b.out(1_000_000), Some(Spent::Tokens));
+        assert_eq!(Budget::started_ago(Caps::USUAL, Duration::from_secs(30)).out(u64::MAX - 1), None);
         assert!(!b.overdue());
         let late = Budget::started_ago(caps, TIME + Duration::from_secs(5));
         assert_eq!(late.out(0), Some(Spent::Time));
@@ -914,7 +930,7 @@ mod tests {
         // The line the model reads, and the chip.
         assert!(Spent::Searches.line(&caps).starts_with("You've made the 20 searches"), "{}", Spent::Searches.line(&caps));
         assert!(Spent::Time.line(&caps).contains("write the report now"));
-        assert_eq!(Spent::Reads.chip(&caps), "research limit: 12 pages");
+        assert_eq!(Spent::Reads.chip(&caps), "the 12 pages the model holds");
     }
 
     #[test]
@@ -929,7 +945,10 @@ mod tests {
         assert_eq!(past(&caps, (3, 2), (3, 2), min, 0), Some(Spent::Searches));
         // Time and tokens first.
         assert_eq!(past(&caps, (0, 0), (0, 0), TIME, 0), Some(Spent::Time));
-        assert_eq!(past(&caps, (0, 0), (0, 0), min, TOKENS), Some(Spent::Tokens));
+        assert_eq!(past(&caps, (0, 0), (0, 0), min, u64::MAX), Some(Spent::Tokens));
+        // Uncapped (your Claude plan's): only the time stops it.
+        assert_eq!(past(&Caps::USUAL, (400, 300), (400, 300), Duration::from_secs(44 * 60), 90_000_000), None);
+        assert_eq!(past(&Caps::USUAL, (0, 0), (0, 0), TIME, 0), Some(Spent::Time));
         let said = write_now_after(Spent::Searches, &caps);
         assert!(said.starts_with("(A note from Yap, not the user.) You've made the 3 searches this research may make. Yap stopped the research there."), "{said}");
         assert!(said.contains("Don't search or fetch anything more."), "{said}");
@@ -937,13 +956,16 @@ mod tests {
 
     #[test]
     fn the_reads_are_sized_to_what_the_models_request_holds() {
-        assert_eq!(Caps::for_request(None, 3_000).reads, READS);
-        assert_eq!(Caps::for_request(Some(200_000), 3_000).reads, READS);
+        // Your Claude plan's Claude Code keeps its own context: no limit.
+        assert_eq!(Caps::for_request(None, 3_000).reads, UNCAPPED);
+        // Yap's tool loop: as many pages as half the request holds, never fewer than 4 (until 20 Nov: at most 12).
+        assert_eq!(Caps::for_request(Some(200_000), 3_000).reads, 33);
+        assert_eq!(Caps::for_request(Some(1_000_000), 3_000).reads, 166);
         // Claude's own fetch puts 8,000 tokens a page in: an 80K request holds 5.
         assert_eq!(Caps::for_request(Some(80_000), 8_000).reads, 5);
         assert_eq!(Caps::for_request(Some(8_000), 3_000).reads, MIN_READS);
-        assert_eq!(Caps::for_request(Some(8_000), 3_000).searches, SEARCHES);
-        assert_eq!(Caps::USUAL.reach(), crate::web::Reach { searches: SEARCHES, reads: READS });
+        assert_eq!(Caps::for_request(Some(8_000), 3_000).searches, UNCAPPED);
+        assert_eq!(Caps::USUAL.reach(), crate::web::Reach { searches: UNCAPPED, reads: UNCAPPED });
     }
 
     #[test]
@@ -970,12 +992,16 @@ mod tests {
     #[test]
     fn the_loop_is_told_the_plan_the_caps_and_how_to_cite() {
         let plan = Plan { title: "QWERTY".into(), summary: "Its history.".into(), sections: vec![Section { key: "Origins".into(), intent: "the typewriter".into() }], note: "Keep it short".into() };
-        let yaps = instructions(&plan, &Caps::USUAL, false);
+        let yaps = instructions(&plan, &Caps::for_request(Some(200_000), 3_000), false);
         assert!(yaps.contains("1. Origins — the typewriter"), "{yaps}");
-        assert!(yaps.contains("up to 20 searches (web_search) and read up to 12 pages (read_page) in about 10 minutes"), "{yaps}");
+        // No limit on searches; the tool loop's pages, what its context holds.
+        assert!(yaps.contains("There's no limit on searches or pages") && yaps.contains("several tool calls in one step"), "{yaps}");
+        assert!(yaps.contains("You can read up to 33 pages in all: what your context holds."), "{yaps}");
+        assert!(!yaps.contains("minutes") && !yaps.contains("up to 20 searches"), "{yaps}");
         assert!(yaps.contains("like [3]") && yaps.contains("\"Keep it short\""), "{yaps}");
-        let code = instructions(&plan, &Caps::USUAL, true);
+        let code = instructions(&plan, &Caps::for_request(None, 8_000), true);
         assert!(code.contains("WebFetch") && code.contains("[3](https://example.com/page)"), "{code}");
+        assert!(code.contains("There's no limit on searches or pages") && !code.contains("You can read up to"), "{code}");
         // Only the web's tools and the notes' (and a big project's) reads run.
         assert!(allows("web_search") && allows("read_page") && allows("search_notes"));
         assert!(allows("read_project_file") && allows("search_project_files"));

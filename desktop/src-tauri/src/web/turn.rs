@@ -1204,7 +1204,7 @@ mod tests {
         let late = Budget::started_ago(caps, caps.time + std::time::Duration::from_secs(1));
         let mut turn = Turn::new(settings("exa-key"), endpoints_of(&f), "research qwerty", &[]).research(late);
         let r = turn.execute("web_search", &search(1)).await;
-        assert_eq!(r["displayText"], json!("Didn't search for \"qwerty history part 1\": research limit: 10 minutes"));
+        assert_eq!(r["displayText"], json!("Didn't search for \"qwerty history part 1\": research limit: 45 minutes"));
         // Claude's own web tools: deeper, then each gone at its cap, both once the time is spent.
         let mut n = native::NativeSearch::new(native::Provider::Anthropic, "claude-opus-5-5", "https://api.anthropic.com/v1", "k");
         n.in_chat = true;

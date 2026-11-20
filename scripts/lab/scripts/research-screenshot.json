@@ -1,0 +1,19 @@
+{
+  "name": "research-screenshot",
+  "about": "Research on a question about a screenshot (20 Nov 2026, chat/research.rs): a message's claim in a picture and \"Is this true? Research it\", Research on. The plan step sees the picture (until that day it had only the words, called it nothing to research and the turn was answered as any, 2 searches and 4 pages, while the Claude app researched the same for 4 minutes over 309 sources); its plan card shows and is started; the research runs uncapped (no limit on searches or pages, 45 minutes its backstop) to a report beside the chat citing only pages read. A real model on the web only: nothing for --fake.",
+  "needs": { "web": true },
+  "steps": [
+    {
+      "ask": "Is this true? Research it",
+      "research": true,
+      "pictures": [{ "width": 1200, "height": 200, "shape": "stripes", "color": "#ffffff", "background": "#ffffff", "word": "BANANAS ARE RADIOACTIVE", "wordColor": "#111111" }],
+      "cards": "allow",
+      "timeout": 2700,
+      "note": "A screenshot of a message saying bananas are radioactive, and the question with Research on."
+    },
+    { "expect": { "status": "answered", "questionImages": 1, "documents": 1 }, "note": "Researched: the report is a document beside the chat (an answer as any turn has none)." },
+    { "expect": { "answerContains": "The full report is open on the right." } },
+    { "expect": { "sources": { "min": 4 } }, "soft": true, "note": "Uncapped: more pages read than a plain answer's handful. Soft: how many is the model's call." },
+    { "shot": "research-screenshot-report", "window": "main", "note": "The thread's summary, the report's card and the report beside the chat." }
+  ]
+}
