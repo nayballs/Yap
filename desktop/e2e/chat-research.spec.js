@@ -24,7 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, openView, setConfig } from './support/fixtures.js';
-import { startFakeLlm } from './support/fake-llm.js';
+import { startFakeLlm, helperPart, researchHelperStep } from './support/fake-llm.js';
 import { startFakeWeb, QWERTY_URL, SHOLES_URL, DVORAK_URL } from './support/fake-web.js';
 import { fakeClaude, PLAN_CHAT } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
@@ -371,6 +371,99 @@ test('"Is this true? Research it" with a screenshot: the plan step sees the pict
   await expect(lastAnswer(main)).toContainText('The full report is open on the right.', { timeout: 30_000 });
 });
 
+test('Research with helpers: a helper for each part of the plan, all at once, each its own searches and pages, then the lead writes the report from their findings', async ({ yap, main, fakeLlm, shot }) => {
+  test.setTimeout(120_000);
+  // (The stand-in model is on this PC, where a research has no helpers: on for this test.)
+  await yap.invoke('e2e_research_helpers', { on: true });
+  try {
+    // Part 1's helper holds its note until the others are done: they work at the same time. Part 1 and part 3
+    // read the same page (one source); none reads the Dvorak page (a later test reads it fresh: page titles
+    // are kept for the session).
+    const held = gate();
+    fakeLlm.reply('researchHelper', (r) => {
+      const step = researchHelperStep(r, { avoid: [DVORAK_URL] });
+      return step.content && helperPart(r.user).n === 1 ? { ...step, gate: held.promise } : step;
+    });
+    // The lead: the report from the findings, no search of its own (each part's number from its note).
+    fakeLlm.scriptChat([
+      {
+        content: (r) => {
+          const n = (part) => new RegExp(`<findings part="${part}"[^>]*>\\nPart ${part} \\([^)]*\\): what the page says \\[(\\d+)\\]`).exec(r.user)?.[1] ?? '99';
+          return [
+            '# How QWERTY came about',
+            '',
+            '## Summary',
+            '',
+            `QWERTY was laid out for the Sholes and Glidden typewriter [${n(2)}] and sold to Remington in 1873 [${n(1)}].`,
+            '',
+            '## Origins',
+            '',
+            `It was sold to Remington in 1873 [${n(1)}].`,
+            '',
+            '## Why it stayed',
+            '',
+            `It came with the first typewriter that sold well [${n(2)}].`,
+            '',
+            '## Rivals',
+            '',
+            `Rivals never displaced it [${n(3)}].`,
+          ].join('\n');
+        },
+      },
+    ]);
+    await freshChat(main);
+    await research(main, true);
+    const before = fakeLlm.requests.length;
+    await ask(main, 'How did the QWERTY keyboard layout come about?');
+    await expect(card(main)).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
+    await card(main).getByRole('button', { name: 'Start research' }).click();
+    const helperCalls = () => fakeLlm.requests.slice(before).filter((r) => r.kind === 'researchHelper');
+    // Parts 2 and 3 finish while part 1 is still at work: at once, one line for them all.
+    await expect.poll(() => helperCalls().filter((r) => r.gated).length, { timeout: 20_000 }).toBe(1);
+    await expect(line(main)).toContainText('2 of 3 parts done', { timeout: 20_000 });
+    await expect(line(main)).toContainText('3 searches, 2 pages read');
+    await shot(main, '14-research-helpers-light');
+    // Each helper: its own part, the whole plan, no chat history, only the web's tools.
+    const firsts = [1, 2, 3].map((n) => helperCalls().find((r) => helperPart(r.user).n === n));
+    expect(firsts.map((r) => helperPart(r.user).key)).toEqual(['Origins', 'Why it stayed', 'Rivals']);
+    for (const r of firsts) {
+      expect(r.user).toContain('The user asked: "How did the QWERTY keyboard layout come about?"');
+      expect(r.user).toContain('1. Origins — where it came from');
+      expect(r.user).toContain("There's no limit on searches or pages");
+      expect(r.messages.filter((m) => m.role !== 'system')).toHaveLength(1);
+      expect(r.tools).toContain('web_search');
+      expect(r.tools).toContain('read_page');
+      expect(r.tools).not.toContain('open_app');
+    }
+    held.open();
+
+    // The lead: their findings in its question, the report beside the chat citing the pages they read.
+    await expect(lastAnswer(main)).toContainText('The full report is open on the right.', { timeout: 30_000 });
+    const lead = fakeLlm.requests.slice(before).find((r) => r.kind !== 'researchHelper' && r.user.includes('You lead this research'));
+    expect(lead.user).toContain('Your research helpers have researched the parts of this plan at the same time');
+    expect(lead.user).toContain('<findings part="1" heading="Origins">\nPart 1 (Origins): what the page says [');
+    expect(lead.user).toContain('<findings part="3" heading="Rivals">');
+    expect(lead.tools).toContain('web_search');
+    const body = panel(main).locator('.docbody');
+    await expect(body.locator('.docname')).toHaveText('How QWERTY came about');
+    await expect(body).toContainText('3 searches, 2 pages read');
+    const links = await body.locator('a').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
+    for (const url of [QWERTY_URL, SHOLES_URL]) expect(links).toContain(url);
+    expect(links).not.toContain(DVORAK_URL);
+    // Part 1's and part 3's page: one source, one number in both notes.
+    const noteNumber = (part) => new RegExp(`<findings part="${part}"[^>]*>\\nPart ${part} \\([^)]*\\): what the page says \\[(\\d+)\\]`).exec(lead.user)?.[1];
+    expect(noteNumber(3)).toBe(noteNumber(1));
+    await expect(lastAnswer(main).locator('a.md-cite')).toHaveCount(2);
+    // The research's chip says how it worked.
+    const conv = newest(yap, 'How did the QWERTY');
+    expect(conv.messages.at(-1).tools).toContain('Researched for under a minute with 3 helpers: 3 searches, 2 pages read');
+    await shot(main, '15-research-helpers-report-light');
+  } finally {
+    fakeLlm.reply('researchHelper', null);
+    await yap.invoke('e2e_research_helpers', { on: false });
+  }
+});
+
 /** A research loop on the fake: one search, then the report titled `title`. */
 const loopOf = (title) => [
   { tools: [{ name: 'web_search', args: { query: 'QWERTY keyboard layout history' } }] },
@@ -489,6 +582,8 @@ test('on your Claude plan, a page Claude Code read that no search found is title
       initOf([], []),
       resultOf(JSON.stringify(PLAN)),
       { _wait_user: true },
+      // (No `helper` lines: each of its helpers' Claude Codes ends at once, so none finishes and the chat's
+      // session researches it all, as with no helpers.)
       // The chat's session: a search that finds two pages, then two pages read — one the search never found.
       { _for: 'chat' },
       { _wait_user: true },
@@ -534,10 +629,103 @@ test('on your Claude plan, a page Claude Code read that no search found is title
     // Kept so with the answer.
     const answer = newest(yap, 'How did the QWERTY')?.messages?.at(-1);
     expect(answer.sources.filter((s) => s.opened).map((s) => s.title)).toEqual(['QWERTY - Wikipedia', 'Dvorak keyboard layout - Wikipedia']);
+    expect(answer.tools.some((c) => c.includes('helpers')), 'no helper finished: the lead researched it all').toBe(false);
     await shot(main, '10-plan-research-sources-light');
     await theme(yap, main, 'dark');
     await shot(main, '11-plan-research-sources-dark');
     await theme(yap, main, 'light');
+  } finally {
+    await setConfig(yap, main, { llmScopes: { chat: fakeChat(fakeLlm) } }).catch(() => {});
+  }
+});
+
+test("on your Claude plan, Research has helpers too: a Claude Code each with only the web's tools, their pages the report's", async ({ yap, main, fakeLlm, shot }) => {
+  test.setTimeout(120_000);
+  const helperDump = path.join(HERE, 'helpers-args.jsonl');
+  const leadDump = path.join(HERE, 'lead-args.jsonl');
+  fs.mkdirSync(HERE, { recursive: true });
+  fs.rmSync(helperDump, { force: true });
+  fs.rmSync(leadDump, { force: true });
+  const PLAN = { research: true, title: "The QWERTY keyboard's story", summary: 'Where QWERTY came from and what followed.', sections: [{ key: 'Origins', intent: 'where it came from' }, { key: 'Why it stayed', intent: 'what kept it going' }, { key: 'Rivals', intent: 'what tried to replace it' }] };
+  const REPORT = [
+    '# Where the QWERTY keyboard came from',
+    '',
+    '## Summary',
+    '',
+    `QWERTY came with the Sholes and Glidden typewriter, whose keyboard Sholes patented in 1878 [1](${SHOLES_URL}).`,
+    '',
+    '## Origins',
+    '',
+    `Sholes patented the arrangement in 1878 [1](${SHOLES_URL}).`,
+  ].join('\n');
+  await yap.invoke('e2e_claude_script', {
+    script: claudeScript('plan-helpers', [
+      { _for: 'ask' },
+      { _wait_user: true },
+      initOf([], []),
+      resultOf(JSON.stringify(PLAN)),
+      { _wait_user: true },
+      // Each helper (a Claude Code of its own): a search, a page read, its note citing the page.
+      { _for: 'helper' },
+      { _wait_user: true },
+      { _dump_args: helperDump },
+      initOf(['WebFetch', 'WebSearch'], []),
+      ...called('h1', 'toolu_hsearch', 'WebSearch', { query: 'Sholes typewriter keyboard' }, `Web search results for query: "Sholes typewriter keyboard"\n\nLinks: [{"title":"Sholes and Glidden typewriter - Wikipedia","url":"${SHOLES_URL}"}]`, {
+        query: 'Sholes typewriter keyboard',
+        results: [{ tool_use_id: 'srvtoolu_h', content: [{ title: 'Sholes and Glidden typewriter - Wikipedia', url: SHOLES_URL }] }],
+        durationSeconds: 0.3,
+      }),
+      ...fetched('h2', 'toolu_hfetch', SHOLES_URL, 'Christopher Latham Sholes patented its keyboard arrangement in 1878.'),
+      ...said('h3', `Sholes patented the arrangement in 1878 [4](${SHOLES_URL}).`),
+      { _wait_user: true },
+      // The lead (the chat's session): the report from their findings, no search of its own.
+      { _for: 'chat' },
+      { _wait_user: true },
+      { _dump_args: leadDump },
+      initOf(['WebFetch', 'WebSearch'], [{ name: 'yap', status: 'connected' }]),
+      ...said('m1', REPORT),
+      { _wait_user: true },
+    ]),
+  });
+  await setConfig(yap, main, { llmScopes: { chat: PLAN_CHAT } });
+  try {
+    await freshChat(main);
+    await research(main, true);
+    await ask(main, 'How did the QWERTY keyboard layout come about?');
+    await expect(card(main)).toHaveAttribute('data-state', 'asking', { timeout: 30_000 });
+    await card(main).getByRole('button', { name: 'Start research' }).click();
+    await expect(lastAnswer(main)).toContainText('The full report is open on the right.', { timeout: 40_000 });
+
+    // A helper for each part: only the web's tools, no server, none of the person's settings, nothing saved.
+    const lines = (file) => fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const helpers = lines(helperDump);
+    expect(helpers).toHaveLength(3);
+    expect(helpers.map((h) => /Your part: (\d)\./.exec(h.user_text)?.[1]).sort()).toEqual(['1', '2', '3']);
+    expect(new Set(helpers.map((h) => h.pid)).size).toBe(3);
+    for (const h of helpers) {
+      const after = (flag) => h.args[h.args.indexOf(flag) + 1];
+      expect(after('--tools')).toBe('WebSearch,WebFetch');
+      expect(h.args).not.toContain('--mcp-config');
+      expect(h.args).toContain('--no-session-persistence');
+      expect(h.user_text).toContain('1. Origins — where it came from');
+      expect(h.user_text).toContain('[3](https://example.com/page)');
+    }
+    // The lead: their findings in its message, the page they read numbered for the research.
+    const [lead] = lines(leadDump);
+    expect(lead.user_text).toContain('You lead this research');
+    expect(lead.user_text).toContain(`<findings part="1" heading="Origins">\nSholes patented the arrangement in 1878 [1](${SHOLES_URL}).`);
+    // The report cites the page the helpers read, by its title.
+    const row = thread(main).getByTestId('chat-sources').last();
+    await expect(row.getByTestId('chat-source').locator('.srctitle')).toHaveText(['Sholes and Glidden typewriter - Wikipedia']);
+    const body = panel(main).locator('.docbody');
+    await expect(body.locator('.docname')).toHaveText('Where the QWERTY keyboard came from');
+    await expect(body).toContainText('3 searches, 1 page read');
+    const note = (yap.readJson('notes.json')?.notes ?? []).find((n) => n.title === 'Where the QWERTY keyboard came from');
+    expect(note.content).toContain(`[[1]](${SHOLES_URL})`);
+    expect(note.content).toContain(`[Sholes and Glidden typewriter - Wikipedia](${SHOLES_URL})`);
+    const answer = newest(yap, 'How did the QWERTY')?.messages?.at(-1);
+    expect(answer.tools).toContain('Researched for under a minute with 3 helpers: 3 searches, 1 page read');
+    await shot(main, '16-plan-research-helpers-light');
   } finally {
     await setConfig(yap, main, { llmScopes: { chat: fakeChat(fakeLlm) } }).catch(() => {});
   }

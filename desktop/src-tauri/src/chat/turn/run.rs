@@ -11,6 +11,21 @@ use super::prompt::Built;
 use super::{superseded, Answer, Asked};
 use crate::notes::commands::note_changed;
 
+/// **A turn's web side** before anything is looked up: the person's links
+/// (this message and their earlier ones, `history`) and the chat's earlier
+/// answers' pages readable, the turn's search settings (Claude's own web
+/// tools in Chat when it has them) — the tool loop's, and each of a
+/// research's helpers' (`research/helpers.rs`).
+pub(super) fn web_turn(t: &Asked<'_>, conv: &crate::chat::chats::Conversation, history: &[(String, String)]) -> crate::web::Turn {
+    let ep = &t.ep;
+    let earlier: Vec<&str> = history.iter().filter(|(r, _)| r == "user").map(|(_, t)| t.as_str()).collect();
+    let mut settings = crate::web::Settings::for_chat(&t.cfg, &ep.provider, &ep.model, &ep.base_url, &ep.api_key);
+    if let (true, Some(n)) = (t.gates.claude_in_chat, settings.native.as_mut()) {
+        n.in_chat = true;
+    }
+    crate::web::Turn::new(settings, crate::web::Endpoints::current(), &t.text, &earlier).with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())))
+}
+
 /// **The answer of a model that calls tools** (`gates.tools`): the tool
 /// loop over the turn's prompt and history, each note it changes
 /// announced as it happens (`yap-note-changed` with origin "chat", then
@@ -47,13 +62,7 @@ pub(super) async fn with_tools(
     // The turn's web side: the person's links (this message and their
     // earlier ones), the sources found, the safety rule's flag.
     let mut web = g.web_on.then(|| {
-        let earlier: Vec<&str> = history.iter().filter(|(r, _)| r == "user").map(|(_, t)| t.as_str()).collect();
-        let mut settings = crate::web::Settings::for_chat(cfg, &ep.provider, &ep.model, &ep.base_url, &ep.api_key);
-        if let (true, Some(n)) = (g.claude_in_chat, settings.native.as_mut()) {
-            n.in_chat = true;
-        }
-        let mut turn = crate::web::Turn::new(settings, crate::web::Endpoints::current(), &t.text, &earlier)
-            .with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())));
+        let mut turn = web_turn(t, conv, history);
         // A picture file on this PC (pictures/local.rs): the chat's own.
         turn.pictures.local = crate::chat::pictures::local::Context::of_chat(conv, &t.text);
         // A strong model looks further once it writes a document: now,
@@ -69,9 +78,13 @@ pub(super) async fn with_tools(
                 turn = turn.outline_first();
             }
         }
-        // A research: as far as its caps reach, no further.
+        // A research: as far as its caps reach, no further — its lead's
+        // first sources the pages its helpers found (chat/research/helpers.rs).
         if let Some(b) = research {
             turn = turn.research(b);
+            if !built.found.is_empty() {
+                turn = turn.with_found(&built.found);
+            }
         }
         // A big project's parts sent with the question are [1]…[k]: the
         // web's pages are numbered after them (chat/projects/sources.rs).

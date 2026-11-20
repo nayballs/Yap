@@ -14,6 +14,8 @@ use crate::chat::cards::outline::{self, Review};
 use crate::chat::research::{self, Budget, Caps, Plan, Planned};
 use crate::chat::stream::{unless_stopped, Event, Halt, Live, Sink, Watch};
 
+mod helpers;
+
 /// What a research stopped before its report says.
 const STOPPED: &str = "Research stopped before the report was written.";
 
@@ -145,22 +147,48 @@ pub(super) async fn answer(
         Ok(Review::Again { said }) => plan.note = said,
         Ok(Review::Unasked) => {}
     }
-    // 3. The loop, uncapped: as many searches and pages as it needs (Yap's
-    // tool loop: as many pages as the model's request holds; your Claude
-    // plan's Claude Code keeps its own context, so no limit at all).
+    // 3. Uncapped: as many searches and pages as it needs (Yap's tool loop:
+    // as many pages as the model's request holds; your Claude plan's Claude
+    // Code keeps its own context, so no limit at all).
     let page = if t.gates.claude_in_chat { crate::web::native::FETCH_TOKENS as usize } else { crate::web::PAGE_TOKENS };
     let caps = Caps::for_request((!on_plan).then_some(fitted.budget.request), page);
-    let budget = Budget::start(caps);
-    built.prompt.context.push(research::instructions(&plan, &caps, on_plan));
+    let started = std::time::Instant::now();
+    let mut budget = Budget::start(caps);
+    tracing::info!(searches = caps.searches, reads = caps.reads, mins = caps.time.as_secs() / 60, "Chat: a research begins");
+    // 4. Its helpers, a part each, at the same time (chat/research/helpers.rs);
+    // then the loop — the lead — writes the report from their findings,
+    // searching more only where a part is thin. Every helper failed: the
+    // lead researches it all, as without them.
+    let here = crate::ai::ai_model::runs_here(&t.ep.provider, &t.ep.base_url);
+    let mut helped: Option<(usize, Vec<String>, String)> = None;
+    if research::helpers::wanted(plan.sections.len(), here && !crate::shell::e2e::research_helpers_here(), built.project.is_some()) {
+        let crew = sink.map(|s| research::helpers::Crew::new(s, plan.sections.len()));
+        let day = day_of(t);
+        let run = helpers::run(t, &opened.conv, fitted, &plan, &day, budget, crew.as_ref(), live.and_then(|l| l.beside));
+        let found = match unless_stopped(run, Some(t.stop)).await {
+            Err(Halt::Superseded) => return Err(superseded()),
+            Err(Halt::Stopped) => return Ok(Some(plain(STOPPED, Vec::new(), Vec::new(), true))),
+            Ok(found) => found,
+        };
+        let merged = research::helpers::merge(&found, on_plan);
+        if merged.any_notes() {
+            built.found = merged.sources.clone();
+            built.found_searches = merged.counts().0;
+            helped = Some((found.len(), merged.chips.clone(), research::helpers::lead_block(&plan, &merged)));
+            budget = budget.for_lead();
+        } else {
+            tracing::info!(parts = found.len(), "Chat: a research's helpers all came back without notes; the lead researches it all");
+        }
+    }
+    built.prompt.context.push(research::instructions(&plan, &caps, on_plan, helped.as_ref().map(|(_, _, block)| block.as_str())));
     built.writes_doc = false;
     built.outline_first = false;
     built.first = crate::chat::tools::FirstStep::Model;
-    tracing::info!(searches = caps.searches, reads = caps.reads, mins = caps.time.as_secs() / 60, "Chat: a research begins");
     let found = if on_plan {
         plan::answer(t, opened, built, fitted, watch, Some(budget)).await?
     } else {
         // (Its words never stream into the thread: the report goes in a document.)
-        let quiet = sink.map(research::Quiet::new);
+        let quiet = sink.map(|s| research::Quiet::after(s, built.found_searches, built.found.iter().filter(|s| s.opened).count()));
         let quiet_live = match (live, quiet.as_ref()) {
             (Some(l), Some(q)) => Some(Live { sink: q, beside: l.beside }),
             _ => live,
@@ -171,6 +199,11 @@ pub(super) async fn answer(
     // WebFetch gives none; a page not in the results then showed its address):
     // their own, read on this PC, for the Sources row and the report's list.
     let mut found = found;
+    // (The helpers' searches and reads are the research's: their chips first.)
+    let helpers_at_work = helped.as_ref().map_or(0, |(n, _, _)| *n);
+    if let Some((_, chips, _)) = helped {
+        found.tools_used = chips.into_iter().chain(found.tools_used).collect();
+    }
     if !found.stopped {
         let ep = crate::web::Endpoints::current();
         let titled = crate::web::title_read_pages(&ep, &mut found.sources, caps.reads.min(TITLES_MOST), TITLES_WITHIN);
@@ -179,8 +212,8 @@ pub(super) async fn answer(
             return Err(superseded());
         }
     }
-    // 4. The report.
-    Ok(Some(report(t, built, found, &plan, budget, sink)))
+    // 5. The report.
+    Ok(Some(report(t, built, found, &plan, started, helpers_at_work, sink)))
 }
 
 /// **The report, made a document** beside the chat (`found`: the loop's
@@ -188,7 +221,7 @@ pub(super) async fn answer(
 /// citations only to the pages read; the thread's answer the summary, the
 /// document's card and the research's chip. Stopped: what it found, and a
 /// line saying so.
-fn report(t: &Asked<'_>, built: &Built, found: Answer, plan: &Plan, budget: Budget, sink: Option<&dyn Sink>) -> Answer {
+fn report(t: &Asked<'_>, built: &Built, found: Answer, plan: &Plan, started: std::time::Instant, helpers: usize, sink: Option<&dyn Sink>) -> Answer {
     let (searches, reads) = research::counts(&found.tools_used, &found.sources);
     let mut chips = found.tools_used.clone();
     if found.stopped {
@@ -198,7 +231,7 @@ fn report(t: &Asked<'_>, built: &Built, found: Answer, plan: &Plan, budget: Budg
     }
     let byline = research::byline(&day_of(t), searches, reads);
     let r = research::report(&found.reply, &found.sources, &plan.title, &byline);
-    chips.push(research::done_chip(searches, reads, budget.elapsed()));
+    chips.push(research::done_chip(searches, reads, started.elapsed(), helpers));
     let reply = match crate::chat::documents::create_report(&r.title, &r.body) {
         Ok(id) => {
             if let Some(doc) = built.doc_turn.noticed("create_document", id) {
@@ -220,6 +253,6 @@ fn report(t: &Asked<'_>, built: &Built, found: Answer, plan: &Plan, budget: Budg
             r.body.clone()
         }
     };
-    tracing::info!(searches, reads, cited = r.cited, dropped = r.dropped, secs = budget.elapsed().as_secs(), "Chat: a research answered");
+    tracing::info!(searches, reads, cited = r.cited, dropped = r.dropped, helpers, secs = started.elapsed().as_secs(), "Chat: a research answered");
     Answer { reply, tools_used: chips, sources: r.sources, looked: true, stopped: false, browser: None, ..found }
 }

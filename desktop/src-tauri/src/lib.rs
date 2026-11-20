@@ -960,6 +960,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_upload_pace,
             #[cfg(debug_assertions)]
+            shell::e2e::e2e_research_helpers,
+            #[cfg(debug_assertions)]
             shell::e2e::e2e_claude_approve_auto,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_claude_script,

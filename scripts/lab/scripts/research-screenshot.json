@@ -1,6 +1,6 @@
 {
   "name": "research-screenshot",
-  "about": "Research on a question about a screenshot (20 Nov 2026, chat/research.rs): a message's claim in a picture and \"Is this true? Research it\", Research on. The plan step sees the picture (until that day it had only the words, called it nothing to research and the turn was answered as any, 2 searches and 4 pages, while the Claude app researched the same for 4 minutes over 309 sources); its plan card shows and is started; the research runs uncapped (no limit on searches or pages, 45 minutes its backstop) to a report beside the chat citing only pages read. A real model on the web only: nothing for --fake.",
+  "about": "Research on a question about a screenshot (20 Nov 2026, chat/research.rs): a message's claim in a picture and \"Is this true? Research it\", Research on. The plan step sees the picture (until that day it had only the words, called it nothing to research and the turn was answered as any, 2 searches and 4 pages, while the Claude app researched the same for 4 minutes over 309 sources); its plan card shows and is started; the research runs uncapped (no limit on searches or pages, 45 minutes its backstop) — a helper for each part of the plan searching at the same time (20 Nov 2026, chat/research/helpers.rs: its chip says \"with N helpers\"), then the lead writing from their findings — to a report beside the chat citing only pages read. A real model on the web only: nothing for --fake.",
   "needs": { "web": true },
   "steps": [
     {

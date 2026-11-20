@@ -677,6 +677,37 @@ pub fn e2e_upload_pace(ms: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// A research's helpers run on the test's model on this PC too
+/// ([`e2e_research_helpers`]).
+#[cfg(debug_assertions)]
+static RESEARCH_HELPERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// **A research's helpers on a model on this PC** (chat/research/helpers.rs
+/// `wanted` leaves them out there), in a test run that asked
+/// ([`e2e_research_helpers`]): the stand-in model is on this PC. Always
+/// `false` in release builds.
+pub fn research_helpers_here() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        active() && RESEARCH_HELPERS.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    #[cfg(not(debug_assertions))]
+    false
+}
+
+/// Test mode only: a research has its helpers on the test's own model on
+/// this PC (`chat-research.spec.js`), or not (`false`, the default: as a
+/// model on this PC is).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_research_helpers(on: bool) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    RESEARCH_HELPERS.store(on, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
+}
+
 /// Test mode only: every permission prompt a Claude Code run sends Yap
 /// (`integrations/claude_live/approve.rs`) is answered at once — `allow`
 /// `true` Allow, `false` Deny — or waits for `claude_approve_answer` as in

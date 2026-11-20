@@ -505,6 +505,39 @@ const STYLE_WRITE = "You write a style for an AI assistant's answers";
 // A research's plan, before any search (chat/research.rs `PLAN_PROMPT`): a JSON plan of three parts from
 // the user's message, unless a spec says otherwise (`reply('researchPlan', fn)`, or a `plain` step).
 const RESEARCH_PLAN = "You plan web research for Yap's Research mode";
+// A research's helper (chat/research/helpers.rs `system`), a part of the plan each, all at once: never the
+// chat's script (they'd take each other's steps). By default each searches its part, reads the page of its
+// number among the results (part 1 the first…), and hands back a note citing it; `reply('researchHelper', fn)`
+// answers with `fn(record)`'s step (`{ tools }` or `{ content }`, a `gate` to hold it) instead.
+const RESEARCH_HELPER = "You're a research helper in Yap's Research mode";
+
+/** A research helper's part, from its brief ("Your part: 2. Why it stayed — …"): its number and heading. */
+export function helperPart(user) {
+  const m = /Your part: (\d+)\. ([^—.\n]+)/.exec(String(user));
+  return m ? { n: Number(m[1]), key: m[2].trim() } : { n: 1, key: '' };
+}
+
+/** A research helper's default step: search, read the page of its number (`avoid`'s left out), then its note. */
+export function researchHelperStep(record, { avoid = [] } = {}) {
+  const part = helperPart(record.user);
+  const results = record.messages.filter((m) => m.role === 'tool').map((m) => {
+    try {
+      return JSON.parse(m.content);
+    } catch {
+      return null;
+    }
+  });
+  const found = results.find((r) => Array.isArray(r?.data?.results))?.data?.results ?? [];
+  const read = results.find((r) => r?.data?.url && r?.data?.n && !Array.isArray(r?.data?.results));
+  if (!found.length) return { tools: [{ name: 'web_search', args: { query: `QWERTY keyboard ${part.key}` } }] };
+  if (!read) {
+    // (`avoid`: pages it never reads.)
+    const pages = found.filter((f) => !avoid.includes(f.url));
+    const page = pages[(part.n - 1) % pages.length];
+    return { tools: [{ name: 'read_page', args: { url: page.url } }] };
+  }
+  return { content: `Part ${part.n} (${part.key}): what the page says [${read.data.n}].` };
+}
 
 /** The research plan's default: its title from the message, three parts. */
 function researchPlanReply(user) {
@@ -550,6 +583,7 @@ const KINDS = [
   [COMMAND_SCREEN, 'commandScreen'],
   [STYLE_WRITE, 'styleWrite'],
   [RESEARCH_PLAN, 'researchPlan'],
+  [RESEARCH_HELPER, 'researchHelper'],
 ];
 
 /** The numbers of the `<passage n="…">` blocks a request gives (search/ask.rs's layout). */
@@ -1132,10 +1166,13 @@ export async function startFakeLlm() {
       // (a model's answer without tools, the loop's last call) — never a long
       // chat's summary in the background (chat/compact.rs), which would take
       // an agent report's scripted words: it has its own reply.
+      // (A research's helpers: their own steps, never the chat's script.)
       const step =
-        kind !== 'screenQuestion' && kind !== 'askOrEdit' && kind !== 'commandScreen' && kind !== 'chatSummary' && (offered.length > 0 || chatScript[0]?.plain)
-          ? chatScript.shift()
-          : undefined;
+        kind === 'researchHelper'
+          ? (replies.get('researchHelper') ?? researchHelperStep)(record)
+          : kind !== 'screenQuestion' && kind !== 'askOrEdit' && kind !== 'commandScreen' && kind !== 'chatSummary' && (offered.length > 0 || chatScript[0]?.plain)
+            ? chatScript.shift()
+            : undefined;
       if (step) {
         const message = step.tools
           ? {
