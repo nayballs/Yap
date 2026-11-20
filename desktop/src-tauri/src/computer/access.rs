@@ -253,6 +253,14 @@ pub fn spoken_line(a: &AccessCard, spoken: bool) -> String {
     format!("Let me use {}{why}?{ending}", said_list(&a.apps))
 }
 
+fn upper_first(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
+}
+
 fn lower_first(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
@@ -270,9 +278,11 @@ pub fn bar_card(id: u64, a: &AccessCard, spoken: bool) -> crate::bar::Card {
     // (The bar shows a card's body as one paragraph: sentences.)
     let apps: Vec<String> = a.apps.iter().map(|app| format!("{} ({})", app.name, tier_words(&app.tier))).collect();
     let mut body = vec![format!("{}.", apps.join(", "))];
-    let reason = a.reason.trim();
+    let reason = a.reason.trim().trim_end_matches(['.', '!', '?']);
     if !reason.is_empty() {
-        body.push(if reason.ends_with(['.', '!', '?']) { reason.to_string() } else { format!("{reason}.") });
+        // A tour's reason reads on from "guide you through …" (the tool asks for it so): said as such.
+        let said = if a.teach { format!("Guides you through {}", lower_first(reason)) } else { upper_first(reason) };
+        body.push(format!("{said}."));
     }
     let extras: Vec<&str> = [(a.clipboard_read, "read the clipboard"), (a.clipboard_write, "write the clipboard"), (a.system_key_combos, "use system shortcuts")].iter().filter(|(on, _)| *on).map(|(_, w)| *w).collect();
     if !extras.is_empty() {
@@ -408,6 +418,12 @@ mod tests {
         assert_eq!(bar.primary.as_ref().map(|p| (p.id.as_str(), p.label.as_str())), Some(("allow:7", "Allow")));
         assert_eq!(bar.secondary.as_ref().map(|p| p.id.as_str()), Some("deny:7"));
         let card = crate::chat::pages::act::confirm::Card { id: 7, act: ACT.into(), state: "asking".into(), access: Some(Box::new(a.clone())), ..Default::default() };
+        // A tour's reason (written to follow "guide you through"), and a lower-case one.
+        let tour = AccessCard { teach: true, reason: "working out 7 plus 8 on the Calculator".into(), clipboard_write: false, ..a.clone() };
+        assert_eq!(bar_card(8, &tour, true).title, "Let Yap guide you?");
+        assert!(bar_card(8, &tour, true).body.contains("Guides you through working out 7 plus 8 on the Calculator."), "{}", bar_card(8, &tour, true).body);
+        let lower = AccessCard { reason: "to tidy your notes".into(), ..a.clone() };
+        assert!(bar_card(9, &lower, true).body.contains(" To tidy your notes."));
         let asking = crate::chat::assistant::spoken_ok::asking(&card, false).expect("asked out loud");
         assert!(asking.spoken && asking.line.starts_with("Let me use Notepad"));
         let bypass = crate::chat::pages::act::confirm::Card { access: Some(Box::new(AccessCard { bypass: true, ..a })), ..card };
