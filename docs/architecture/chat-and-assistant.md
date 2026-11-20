@@ -7026,8 +7026,15 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
     searches and distinct pages read so far); their words, chips and sources
     never reach the page. Then the lead's line (`Quiet::after`: their
     searches counted in). The chip: "Researched for 3 min with 4 helpers: 14
-    searches, 20 pages read"; the answer's chips start with the helpers'.
-    ■ Stop drops them all (their Claude Codes end).
+    searches, 20 pages read"; the answer's chips start with the helpers',
+    a page two of them read one "Read …" chip (`helpers::chips_once`: the
+    Lab run below said "read 46 pages" under the answer, "34 pages read" in
+    the report, until it did). ■ Stop drops them all (their Claude Codes end).
+  - **On Opus on the plan in Yap Lab** (`research-screenshot`, 20 Nov 2026):
+    5 helpers, none failed, 3 min 56 s; the lead's report 41 s after — 4 min
+    37 s in all, 33 searches, 34 pages read, 24 cited (one loop that day:
+    11 searches, 14 pages in 2 min 14 s; the Claude app: 4 min, "309
+    sources").
 - **Progress**: the report's words never stream into the thread
   (`research::Quiet`, over the page's stream): the activity line says what's
   under way with the count so far ("Reading en.wikipedia.org/wiki/QWERTY ·

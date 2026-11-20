@@ -457,6 +457,8 @@ test('Research with helpers: a helper for each part of the plan, all at once, ea
     // The research's chip says how it worked.
     const conv = newest(yap, 'How did the QWERTY');
     expect(conv.messages.at(-1).tools).toContain('Researched for under a minute with 3 helpers: 3 searches, 2 pages read');
+    // The page two helpers read: one "Read …" chip, as it's one source.
+    expect(conv.messages.at(-1).tools.filter((c) => c.startsWith('Read '))).toHaveLength(2);
     await shot(main, '15-research-helpers-report-light');
   } finally {
     fakeLlm.reply('researchHelper', null);

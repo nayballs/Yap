@@ -202,7 +202,7 @@ pub(super) async fn answer(
     // (The helpers' searches and reads are the research's: their chips first.)
     let helpers_at_work = helped.as_ref().map_or(0, |(n, _, _)| *n);
     if let Some((_, chips, _)) = helped {
-        found.tools_used = chips.into_iter().chain(found.tools_used).collect();
+        found.tools_used = research::helpers::chips_once(chips.into_iter().chain(found.tools_used).collect());
     }
     if !found.stopped {
         let ep = crate::web::Endpoints::current();

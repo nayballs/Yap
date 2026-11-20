@@ -222,7 +222,29 @@ pub fn merge(found: &[Found], claude_code: bool) -> Merged {
         };
         parts.push(Part { part: f.part, notes, unfinished, read });
     }
-    Merged { sources, chips, parts }
+    Merged { sources, chips: chips_once(chips), parts }
+}
+
+/// **A research's chips, each page read once** (`chips`: its helpers' and
+/// its lead's, in order): a page two of them read is one "Read …" chip, as
+/// it's one source (a Lab run on Opus: "read 46 pages" under the answer,
+/// "34 pages read" in the report). Searches stay as they are — the same
+/// words searched twice are two searches. Pure.
+pub fn chips_once(chips: Vec<String>) -> Vec<String> {
+    let mut seen: Vec<String> = Vec::new();
+    chips
+        .into_iter()
+        .filter(|c| {
+            if !c.starts_with("Read ") {
+                return true;
+            }
+            if seen.contains(c) {
+                return false;
+            }
+            seen.push(c.clone());
+            true
+        })
+        .collect()
 }
 
 /// `text` at most `max` characters, cut at a line or a word ("…"). Pure.
@@ -509,7 +531,13 @@ mod tests {
         assert_eq!(m.parts[2].read, [3]);
         assert!(m.any_notes());
         assert_eq!(m.counts(), (2, 3));
-        assert_eq!(m.chips.len(), 5);
+        // The page both read: one chip, as one source.
+        assert_eq!(m.chips.len(), 4);
+        assert_eq!(m.chips.iter().filter(|c| c.as_str() == "Read shared.example/dose").count(), 1);
+        assert_eq!(
+            chips_once(vec!["Searched the web: \"x\"".into(), "Read a.example/1".into(), "Searched the web: \"x\"".into(), "Read a.example/1".into(), "Couldn't read b.example".into(), "Couldn't read b.example".into()]),
+            ["Searched the web: \"x\"", "Read a.example/1", "Searched the web: \"x\"", "Couldn't read b.example", "Couldn't read b.example"]
+        );
         // The lead's block: how they worked, each part, the unfinished one the lead's.
         let block = lead_block(&plan(), &m);
         assert!(block.starts_with("Your research helpers have researched the parts of this plan at the same time"), "{block}");
