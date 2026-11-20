@@ -18,10 +18,11 @@ const BUDGET_MS: u128 = 4_000;
 #[cfg_attr(not(windows), allow(dead_code))]
 const DEPTH: usize = 16;
 
-/// Whether a read lists `n` (the window itself, or anything with a name, a
-/// value, a state or something to do). Pure.
+/// Whether a read lists `n` (the window itself, every edit box — a
+/// password box too, marked, so the model knows it's there — or anything
+/// with a name, a value, a state or something to do). Pure.
 pub fn listed(n: &Node) -> bool {
-    n.path.is_empty() || !n.name.trim().is_empty() || n.value.as_deref().is_some_and(|v| !v.is_empty()) || n.toggled.is_some() || !n.can().is_empty()
+    n.path.is_empty() || matches!(n.role.as_str(), "edit" | "document") || !n.name.trim().is_empty() || n.value.as_deref().is_some_and(|v| !v.is_empty()) || n.toggled.is_some() || !n.can().is_empty()
 }
 
 /// **The window's elements** (`hwnd`), at most `max`. Blocking.
@@ -203,6 +204,7 @@ mod tests {
         assert!(!listed(&n(vec![0], "pane", "")), "a nameless pane: walked through");
         assert!(listed(&n(vec![0], "pane", "Sidebar")));
         assert!(listed(&n(vec![1], "edit", "")), "an edit box takes a value");
+        assert!(listed(&Node { password: true, ..n(vec![1], "edit", "") }), "a nameless password box: listed, marked (found by the robot test on a real WinForms pad)");
         assert!(listed(&Node { toggled: Some(true), ..n(vec![2], "custom", "") }));
     }
 }
