@@ -1269,13 +1269,13 @@ async function setThings(a) {
   // Computer use (computer.rs, 19 Nov 2026) on a stand-in desktop: test windows drawn by the test Yap itself
   // (computer/sim.rs), never the real screen, mouse or keyboard; its Start menu a stand-in list of test apps.
   // `--computer real` (a lab started with --real-screen on, 20 Nov 2026): the person's real screen, mouse and
-  // keyboard, Windows' own apps only on its Start menu; computer use's own grants and cards the only gate.
+  // keyboard, and this PC's own Start menu (apps/index.rs reads it under `lab_screen`, as a person's Yap does);
+  // computer use's own grants and cards the only gate: answer each card as the person would.
   if (a.computer === 'real') {
     if (!START.realScreen) throw new Error('--computer real needs a lab started with --real-screen on');
     // (No stand-in scene in robot mode: `e2e_computer_scene` is the stand-in desktop's alone.)
-    fs.writeFileSync(START_MENU, JSON.stringify(REAL_START_MENU, null, 2));
     await patchConfig({ computerUse: true, assistantScreen: true, assistantScreenCloud: true, assistantScreenAsked: true });
-    done.computer = { apps: REAL_START_MENU.map((x) => x.name), screen: 'real' };
+    done.computer = { screen: 'real', startMenu: "this PC's own" };
   } else if (a.computer !== undefined) {
     const on = onOff(a.computer, false, 'computer');
     if (on) {
@@ -1292,16 +1292,6 @@ async function setThings(a) {
   if (!Object.keys(done).length) throw new Error('Nothing to set: --web, --yap-code, --connectors, --bypass, --gh, --git, --clock, --folder-pick, --computer, config or files');
   return done;
 }
-
-/** `set --computer real`'s Start menu: Windows' own apps (their Start-menu ids), really started there. */
-const REAL_START_MENU = [
-  { id: 'Microsoft.WindowsNotepad_8wekyb3d8bbwe!App', name: 'Notepad' },
-  { id: 'Microsoft.Paint_8wekyb3d8bbwe!App', name: 'Paint' },
-  { id: 'Microsoft.WindowsAlarms_8wekyb3d8bbwe!App', name: 'Clock' },
-  { id: 'Microsoft.Windows.Photos_8wekyb3d8bbwe!App', name: 'Photos' },
-  { id: 'windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel', name: 'Settings' },
-  { id: 'Microsoft.Windows.Explorer', name: 'File Explorer' },
-];
 
 /** `set --computer on`'s Start menu: test apps only (made-up paths; nothing is ever launched in test mode). */
 const COMPUTER_START_MENU = [
