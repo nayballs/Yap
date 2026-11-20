@@ -402,7 +402,8 @@ pub fn instructions(plan: &Plan, caps: &Caps, claude_code: bool) -> String {
     }
     out.push_str(&format!(
         "\n\nResearch it thoroughly on the web ({search}), as a careful researcher would, with many searches that build on each other: start broad, then follow what you find — names, dates, claims to check, the other side of a question — and read the pages your facts come from ({read}; a search result's snippet isn't a source). \
-There's no limit on searches or pages: search each part of the plan from several angles, and scale the effort to the question — a single claim to check still deserves several sources that agree, a broad question dozens of searches. \
+There's no limit on searches or pages, and Research mode is for depth: the user turned it on to have this researched thoroughly, well past what an ordinary answer looks up. \
+Give every part of the plan searches of its own (at least two or three, from different angles), follow the leads they turn up, and confirm each important fact in more than one independent source (an official or expert body, a study, a reputable publication); don't stop because the first pages agree. \
 Make the searches and reads that don't depend on each other at once (several tool calls in one step).{} Where sources disagree, say so.\n\n\
 When every part of the plan is well answered, stop calling tools and write the report as your answer, in markdown: a # title; then ## Summary, two to four sentences that answer the question; then a ## section for each part of the plan, in its order (add one only for something important the plan didn't foresee). \
 Every fact from a page: {cite}. Cite only pages you read with {read}, never a page you only saw in search results. No list of sources at the end (Yap adds it), no offer to do more. \

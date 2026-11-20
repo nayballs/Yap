@@ -6941,11 +6941,17 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   enabled", as the Claude app's, whose help pages give it no limit on
   searches, sources or tool calls; until then 20 searches, 12 pages, 10
   minutes, 1M tokens): `Caps::USUAL` has no limit on searches, page reads
-  or tokens (`UNCAPPED`, `u64::MAX`). The loop is told there's no limit,
-  to scale the effort to the question (a single claim still several sources
-  that agree, a broad question dozens of searches) and to make the searches
-  and reads that don't depend on each other at once (several tool calls in
-  one step). Two bounds remain, neither a cap on how far it goes: **Yap's
+  or tokens (`UNCAPPED`, `u64::MAX`). The loop is told there's no limit
+  and that Research mode is for depth: searches of its own for every part of
+  the plan (two or three at least, from different angles), the leads they
+  turn up followed, each important fact confirmed in more than one
+  independent source, never stopping because the first pages agree; and to
+  make the searches and reads that don't depend on each other at once
+  (several tool calls in one step). On Opus on the plan in Yap Lab
+  (`research-screenshot`): told only to scale the effort, 6 searches and 10
+  pages in 91 s; told this, 11 searches and 14 pages in 2 min 14 s (the
+  Claude app, its own subagents in parallel: 4 min, "309 sources", which
+  counts every result it saw — Yap's Sources row counts pages read). Two bounds remain, neither a cap on how far it goes: **Yap's
   tool loop** reads as many pages as half the model's request holds
   (`Caps::for_request`: pages of 3,000 tokens, or Claude's fetch's 8,000;
   at least `MIN_READS` 4; 33 on a 200K model), since each request carries
