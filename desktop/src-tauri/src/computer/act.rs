@@ -257,7 +257,7 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
     };
     // What's there now, and the checks.
     let facts_desk = desk;
-    let (verdict, desk) = {
+    let (verdict, desk, front_hwnd) = {
         let apps = apps.clone();
         let p = (plan.act, plan.at, plan.end, plan.text.clone());
         let unattended = ctx.unattended;
@@ -276,9 +276,10 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
                 let pointer = matches!(act, Act::Click { .. } | Act::Drag { .. } | Act::Press | Act::Scroll { .. });
                 let landing = if pointer { under.clone().flatten() } else { front.clone() };
                 if let crate::shell::realtest::Gate::Refused(why) = crate::shell::realtest::gate(landing.map(|w| w.hwnd), "use an app (computer use)") {
-                    return (Verdict::Refuse { error: why, chip: "Didn't act: robot mode".into() }, d);
+                    return (Verdict::Refuse { error: why, chip: "Didn't act: robot mode".into() }, d, None);
                 }
             }
+            let front_hwnd = front.as_ref().map(|w| w.hwnd);
             let f = Facts {
                 front: target(front, &apps, d.as_ref()),
                 under: under.and_then(|w| target(w, &apps, d.as_ref())),
@@ -289,7 +290,7 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
                 text: &text,
                 unattended,
             };
-            (checks::decide(act, &f), d)
+            (checks::decide(act, &f), d, front_hwnd)
         };
         match tauri::async_runtime::spawn_blocking(read).await {
             Ok(r) => r,
@@ -328,7 +329,14 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
     let steps = plan.steps.clone();
     // The person's input, read between steps (the hook's atomics).
     let probe = driving.probe();
+    // Keys after the person answered Yap's card: Yap's own window took the focus for it, so the app that was in
+    // front comes back first (a real run, 20 Nov 2026: the keys went nowhere).
+    let keys = matches!(plan.act, Act::Type | Act::Key { .. } | Act::Hold { .. });
+    let raise_first = if asked && keys { front_hwnd } else { None };
     let ran = tauri::async_runtime::spawn_blocking(move || {
+        if let Some(h) = raise_first {
+            hands.raise(h);
+        }
         let stop = || probe.stopped() || halted.load(std::sync::atomic::Ordering::Relaxed);
         input::run(hands.as_ref(), &steps, &stop)
     })

@@ -114,10 +114,18 @@ fn landing(t: Option<&Target>, keys: bool) -> Result<(String, Tier), Verdict> {
         });
     }
     let Some((app, tier)) = t.app.clone() else {
-        return Err(refuse(
-            "That window belongs to an app the user hasn't allowed (masked in the screenshot). Ask for it with request_access if you need it.",
-            "Didn't act: an app you haven't allowed",
-        ));
+        return Err(if keys {
+            // (Acting by element or an answered card leaves the window in front as it was: a real run, 20 Nov 2026.)
+            refuse(
+                "The window in front belongs to an app the user hasn't allowed, so keys and typing would go to it: bring the app you're working in to the front first (open_application, or click into its window), then press the keys.",
+                "Didn't type: another app is in front",
+            )
+        } else {
+            refuse(
+                "That window belongs to an app the user hasn't allowed (masked in the screenshot). Ask for it with request_access if you need it.",
+                "Didn't act: an app you haven't allowed",
+            )
+        });
     };
     if t.elevated {
         return Err(refuse(
@@ -234,6 +242,10 @@ mod tests {
         // Keys go to the window in front: Yap's own there is "click the app first".
         let front_yap = Facts { front: Some(Target { yap: true, ..Default::default() }), ..Default::default() };
         assert!(error(decide(Act::Type, &front_yap)).contains("click the app's window first"));
+        // Another app in front for keys: bring the app back, not "ask for it" (a real run, 20 Nov 2026).
+        let front_other = Facts { front: Some(Target::default()), ..Default::default() };
+        assert!(error(decide(Act::Type, &front_other)).contains("bring the app you're working in to the front first"));
+        assert!(error(decide(left(), &Facts { under: Some(Target::default()), front: Some(Target::default()), ..Default::default() })).contains("request_access"));
         // A drag's end must be allowed too.
         let drag = Facts { under: allowed("Explorer", Tier::Full), end: Some(Target::default()), ..Default::default() };
         assert!(error(decide(Act::Drag { mods: false }, &drag)).contains("hasn't allowed"));
