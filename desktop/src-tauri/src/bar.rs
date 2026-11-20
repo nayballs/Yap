@@ -2007,6 +2007,7 @@ pub fn bar_debug(app: AppHandle) -> Result<serde_json::Value, String> {
             "pid": std::process::id(),
             "shown": s.shown,
             "interactive": s.interactive,
+            "compact": s.compact,
             "pointer": s.pointer,
             "exStyle": {
                 "transparent": style & WS_EX_TRANSPARENT != 0,
