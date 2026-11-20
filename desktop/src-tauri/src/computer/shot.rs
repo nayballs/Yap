@@ -206,6 +206,10 @@ pub trait Desk: Send + Sync {
     fn focused(&self) -> Option<super::uia::Element>;
     /// The window runs above Yap (an administrator's): input to it is dropped.
     fn elevated(&self, w: &Win) -> bool;
+    /// **A window's elements** (UI Automation's tree), at most `max`.
+    fn tree(&self, w: &Win, max: usize) -> Result<Vec<super::elements::Node>, String>;
+    /// **An element acted on** through its own pattern: what happened.
+    fn act_on(&self, w: &Win, node: &super::elements::Node, what: &super::elements::Do) -> Result<String, String>;
 }
 
 /// **This PC** (Windows): its monitors, its windows, a capture with Yap's
@@ -256,6 +260,14 @@ impl Desk for ThisPc {
 
     fn elevated(&self, w: &Win) -> bool {
         crate::pasting::elevated::target_blocked(w.hwnd)
+    }
+
+    fn tree(&self, w: &Win, max: usize) -> Result<Vec<super::elements::Node>, String> {
+        super::uia::tree::tree(w.hwnd, max)
+    }
+
+    fn act_on(&self, w: &Win, node: &super::elements::Node, what: &super::elements::Do) -> Result<String, String> {
+        super::uia::tree::act(w.hwnd, node, what)
     }
 }
 

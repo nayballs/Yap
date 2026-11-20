@@ -1326,6 +1326,8 @@ const COMPUTER_SCENE = {
         W('link', 'Recipe ideas (www.example.com)', 20, 180, 420, 20),
         W('field', 'Shop PIN', 20, 230, 220, 36),
         W('password', 'Password', 20, 290, 220, 36),
+        // A check box: read_window lists it (phase 5), toggle_element ticks it.
+        W('check', 'Word wrap', 20, 350, 160, 30),
       ],
     },
     {

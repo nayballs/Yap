@@ -9,6 +9,8 @@
 //!
 //! An element's name stays in memory for the check: never logged.
 
+pub mod tree;
+
 /// What kind of control an element is, as far as the checks care.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {

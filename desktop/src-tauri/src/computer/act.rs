@@ -222,7 +222,7 @@ fn plan(name: &str, args: &Value, frame: Option<&super::frame::Frame>, cursor: O
 }
 
 /// A window as the checks see it: the allowed app it's of and its tier.
-fn target(w: Option<super::windows::Win>, apps: &[grants::Granted], desk: &dyn shot::Desk) -> Option<Target> {
+pub(super) fn target(w: Option<super::windows::Win>, apps: &[grants::Granted], desk: &dyn shot::Desk) -> Option<Target> {
     let w = w?;
     let app = (!w.own).then(|| apps.iter().find(|g| g.owns(&w)).map(|g| (g.name.clone(), g.tier))).flatten();
     let messaging = crate::pasting::app_kind::classify(Some(&w.exe), &w.class, "") == crate::pasting::app_kind::AppKind::Messaging;
