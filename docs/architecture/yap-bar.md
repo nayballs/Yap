@@ -91,9 +91,23 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   on it, bottom-centre on the work area (`overlay::place`: taskbars on any
   edge, an auto-hidden one kept clear, per-monitor DPI with a re-place after
   a DPI-changing move, unplugged monitors), frozen while a dictation records
-  or transcribes. **One size, never minimised** (19 Nov 2026): the window is
-  always placed at `overlay::size_on` (520×560 at the monitor's scale), never
-  at the size Windows reports — minimised from outside (Win+M, Show desktop,
+  or transcribes. **Compact while only the idle pill shows** (20 Nov 2026,
+  `overlay::COMPACT_WIDTH` × `COMPACT_HEIGHT`, 120 × 44, `bar.rs`
+  `wants_compact`).
+  - Another app that masks windows by their rectangle (Claude's computer use,
+    a capture tool) masked the whole 520 × 560 transparent window and lost
+    the dialog buttons under it.
+  - Compact means: no card, line, pointer, menu, dictation, meeting or
+    reading; the pointer not near; and the page saying nothing else is drawn
+    (`bar_regions`' `busy`).
+  - Every `emit`, and a dictation starting, grows the window to full size
+    first and holds it for `GROWN_HOLD_MS` while the page draws. The poller
+    refits it each tick (`refit`).
+  - Both sizes are placed bottom-centre, so the pill doesn't move.
+
+  **Never minimised** (19 Nov 2026): the window is always placed at
+  `overlay::size_on` (520 × 560 at the monitor's scale, or the compact size),
+  never at the size Windows reports — minimised from outside (Win+M, Show desktop,
   a shake of another window), that's a 160×28 strip, and placing it at that
   size once left the bar a strip at the bottom of the screen, its page
   clipped inside (a recording showed nothing, a hover a small square). It

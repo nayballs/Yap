@@ -257,6 +257,8 @@ pub(crate) async fn chat_turn(
     let done = crate::ai::usage::tallied(crate::notes::versions::in_turn(turn)).await;
     // Computer use's guided tour ends with its turn (`computer/teach.rs`): its tooltip gone, Yap's window back.
     crate::computer::teach::turn_ended(done.as_ref().ok().map(|t| t.conversation_id).or(conversation_id));
+    // …and its hold on the PC: the next chat drives at once (computer/watch.rs).
+    crate::computer::watch::turn_ended(done.as_ref().ok().map(|t| t.conversation_id).or(conversation_id));
     done
 }
 

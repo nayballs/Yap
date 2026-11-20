@@ -435,6 +435,18 @@ pub fn begin(conversation: Option<u64>, turn: &str) -> Result<Driving, (&'static
     Ok(Driving { began, turn: turn.to_string(), halted: Arc::new(AtomicBool::new(false)) })
 }
 
+/// **`conversation`'s turn ended** (`chat/turn.rs`, every Chat turn): the
+/// PC is let go at once, so the next chat to use it isn't told "another
+/// chat is using your PC" for [`HOLD`] after a turn that's over (the parity
+/// loop, 20 Nov 2026: a fresh chat right after another's was refused).
+/// `None`: whichever chat held it.
+pub fn turn_ended(conversation: Option<u64>) {
+    let mut holder = HOLDER.lock().unwrap_or_else(|p| p.into_inner());
+    if holder.as_ref().is_some_and(|h| conversation.is_none() || h.conversation == conversation) {
+        *holder = None;
+    }
+}
+
 /// The PC isn't driven any more (the indicator went): the hook stops
 /// listening for the person.
 pub fn disarm() {
@@ -491,6 +503,20 @@ mod tests {
         drop(d);
         assert!(begin(Some(5), "turn-a").is_err());
         assert!(begin(Some(5), "turn-b").is_ok(), "the next message's turn");
+        reset();
+    }
+
+    /// A chat's turn over: the next chat drives at once, not [`HOLD`] later.
+    #[test]
+    fn a_turn_over_lets_the_next_chat_drive_at_once() {
+        let _one = crate::computer::tests::LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        reset();
+        drop(begin(Some(11), "turn-x").unwrap());
+        assert!(begin(Some(12), "turn-y").is_err(), "held for the chat that just acted");
+        turn_ended(Some(12));
+        assert!(begin(Some(12), "turn-y").is_err(), "another chat's turn ending lets nothing go");
+        turn_ended(Some(11));
+        assert!(begin(Some(12), "turn-y").is_ok(), "its own turn over: the next chat drives");
         reset();
     }
 

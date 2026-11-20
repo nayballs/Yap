@@ -2168,6 +2168,35 @@ mod escape_watch {
 mod tests {
     use super::*;
 
+    /// Compact only while nothing but the idle pill shows (the pointer away,
+    /// the page quiet, no card or dictation), and not right after growing.
+    #[test]
+    fn the_window_is_compact_only_while_only_the_idle_pill_shows() {
+        let pill = |w: f64, h: f64| Region { id: "pill".into(), x: 30.0, y: 16.0, w, h };
+        let idle = || State { shown: true, page_busy: false, regions: vec![pill(60.0, 20.0)], ..Default::default() };
+        let later = GROWN_HOLD_MS + 10;
+        assert!(wants_compact(&idle(), later));
+        // Right after growing for something new: held full a moment.
+        assert!(!wants_compact(&State { grown_at: later - 100, ..idle() }, later));
+        // Anything more, and it's full size.
+        for (why, s) in [
+            ("hidden", State { shown: false, ..idle() }),
+            ("the pointer near", State { near: true, ..idle() }),
+            ("clickable", State { interactive: true, ..idle() }),
+            ("the page drew more", State { page_busy: true, ..idle() }),
+            ("the opened pill", State { regions: vec![pill(216.0, 50.0)], ..idle() }),
+            ("a card", State { regions: vec![pill(60.0, 20.0), Region { id: "card:a".into(), x: 0.0, y: 0.0, w: 300.0, h: 80.0 }], ..idle() }),
+            ("a card in front", State { front: Some("a".into()), ..idle() }),
+            ("computer use", State { computer: Some("Clicks Save".into()), ..idle() }),
+            ("reading aloud", State { reading: true, ..idle() }),
+            ("a meeting", State { meeting: true, ..idle() }),
+            ("a dictation", State { dictation: Dictation::Recording, ..idle() }),
+            ("the Voice Assistant", State { assistant: crate::chat::assistant::Phase::Listening, ..idle() }),
+        ] {
+            assert!(!wants_compact(&s, later), "{why}");
+        }
+    }
+
     fn screen(id: isize, left: i32) -> Screen {
         Screen {
             id,
