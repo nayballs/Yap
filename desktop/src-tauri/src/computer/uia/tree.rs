@@ -56,7 +56,7 @@ mod win {
     use windows::core::BSTR;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::Accessibility::{
-        IUIAutomationElement, IUIAutomationInvokePattern, IUIAutomationSelectionItemPattern, IUIAutomationTogglePattern, IUIAutomationTreeWalker, IUIAutomationValuePattern, ToggleState_On, UIA_InvokePatternId, UIA_SelectionItemPatternId,
+        IUIAutomation, IUIAutomationElement, IUIAutomationInvokePattern, IUIAutomationSelectionItemPattern, IUIAutomationTogglePattern, IUIAutomationTreeWalker, IUIAutomationValuePattern, ToggleState_On, UIA_InvokePatternId, UIA_SelectionItemPatternId,
         UIA_TogglePatternId, UIA_ValuePatternId,
     };
 
@@ -144,6 +144,41 @@ mod win {
 
     const CHANGED: &str = "The window changed since it was read: that element isn't there any more. Read the window again.";
 
+    /// **`text` typed into `e`**: the box focused (its window, `hwnd`, in
+    /// front), everything in it selected, the text typed as Yap's own
+    /// keys, then read back. `None`: it couldn't take the focus (or the text
+    /// didn't come out whole): the caller sets it through the Value pattern
+    /// instead. Blocking.
+    fn typed_in(a: &IUIAutomation, e: &IUIAutomationElement, hwnd: isize, text: &str, value: Option<&IUIAutomationValuePattern>) -> Option<Result<String, String>> {
+        use crate::computer::input::{self, Hands};
+        use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetForegroundWindow, GA_ROOT};
+        unsafe { e.SetFocus() }.ok()?;
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        let focused = unsafe { a.GetFocusedElement() }.ok()?;
+        if !unsafe { a.CompareElements(&focused, e) }.map(|b| b.as_bool()).unwrap_or(false) {
+            return None;
+        }
+        // Keys go to the window in front: it must be this one.
+        let front = unsafe { GetAncestor(GetForegroundWindow(), GA_ROOT) };
+        if front.0 as isize != hwnd {
+            return None;
+        }
+        let mut steps = input::key(&input::keys_of("ctrl+a"), 1);
+        steps.extend(input::text(text));
+        if input::run(&input::ThisPc as &dyn Hands, &steps, &|| false).is_err() {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        // Read back where the box says: anything but the text (the select-all didn't take) is set over.
+        match value.and_then(|p| unsafe { p.CurrentValue() }.ok()).map(|b| b.to_string()) {
+            Some(now) if now != text => {
+                let fixed = value.map(|p| unsafe { p.SetValue(&BSTR::from(text)) }).is_some_and(|r| r.is_ok());
+                Some(if fixed { Ok("typed it in, then set it whole through its accessibility (check the app used it)".to_string()) } else { Err("The text didn't come out as asked: read the window again.".to_string()) })
+            }
+            _ => Some(Ok("typed it in".to_string())),
+        }
+    }
+
     pub fn act(hwnd: isize, node: &Node, what: &Do) -> Result<String, String> {
         let _com = Com::init().ok_or("COM didn't start")?;
         let a = automation(TIMEOUT_MS).ok_or("UI Automation didn't answer")?;
@@ -181,12 +216,17 @@ mod win {
             Do::Select => select().or_else(invoke),
             Do::SetValue(text) => {
                 let p = unsafe { e.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId) }.ok();
-                p.map(|p| {
-                    if unsafe { p.CurrentIsReadOnly() }.map(|b| b.as_bool()).unwrap_or(false) {
-                        return Err("That box is read only.".to_string());
-                    }
-                    unsafe { p.SetValue(&BSTR::from(text.as_str())) }.map(|_| "set its text".to_string()).map_err(|x| format!("The app didn't take the text ({x})."))
-                })
+                if p.as_ref().is_some_and(|p| unsafe { p.CurrentIsReadOnly() }.map(|b| b.as_bool()).unwrap_or(false)) {
+                    return Err("That box is read only.".to_string());
+                }
+                // Typed in, as a person would, when the box takes the focus: an app always takes keystrokes,
+                // where some (Windows' Save and Open dialogs) show text set through the Value pattern yet
+                // never take it (a real run, 20 Nov 2026: Paint's Save As kept the old name and offered to
+                // overwrite the original). The Value pattern is the fallback.
+                if let Some(said) = typed_in(&a, &e, hwnd, text, p.as_ref()) {
+                    return said;
+                }
+                p.map(|p| unsafe { p.SetValue(&BSTR::from(text.as_str())) }.map(|_| "set its text through its accessibility (some dialogs show such text yet don't take it: if it matters, check the app used it)".to_string()).map_err(|x| format!("The app didn't take the text ({x}).")))
             }
         };
         done.unwrap_or_else(|| Err("That element can't be acted on that way through its accessibility: use the clicks or typing at its place instead.".into()))
