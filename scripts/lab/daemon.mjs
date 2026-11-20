@@ -2034,6 +2034,14 @@ const COMMANDS = {
   click: async (a) => click(a),
   spoken: async (a) => spokenCmd(a),
   copied: async (a) => copiedCmd(a),
+  // Computer use's guided tour (computer/teach.rs): the tooltip shown (a test Yap never puts it on the real screen), Next or Exit pressed on it.
+  teach: async (a) => {
+    const how = a._[0];
+    if (how && !['next', 'exit'].includes(how)) throw new Error('teach [next|exit]: the guided tour’s tooltip, and Next or Exit pressed on it');
+    const out = await invoke('e2e_computer_teach', how ? { press: how } : {});
+    if (how && turn && !turn.finalized) turn.status = 'running';
+    return out;
+  },
   type: async (a) => typeKeys(a),
   side: async (a) => side(a),
   pick: async (a) => pick(a),

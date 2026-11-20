@@ -984,6 +984,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             computer::e2e_computer_do,
             #[cfg(debug_assertions)]
+            computer::teach::e2e_computer_teach,
+            #[cfg(debug_assertions)]
             shell::e2e::e2e_snip_input,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip_last,

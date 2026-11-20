@@ -29,6 +29,9 @@ const BURST_MS: u64 = 500;
 
 /// Yap is driving: the hook reports the person's input.
 static ARMED: AtomicBool = AtomicBool::new(false);
+/// A guided tour (teach mode): the person's hand is on the mouse, so a small
+/// move doesn't stop a step's actions (a key, a button or the wheel still does).
+static LENIENT: AtomicBool = AtomicBool::new(false);
 /// The person's last input while armed (ms on the hook's clock) and what it was.
 static TOUCH_MS: AtomicU64 = AtomicU64::new(0);
 static TOUCH_KIND: AtomicU8 = AtomicU8::new(0);
@@ -91,8 +94,17 @@ fn touched(kind: Touch) {
     TOUCH_MS.store(now_ms(), Ordering::Relaxed);
 }
 
-/// **The hook heard a real key** (not injected, not Yap's). Atomics only.
+/// Moves of the mouse don't stop a guided tour's actions (`on`), or do again.
+pub fn lenient(on: bool) {
+    LENIENT.store(on, Ordering::Relaxed);
+}
+
+/// **The hook heard a real key** (not injected, not Yap's). Atomics only —
+/// and Esc answers a guided tour's tooltip waiting (its Exit).
 pub fn person_key(vkey: u32, down: bool) {
+    if down && vkey == 0x1B && super::teach::tip_up() {
+        super::teach::press(super::teach::Pressed::Exit);
+    }
     if !down || !ARMED.load(Ordering::Relaxed) {
         return;
     }
@@ -145,6 +157,10 @@ pub fn e2e_computer_touch(kind: String) -> Result<bool, String> {
         "wheel" => Touch::Wheel,
         _ => Touch::Move,
     };
+    // Esc on a guided tour's tooltip: its Exit, as the hook's Esc is.
+    if t == Touch::Esc && super::teach::tip_up() {
+        return Ok(super::teach::press(super::teach::Pressed::Exit));
+    }
     let armed = ARMED.load(Ordering::Relaxed);
     if armed {
         touched(t);

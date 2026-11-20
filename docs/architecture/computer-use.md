@@ -32,7 +32,11 @@ The plan and its phases are in the private repo
   ([below](#an-api-key-the-apis-own-toolset)).
 - The Voice Assistant uses apps from any app, its cards on the bar
   ([below](#from-any-app-the-voice-assistant)).
-- Not yet: teach mode (phase 4).
+
+**Phase 4, teach mode (2026-11-20)**:
+- Built: `request_teach_access`, `teach_step`, `teach_batch`: Claude guides the
+  person step by step with a tooltip on screen
+  ([below](#teach-mode-a-guided-tour)).
 
 ## Modules (`desktop/src-tauri/src/`)
 
@@ -89,6 +93,11 @@ The plan and its phases are in the private repo
   and its first window brought forward.
 - `computer/clipboard.rs` — `read_clipboard` / `write_clipboard`, each with
   its grant.
+- `computer/teach.rs` — teach mode: the tour's card, each step's tooltip
+  waiting for Next or Exit, Next running the step's actions, the tour ended
+  with the turn.
+- `computer/teach/tooltip.rs` — the tooltip: a native, never-focused window
+  beside the anchor with a ring on the spot, kept out of every capture.
 - `computer/uia.rs` — UI Automation, time-boxed: the element under a point
   (a link, a control's name), the focused one (a password field).
 - `computer/watch.rs` — one chat in control at a time (`HOLD`, 10 s), and the
@@ -301,6 +310,41 @@ docs.
 - **Screenshots** are never removed from a turn's history: the 5.5 models'
   thinking is tied to them.
 
+## Teach mode: a guided tour
+
+When the person wants to learn how ("teach me", "show me how"), Claude guides
+them instead of doing it all itself (the desktop contract's teach tools).
+- **`request_teach_access`** is the access card worded as a tour: "Let Yap's
+  AI guide you through this?", the same apps and tiers, no clipboard or
+  system-key extras (`access::request_for`, `AccessCard::teach`). Out loud:
+  "Shall I guide you through …?" and "Let Yap guide you?" on the bar.
+  - Allowed, the tour begins: Yap's main window steps aside (hidden if it
+    showed), and comes back when the turn ends.
+- **`teach_step`** shows one tooltip and waits for the person:
+  - **the tooltip** (`teach/tooltip.rs`) is Yap's dark card, "Step 2 of 5",
+    the explanation, what Next will do, then Exit and Next. It sits beside
+    the step's anchor (flipped to stay on the display, centred without one),
+    with a ring on the spot;
+  - it never takes the focus, so the app being taught stays in front, and
+    it's kept out of every capture (`WDA_EXCLUDEFROMCAPTURE`);
+  - **Next** runs the step's actions as a batch (`batch::run`: the same
+    checks), then a screenshot comes back with the result;
+  - **Exit**, **Esc** (the input hook) or no answer in 15 minutes answers
+    `exited: true`, and every step after it in the turn answers the same.
+- **`teach_batch`** queues several steps. Every one is checked before the
+  first tooltip shows. Anchors and clicks all refer to the screenshot before
+  the call. It answers `stepsCompleted`, each step's results and a final
+  screenshot; `exited` with `stepsCompleted` on Exit; `stepFailed` when an
+  action fails.
+- **The watch during a tour:** it's off while a tooltip waits, so the
+  person's click on Next is theirs. While a step's actions run, a key, a
+  button or the wheel stops them as ever, but a small move of the mouse
+  doesn't (`watch::lenient`): the person's hand is on it.
+- **The tour ends with the turn** (`chat/turn.rs` calls
+  `teach::turn_ended`): the tooltip goes, Yap's window comes back.
+- A test run never puts the tooltip on the real screen: `e2e_computer_teach`
+  reads it and presses Next or Exit (Yap Lab: `teach next|exit`).
+
 ## From any app: the Voice Assistant
 
 A question asked with the Voice Assistant's shortcut from any app may use
@@ -461,8 +505,18 @@ three gaps:
 - **Unit tests for phase 3:** a batch read whole first; a batch, the
   clipboard and `open_application` on the stand-in desktop; the request
   with the toolset; which models take it; the access card said out loud.
+- **e2e for phase 4:** `computer-teach.spec.js`:
+  - the tour's card, a step whose Next runs it with a screenshot after;
+  - a batch left with Exit on its second step;
+  - Yap's window stepping aside, and the tour ending with the turn;
+  - Esc on a tooltip as its Exit.
+- **Unit tests for phase 4:** a step checked first; a tour on the stand-in
+  desktop (Next, a batch left with Exit, nothing after it); where the
+  tooltip goes.
 - **Robot tests** (real windows, idle PC only):
   - `computer-see.real.js`: the test pad allowed, an Edge page over it
     masked;
   - `computer-input.real.js`: clicks into the pad's box, types, Ctrl+A,
-    types over it, and never types into its password box.
+    types over it, and never types into its password box;
+  - `computer-teach.real.js`: the real tooltip beside the pad's box, its
+    Next clicked as the person would, the focus kept, the step done.

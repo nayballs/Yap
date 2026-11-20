@@ -123,6 +123,13 @@ pub async fn execute(args: &Value, ctx: &Ctx<'_>) -> Run {
         Ok(a) => a,
         Err(e) => return failed(&format!("{e} Nothing was done."), "Didn't act: the batch wasn't right").into(),
     };
+    run(&actions, ctx).await.0
+}
+
+/// **Actions read with [`read`], run in order** (a batch's, a teach step's
+/// after Next): what they gave, and the error a stop says (`None`: every
+/// one ran).
+pub async fn run(actions: &[(String, Value)], ctx: &Ctx<'_>) -> (Run, Option<String>) {
     let n = actions.len();
     let conversation = ctx.conversation;
     // Every action's coordinates: the screenshot before the batch.
@@ -148,14 +155,15 @@ pub async fn execute(args: &Value, ctx: &Ctx<'_>) -> Run {
             grants::with(conversation, |s| s.last = newest.clone().or_else(|| before.clone()));
             let remaining = n - i - 1;
             tracing::info!(at = i, of = n, "Computer use: a batch stopped");
+            let stopped = format!("Batch stopped at actions[{i}] ({name}): {error} {i} completed, {remaining} remaining.");
             out.result = json!({
                 "success": false,
-                "error": format!("Batch stopped at actions[{i}] ({name}): {error} {i} completed, {remaining} remaining."),
+                "error": stopped,
                 "data": { "results": results, "completed": i, "remaining": remaining },
                 "displayText": "",
                 "displayTexts": chips,
             });
-            return out;
+            return (out, Some(stopped));
         }
         results.push(json!({ "action": name, "ok": true, "displayText": chip, "data": ran.result["data"].clone() }));
     }
@@ -167,7 +175,7 @@ pub async fn execute(args: &Value, ctx: &Ctx<'_>) -> Run {
         (false, true) => "All done. Take a screenshot to see what it did.",
     };
     out.result = json!({ "success": true, "data": { "results": results, "completed": n }, "note": note, "displayText": "", "displayTexts": chips });
-    out
+    (out, None)
 }
 
 #[cfg(test)]

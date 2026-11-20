@@ -254,7 +254,10 @@ pub(crate) async fn chat_turn(
     // are one change in their versions (`versions::in_turn`: the document
     // panel's Undo takes the whole turn back).
     let turn = Box::pin(answer_turn(app, conversation_id, text, scope, by_voice, asked, watcher, stop));
-    crate::ai::usage::tallied(crate::notes::versions::in_turn(turn)).await
+    let done = crate::ai::usage::tallied(crate::notes::versions::in_turn(turn)).await;
+    // Computer use's guided tour ends with its turn (`computer/teach.rs`): its tooltip gone, Yap's window back.
+    crate::computer::teach::turn_ended(done.as_ref().ok().map(|t| t.conversation_id).or(conversation_id));
+    done
 }
 
 /// **The question being answered** and what's settled about its turn
