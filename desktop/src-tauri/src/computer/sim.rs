@@ -174,9 +174,40 @@ impl Scene {
         self.windows.first().and_then(|w| w.focus).map(|g| (0, g))
     }
 
+    /// **Widget `g` of window `w` pressed** (a click on it, or its
+    /// accessibility's Invoke or Toggle): a calculator's key, a button (a
+    /// "Delete …" one empties the window's text fields, so a screenshot
+    /// shows it worked), a check box ticked or not.
+    fn invoke(&mut self, w: usize, g: usize) {
+        let name = self.windows[w].widgets[g].name.clone();
+        match self.windows[w].widgets[g].kind.as_str() {
+            "key" => {
+                self.calc_in(w, &name);
+                self.log.push(format!("pressed {name}"));
+            }
+            "check" => {
+                let on = self.windows[w].widgets[g].text == "on";
+                self.windows[w].widgets[g].text = if on { String::new() } else { "on".into() };
+                self.log.push(format!("{} {name}", if on { "unticked" } else { "ticked" }));
+            }
+            _ => {
+                if name.starts_with("Delete") {
+                    for f in self.windows[w].widgets.iter_mut().filter(|f| f.kind == "field") {
+                        f.text.clear();
+                    }
+                }
+                self.log.push(format!("pressed {name}"));
+            }
+        }
+    }
+
     /// A calculator's key pressed: digits and operators onto its display, `=` works it out, `C` clears.
     fn calc(&mut self, key: &str) {
-        let w = &mut self.windows[0];
+        self.calc_in(0, key);
+    }
+
+    fn calc_in(&mut self, w: usize, key: &str) {
+        let w = &mut self.windows[w];
         let Some(d) = w.widgets.iter().position(|g| g.kind == "text" && g.name == "Display") else { return };
         let shown = w.widgets[d].text.clone();
         w.widgets[d].text = match key {
@@ -211,21 +242,7 @@ impl Scene {
                             self.windows[0].selected = presses >= 2;
                             self.log.push(format!("focused {}", name(self, g)));
                         }
-                        "key" => {
-                            let k = name(self, g);
-                            self.calc(&k);
-                            self.log.push(format!("pressed {k}"));
-                        }
-                        "button" => {
-                            let b = name(self, g);
-                            // A "Delete …" button empties the window's text fields, so a screenshot shows it worked.
-                            if b.starts_with("Delete") {
-                                for f in self.windows[0].widgets.iter_mut().filter(|f| f.kind == "field") {
-                                    f.text.clear();
-                                }
-                            }
-                            self.log.push(format!("pressed {b}"));
-                        }
+                        "key" | "button" | "check" => self.invoke(0, g),
                         "link" => self.log.push(format!("opened {}", name(self, g))),
                         _ => self.log.push(format!("clicked {}", name(self, g))),
                     },
@@ -341,6 +358,14 @@ impl Desk for Scene {
                         let words = if shown.is_empty() { g.name.clone() } else { shown };
                         text(&mut rgba, w, h, gr.x + 6, gr.y + (gr.h - 14) / 2, &words, if g.text.is_empty() { [140, 140, 150] } else { INK });
                     }
+                    "check" => {
+                        // A box (ticked: filled) and its name beside it.
+                        let side = 18.min(gr.h);
+                        let b = Rect::new(gr.x, gr.y + (gr.h - side) / 2, side, side);
+                        paint(&mut rgba, w, h, &b, [90, 90, 98]);
+                        paint(&mut rgba, w, h, &b.inflate(-2), if g.text == "on" { [40, 110, 200] } else { [255, 255, 255] });
+                        text(&mut rgba, w, h, gr.x + side + 8, gr.y + (gr.h - 14) / 2, &g.name, INK);
+                    }
                     "link" => {
                         text(&mut rgba, w, h, gr.x, gr.y, &g.name, LINK);
                         paint(&mut rgba, w, h, &Rect::new(gr.x, gr.y + 15, (g.name.chars().count() as i32) * 12, 2), LINK);
@@ -376,6 +401,12 @@ impl Desk for Scene {
     fn elevated(&self, w: &Win) -> bool {
         let i = (w.hwnd - 1) as usize;
         self.windows.get(i).is_some_and(|s| s.elevated)
+    }
+    fn tree(&self, w: &Win, max: usize) -> Result<Vec<crate::computer::elements::Node>, String> {
+        self.elements_of(w, max)
+    }
+    fn act_on(&self, _w: &Win, _node: &crate::computer::elements::Node, _what: &crate::computer::elements::Do) -> Result<String, String> {
+        Err("a scene's copy doesn't change: act through the stand-in desktop".into())
     }
 }
 
@@ -415,6 +446,12 @@ impl Desk for SimDesk {
     fn elevated(&self, w: &Win) -> bool {
         with(|s| s.elevated(w)).unwrap_or(false)
     }
+    fn tree(&self, w: &Win, max: usize) -> Result<Vec<crate::computer::elements::Node>, String> {
+        with(|s| s.elements_of(w, max)).unwrap_or_else(|| Err("no stand-in desktop".into()))
+    }
+    fn act_on(&self, w: &Win, node: &crate::computer::elements::Node, what: &crate::computer::elements::Do) -> Result<String, String> {
+        with(|s| s.act_on_element(w, node, what)).unwrap_or_else(|| Err("no stand-in desktop".into()))
+    }
 }
 
 impl Hands for SimDesk {
@@ -444,6 +481,70 @@ impl Hands for SimDesk {
 }
 
 impl Scene {
+    /// **A window's elements** (the stand-in's accessibility tree): the
+    /// window, then each widget, as UI Automation would list them.
+    fn elements_of(&self, w: &Win, max: usize) -> Result<Vec<crate::computer::elements::Node>, String> {
+        use crate::computer::elements::Node;
+        let i = (w.hwnd - 1) as usize;
+        let win = self.windows.get(i).ok_or("that window has closed")?;
+        let mut out = vec![Node { path: Vec::new(), role: "window".into(), name: win.title.clone(), enabled: true, rect: Rect::new(win.x, win.y, win.w, win.h), ..Default::default() }];
+        for (j, g) in win.widgets.iter().enumerate().take(max.saturating_sub(1)) {
+            let role = match g.kind.as_str() {
+                "button" | "key" => "button",
+                "field" | "password" => "edit",
+                "link" => "hyperlink",
+                "check" => "check box",
+                _ => "text",
+            };
+            out.push(Node {
+                path: vec![j as u32],
+                role: role.into(),
+                name: g.name.clone(),
+                value: (matches!(g.kind.as_str(), "field" | "text")).then(|| g.text.clone()),
+                enabled: true,
+                focused: win.focus == Some(j),
+                password: g.kind == "password",
+                toggled: (g.kind == "check").then(|| g.text == "on"),
+                selected: None,
+                rect: g.rect_in(win),
+            });
+        }
+        Ok(out)
+    }
+
+    /// **An element acted on** (the stand-in's accessibility): found by its
+    /// place, still what was read, then pressed, set, ticked or selected.
+    fn act_on_element(&mut self, w: &Win, node: &crate::computer::elements::Node, what: &crate::computer::elements::Do) -> Result<String, String> {
+        use crate::computer::elements::Do;
+        let changed = "The window changed since it was read: that element isn't there any more. Read the window again.".to_string();
+        let i = (w.hwnd - 1) as usize;
+        let now = self.elements_of(w, usize::MAX)?;
+        let found = now.iter().find(|n| n.path == node.path).ok_or(changed.clone())?;
+        if found.role != node.role || found.name != node.name {
+            return Err(changed);
+        }
+        let Some(&g) = node.path.first() else { return Err("The window itself can't be clicked that way.".into()) };
+        let g = g as usize;
+        let kind = self.windows[i].widgets[g].kind.clone();
+        let name = node.name.clone();
+        match (what, kind.as_str()) {
+            (Do::Click, "button" | "key" | "check") | (Do::Toggle, "check") => {
+                self.invoke(i, g);
+                Ok(if kind == "check" { if self.windows[i].widgets[g].text == "on" { "it's ticked now".into() } else { "it's not ticked now".into() } } else { "clicked it".into() })
+            }
+            (Do::SetValue(t), "field") => {
+                self.windows[i].widgets[g].text = t.clone();
+                self.log.push(format!("set {name}"));
+                Ok("set its text".into())
+            }
+            (Do::Select, _) => {
+                self.log.push(format!("selected {name}"));
+                Ok("selected it".into())
+            }
+            _ => Err("That element can't be acted on that way through its accessibility: use the clicks or typing at its place instead.".into()),
+        }
+    }
+
     /// **An allowed app opened**: a window of it raised, else a new one in
     /// front (its title the app's name).
     fn open(&mut self, g: &crate::computer::grants::Granted) -> crate::computer::open::Opened {

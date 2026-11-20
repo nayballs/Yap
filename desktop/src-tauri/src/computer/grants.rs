@@ -237,6 +237,8 @@ pub struct Session {
     /// The display `switch_display` chose (its name); `None`: automatic.
     pub display: Option<String>,
     pub last: Option<Arc<Last>>,
+    /// The elements the last `read_window` listed, by ref (`elements.rs`).
+    pub elements: Vec<super::elements::Kept>,
     used: Option<Instant>,
 }
 

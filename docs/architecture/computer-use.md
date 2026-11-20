@@ -38,6 +38,10 @@ The plan and its phases are in the private repo
   person step by step with a tooltip on screen
   ([below](#teach-mode-a-guided-tour)).
 
+**Phase 5, elements instead of pixels (2026-11-20, beyond the desktop app)**:
+- Built: `read_window`, `click_element`, `set_value`, `toggle_element`,
+  `select_element` ([below](#elements-instead-of-pixels)).
+
 ## Modules (`desktop/src-tauri/src/`)
 
 - `computer.rs` — the area:
@@ -98,6 +102,12 @@ The plan and its phases are in the private repo
   with the turn.
 - `computer/teach/tooltip.rs` — the tooltip: a native, never-focused window
   beside the anchor with a ring on the spot, kept out of every capture.
+- `computer/elements.rs` — elements instead of pixels: `read_window`'s lines
+  and refs (kept in the chat's session until the next read), and an element
+  acted on through the same checks.
+- `computer/uia/tree.rs` — a window's UI Automation tree read depth first
+  (time-boxed), and an element found again by its place and acted on
+  through its own pattern (Invoke, Value, Toggle, SelectionItem).
 - `computer/uia.rs` — UI Automation, time-boxed: the element under a point
   (a link, a control's name), the focused one (a password field).
 - `computer/watch.rs` — one chat in control at a time (`HOLD`, 10 s), and the
@@ -345,6 +355,42 @@ them instead of doing it all itself (the desktop contract's teach tools).
 - A test run never puts the tooltip on the real screen: `e2e_computer_teach`
   reads it and presses Next or Exit (Yap Lab: `teach next|exit`).
 
+## Elements instead of pixels
+
+Beyond the desktop app's contract (the plan's phase 5): in most Windows apps
+(Win32, WinForms, WPF, UWP) Claude can act on a window's controls by their
+accessibility instead of their pixels. It's faster, and it doesn't miss when
+a window moves. Custom-drawn apps (games, some Electron apps) expose little,
+so screenshots and clicks stay the way there.
+- **`read_window`** reads an allowed app's window (the one named, else the
+  allowed app in front) through UI Automation's control view, depth first,
+  at most 400 elements in 4 s. It answers one line an element:
+  - the ref, role and name;
+  - its value, never a password box's;
+  - its state (ticked, selected, focused, disabled);
+  - what it takes (`[click]`, `[set_value]`, `[toggle]`, `[select]`);
+  - where it is on the last screenshot (`at [x, y]`).
+
+  Nameless panes and groups are walked through but not listed. A link says
+  to open it in Yap's browser. The refs (`e1`, `e2`…) last until the next
+  read, kept in the chat's session (`grants::Session::elements`). What's in
+  the window is outside content for the turn's safety rule.
+- **`click_element`, `set_value`, `toggle_element`, `select_element`** act
+  by ref through the element's own pattern: Invoke (else Toggle, else
+  Select), Value, Toggle and SelectionItem. The mouse never moves and no key
+  is sent, so the person can keep working beside it.
+  - **The same checks as a click or typing** (`checks::decide`, as a left
+    click or as typing into the element): the app allowed, never Yap's or
+    an administrator's window, the tier (a terminal's or IDE's take a click,
+    never `set_value`; a browser's nothing), never a link, never a password
+    box, card or bank details refused, and a Send, Pay or Delete asked first
+    on the card (nothing asks in Bypass).
+  - **Found again** by its place in the tree, and it must still be what was
+    read (its role and name). Otherwise the call says the window changed,
+    so read it again.
+  - The bar's line says what it does, as for any action; one chat at a
+    time.
+
 ## From any app: the Voice Assistant
 
 A question asked with the Voice Assistant's shortcut from any app may use
@@ -513,10 +559,19 @@ three gaps:
 - **Unit tests for phase 4:** a step checked first; a tour on the stand-in
   desktop (Next, a batch left with Exit, nothing after it); where the
   tooltip goes.
+- **e2e for phase 5:** `computer-elements.spec.js`: a window read by ref,
+  its text set, a box ticked and a button clicked with the mouse never
+  moving; Send by ref asking first (Don't: nothing pressed).
+- **Unit tests for phase 5:** the tree's lines; what's listed; elements by
+  ref on the stand-in desktop (Send asked, a link and a password box
+  refused, a stale ref).
 - **Robot tests** (real windows, idle PC only):
   - `computer-see.real.js`: the test pad allowed, an Edge page over it
     masked;
   - `computer-input.real.js`: clicks into the pad's box, types, Ctrl+A,
     types over it, and never types into its password box;
   - `computer-teach.real.js`: the real tooltip beside the pad's box, its
-    Next clicked as the person would, the focus kept, the step done.
+    Next clicked as the person would, the focus kept, the step done;
+  - `computer-elements.real.js`: the pad (WinForms) read by ref through
+    real UI Automation, its box filled through its Value pattern, its
+    password box refused, its button pressed through Invoke.
