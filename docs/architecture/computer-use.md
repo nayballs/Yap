@@ -144,6 +144,23 @@ Frontend:
   (`agents/runner.rs` `direct_eyes`). A Remote Control turn from a phone
   never does, and nor does an agent Chat sends out.
 
+**Switched off, and only that** (`computer::switched_off`, 20 Nov 2026):
+- **When:** a turn that would get computer use if the switch were on.
+- **What:** the model is told `computer::OFF_LINE` instead: where the switch
+  is (Settings → Voice Assistant), and no keystrokes or clicks sent to apps
+  from a script meanwhile.
+- **Where it's added:**
+  - the tool loop: `Gates::computer_off`, read in `prompt.rs`;
+  - a plan chat: `plan.rs` `session_computer_off`, kept for the whole session
+    like `session_eyes`' `computer`, so the session's fingerprint holds;
+  - a Code chat's own session: `RunSpec::computer_off`, added to the `yap`
+    server's `instructions` (`rpc.rs`).
+- **Why:** the maintainer's Code chat, with the switch off, loaded his own
+  Claude Code's computer-use skill. It said computer use "only works through
+  the Claude desktop app" and typed into Notepad from PowerShell.
+- **Not:** a phone's question, a routine's, across the meetings, or a model
+  that may not use apps. Switching it on there wouldn't help.
+
 **Refused at call time** (`refused_now`), each with words the model passes
 on:
 - the switch off;
@@ -439,9 +456,14 @@ apps too (phase 3).
 - each screenshot is shown with the question;
 - a look marks the turn's web content (the safety rule).
 
-**What Claude is told:** the plan's system prompt gets a line
-(`claude_live::computer::LINES`), and the server's `instructions` say the
-same in short.
+**What Claude is told:**
+- **A plan chat:** its system prompt gets a line
+  (`claude_live::computer::LINES`).
+- **The server's `instructions`:** the same in short. They open by saying
+  these tools are this session's computer use, standing in for the Claude
+  desktop app's. A Code chat's own session gets nothing else from Yap, and
+  the person's own Claude Code may have a computer-use skill that names only
+  the desktop app's tools.
 
 ## The parity pass (Yap Lab against the desktop app's own tools)
 

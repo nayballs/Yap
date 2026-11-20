@@ -302,6 +302,14 @@ fn session_eyes(t: &Asked<'_>, code: bool) -> crate::integrations::claude_live::
     }
 }
 
+/// **Computer use switched off, and only that**, for the whole session (as
+/// [`session_eyes`]' `computer` is): its system prompt says where the switch
+/// is (`computer::OFF_LINE`), so a request to use an app is answered with
+/// that, not "only the Claude desktop app can". Pure.
+fn session_computer_off(t: &Asked<'_>) -> bool {
+    crate::computer::switched_off(&t.cfg, t.gates.tools, &t.ep.provider, &t.ep.model, !t.meetings, false)
+}
+
 /// **What this turn may use of them**: the turn's own gates (`gates.rs`:
 /// Chat, or the Voice Assistant with Chat in view, acting on the pages too;
 /// the Voice Assistant from another app, the look at the window in front
@@ -532,6 +540,9 @@ fn system_prompt(t: &Asked<'_>, built: &Built, eyes: crate::integrations::claude
     if eyes.computer {
         s.push(' ');
         s.push_str(crate::integrations::claude_live::computer::LINES);
+    } else if session_computer_off(t) {
+        s.push(' ');
+        s.push_str(crate::computer::OFF_LINE);
     }
     // Visuals in the chat itself (chat/made.rs, 15 Nov 2026): the session always lists the tool.
     s.push(' ');

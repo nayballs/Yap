@@ -733,6 +733,10 @@ fn instructions(g: &Gates, profile: &crate::ai::about_you::Profile, memory: bool
         if g.computer {
             s.push(' ');
             s.push_str(crate::computer::INSTRUCTIONS);
+        } else if g.computer_off {
+            // …all but the switch: where it is (computer::switched_off).
+            s.push(' ');
+            s.push_str(crate::computer::OFF_LINE);
         }
         // Connectors (chat/tools/connectors.rs): Yap's own line, never a
         // server's instructions.
@@ -913,6 +917,7 @@ mod tests {
             screen_takes: Default::default(),
             act: false,
             computer: false,
+            computer_off: false,
             calendar: false,
             agents: false,
             connectors: false,
@@ -925,6 +930,19 @@ mod tests {
             visuals: false,
             project_files: false,
         }
+    }
+
+    #[test]
+    fn computer_use_switched_off_says_where_the_switch_is() {
+        // (20 Nov 2026: a Code chat's Claude said computer use "only works
+        // through the Claude desktop app" and typed from PowerShell instead.)
+        let profile = crate::ai::about_you::Profile::default();
+        let off = instructions(&Gates { computer_off: true, ..tool_gates() }, &profile, false);
+        assert!(off.contains(crate::computer::OFF_LINE) && !off.contains(crate::computer::INSTRUCTIONS), "{off}");
+        let on = instructions(&Gates { computer: true, computer_off: false, ..tool_gates() }, &profile, false);
+        assert!(on.contains(crate::computer::INSTRUCTIONS) && !on.contains(crate::computer::OFF_LINE), "{on}");
+        let neither = instructions(&tool_gates(), &profile, false);
+        assert!(!neither.contains("Let Yap's AI use apps on your PC") && !neither.contains(crate::computer::INSTRUCTIONS), "{neither}");
     }
 
     #[test]
@@ -1045,6 +1063,7 @@ mod tests {
             screen_takes: Default::default(),
             act: false,
             computer: false,
+            computer_off: false,
             calendar: false,
             agents: false,
             connectors: false,

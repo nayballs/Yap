@@ -180,6 +180,11 @@ pub struct RunSpec {
     /// has the browser too, since 14 Nov 2026 (`agents/runner.rs`
     /// `direct_eyes`): the pages, never the screen or acting on a page.
     pub eyes: eyes::Eyes,
+    /// **Computer use switched off, and only that** (`computer::switched_off`,
+    /// 20 Nov 2026): a Code chat's own session, not a phone's turn, with "Let
+    /// Yap's AI use apps on your PC" off. Its instructions say where the
+    /// switch is (`computer::OFF_LINE`), as a plan chat's system prompt does.
+    pub computer_off: bool,
     /// A plan chat's connector tools ([`connectors`]): listed for the whole
     /// session (its hash in the session's fingerprint, `chat/turn/plan.rs`),
     /// each call for the turn it belongs to. Never an agent's run.
@@ -217,7 +222,7 @@ pub struct RunSpec {
 
 impl RunSpec {
     pub fn new(label: impl Into<String>, tools: Tools) -> RunSpec {
-        RunSpec { label: label.into(), tools, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), connectors: None, reads: false, cards: crate::chat::cards::Cards::default(), projects: false, documents: false }
+        RunSpec { label: label.into(), tools, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), computer_off: false, connectors: None, reads: false, cards: crate::chat::cards::Cards::default(), projects: false, documents: false }
     }
 
     /// The same, with the documents beside the chat (`on`).

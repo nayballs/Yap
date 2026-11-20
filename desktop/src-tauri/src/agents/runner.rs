@@ -1454,6 +1454,8 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         // beside the chat and the screen look (14 Nov 2026), acting on its
         // pages too (the same day, as Claude Code's own app's browser).
         eyes: if direct { direct_eyes(&cfg, &agent.model, phone.is_some()) } else { Default::default() },
+        // Apps on the PC switched off, and only that (computer.rs): its instructions say where the switch is.
+        computer_off: direct && crate::computer::switched_off(&cfg, true, crate::ai::claude_plan::PROVIDER, &agent.model, true, phone.is_some()),
         connectors: None,
         // A Code chat's own session (the person's message went straight to
         // it) reads Yap's meetings, notes, tasks and calendar on request, as

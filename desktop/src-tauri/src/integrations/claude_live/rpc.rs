@@ -196,6 +196,8 @@ fn instructions(spec: &RunSpec) -> String {
                 .into_iter()
                 .chain(agent_eyes_lines(spec.eyes, spec.approval.as_ref().is_some_and(|a| a.unattended)))
                 .chain(servers_offered(spec).then_some(crate::chat::pages::preview::INSTRUCTIONS))
+                // Apps on the PC switched off, and only that: where the switch is (computer.rs).
+                .chain((spec.computer_off && !spec.eyes.computer).then_some(crate::computer::OFF_LINE))
                 .chain(std::iter::once(VISUALS_INSTRUCTIONS))
                 .collect::<Vec<_>>()
                 .join(" "),
