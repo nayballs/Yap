@@ -38,8 +38,9 @@
 /// are fair game, as in a real run — computer use acts on their apps (its own
 /// grants the only gate), the Voice Assistant reads their selection, a paste
 /// goes into them ([`gate`], [`permits`] and [`recheck_foreground`] let them
-/// by) — and an app computer use opens from its Start menu (the Lab's list
-/// in `YAP_E2E_APPS`) is really started. Everything else stays robot mode's.
+/// by) — and the Start menu is this PC's own (`apps/index.rs`), an app
+/// computer use opens from it really started. Everything else stays robot
+/// mode's.
 /// Opt-in per run, for a real-world pass of computer use; the Lab's input
 /// watcher (`yaprobot watch`) ends the run at the person's first touch.
 pub fn lab_screen() -> bool {

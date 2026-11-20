@@ -112,7 +112,8 @@ pub fn apps(refresh: bool) -> Arc<Vec<App>> {
     }
     #[cfg(not(test))]
     {
-        if crate::shell::e2e::active() {
+        // A test run's stand-in list — but Yap Lab on the real screen reads this PC's own Start menu, as a person's Yap does.
+        if crate::shell::e2e::active() && !crate::shell::realtest::lab_screen() {
             return Arc::new(tidy(stand_ins()));
         }
         let cached = || {

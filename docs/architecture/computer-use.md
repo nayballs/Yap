@@ -201,6 +201,11 @@ A window is an allowed app's when any of these holds:
   package is `microsoft.windowsnotepad_8wekyb3d8bbwe`.
 - **It's the shell, for File Explorer.** File Explorer also owns the desktop
   (`Progman`, `WorkerW`) and the taskbar.
+- **It's a dialog of one** (20 Nov 2026, `windows::app_id_of`). A window
+  with no AppUserModelID of its own, owned (`GA_ROOTOWNER`) by a window of
+  the same process, takes that window's. LibreOffice runs every app in one
+  process and only its frames carry an id, so Calc's Windows file dialog was
+  masked as "an app you haven't allowed" until then.
 
 Yap's own windows are never anyone's.
 
@@ -378,8 +383,17 @@ so screenshots and clicks stay the way there.
   the window is outside content for the turn's safety rule.
 - **`click_element`, `set_value`, `toggle_element`, `select_element`** act
   by ref through the element's own pattern: Invoke (else Toggle, else
-  Select), Value, Toggle and SelectionItem. The mouse never moves and no key
-  is sent, so the person can keep working beside it.
+  Select), Value, Toggle and SelectionItem. The mouse never moves.
+  - **`set_value` types the text** (20 Nov 2026, `uia/tree.rs` `typed_in`).
+    It focuses the element, checks the focus landed there with its window in
+    front, then selects all, types as Yap's own keys and reads the value
+    back.
+    - The Value pattern is the fallback, used when the box won't take the
+      focus or the text didn't come out whole; the model is then told to
+      check the app used it.
+    - Windows' Save and Open dialogs show Value-pattern text yet never take
+      it. A real run's Save As kept the old name and offered to overwrite
+      the original.
   - **The same checks as a click or typing** (`checks::decide`, as a left
     click or as typing into the element): the app allowed, never Yap's or
     an administrator's window, the tier (a terminal's or IDE's take a click,

@@ -24,6 +24,15 @@ pub const LABEL: &str = "overlay";
 /// grey box).
 pub const WIDTH: f64 = 520.0;
 pub const HEIGHT: f64 = 560.0;
+/// **The window while only the idle pill shows** (logical px): its hit zone
+/// (60 × 20, 8 px up from the bottom) with room round it. Another app that
+/// masks windows by their rectangle (Claude's computer use, a capture tool)
+/// then loses this strip, not 520 × 560 of the screen above the taskbar (20
+/// Nov 2026: Claude's computer use lost dialog buttons under the masked
+/// window). Anything more — the pointer near, a card, a dictation — and the
+/// window is [`WIDTH`] × [`HEIGHT`] again first (`bar.rs` `wants_compact`).
+pub const COMPACT_WIDTH: f64 = 120.0;
+pub const COMPACT_HEIGHT: f64 = 44.0;
 
 /// A rectangle in physical screen px (right/bottom exclusive, like Win32).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
@@ -102,12 +111,14 @@ impl Edge {
     }
 }
 
-/// The bar window's one size on `screen` (physical px): [`WIDTH`] ×
-/// [`HEIGHT`] at its scale, rounded as tao rounds a logical size. Never the
+/// The bar window's size on `screen` (physical px): [`WIDTH`] × [`HEIGHT`],
+/// or [`COMPACT_WIDTH`] × [`COMPACT_HEIGHT`] while only the idle pill shows
+/// (`compact`), at its scale, rounded as tao rounds a logical size. Never the
 /// window's size as Windows reports it, which for a minimised window is a
 /// 160 × 28 strip. Pure.
-pub fn size_on(screen: &Screen) -> (i32, i32) {
-    ((WIDTH * screen.scale).round() as i32, (HEIGHT * screen.scale).round() as i32)
+pub fn size_on(screen: &Screen, compact: bool) -> (i32, i32) {
+    let (w, h) = if compact { (COMPACT_WIDTH, COMPACT_HEIGHT) } else { (WIDTH, HEIGHT) };
+    ((w * screen.scale).round() as i32, (h * screen.scale).round() as i32)
 }
 
 /// The bar window's rect on `screen` for a window of `size` (physical px):
@@ -880,13 +891,16 @@ mod tests {
             autohide_bottom: 0,
             autohide_top: 0,
         };
-        let size = size_on(&s);
+        let size = size_on(&s, false);
         assert_eq!(size, (780, 840));
         // Its one size at other scales, whatever the window measures now (a
         // minimised window: 160 × 28).
-        assert_eq!(size_on(&Screen { scale: 1.0, ..s }), (520, 560));
-        assert_eq!(size_on(&Screen { scale: 1.25, ..s }), (650, 700));
-        assert_eq!(size_on(&Screen { scale: 1.75, ..s }), (910, 980));
+        assert_eq!(size_on(&Screen { scale: 1.0, ..s }, false), (520, 560));
+        assert_eq!(size_on(&Screen { scale: 1.25, ..s }, false), (650, 700));
+        assert_eq!(size_on(&Screen { scale: 1.75, ..s }, false), (910, 980));
+        // Only the idle pill: its strip, at the scale too.
+        assert_eq!(size_on(&Screen { scale: 1.0, ..s }, true), (120, 44));
+        assert_eq!(size_on(&Screen { scale: 1.5, ..s }, true), (180, 66));
         let r = place(&s, size, Edge::Bottom);
         assert_eq!(r, Rect::new(-2310, 1248, -1530, 2088));
         assert!(s.monitor.covers(&r));

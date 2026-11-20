@@ -48,6 +48,22 @@ pub const SHELL_CLASSES: &[&str] = &["Progman", "WorkerW", "Shell_TrayWnd", "She
 
 /// **A packaged app's family**, from its exe's path under `WindowsApps`
 /// ("…\WindowsApps\Microsoft.WindowsNotepad_11.2410.21.0_x64__8wekyb3d8bbwe\…"
+/// **A window's app id**: its own AppUserModelID; else, for a window another
+/// of the same process owns (a dialog, a popup: `GA_ROOTOWNER`), its
+/// owner's, so a file dialog LibreOffice Calc opens is Calc's (LibreOffice
+/// runs every app in one process, and only its frames carry an id); else
+/// its package's family. Pure. (A real-screen run, 20 Nov 2026: Calc's Open
+/// dialog was masked as an app not allowed.)
+pub fn app_id_of(own: String, owner: Option<String>, package: Option<String>) -> String {
+    if !own.is_empty() {
+        return own;
+    }
+    if let Some(o) = owner.filter(|o| !o.is_empty()) {
+        return o;
+    }
+    package.unwrap_or_default()
+}
+
 /// → "microsoft.windowsnotepad_8wekyb3d8bbwe"): the package's name and its
 /// publisher's id, the part of its AppUserModelID before the `!`. `None`:
 /// not a packaged app. Pure.
@@ -167,10 +183,10 @@ mod win {
     use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PropVariantToStringAlloc};
     use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, FindWindowExW, GetAncestor, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, WindowFromPoint, GA_ROOT, GWL_EXSTYLE, WS_EX_TRANSPARENT,
+        EnumWindows, FindWindowExW, GetAncestor, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, WindowFromPoint, GA_ROOT, GA_ROOTOWNER, GWL_EXSTYLE, WS_EX_TRANSPARENT,
     };
 
-    use super::{package_family, shown, Seen, Win};
+    use super::{app_id_of, package_family, shown, Seen, Win};
     use crate::snip::geom::Rect;
 
     /// `PKEY_AppUserModel_ID` ({9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}, 5).
@@ -266,10 +282,16 @@ mod win {
             }
         }
         let exe = walk.exe(pid);
-        let mut aumid = own_aumid(hwnd);
-        if aumid.is_empty() {
-            aumid = package_family(&exe).unwrap_or_default();
-        }
+        let own_id = own_aumid(hwnd);
+        // A dialog or popup with no id of its own: the id of the window of its process that owns it.
+        let owner = own_id
+            .is_empty()
+            .then(|| {
+                let root = unsafe { GetAncestor(hwnd, GA_ROOTOWNER) };
+                (!root.0.is_null() && root != hwnd && pid_of(root) == pid_of(hwnd)).then(|| own_aumid(root))
+            })
+            .flatten();
+        let aumid = app_id_of(own_id, owner, package_family(&exe));
         let own = pid == walk.own;
         Win { hwnd: hwnd.0 as isize, pid, rect, class, exe, aumid, own }
     }
@@ -335,6 +357,17 @@ mod win {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dialog_with_no_id_of_its_own_is_its_owners_app() {
+        // A window's own id wins.
+        assert_eq!(app_id_of("thedocumentfoundation.libreoffice.calc".into(), Some("other".into()), None), "thedocumentfoundation.libreoffice.calc");
+        // LibreOffice Calc's Open dialog: no id, owned by Calc's frame in the same process.
+        assert_eq!(app_id_of(String::new(), Some("thedocumentfoundation.libreoffice.calc".into()), None), "thedocumentfoundation.libreoffice.calc");
+        // No owner's id: the package's family, as before; else none.
+        assert_eq!(app_id_of(String::new(), Some(String::new()), Some("microsoft.paint_8wekyb3d8bbwe".into())), "microsoft.paint_8wekyb3d8bbwe");
+        assert_eq!(app_id_of(String::new(), None, None), "");
+    }
 
     #[test]
     fn a_packaged_apps_family_comes_from_its_folder() {

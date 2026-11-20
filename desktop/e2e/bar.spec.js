@@ -421,6 +421,27 @@ test('fullscreen: the pill hides; a card shows over a borderless app, waits out 
   await closeToasts(main);
 });
 
+// Another app that masks windows by their rectangle (Claude's computer use, a capture tool) masked the bar's
+// whole 520 × 560 transparent window and lost the dialog buttons under it (20 Nov 2026): with only the idle pill
+// showing, the window is a small strip; the pointer near (or a card, a dictation…) and it's full size first.
+test('only the idle pill: a compact window; the pointer near: full size, the pill where it was', async ({ yap }) => {
+  const size = (d) => [d.rect.right - d.rect.left, d.rect.bottom - d.rect.top].map((v) => Math.round(v / d.scale));
+  await pointerAway(yap);
+  await expect.poll(() => debug(yap).then((d) => d.compact), { timeout: 10_000 }).toBe(true);
+  await expect.poll(() => debug(yap).then(size)).toEqual([120, 44]);
+  const idle = await debug(yap);
+  await hoverPill(yap);
+  await expect.poll(() => debug(yap).then(size)).toEqual([520, 560]);
+  const full = await debug(yap);
+  // Bottom-centre both ways: the pill doesn't move.
+  expect(full.rect.bottom).toBe(idle.rect.bottom);
+  expect(Math.abs((full.rect.left + full.rect.right) / 2 - (idle.rect.left + idle.rect.right) / 2)).toBeLessThanOrEqual(1);
+  await expect(yap.overlay.getByRole('button', { name: 'Dictate' })).toBeVisible();
+  await pointerAway(yap);
+  await expect.poll(() => debug(yap).then(size), { timeout: 10_000 }).toEqual([120, 44]);
+  await expect(yap.overlay.getByLabel('Yap bar')).toBeVisible();
+});
+
 // The maintainer's bar ended up a 160 × 28 strip (Windows' size for a
 // minimised window) at the bottom of the screen, the page clipped inside it:
 // recording showed nothing and a hover a small square. Minimised from
@@ -428,6 +449,10 @@ test('fullscreen: the pill hides; a card shows over a borderless app, waits out 
 // minimised window and took its 160 × 28 for the bar's size.
 test('minimised from outside (Win+M, Show desktop), it comes back whole, never a 160 × 28 strip', async ({ yap }) => {
   const bar = yap.overlay;
+  const pageSize = () => bar.evaluate(() => [innerWidth * devicePixelRatio, innerHeight * devicePixelRatio]).then((p) => p.map(Math.round));
+  // The idle bar, only its pill showing: the compact window, its own size then (the pointer near, below).
+  await pointerAway(yap);
+  await expect.poll(() => debug(yap).then((x) => x.compact), { timeout: 10_000 }).toBe(true);
   const d = await debug(yap);
   const whole = { width: d.rect.right - d.rect.left, height: d.rect.bottom - d.rect.top };
   const back = { iconic: false, visible: true, rect: whole, normal: whole };
@@ -438,8 +463,7 @@ test('minimised from outside (Win+M, Show desktop), it comes back whole, never a
   await expect.poll(placement, { timeout: 10_000 }).toMatchObject(back);
   // Where it was, bottom-centre on the work area, its page filling it.
   await expect.poll(() => debug(yap).then((x) => x.rect)).toEqual(d.rect);
-  const page = await bar.evaluate(() => [innerWidth * devicePixelRatio, innerHeight * devicePixelRatio]);
-  expect(page.map(Math.round)).toEqual([whole.width, whole.height]);
+  await expect.poll(pageSize).toEqual([whole.width, whole.height]);
   await expect(bar.getByLabel('Yap bar')).toBeVisible();
 
   // The state it was found in: not minimised, but the strip's size.
@@ -447,12 +471,23 @@ test('minimised from outside (Win+M, Show desktop), it comes back whole, never a
   await expect.poll(placement, { timeout: 10_000 }).toMatchObject(back);
   await expect.poll(() => debug(yap).then((x) => x.rect)).toEqual(d.rect);
 
-  // Hidden over a fullscreen app and shown again: whole.
+  // Hidden over a fullscreen app and shown again: whole (full size as it's shown, compact again after).
   await simulate(yap, { fullscreen: 'borderless' });
   await expect.poll(() => debug(yap).then((x) => x.shown)).toBe(false);
   await simulate(yap, { fullscreen: 'none' });
   await expect.poll(() => debug(yap).then((x) => x.shown)).toBe(true);
-  expect(placement()).toMatchObject(back);
+  await expect.poll(placement, { timeout: 10_000 }).toMatchObject(back);
+
+  // The pointer near after all that: the whole window, its page filling it (the strip showed a small square).
+  await hoverPill(yap);
+  await expect.poll(() => debug(yap).then((x) => x.compact)).toBe(false);
+  const full = await debug(yap);
+  const fullSize = [full.rect.right - full.rect.left, full.rect.bottom - full.rect.top];
+  expect(fullSize.map((v) => Math.round(v / full.scale))).toEqual([520, 560]);
+  expect(full.rect.bottom).toBe(d.rect.bottom);
+  await expect.poll(pageSize).toEqual(fullSize);
+  await expect(bar.getByRole('button', { name: 'Dictate' })).toBeVisible();
+  await pointerAway(yap);
 });
 
 test('◉ starts meeting notes: the recording pill opens the notepad and ends the meeting', async ({ yap, shot }) => {

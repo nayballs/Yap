@@ -407,6 +407,15 @@ struct State {
     pointer: Option<String>,
     /// The cursor is near the window (the poll speeds up).
     near: bool,
+    /// The window is its compact size (`overlay::COMPACT_WIDTH`): only the
+    /// idle pill shows ([`wants_compact`]).
+    compact: bool,
+    /// The page drew something besides the idle pill (`bar_regions`' `busy`):
+    /// a card, a line, a pointer, the opened pill. Busy until it says.
+    page_busy: bool,
+    /// When the window last grew for something new (unix ms): it stays full a
+    /// moment, so the page can draw it and say so before a shrink is weighed.
+    grown_at: u64,
     /// The screen the bar was last placed on, and the rect it was put at.
     placed: Option<Screen>,
     rect: Option<Rect>,
@@ -457,6 +466,9 @@ impl Default for State {
             interactive: false,
             pointer: None,
             near: false,
+            compact: false,
+            page_busy: true,
+            grown_at: 0,
             placed: None,
             rect: None,
             replace: false,
@@ -546,6 +558,30 @@ static APP: OnceLock<AppHandle> = OnceLock::new();
 /// and window calls wait on it.
 fn lock() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// How long the window stays full after growing for something new, before
+/// a shrink back to compact is weighed (the page draws it and says so first).
+const GROWN_HOLD_MS: u64 = 1_500;
+
+/// **Only the idle pill shows** — no card, line, pointer, menu, dictation,
+/// meeting or reading, the pointer nowhere near, the page saying so — so the
+/// window may be its compact size (`overlay::size_on`). Pure.
+fn wants_compact(s: &State, now: u64) -> bool {
+    let idle_pill = s.regions.iter().all(|r| r.id == "pill" && r.w <= 90.0 && r.h <= 32.0);
+    s.shown
+        && !s.near
+        && !s.interactive
+        && s.pointer.is_none()
+        && !s.page_busy
+        && idle_pill
+        && s.front.is_none()
+        && s.computer.is_none()
+        && !s.reading
+        && !s.meeting
+        && s.dictation == Dictation::Idle
+        && s.assistant == crate::chat::assistant::Phase::Idle
+        && now.saturating_sub(s.grown_at) >= GROWN_HOLD_MS
 }
 
 fn now_ms() -> u64 {
@@ -694,7 +730,49 @@ pub fn status() -> Status {
 }
 
 fn emit(app: &AppHandle) {
+    // Whatever the status brings, the page has the whole window to draw it in.
+    grow(app);
     let _ = app.emit(EVENT, status());
+}
+
+/// **The window full size again** (from compact), held a moment
+/// ([`GROWN_HOLD_MS`]) while the page draws what's new.
+fn grow(app: &AppHandle) {
+    let placed = {
+        let mut s = lock();
+        s.grown_at = now_ms();
+        if !s.compact {
+            return;
+        }
+        s.compact = false;
+        (s.placed, s.edge)
+    };
+    #[cfg(windows)]
+    if let (Some(screen), edge) = placed {
+        place(app, screen, edge, false);
+    }
+    #[cfg(not(windows))]
+    let _ = (app, placed);
+}
+
+/// **The window at the size the bar's state wants**: compact while only the
+/// idle pill shows ([`wants_compact`]), full otherwise. Called each poll.
+fn refit(app: &AppHandle) {
+    let placed = {
+        let mut s = lock();
+        let want = wants_compact(&s, now_ms());
+        if want == s.compact || s.placed.is_none() {
+            return;
+        }
+        s.compact = want;
+        (s.placed, s.edge)
+    };
+    #[cfg(windows)]
+    if let (Some(screen), edge) = placed {
+        place(app, screen, edge, false);
+    }
+    #[cfg(not(windows))]
+    let _ = (app, placed);
 }
 
 /// Send the page the bar's status again (the first-use pointers changed:
@@ -779,7 +857,8 @@ fn place(app: &AppHandle, screen: Screen, edge: Edge, moved_monitor: bool) {
             tracing::info!("bar: minimised from outside; back at its own size");
             overlay::win::restore_quietly(hwnd);
         }
-        let target = overlay::place(&screen, overlay::size_on(&screen), edge);
+        let compact = lock().compact;
+        let target = overlay::place(&screen, overlay::size_on(&screen, compact), edge);
         let mut rect = overlay::win::window_rect(hwnd);
         for _ in 0..3 {
             if rect.is_none_or(|now| now == target) {
@@ -856,6 +935,7 @@ fn poller(app: AppHandle, rx: mpsc::Receiver<()>) {
             apply(&app);
         }
         hover(&app, cursor);
+        refit(&app);
     }
 }
 
@@ -1239,6 +1319,9 @@ pub fn sync(app: &AppHandle, cfg: &crate::config::YapConfig) {
 /// Called from the `yap-state` listener: it never locks the pipeline.
 pub fn on_pipeline_state(app: &AppHandle, state: &str) {
     let d = Dictation::from_state(state);
+    if d != Dictation::Idle {
+        grow(app);
+    }
     let starting = {
         let mut s = lock();
         let starting = d == Dictation::Recording && s.dictation != Dictation::Recording;
@@ -1679,10 +1762,13 @@ pub fn bar_status() -> Status {
 /// The page's interactive rects (CSS px from the window's top-left): the
 /// pill's hover zone, cards, the menu. Sent on every layout change.
 #[tauri::command]
-pub fn bar_regions(regions: Vec<Region>) {
+pub fn bar_regions(regions: Vec<Region>, busy: Option<bool>) {
     let mut s = lock();
-    if s.regions != regions {
+    // (Without `busy`, an older page: never compact.)
+    let busy = busy.unwrap_or(true);
+    if s.regions != regions || s.page_busy != busy {
         s.regions = regions;
+        s.page_busy = busy;
         drop(s);
         wake();
     }
@@ -1921,6 +2007,7 @@ pub fn bar_debug(app: AppHandle) -> Result<serde_json::Value, String> {
             "pid": std::process::id(),
             "shown": s.shown,
             "interactive": s.interactive,
+            "compact": s.compact,
             "pointer": s.pointer,
             "exStyle": {
                 "transparent": style & WS_EX_TRANSPARENT != 0,
@@ -2081,6 +2168,35 @@ mod escape_watch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Compact only while nothing but the idle pill shows (the pointer away,
+    /// the page quiet, no card or dictation), and not right after growing.
+    #[test]
+    fn the_window_is_compact_only_while_only_the_idle_pill_shows() {
+        let pill = |w: f64, h: f64| Region { id: "pill".into(), x: 30.0, y: 16.0, w, h };
+        let idle = || State { shown: true, page_busy: false, regions: vec![pill(60.0, 20.0)], ..Default::default() };
+        let later = GROWN_HOLD_MS + 10;
+        assert!(wants_compact(&idle(), later));
+        // Right after growing for something new: held full a moment.
+        assert!(!wants_compact(&State { grown_at: later - 100, ..idle() }, later));
+        // Anything more, and it's full size.
+        for (why, s) in [
+            ("hidden", State { shown: false, ..idle() }),
+            ("the pointer near", State { near: true, ..idle() }),
+            ("clickable", State { interactive: true, ..idle() }),
+            ("the page drew more", State { page_busy: true, ..idle() }),
+            ("the opened pill", State { regions: vec![pill(216.0, 50.0)], ..idle() }),
+            ("a card", State { regions: vec![pill(60.0, 20.0), Region { id: "card:a".into(), x: 0.0, y: 0.0, w: 300.0, h: 80.0 }], ..idle() }),
+            ("a card in front", State { front: Some("a".into()), ..idle() }),
+            ("computer use", State { computer: Some("Clicks Save".into()), ..idle() }),
+            ("reading aloud", State { reading: true, ..idle() }),
+            ("a meeting", State { meeting: true, ..idle() }),
+            ("a dictation", State { dictation: Dictation::Recording, ..idle() }),
+            ("the Voice Assistant", State { assistant: crate::chat::assistant::Phase::Listening, ..idle() }),
+        ] {
+            assert!(!wants_compact(&s, later), "{why}");
+        }
+    }
 
     fn screen(id: isize, left: i32) -> Screen {
         Screen {

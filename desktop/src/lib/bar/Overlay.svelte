@@ -370,10 +370,14 @@
       })
       .filter((r) => r.w > 0 && r.h > 0);
     afterAnimations();
-    const json = JSON.stringify(regions);
+    // Anything besides the idle pill (a card, a line, a pointer, the menu, the opened pill): the window stays
+    // full size; with only the idle pill, Rust may make it small (bar.rs `wants_compact`), so another app that
+    // masks windows by their rectangle loses only that strip.
+    const busy = (document.querySelector('.stage > .cards')?.childElementCount ?? 0) > 0 || regions.some((r) => r.id !== 'pill' || r.w > 90 || r.h > 32);
+    const json = JSON.stringify([regions, busy]);
     if (json === lastSent) return;
     lastSent = json;
-    invoke('bar_regions', { regions }).catch(() => {});
+    invoke('bar_regions', { regions, busy }).catch(() => {});
   }
   // Svelte's transitions and `animate:flip` run on the Web Animations API,
   // which fires no transitionend / animationend. A card growing as its

@@ -458,8 +458,9 @@ person's real screen, mouse and keyboard**, for a real-world pass. The test Yap 
 with `YAP_LAB_REAL_SCREEN=1` (`shell/realtest.rs` `lab_screen`):
 - computer use's own grants and cards are the only gate (robot mode's "only the test's own windows"
   doesn't apply to it);
-- its Start menu is Windows' own apps only (Notepad, Paint, Clock, Photos, Settings, File
-  Explorer), and an app it opens is really started.
+- its Start menu is this PC's own (`apps/index.rs` reads it under `lab_screen`, as a person's Yap
+  does), and an app it opens is really started. Every app on it can be asked for: answer each
+  access card as the person would, and deny the ones a test must not touch.
 
 Debug builds only, opt-in per run. **It takes the keyboard and mouse**, so start it only on an idle
 PC and say so. Put the robot tests' input watcher over the daemon (`yaprobot watch <daemon pid> -
