@@ -1272,8 +1272,8 @@ async function setThings(a) {
   // keyboard, Windows' own apps only on its Start menu; computer use's own grants and cards the only gate.
   if (a.computer === 'real') {
     if (!START.realScreen) throw new Error('--computer real needs a lab started with --real-screen on');
+    // (No stand-in scene in robot mode: `e2e_computer_scene` is the stand-in desktop's alone.)
     fs.writeFileSync(START_MENU, JSON.stringify(REAL_START_MENU, null, 2));
-    await invoke('e2e_computer_scene', { scene: null });
     await patchConfig({ computerUse: true, assistantScreen: true, assistantScreenCloud: true, assistantScreenAsked: true });
     done.computer = { apps: REAL_START_MENU.map((x) => x.name), screen: 'real' };
   } else if (a.computer !== undefined) {
