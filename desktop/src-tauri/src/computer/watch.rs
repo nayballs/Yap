@@ -14,9 +14,21 @@
 //!   of that turn's input actions are refused: Claude waits for the
 //!   person's next message.
 //! - Only while Yap is driving ([`ARMED`]): the rest of the time the hook
-//!   does nothing more than it did.
+//!   does nothing more than it did. That's from an action's start until
+//!   the bar's "Yap is using your PC" goes, so **between two actions too**:
+//!   Esc pressed while Claude thinks about its next step stops that step
+//!   (and the bar's line goes at once). (A real-API run on 20 Nov 2026
+//!   found an Esc between actions lost: only one during an action counted.)
+//! - **Never Yap's own cards**: while one waits for the person (the access
+//!   card, an ask-first card, a question: `chat/pages/act/confirm.rs`),
+//!   their clicks and keys answer it, and none of it before the card went
+//!   ever stops what comes after. Without that, the mouse moving to a Send
+//!   card's Allow stopped the very action it allowed.
+//! - **A move of the mouse** counts only while an action runs (when Yap's
+//!   pointer and theirs would fight), never on a guided tour (the hand on
+//!   the mouse after Next) nor as the hand leaves a card just answered.
 
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -39,6 +51,64 @@ static TOUCH_KIND: AtomicU8 = AtomicU8::new(0);
 static BURST_X: AtomicI32 = AtomicI32::new(0);
 static BURST_Y: AtomicI32 = AtomicI32::new(0);
 static LAST_MOVE_MS: AtomicU64 = AtomicU64::new(0);
+/// Input actions running now (from `begin` until their [`Driving`] goes).
+static ACTIONS: AtomicU32 = AtomicU32::new(0);
+/// The hand leaving a card just answered: moves this soon after aren't the person taking over.
+const CARD_SETTLE_MS: u64 = 1_500;
+
+/// **Yap's own cards waiting for the person** ([`card`]) and when the last
+/// went (ms on the hook's clock; 0: none yet). The app's, for every thread;
+/// a unit test's own thread's, so another test's card never reaches it.
+mod cards {
+    #[cfg(not(test))]
+    mod imp {
+        use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+        static WAITING: AtomicU32 = AtomicU32::new(0);
+        static GONE: AtomicU64 = AtomicU64::new(0);
+        pub fn waiting() -> u32 {
+            WAITING.load(Ordering::Relaxed)
+        }
+        pub fn up() {
+            WAITING.fetch_add(1, Ordering::Relaxed);
+        }
+        pub fn down(now: u64) {
+            let _ = WAITING.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| Some(n.saturating_sub(1)));
+            GONE.store(now, Ordering::Relaxed);
+        }
+        pub fn gone() -> u64 {
+            GONE.load(Ordering::Relaxed)
+        }
+        #[cfg(debug_assertions)]
+        pub fn reset() {
+            GONE.store(0, Ordering::Relaxed);
+        }
+    }
+    #[cfg(test)]
+    mod imp {
+        use std::cell::Cell;
+        thread_local! {
+            static WAITING: Cell<u32> = const { Cell::new(0) };
+            static GONE: Cell<u64> = const { Cell::new(0) };
+        }
+        pub fn waiting() -> u32 {
+            WAITING.with(Cell::get)
+        }
+        pub fn up() {
+            WAITING.with(|w| w.set(w.get() + 1));
+        }
+        pub fn down(now: u64) {
+            WAITING.with(|w| w.set(w.get().saturating_sub(1)));
+            GONE.with(|g| g.set(now));
+        }
+        pub fn gone() -> u64 {
+            GONE.with(Cell::get)
+        }
+        pub fn reset() {
+            GONE.with(|g| g.set(0));
+        }
+    }
+    pub use imp::*;
+}
 
 /// What the person did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,16 +169,64 @@ pub fn lenient(on: bool) {
     LENIENT.store(on, Ordering::Relaxed);
 }
 
+/// **Whether the person's `t` counts now**: Yap drives, no card of Yap's
+/// waits, and a move only while an action runs — never on a guided tour,
+/// nor as the hand leaves a card just answered. Atomics only.
+fn counts(t: Touch, now: u64) -> bool {
+    if !ARMED.load(Ordering::Relaxed) || cards::waiting() > 0 {
+        return false;
+    }
+    let gone = cards::gone();
+    t != Touch::Move || (ACTIONS.load(Ordering::Relaxed) > 0 && !LENIENT.load(Ordering::Relaxed) && (gone == 0 || now >= gone + CARD_SETTLE_MS))
+}
+
+/// **The person's input after `ms`** (never before a card of Yap's went),
+/// and what it was.
+fn touched_after(ms: u64) -> Option<Touch> {
+    let since = ms.max(cards::gone());
+    (TOUCH_MS.load(Ordering::Relaxed) > since).then(|| Touch::of(TOUCH_KIND.load(Ordering::Relaxed))).flatten()
+}
+
+/// The person took over after `ms` (the indicator's linger reads it: Esc
+/// between two actions takes the bar's line away at once).
+pub fn taken_over_since(ms: u64) -> bool {
+    touched_after(ms).is_some()
+}
+
+/// The watch's clock (ms), for [`taken_over_since`].
+pub fn clock() -> u64 {
+    now_ms()
+}
+
+/// **A card of Yap's waiting for the person** (`chat/pages/act/confirm.rs`:
+/// every card that asks): while one is up, the person's clicks and keys
+/// answer it, never take over; dropped, it's gone.
+pub struct CardUp(());
+
+impl Drop for CardUp {
+    fn drop(&mut self) {
+        cards::down(now_ms().max(1));
+        // The hand on its way back starts a burst of its own.
+        LAST_MOVE_MS.store(0, Ordering::Relaxed);
+    }
+}
+
+/// A card of Yap's shown: [`CardUp`] while it waits.
+pub fn card() -> CardUp {
+    cards::up();
+    CardUp(())
+}
+
 /// **The hook heard a real key** (not injected, not Yap's). Atomics only —
 /// and Esc answers a guided tour's tooltip waiting (its Exit).
 pub fn person_key(vkey: u32, down: bool) {
     if down && vkey == 0x1B && super::teach::tip_up() {
         super::teach::press(super::teach::Pressed::Exit);
     }
-    if !down || !ARMED.load(Ordering::Relaxed) {
-        return;
+    let t = if vkey == 0x1B { Touch::Esc } else { Touch::Key };
+    if down && counts(t, now_ms()) {
+        touched(t);
     }
-    touched(if vkey == 0x1B { Touch::Esc } else { Touch::Key });
 }
 
 /// Whether a burst of moves from `start` to `at` is the person's. Pure.
@@ -119,13 +237,13 @@ pub fn moved_far(start: (i32, i32), at: (i32, i32)) -> bool {
 /// **The hook heard a real mouse event** (`msg`: its window message; the
 /// pointer at `x`, `y`). Atomics only.
 pub fn person_mouse(msg: u32, x: i32, y: i32) {
-    if !ARMED.load(Ordering::Relaxed) {
-        return;
-    }
+    let now = now_ms();
     match msg {
         // Moves: a new burst after a pause; far enough within one, the person's.
         0x0200 => {
-            let now = now_ms();
+            if !counts(Touch::Move, now) {
+                return;
+            }
             if now.saturating_sub(LAST_MOVE_MS.load(Ordering::Relaxed)) > BURST_MS {
                 BURST_X.store(x, Ordering::Relaxed);
                 BURST_Y.store(y, Ordering::Relaxed);
@@ -136,14 +254,16 @@ pub fn person_mouse(msg: u32, x: i32, y: i32) {
             }
         }
         // Any button going down.
-        0x0201 | 0x0204 | 0x0207 | 0x020B => touched(Touch::Button),
-        0x020A | 0x020E => touched(Touch::Wheel),
+        0x0201 | 0x0204 | 0x0207 | 0x020B if counts(Touch::Button, now) => touched(Touch::Button),
+        0x020A | 0x020E if counts(Touch::Wheel, now) => touched(Touch::Wheel),
         _ => {}
     }
 }
 
 /// **Test mode: the person's input, pretended** ("esc", "key", "button",
-/// "wheel", "move"): as the hook would report it, only while Yap drives.
+/// "wheel", "move"): as the hook would report it, only while Yap drives
+/// and no card of Yap's waits (a move only while an action runs). Whether
+/// it counted.
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn e2e_computer_touch(kind: String) -> Result<bool, String> {
@@ -161,16 +281,19 @@ pub fn e2e_computer_touch(kind: String) -> Result<bool, String> {
     if t == Touch::Esc && super::teach::tip_up() {
         return Ok(super::teach::press(super::teach::Pressed::Exit));
     }
-    let armed = ARMED.load(Ordering::Relaxed);
-    if armed {
+    let counted = counts(t, now_ms());
+    if counted {
         touched(t);
     }
-    Ok(armed)
+    Ok(counted)
 }
 
-/// Who holds the PC: the chat, and when its last action ended.
+/// Who holds the PC: the chat and its turn, when its last action began
+/// (ms) and when it ended.
 struct Holder {
     conversation: Option<u64>,
+    turn: String,
+    began: u64,
     last: Instant,
 }
 
@@ -195,14 +318,15 @@ pub struct Probe {
 
 impl Probe {
     pub fn stopped(self) -> bool {
-        TOUCH_MS.load(Ordering::Relaxed) > self.began
+        touched_after(self.began).is_some()
     }
 }
 
 impl Driving {
-    /// The person took over since this began: what they did.
+    /// The person took over since this began (never by answering a card of
+    /// Yap's meanwhile, an ask-first card's Allow): what they did.
     pub fn touched(&self) -> Option<Touch> {
-        (TOUCH_MS.load(Ordering::Relaxed) > self.began).then(|| Touch::of(TOUCH_KIND.load(Ordering::Relaxed))).flatten()
+        touched_after(self.began)
     }
 
     /// What the blocking steps read between them.
@@ -218,13 +342,18 @@ impl Driving {
 
     /// Stopped by the person: this turn's input actions end here.
     pub fn stopped_by_person(&self) {
-        let mut s = STOPPED.lock().unwrap_or_else(|p| p.into_inner());
-        if !s.contains(&self.turn) {
-            s.push(self.turn.clone());
-            let n = s.len();
-            if n > 32 {
-                s.drain(..n - 32);
-            }
+        mark_stopped(&self.turn);
+    }
+}
+
+/// `turn`'s input actions end here (the person took over).
+fn mark_stopped(turn: &str) {
+    let mut s = STOPPED.lock().unwrap_or_else(|p| p.into_inner());
+    if !s.iter().any(|t| t == turn) {
+        s.push(turn.to_string());
+        let n = s.len();
+        if n > 32 {
+            s.drain(..n - 32);
         }
     }
 }
@@ -233,9 +362,30 @@ impl Drop for Driving {
     fn drop(&mut self) {
         // A turn's future dropped mid-action (■): the blocking steps stop too.
         self.halted.store(true, Ordering::Relaxed);
+        let _ = ACTIONS.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| Some(n.saturating_sub(1)));
         if let Some(h) = HOLDER.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
             h.last = Instant::now();
         }
+    }
+}
+
+/// What the model and the chip are told when the person took over between
+/// two of the turn's actions (the same words as during one, `act.rs`).
+fn took_over(t: Touch) -> (&'static str, &'static str) {
+    macro_rules! said {
+        ($w:literal) => {
+            (
+                concat!("The user ", $w, " while Yap was working, so Yap stopped (nothing more was sent). Don't use their apps again until they ask: say what's left to do."),
+                concat!("Stopped: you ", $w),
+            )
+        };
+    }
+    match t {
+        Touch::Esc => said!("pressed Esc"),
+        Touch::Key => said!("pressed a key"),
+        Touch::Button => said!("clicked"),
+        Touch::Wheel => said!("scrolled"),
+        Touch::Move => said!("moved the mouse"),
     }
 }
 
@@ -256,7 +406,9 @@ pub fn refused(holder: Option<(Option<u64>, Duration)>, conversation: Option<u64
 }
 
 /// **Takes the PC for an input action** of `conversation`'s turn `turn`:
-/// refused when another chat holds it or the person stopped this turn.
+/// refused when another chat holds it or the person stopped this turn —
+/// during one of its actions, or **between two** (Esc while Claude thought
+/// about this one, the bar still saying "Yap is using your PC").
 pub fn begin(conversation: Option<u64>, turn: &str) -> Result<Driving, (&'static str, &'static str)> {
     let stopped = STOPPED.lock().unwrap_or_else(|p| p.into_inner()).iter().any(|t| t == turn);
     let mut holder = HOLDER.lock().unwrap_or_else(|p| p.into_inner());
@@ -264,11 +416,20 @@ pub fn begin(conversation: Option<u64>, turn: &str) -> Result<Driving, (&'static
     if let Some(no) = refused(held, conversation, stopped) {
         return Err(no);
     }
-    *holder = Some(Holder { conversation, last: Instant::now() });
+    // The person's input since this turn's last action began, while the watch listened: theirs to stop.
+    let between = holder.as_ref().filter(|h| h.conversation == conversation && h.turn == turn).and_then(|h| touched_after(h.began));
+    if let Some(t) = between {
+        mark_stopped(turn);
+        disarm();
+        return Err(took_over(t));
+    }
+    let began = now_ms();
+    *holder = Some(Holder { conversation, turn: turn.to_string(), began, last: Instant::now() });
+    ACTIONS.fetch_add(1, Ordering::Relaxed);
     ARMED.store(true, Ordering::Relaxed);
     // (Movement before this action began is never its stop.)
     LAST_MOVE_MS.store(0, Ordering::Relaxed);
-    Ok(Driving { began: now_ms(), turn: turn.to_string(), halted: Arc::new(AtomicBool::new(false)) })
+    Ok(Driving { began, turn: turn.to_string(), halted: Arc::new(AtomicBool::new(false)) })
 }
 
 /// The PC isn't driven any more (the indicator went): the hook stops
@@ -284,6 +445,9 @@ pub fn reset() {
     *HOLDER.lock().unwrap_or_else(|p| p.into_inner()) = None;
     STOPPED.lock().unwrap_or_else(|p| p.into_inner()).clear();
     TOUCH_MS.store(0, Ordering::Relaxed);
+    TOUCH_KIND.store(0, Ordering::Relaxed);
+    cards::reset();
+    LENIENT.store(false, Ordering::Relaxed);
     disarm();
 }
 
@@ -324,6 +488,83 @@ mod tests {
         drop(d);
         assert!(begin(Some(5), "turn-a").is_err());
         assert!(begin(Some(5), "turn-b").is_ok(), "the next message's turn");
+        reset();
+    }
+
+    /// Esc while Claude thinks between two actions (the watch still
+    /// listening): the turn's next action is refused, in the same words as
+    /// one stopped mid-action. (A real-API run, 20 Nov 2026, found it lost.)
+    #[test]
+    fn esc_between_two_actions_stops_the_next_one() {
+        let _one = crate::computer::tests::LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        reset();
+        drop(begin(Some(6), "turn-c").unwrap());
+        std::thread::sleep(Duration::from_millis(5));
+        person_key(0x1B, true);
+        assert!(taken_over_since(0));
+        let no = begin(Some(6), "turn-c").err().expect("refused");
+        assert_eq!(no.1, "Stopped: you pressed Esc");
+        assert!(no.0.contains("pressed Esc while Yap was working"));
+        assert!(!ARMED.load(Ordering::Relaxed), "the watch stops listening");
+        assert!(begin(Some(6), "turn-c").is_err(), "and the rest of the turn too");
+        assert!(begin(Some(6), "turn-d").is_ok(), "the next message's turn");
+        reset();
+    }
+
+    /// The person answering a card of Yap's (an ask-first card's Allow, the
+    /// access card, a question) never takes over: not while it waits, not
+    /// the action it allowed, not the turn's next.
+    #[test]
+    fn answering_a_card_of_yaps_never_takes_over() {
+        let _one = crate::computer::tests::LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        reset();
+        let d = begin(Some(7), "turn-e").unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        let card = card();
+        person_mouse(0x0200, 100, 100);
+        person_mouse(0x0200, 400, 300);
+        person_mouse(0x0201, 400, 300);
+        person_key(0x0D, true);
+        assert_eq!(d.touched(), None, "the card's clicks and keys");
+        drop(card);
+        assert_eq!(d.touched(), None, "nor once it's gone");
+        // The hand leaving the card: its moves don't count either.
+        person_mouse(0x0200, 400, 300);
+        person_mouse(0x0200, 800, 600);
+        assert_eq!(d.touched(), None, "the hand leaving the card");
+        drop(d);
+        assert!(begin(Some(7), "turn-e").is_ok(), "the turn's next action");
+        reset();
+    }
+
+    /// A move of the mouse counts while an action runs, never between two
+    /// (Claude thinking) nor on a guided tour; a click between two does.
+    #[test]
+    fn moves_count_only_while_an_action_runs_and_never_on_a_tour() {
+        let _one = crate::computer::tests::LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        reset();
+        let d = begin(Some(8), "turn-f").unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        person_mouse(0x0200, 10, 10);
+        person_mouse(0x0200, 200, 10);
+        assert_eq!(d.touched(), Some(Touch::Move), "during the action");
+        drop(d);
+        reset();
+        drop(begin(Some(8), "turn-g").unwrap());
+        std::thread::sleep(Duration::from_millis(5));
+        person_mouse(0x0200, 10, 10);
+        person_mouse(0x0200, 200, 10);
+        assert!(begin(Some(8), "turn-g").is_ok(), "a move between two actions");
+        reset();
+        lenient(true);
+        let d = begin(Some(8), "turn-h").unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        person_mouse(0x0200, 10, 10);
+        person_mouse(0x0200, 200, 10);
+        assert_eq!(d.touched(), None, "a tour's step: the hand on the mouse after Next");
+        person_mouse(0x0201, 200, 10);
+        assert_eq!(d.touched(), Some(Touch::Button), "a click still stops it");
+        drop(d);
         reset();
     }
 }

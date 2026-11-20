@@ -111,7 +111,8 @@ The plan and its phases are in the private repo
 - `computer/uia.rs` — UI Automation, time-boxed: the element under a point
   (a link, a control's name), the focused one (a password field).
 - `computer/watch.rs` — one chat in control at a time (`HOLD`, 10 s), and the
-  person's own input stopping it (fed by `dictation/input_hook.rs`).
+  person's own input stopping it (fed by `dictation/input_hook.rs`): during
+  an action or between two, never their answer on a card of Yap's.
 - `computer/indicator.rs` — the bar's line (`bar::set_computer`) and the
   border round the display (four click-through strips, kept out of every
   capture).
@@ -348,8 +349,8 @@ them instead of doing it all itself (the desktop contract's teach tools).
   action fails.
 - **The watch during a tour:** it's off while a tooltip waits, so the
   person's click on Next is theirs. While a step's actions run, a key, a
-  button or the wheel stops them as ever, but a small move of the mouse
-  doesn't (`watch::lenient`): the person's hand is on it.
+  button or the wheel stops them as ever, but a move of the mouse doesn't
+  (`watch::lenient`): the person's hand is on it.
 - **The tour ends with the turn** (`chat/turn.rs` calls
   `teach::turn_ended`): the tooltip goes, Yap's window comes back.
 - A test run never puts the tooltip on the real screen: `e2e_computer_teach`
@@ -491,7 +492,19 @@ three gaps:
   input: anything not injected and not Yap's own. Any of these stops it:
   - a key (Esc above all);
   - a button or the wheel;
-  - a move of more than 10 px within one burst, robot mode's thresholds.
+  - a move of more than 10 px within one burst, robot mode's thresholds,
+    but only while an action runs.
+- **When it counts** (`watch.rs`, 20 Nov 2026, found by the first real-API
+  run): from an action's start until the bar's line goes, so **between two
+  actions too**. Esc pressed while Claude thinks about its next step takes
+  the line away at once, and that next step is refused. Before, only input
+  during an action counted, and most of a real turn is the model thinking.
+- **Never Yap's own cards.** While a card waits (the access card, an
+  ask-first card, a question: `confirm.rs`'s `Pending` holds a
+  `watch::CardUp`), the person's clicks and keys answer it, and nothing from
+  before it went stops what follows. Moves don't count for 1.5 s after a
+  card goes either (the hand leaving it). Before, the mouse moving to a Send
+  card's Allow stopped the very click it allowed.
 - **What a stop does.**
   - The action stops between two steps, and what it held is let go.
   - The indicator goes at once.
@@ -532,8 +545,11 @@ three gaps:
 - **e2e for phase 2:** `computer-input.spec.js`:
   - a click and typing land in the stand-in app, and the bar shows the
     indicator, then lets it go;
-  - Send asks first, and Don't presses nothing;
-  - Esc stops a held key, and the rest of the turn is refused.
+  - Send asks first, and Don't presses nothing; Allow once by mouse sends
+    (the person's move, click and keys on the card never take over);
+  - Esc stops a held key, and the rest of the turn is refused;
+  - Esc between two actions (the stand-in Claude Code waiting 3 s) takes the
+    bar's line away at once, and the next action never runs.
 - **Unit tests for phase 2:** the checks' table; the steps (combos, a
   click's modifiers, a drag, what a stop lets go); the watch; the whole of
   phase 2 on the stand-in desktop.
