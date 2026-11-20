@@ -272,7 +272,7 @@ pub async fn execute(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
             let focus = if act == Act::Type { d.focused() } else { None };
             let front = d.front();
             // Robot mode: only the windows the test opened, whatever's allowed (shell/realtest.rs).
-            if crate::shell::realtest::on() {
+            if crate::shell::realtest::on() && !crate::shell::realtest::lab_screen() {
                 let pointer = matches!(act, Act::Click { .. } | Act::Drag { .. } | Act::Press | Act::Scroll { .. });
                 let landing = if pointer { under.clone().flatten() } else { front.clone() };
                 if let crate::shell::realtest::Gate::Refused(why) = crate::shell::realtest::gate(landing.map(|w| w.hwnd), "use an app (computer use)") {

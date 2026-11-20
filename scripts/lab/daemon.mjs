@@ -1268,7 +1268,15 @@ async function setThings(a) {
   }
   // Computer use (computer.rs, 19 Nov 2026) on a stand-in desktop: test windows drawn by the test Yap itself
   // (computer/sim.rs), never the real screen, mouse or keyboard; its Start menu a stand-in list of test apps.
-  if (a.computer !== undefined) {
+  // `--computer real` (a lab started with --real-screen, 20 Nov 2026): the person's real screen, mouse and
+  // keyboard, Windows' own apps only on its Start menu; computer use's own grants and cards the only gate.
+  if (a.computer === 'real') {
+    if (!START.realScreen) throw new Error('--computer real needs a lab started with --real-screen');
+    fs.writeFileSync(START_MENU, JSON.stringify(REAL_START_MENU, null, 2));
+    await invoke('e2e_computer_scene', { scene: null });
+    await patchConfig({ computerUse: true, assistantScreen: true, assistantScreenCloud: true, assistantScreenAsked: true });
+    done.computer = { apps: REAL_START_MENU.map((x) => x.name), screen: 'real' };
+  } else if (a.computer !== undefined) {
     const on = onOff(a.computer, false, 'computer');
     if (on) {
       fs.writeFileSync(START_MENU, JSON.stringify(COMPUTER_START_MENU, null, 2));
@@ -1284,6 +1292,16 @@ async function setThings(a) {
   if (!Object.keys(done).length) throw new Error('Nothing to set: --web, --yap-code, --connectors, --bypass, --gh, --git, --clock, --folder-pick, --computer, config or files');
   return done;
 }
+
+/** `set --computer real`'s Start menu: Windows' own apps (their Start-menu ids), really started there. */
+const REAL_START_MENU = [
+  { id: 'Microsoft.WindowsNotepad_8wekyb3d8bbwe!App', name: 'Notepad' },
+  { id: 'Microsoft.Paint_8wekyb3d8bbwe!App', name: 'Paint' },
+  { id: 'Microsoft.WindowsAlarms_8wekyb3d8bbwe!App', name: 'Clock' },
+  { id: 'Microsoft.Windows.Photos_8wekyb3d8bbwe!App', name: 'Photos' },
+  { id: 'windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel', name: 'Settings' },
+  { id: 'Microsoft.Windows.Explorer', name: 'File Explorer' },
+];
 
 /** `set --computer on`'s Start menu: test apps only (made-up paths; nothing is ever launched in test mode). */
 const COMPUTER_START_MENU = [
@@ -2173,6 +2191,8 @@ async function start() {
   }
   // The main window's size (shell/lab.rs): the same in every run, so shots compare.
   const env = { YAP_LAB: '1', YAP_LAB_RECORD: RECORD, YAP_LAB_WINDOW: START.size ?? '1280x860', YAP_E2E_APPS: START_MENU };
+  // `--real-screen`: robot mode, and computer use on the real screen (shell/realtest.rs `lab_screen`).
+  if (START.realScreen) Object.assign(env, { YAP_REALTEST: '1', YAP_LAB_REAL_SCREEN: '1' });
   fs.rmSync(START_MENU, { force: true });
   // The real web and the person's own Claude Code — but with `--fake`, the
   // stand-ins (`--fake --live-web`: the fake AI on the real web, for the

@@ -267,7 +267,7 @@ pub async fn read(args: &Value, ctx: &Ctx<'_>) -> Run {
                 None => "None of the allowed apps is in front: name one (app), or bring it up with open_application.".into(),
             });
         };
-        if crate::shell::realtest::on() {
+        if crate::shell::realtest::on() && !crate::shell::realtest::lab_screen() {
             if let crate::shell::realtest::Gate::Refused(why) = crate::shell::realtest::gate(Some(win.hwnd), "read a window (computer use)") {
                 return Err(why);
             }
@@ -350,7 +350,7 @@ pub async fn act(name: &str, args: &Value, ctx: &Ctx<'_>) -> Run {
     let checked = tauri::async_runtime::spawn_blocking(move || -> Result<Checked, String> {
         let desk = shot::desk()?;
         let win = desk.windows().into_iter().find(|x| x.hwnd == k.hwnd);
-        if crate::shell::realtest::on() {
+        if crate::shell::realtest::on() && !crate::shell::realtest::lab_screen() {
             if let crate::shell::realtest::Gate::Refused(why) = crate::shell::realtest::gate(Some(k.hwnd), "act on a window's element (computer use)") {
                 return Ok((Verdict::Refuse { error: why, chip: "Didn't act: robot mode".into() }, desk, win));
             }

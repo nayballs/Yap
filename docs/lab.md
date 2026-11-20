@@ -453,6 +453,19 @@ among them. Computer use's switch and the two screen switches go on. The real sc
 keyboard are never touched (test mode), so the Claude inside Yap can be asked to use apps and the
 tools compared one for one with the desktop app's (the private plan's parity pass).
 
+`--computer real` (20 Nov 2026, a lab started with `start --real-screen`): **computer use on the
+person's real screen, mouse and keyboard**, for a real-world pass. The test Yap runs in robot mode
+with `YAP_LAB_REAL_SCREEN=1` (`shell/realtest.rs` `lab_screen`):
+- computer use's own grants and cards are the only gate (robot mode's "only the test's own windows"
+  doesn't apply to it);
+- its Start menu is Windows' own apps only (Notepad, Paint, Clock, Photos, Settings, File
+  Explorer), and an app it opens is really started.
+
+Debug builds only, opt-in per run. **It takes the keyboard and mouse**, so start it only on an idle
+PC and say so. Put the robot tests' input watcher over the daemon (`yaprobot watch <daemon pid> -
+<note>`), so the person's first key, click or mouse move ends the run. In robot mode the test Yap's
+own hook hears only the robot's keys, so Esc is pretended with `e2e_computer_touch`.
+
 Two more (16 Nov 2026), for a Code chat summary's Changes (`summary` below):
 
 - `--gh on|off`: **the lab's read-only `gh`** (`agents/prs/lab.rs`, only in a live lab:

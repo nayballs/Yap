@@ -33,6 +33,23 @@
 //! Release builds compile robot mode out: [`on`] is always `false`, [`gate`]
 //! always [`Gate::Go`] (a normal run) and the commands don't exist.
 
+/// **Yap Lab on the real screen** (`lab start --real-screen`: robot mode and
+/// `YAP_LAB_REAL_SCREEN=1`, debug builds only): computer use acts on the
+/// person's real apps, its own grants the only gate (never just the robot's
+/// windows), and an app it opens from its Start menu (the Lab's list in
+/// `YAP_E2E_APPS`) is really started. Everything else stays robot mode's.
+/// Opt-in per run, for a real-world pass of computer use; the Lab's input
+/// watcher (`yaprobot watch`) ends the run at the person's first touch.
+pub fn lab_screen() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| on() && std::env::var("YAP_LAB_REAL_SCREEN").is_ok_and(|v| v.trim() == "1"))
+    }
+    #[cfg(not(debug_assertions))]
+    false
+}
+
 /// What a paste, a key press or a read may do with a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Gate {

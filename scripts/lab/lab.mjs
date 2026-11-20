@@ -8,6 +8,7 @@
 //         [--connectors on|off] [--workspace <dir>] [--build <exe>]
 //         [--stale-ok] [--fake [--live-web]] [--idle <min>]
 //         [--size 1280x860] [--no-shots] [--theme light|dark]
+//         [--real-screen]   computer use on the person's real screen (`set --computer real`; hands off)
 //   check                                  is Claude Code here and signed in?
 //   ask "<text>" [--spoken [--away]] [--chat new|same|<id>|code:<workspace>]
 //       [--timeout 600] [--no-shots] [--theme light|dark]
@@ -181,6 +182,8 @@ async function start(args, { check = false } = {}) {
     size,
     shots: !args['no-shots'],
     theme: args.theme ?? 'both',
+    // Computer use on the person's real screen (`set --computer real`): opt-in, and the person's hands off.
+    realScreen: !!args['real-screen'],
   };
   fs.writeFileSync(path.join(LAB, 'start.json'), JSON.stringify(options, null, 2));
   const logFd = fs.openSync(path.join(LAB, 'daemon.log'), 'a');
