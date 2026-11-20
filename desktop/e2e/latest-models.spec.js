@@ -10,12 +10,15 @@
 // - the model in use stays where the split puts it (the picker opens More
 //   models when it's there);
 // - More models newest first: the provider's dates, else the id's version;
-// - a provider none of whose models is in a family isn't split.
+// - a provider none of whose models is in a family isn't split;
+// - an Anthropic key's default model (modelCatalog.js `defaultFrom`) is the
+//   newest Haiku Anthropic offers, never just the list's first row.
 // The rows are made from Yap's curated lists (ppModels.js) and a few live
 // ones of the tests' own.
 import { test, expect } from '@playwright/test';
-import { latestModels, newestFirst, versionOf } from '../src/lib/core/latestModels.js';
+import { latestModels, newestFirst, versionOf, newestOfFamily } from '../src/lib/core/latestModels.js';
 import { PP_CLOUD_MODELS } from '../src/lib/core/ppModels.js';
+import { defaultFrom, mergeModels } from '../src/lib/core/modelCatalog.js';
 
 const row = (provider, model, name, extra = {}) => ({ key: `${provider}:${model}`, provider, model, name, ...extra });
 /** A provider's curated list as the picker's rows. */
@@ -147,4 +150,21 @@ test('the version an id says', () => {
   expect(versionOf('openai', 'gpt-6.1-sol')).toEqual([6, 1]);
   expect(versionOf('gemini', 'models/gemini-3.1-pro-preview')).toEqual([3, 1]);
   expect(versionOf('groq', 'openai/gpt-oss-120b')).toEqual([0, 0]);
+});
+
+test("an Anthropic key's default is the newest Haiku Anthropic offers, never an older one first", () => {
+  const live = (models) => ({ ok: true, models });
+  const at = (id, created, extra = {}) => ({ id, name: id, created, ...extra });
+  // Yap's own list (no key yet, or the check failed): Haiku 5.5, not Haiku 4.5 (20 Nov 2026).
+  expect(defaultFrom(mergeModels('anthropic'), 'anthropic')).toBe('claude-haiku-5-5');
+  // A newer Haiku in Anthropic's own list takes its place, curated or not.
+  const six = live([at('claude-haiku-4-5-20251001', 1759276800), at('claude-haiku-5-5', 1790000000), at('claude-haiku-6', 1800000000), at('claude-opus-5-5', 1790000000)]);
+  expect(defaultFrom(mergeModels('anthropic', six), 'anthropic')).toBe('claude-haiku-6');
+  // One being retired, or no longer offered, never does.
+  const retiring = live([at('claude-haiku-5-5', 1790000000, { deprecated: true }), at('claude-haiku-4-5-20251001', 1759276800)]);
+  expect(defaultFrom(mergeModels('anthropic', retiring), 'anthropic')).toBe('claude-haiku-4-5-20251001');
+  // The family's newest, read as Latest reads it; another provider keeps its first row.
+  expect(newestOfFamily('anthropic', 'haiku', [{ key: 'a', model: 'claude-haiku-4-5' }, { key: 'b', model: 'claude-haiku-5-5' }]).model).toBe('claude-haiku-5-5');
+  expect(newestOfFamily('anthropic', 'haiku', [{ key: 'a', model: 'claude-opus-5-5' }])).toBeNull();
+  expect(defaultFrom(mergeModels('groq'), 'groq')).toBe(PP_CLOUD_MODELS.groq.models[0].value);
 });

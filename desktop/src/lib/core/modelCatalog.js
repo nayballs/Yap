@@ -19,6 +19,7 @@
 // - No key, offline, a failed fetch, a test run: exactly the curated list.
 import { PP_CLOUD_MODELS, CURATED_AT, modelThinks } from './ppModels.js';
 import { contextInfo } from './localContext.js';
+import { newestOfFamily } from './latestModels.js';
 
 const DAY = 24 * 60 * 60;
 /** How long a model keeps its "New" tag. */
@@ -83,6 +84,9 @@ export function mergeModels(provider, entry, { current = '', now = Date.now() / 
     curated: !!c,
     tools: m?.tools ?? null,
     thinks: m?.thinks ?? (c ? modelThinks(c.value) : false),
+    // The provider's own word on it (a default never picks one being retired).
+    deprecated: !!m?.deprecated,
+    created: m?.created ?? null,
     ...extra,
   });
   const curatedOnly = () => ({ ...state, live: false, items: curated.map((c) => row(c, null)), more: [], missing: null });
@@ -157,6 +161,14 @@ export function mergeModels(provider, entry, { current = '', now = Date.now() / 
  * first one it shows that the provider still offers.
  */
 export function defaultFrom(merged, provider) {
+  // A provider whose default is a family's newest (Anthropic: `defaultFamily: 'haiku'`): the newest of it the
+  // provider offers, the live list's too (20 Nov 2026: an API key's Chat started on Haiku 4.5, first in the list).
+  const family = PP_CLOUD_MODELS[provider]?.defaultFamily;
+  if (family) {
+    const rows = [...merged.items, ...(merged.more ?? [])].map((i) => ({ key: i.value, model: i.value, missing: i.missing, deprecated: i.deprecated, created: i.created }));
+    const newest = newestOfFamily(provider, family, rows);
+    if (newest) return newest.model;
+  }
   return merged.items.find((i) => !i.missing)?.value ?? PP_CLOUD_MODELS[provider]?.models[0]?.value ?? PP_CLOUD_MODELS[provider]?.fallback ?? '';
 }
 

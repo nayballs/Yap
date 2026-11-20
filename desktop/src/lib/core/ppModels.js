@@ -33,11 +33,14 @@ export const PP_CLOUD_MODELS = {
   },
   anthropic: {
     keyUrl: 'https://console.anthropic.com/settings/keys',
+    // The default for an API key: the newest Haiku Anthropic offers (modelCatalog.js `defaultFrom`), never
+    // just the first row here, so a new Haiku takes its place (20 Nov 2026: it was Haiku 4.5, ten times the price).
+    defaultFamily: 'haiku',
     // Anthropic lists older models by their dated ids
     // (claude-haiku-4-5-20251001); the aliases here still match them.
     models: [
-      { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', desc: 'Fast with near-frontier intelligence' },
       { value: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', desc: 'Newest Haiku: fastest and lowest-cost Claude' },
+      { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', desc: 'Previous Haiku' },
       { value: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', desc: 'Newest Sonnet: balanced speed and intelligence' },
       { value: 'claude-opus-5-5', label: 'Claude Opus 5.5', desc: 'Newest Opus: the most capable Claude for most work' },
       { value: 'claude-fable-5-2', label: 'Claude Fable 5.2', desc: 'Newest Fable: for the hardest reasoning and long tasks; slower' },
