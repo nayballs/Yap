@@ -258,8 +258,16 @@ pub struct Ask<'a> {
 }
 
 /// A question waiting: taken out of the waiting list when dropped (answered,
-/// timed out, or the turn stopped).
-struct Pending(u64);
+/// timed out, or the turn stopped). While it waits, the person's clicks and
+/// keys answer it: computer use's watch never takes them for the person
+/// taking over (`computer/watch.rs`).
+struct Pending(u64, #[allow(dead_code)] crate::computer::watch::CardUp);
+
+impl Pending {
+    fn new(id: u64) -> Self {
+        Pending(id, crate::computer::watch::card())
+    }
+}
 
 impl Drop for Pending {
     fn drop(&mut self) {
@@ -339,7 +347,7 @@ pub(crate) fn waiting() -> (u64, tokio::sync::oneshot::Receiver<Reply>, impl Dro
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let (tx, rx) = tokio::sync::oneshot::channel();
     PENDING.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashMap::new).insert(id, tx);
-    (id, rx, Pending(id))
+    (id, rx, Pending::new(id))
 }
 
 /// **Ask the person** (`what`), showing the card through `live`, and wait
@@ -384,7 +392,7 @@ async fn ask_with(live: Option<crate::chat::stream::Live<'_>>, what: Ask<'_>, co
     }
     let (tx, rx) = tokio::sync::oneshot::channel();
     PENDING.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashMap::new).insert(id, tx);
-    let _pending = Pending(id);
+    let _pending = Pending::new(id);
     let card = |state: &str| {
         crate::chat::stream::Event::Confirm(Card {
             id,

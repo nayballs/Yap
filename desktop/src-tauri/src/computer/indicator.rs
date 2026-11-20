@@ -9,7 +9,9 @@
 //!   (`WDA_EXCLUDEFROMCAPTURE`), so no screenshot ever shows them.
 //!
 //! Both go [`LINGER`] after the last action ends, unless another begins: a
-//! turn's actions read as one stretch, not a flicker each.
+//! turn's actions read as one stretch, not a flicker each. Esc (or a key, a
+//! click) meanwhile takes them away at once: the next action won't run
+//! (`watch.rs`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -43,8 +45,20 @@ pub fn done() {
         return;
     }
     let stretch = STRETCH.load(Ordering::Relaxed);
+    let ended = super::watch::clock();
     std::thread::spawn(move || {
-        std::thread::sleep(LINGER);
+        let until = std::time::Instant::now() + LINGER;
+        while std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(100));
+            if STRETCH.load(Ordering::Relaxed) != stretch {
+                return;
+            }
+            // The person took over while Claude thinks about its next step: the line goes now.
+            if super::watch::taken_over_since(ended) {
+                off();
+                return;
+            }
+        }
         if STRETCH.load(Ordering::Relaxed) == stretch {
             off();
         }

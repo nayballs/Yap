@@ -211,6 +211,55 @@ test("a click on Send asks first on the card; Don't presses nothing", async ({ y
   expect((await state(yap)).log).not.toContain('pressed Send');
 });
 
+test("answering Yap's Send card by mouse is the person's answer, never taking over: Allow once sends", async ({ yap, main }) => {
+  const DUMP = fresh('send-allowed.jsonl');
+  const SAID = 'I sent your reply.';
+  await play(yap, 'send-allowed', [turn(use('request_access', ACCESS, DUMP), use('screenshot', {}, DUMP), use('left_click', { coordinate: SEND, action_summary: 'Sends the reply' }, DUMP), answers(SAID))]);
+  await freshChat(main);
+  await send(main, 'Send my reply');
+  await allow(main);
+  const card = main.getByTestId('chat-page-confirm').last();
+  await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
+  // The person's mouse on its way to the card, their click and a key on it: answering it, never taking
+  // over (before 20 Nov 2026 the watch, armed for the click, took them as the person stopping Yap).
+  for (const kind of ['move', 'button', 'key', 'esc']) expect(await yap.invoke('e2e_computer_touch', { kind }), kind).toBe(false);
+  await card.getByRole('button', { name: 'Allow once' }).click();
+  await expect(lastAnswer(main)).toHaveText(SAID, { timeout: 20_000 });
+  const clicked = jsonLines(DUMP)[2];
+  expect(resultOf(clicked)).toMatchObject({ success: true, displayText: 'Sends the reply' });
+  expect((await state(yap)).log).toContain('pressed Send');
+});
+
+test("Esc while Claude thinks between two actions stops the next one, and the bar's line goes at once", async ({ yap, main }) => {
+  const DUMP = fresh('esc-between.jsonl');
+  const SAID = 'You pressed Esc, so I stopped.';
+  await play(yap, 'esc-between', [
+    turn(
+      use('request_access', ACCESS, DUMP),
+      use('screenshot', {}, DUMP),
+      use('left_click', { coordinate: MESSAGE, action_summary: 'Clicks into the message box' }, DUMP),
+      // Claude thinking about its next step.
+      { _sleep_ms: 3000 },
+      use('type', { text: 'Running late', action_summary: 'Types the reply' }, DUMP),
+      answers(SAID),
+    ),
+  ]);
+  await freshChat(main);
+  await send(main, 'Write my reply');
+  await allow(main);
+  await expect(yap.overlay.getByTestId('bar-computer')).toBeVisible({ timeout: 20_000 });
+  await expect.poll(() => yap.invoke('e2e_computer_touch', { kind: 'esc' }), { timeout: 10_000 }).toBe(true);
+  // The line goes at once, not after its linger…
+  await expect(yap.overlay.getByTestId('bar-computer')).toBeHidden({ timeout: 2_000 });
+  await expect(lastAnswer(main)).toHaveText(SAID, { timeout: 20_000 });
+  // …and the next action never runs (found by a real-API run on 20 Nov 2026: it did).
+  const [, , clicked, typed] = jsonLines(DUMP);
+  expect(resultOf(clicked).success).toBe(true);
+  expect(resultOf(typed).success).toBe(false);
+  expect(resultOf(typed).displayText).toBe('Stopped: you pressed Esc');
+  expect((await state(yap)).log).toEqual(['focused Message']);
+});
+
 test('Esc stops the action under way, and the rest of the turn is refused', async ({ yap, main }) => {
   const DUMP = fresh('esc.jsonl');
   const SAID = 'You took over, so I stopped.';
