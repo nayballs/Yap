@@ -197,7 +197,8 @@ impl Loop<'_> {
                 live.sink.send(crate::chat::stream::Event::Text { text: String::new() });
             }
             self.messages.push(json!({ "role": "assistant", "content": content }));
-            self.messages.push(json!({ "role": "user", "content": crate::chat::research::SEARCH_FIRST }));
+            let first = self.extra.research.map_or(crate::chat::research::SEARCH_FIRST, |b| b.search_first());
+            self.messages.push(json!({ "role": "user", "content": first }));
             return Step::Again;
         }
         // A new document's first step, its web tools held back for the
@@ -244,7 +245,7 @@ impl Loop<'_> {
     /// turn's chips.
     pub(super) async fn answer_now(mut self) -> Result<(String, Vec<String>), String> {
         // (A research turn's: the report now, chat/research.rs.)
-        let note = if self.extra.research.is_some() { crate::chat::research::WRITE_NOW } else { ANSWER_NOW_NOTE };
+        let note = self.extra.research.map_or(ANSWER_NOW_NOTE, |b| b.write_now());
         self.messages.push(json!({ "role": "user", "content": note }));
         let native = self.claude_step();
         // (Claude on the Messages API keeps its tools, told to call none: its

@@ -43,12 +43,13 @@
 //!   image's type and size, never its data), for an e2e spec. With
 //!   `"list":true` in place of a tool, `tools/list` instead: the dump has
 //!   each tool's name and `readOnlyHint` (what a session was offered).
-//! - `{"_for":"chat"}` (or `"agent"`, `"ask"`, `"all"`): the lines up to the
-//!   next `_for` play only in a process of that kind — `agent` started with
-//!   `--permission-prompt-tool` (an agent's run), `chat` with an
-//!   `--mcp-config` but no prompt tool (a plan chat's session), `ask` with
-//!   neither (one question, no tools) — so one script plays a plan chat,
-//!   the agent it starts and the report's question. `all` (as from the top):
+//! - `{"_for":"chat"}` (or `"agent"`, `"helper"`, `"ask"`, `"all"`): the
+//!   lines up to the next `_for` play only in a process of that kind —
+//!   `agent` started with `--permission-prompt-tool` (an agent's run), `chat`
+//!   with an `--mcp-config` but no prompt tool (a plan chat's session),
+//!   `helper` with neither and the web's tools (a research's helper), `ask`
+//!   with no tools (one question) — so one script plays a plan chat, the
+//!   agent it starts and the report's question. `all` (as from the top):
 //!   every kind.
 //! - `{"_dump_args":true}`: prints `{"type":"system","subtype":"fake_args",
 //!   "args":[…],"cwd":…,"pid":…,"user_text":…,"user_pictures":[…]}` (its
@@ -501,12 +502,16 @@ impl Ctx {
     }
 
     /// What kind of run this is, for `_for`: "agent" (a permission prompt
-    /// tool), "chat" (an MCP server, no prompt tool) or "ask" (neither).
+    /// tool), "chat" (an MCP server, no prompt tool), "helper" (neither, the
+    /// web's tools: a research's helper, chat/research/helpers.rs) or "ask"
+    /// (no tools).
     pub fn kind(&self) -> &'static str {
         if self.args.iter().any(|a| a == "--permission-prompt-tool") {
             "agent"
         } else if self.args.iter().any(|a| a == "--mcp-config") {
             "chat"
+        } else if self.args.windows(2).any(|w| w[0] == "--tools" && w[1].contains("WebSearch")) {
+            "helper"
         } else {
             "ask"
         }

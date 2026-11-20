@@ -46,6 +46,8 @@ use crate::chat::cards::outline::Section;
 use crate::chat::chats::Source;
 use crate::chat::stream::{Event, Sink};
 
+pub mod helpers;
+
 /// **No cap** (20 Nov 2026, the maintainer: Research uncapped, as the Claude app's,
 /// whose help pages give it no limit on searches, sources or tool calls): a
 /// research makes as many searches, and reads as many pages, as the
@@ -109,13 +111,20 @@ pub enum Spent {
 impl Spent {
     /// What the model reads when it's out: write the report now. Pure.
     pub fn line(self, caps: &Caps) -> String {
+        self.line_for(caps, false)
+    }
+
+    /// The same for a research's helper (`helper`, chat/research/helpers.rs):
+    /// its findings now, not the report. Pure.
+    pub fn line_for(self, caps: &Caps, helper: bool) -> String {
         let what = match self {
             Spent::Searches => format!("You've made the {} searches this research may make", caps.searches),
             Spent::Reads => format!("You've read the {} pages your context holds", caps.reads),
             Spent::Time => format!("This research has had its {} minutes", caps.time.as_secs() / 60),
             Spent::Tokens => "This research has used the tokens it may use".to_string(),
         };
-        format!("{what}: write the report now, from the pages you read (a fact none of them gave is said to be unconfirmed, never guessed). Don't call any more tools.")
+        let write = if helper { "write your findings now" } else { "write the report now" };
+        format!("{what}: {write}, from the pages you read (a fact none of them gave is said to be unconfirmed, never guessed). Don't call any more tools.")
     }
 
     /// The chip's ending ("research limit: 20 searches"). Pure.
@@ -169,22 +178,67 @@ pub fn write_now_after(why: Spent, caps: &Caps) -> String {
     format!("(A note from Yap, not the user.) {} Yap stopped the research there. Write the report now as your answer, from the pages you read, as the research turn said: # title, ## Summary, a ## section for each part of the plan, every fact cited as a link to a page you read. Don't search or fetch anything more.", why.line(caps).split(':').next().unwrap_or("The research is over").trim_end_matches('.').to_string() + ".")
 }
 
-/// **A research under way**: its caps and its clock.
+/// **A research under way**: its caps and its clock — the research's own,
+/// or one of its helpers' ([`Budget::helper`], chat/research/helpers.rs).
 #[derive(Debug, Clone, Copy)]
 pub struct Budget {
     pub caps: Caps,
     started: Instant,
+    /// One of the research's helpers: what it's told to write when it's
+    /// out, or answered before searching, is its findings, not the report.
+    pub helper: bool,
 }
 
 impl Budget {
     pub fn start(caps: Caps) -> Budget {
-        Budget { caps, started: Instant::now() }
+        Budget { caps, started: Instant::now(), helper: false }
+    }
+
+    /// **One of its helpers'** (chat/research/helpers.rs): the research's
+    /// own caps and clock — no limit of its own — told as a helper's.
+    pub fn for_helper(self) -> Budget {
+        Budget { helper: true, ..self }
+    }
+
+    /// **The lead's, after its helpers**: the research's clock, or — when
+    /// they left it less than [`helpers::LEAD_AT_LEAST`] — that long from now.
+    pub fn for_lead(self) -> Budget {
+        if self.caps.time.saturating_sub(self.elapsed()) >= helpers::LEAD_AT_LEAST {
+            Budget { helper: false, ..self }
+        } else {
+            Budget::start(Caps { time: helpers::LEAD_AT_LEAST, ..self.caps })
+        }
     }
 
     /// A budget that began `ago` (the tests' clock).
     #[cfg(test)]
     pub fn started_ago(caps: Caps, ago: Duration) -> Budget {
-        Budget { caps, started: Instant::now().checked_sub(ago).unwrap_or_else(Instant::now) }
+        Budget { caps, started: Instant::now().checked_sub(ago).unwrap_or_else(Instant::now), helper: false }
+    }
+
+    /// What the model reads when `why` ran out ([`Spent::line_for`]).
+    pub fn line(&self, why: Spent) -> String {
+        why.line_for(&self.caps, self.helper)
+    }
+
+    /// What a research turn that answered in words before any search is
+    /// told (once): [`SEARCH_FIRST`], or a helper's.
+    pub fn search_first(&self) -> &'static str {
+        if self.helper {
+            crate::chat::research::helpers::SEARCH_FIRST
+        } else {
+            SEARCH_FIRST
+        }
+    }
+
+    /// The loop's last call, past the time and its grace: [`WRITE_NOW`], or
+    /// a helper's.
+    pub fn write_now(&self) -> &'static str {
+        if self.helper {
+            crate::chat::research::helpers::WRITE_NOW
+        } else {
+            WRITE_NOW
+        }
     }
 
     pub fn elapsed(&self) -> Duration {
@@ -377,7 +431,11 @@ pub fn parse_plan(reply: &str, question: &str) -> Planned {
 /// how to research it, the caps, and how to write the report — Yap's tool
 /// loop (`web_search`, `read_page`; `claude_code`: Claude Code's `WebSearch`
 /// and `WebFetch`, citing as links). Pure.
-pub fn instructions(plan: &Plan, caps: &Caps, claude_code: bool) -> String {
+///
+/// **The lead of a research whose helpers have done the searching**
+/// (`helpers`: their findings, `helpers::lead_block`): it writes the report
+/// from them, searching more itself only where a part is thin.
+pub fn instructions(plan: &Plan, caps: &Caps, claude_code: bool, helpers: Option<&str>) -> String {
     let (search, read, cite) = if claude_code {
         ("WebSearch", "WebFetch", "cite it right after it as a markdown link to that page whose text is a number, like [3](https://example.com/page)")
     } else {
@@ -400,6 +458,18 @@ pub fn instructions(plan: &Plan, caps: &Caps, claude_code: bool) -> String {
     if !plan.note.is_empty() {
         out.push_str(&format!("\nTheir note for the research, to follow throughout: \"{}\"", plan.note));
     }
+    let room = if caps.reads == UNCAPPED { String::new() } else { format!(" You can read up to {} pages in all: what your context holds.", caps.reads) };
+    if let Some(block) = helpers {
+        out.push_str("\n\n");
+        out.push_str(block);
+        out.push_str(&format!(
+            "\n\nYou lead this research: write the report from your helpers' findings. There's no limit on searches or pages: where a part is thin, its helper didn't finish, or the findings disagree on something that matters, search and read more yourself first ({search}, then {read} on the pages your facts come from; a search result's snippet isn't a source), the searches and reads that don't depend on each other at once.{room} Otherwise write the report now, without searching again. Where sources disagree, say so.\n\n\
+Write the report as your answer, in markdown: a # title; then ## Summary, two to four sentences that answer the question; then a ## section for each part of the plan, in its order (add one only for something important the plan didn't foresee). \
+Every fact from a page: {cite}. Cite only pages read — your helpers' (their notes' numbers) or your own with {read} — never a page only seen in search results. No list of sources at the end (Yap adds it), no offer to do more. \
+Don't make a note or a document yourself: Yap puts your report in a document beside the chat."
+        ));
+        return out;
+    }
     out.push_str(&format!(
         "\n\nResearch it thoroughly on the web ({search}), as a careful researcher would, with many searches that build on each other: start broad, then follow what you find — names, dates, claims to check, the other side of a question — and read the pages your facts come from ({read}; a search result's snippet isn't a source). \
 There's no limit on searches or pages, and Research mode is for depth: the user turned it on to have this researched thoroughly, well past what an ordinary answer looks up. \
@@ -408,7 +478,7 @@ Make the searches and reads that don't depend on each other at once (several too
 When every part of the plan is well answered, stop calling tools and write the report as your answer, in markdown: a # title; then ## Summary, two to four sentences that answer the question; then a ## section for each part of the plan, in its order (add one only for something important the plan didn't foresee). \
 Every fact from a page: {cite}. Cite only pages you read with {read}, never a page you only saw in search results. No list of sources at the end (Yap adds it), no offer to do more. \
 Don't make a note or a document yourself: Yap puts your report in a document beside the chat.",
-        if caps.reads == UNCAPPED { String::new() } else { format!(" You can read up to {} pages in all: what your context holds.", caps.reads) },
+        room,
     ));
     out
 }
@@ -471,6 +541,8 @@ pub struct Quiet<'a> {
 struct QuietState {
     searches: usize,
     reads: usize,
+    /// The helpers' searches, before this loop's (`Quiet::after`).
+    before: usize,
     /// The report's words have begun ("Writing the report").
     writing: bool,
     /// The step under way, its line without the progress.
@@ -478,8 +550,12 @@ struct QuietState {
 }
 
 impl<'a> Quiet<'a> {
-    pub fn new(inner: &'a dyn Sink) -> Quiet<'a> {
-        Quiet { inner, state: Mutex::new(QuietState::default()) }
+    /// `inner`'s stream, quiet — after a research's helpers (chat/research/
+    /// helpers.rs; none: 0 and 0), their `searches` counted in from the
+    /// start (their pages read are the lead's first sources, so its chips
+    /// count them already), `reads` until its first step comes back.
+    pub fn after(inner: &'a dyn Sink, searches: usize, reads: usize) -> Quiet<'a> {
+        Quiet { inner, state: Mutex::new(QuietState { searches, reads, before: searches, ..QuietState::default() }) }
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, QuietState> {
@@ -532,6 +608,7 @@ impl Sink for Quiet<'_> {
                 let (s, r) = counts(&chips, &sources);
                 let again = {
                     let mut st = self.state();
+                    let s = s + st.before;
                     let changed = (st.searches, st.reads) != (s, r);
                     st.searches = s;
                     st.reads = r;
@@ -820,10 +897,11 @@ pub fn byline(day: &str, searches: usize, reads: usize) -> String {
 
 /// The turn's chip for the research: "Researched for 6 min: 12 searches, 8
 /// pages read". Pure.
-pub fn done_chip(searches: usize, reads: usize, elapsed: Duration) -> String {
+pub fn done_chip(searches: usize, reads: usize, elapsed: Duration, helpers: usize) -> String {
     let mins = (elapsed.as_secs() + 30) / 60;
     let took = if mins == 0 { "under a minute".to_string() } else { format!("{mins} min") };
-    format!("Researched for {took}: {}", progress(searches, reads))
+    let with = if helpers > 1 { format!(" with {helpers} helpers") } else { String::new() };
+    format!("Researched for {took}{with}: {}", progress(searches, reads))
 }
 
 // ---- what the page asks -----------------------------------------------------------------------
@@ -993,16 +1071,39 @@ mod tests {
     #[test]
     fn the_loop_is_told_the_plan_the_caps_and_how_to_cite() {
         let plan = Plan { title: "QWERTY".into(), summary: "Its history.".into(), sections: vec![Section { key: "Origins".into(), intent: "the typewriter".into() }], note: "Keep it short".into() };
-        let yaps = instructions(&plan, &Caps::for_request(Some(200_000), 3_000), false);
+        let yaps = instructions(&plan, &Caps::for_request(Some(200_000), 3_000), false, None);
         assert!(yaps.contains("1. Origins — the typewriter"), "{yaps}");
         // No limit on searches; the tool loop's pages, what its context holds.
         assert!(yaps.contains("There's no limit on searches or pages") && yaps.contains("several tool calls in one step"), "{yaps}");
         assert!(yaps.contains("You can read up to 33 pages in all: what your context holds."), "{yaps}");
         assert!(!yaps.contains("minutes") && !yaps.contains("up to 20 searches"), "{yaps}");
         assert!(yaps.contains("like [3]") && yaps.contains("\"Keep it short\""), "{yaps}");
-        let code = instructions(&plan, &Caps::for_request(None, 8_000), true);
+        let code = instructions(&plan, &Caps::for_request(None, 8_000), true, None);
         assert!(code.contains("WebFetch") && code.contains("[3](https://example.com/page)"), "{code}");
         assert!(code.contains("There's no limit on searches or pages") && !code.contains("You can read up to"), "{code}");
+        // The lead after its helpers: their findings, then the report from them,
+        // more searching only where a part is thin.
+        let block = "Your research helpers have researched the parts of this plan at the same time…\n\n<findings part=\"1\" heading=\"Origins\">\nSholes [1].\n</findings>";
+        let lead = instructions(&plan, &Caps::for_request(None, 8_000), true, Some(block));
+        assert!(lead.contains("1. Origins — the typewriter") && lead.contains("\"Keep it short\""), "{lead}");
+        assert!(lead.contains(block), "{lead}");
+        assert!(lead.contains("You lead this research: write the report from your helpers' findings. There's no limit on searches or pages"), "{lead}");
+        assert!(lead.contains("Otherwise write the report now, without searching again"), "{lead}");
+        assert!(lead.contains("Cite only pages read — your helpers' (their notes' numbers) or your own with WebFetch"), "{lead}");
+        assert!(lead.contains("[3](https://example.com/page)") && lead.contains("## Summary"), "{lead}");
+        assert!(!lead.contains("Give every part of the plan searches of its own"), "the helpers did: {lead}");
+        // A helper's budget: the research's caps and clock, its words its findings'.
+        let research = Budget::start(Caps::USUAL);
+        let helper = research.for_helper();
+        assert!(helper.helper && helper.caps == Caps::USUAL);
+        assert!(helper.line(Spent::Time).contains("write your findings now") && research.line(Spent::Time).contains("write the report now"));
+        assert_eq!((helper.search_first(), helper.write_now()), (helpers::SEARCH_FIRST, helpers::WRITE_NOW));
+        assert_eq!((research.search_first(), research.write_now()), (SEARCH_FIRST, WRITE_NOW));
+        // The lead after them: the research's clock while it has 10 minutes left, else 10 from now.
+        assert!(!helper.for_lead().helper && helper.for_lead().caps.time == TIME);
+        let late = Budget::started_ago(Caps::USUAL, TIME - Duration::from_secs(60)).for_helper().for_lead();
+        assert_eq!(late.caps.time, helpers::LEAD_AT_LEAST);
+        assert!(late.elapsed() < Duration::from_secs(5) && !late.helper);
         // Only the web's tools and the notes' (and a big project's) reads run.
         assert!(allows("web_search") && allows("read_page") && allows("search_notes"));
         assert!(allows("read_project_file") && allows("search_project_files"));
@@ -1096,8 +1197,9 @@ mod tests {
         assert_eq!(counts(&chips, &sources), (2, 1));
         assert_eq!(progress(2, 1), "2 searches, 1 page read");
         assert_eq!(progress(1, 0), "1 search, 0 pages read");
-        assert_eq!(done_chip(12, 8, Duration::from_secs(6 * 60 + 10)), "Researched for 6 min: 12 searches, 8 pages read");
-        assert_eq!(done_chip(1, 1, Duration::from_secs(20)), "Researched for under a minute: 1 search, 1 page read");
+        assert_eq!(done_chip(12, 8, Duration::from_secs(6 * 60 + 10), 0), "Researched for 6 min: 12 searches, 8 pages read");
+        assert_eq!(done_chip(1, 1, Duration::from_secs(20), 0), "Researched for under a minute: 1 search, 1 page read");
+        assert_eq!(done_chip(14, 20, Duration::from_secs(3 * 60), 4), "Researched for 3 min with 4 helpers: 14 searches, 20 pages read");
         assert_eq!(byline("16 November 2026", 3, 2), "Researched 16 November 2026 · 3 searches, 2 pages read");
     }
 
@@ -1111,7 +1213,7 @@ mod tests {
             }
         }
         let log = Log::default();
-        let q = Quiet::new(&log);
+        let q = Quiet::after(&log, 0, 0);
         q.send(Event::Chips { chips: vec!["Searched the web: \"qwerty\"".into()], sources: vec![src(1, "https://a.example/", true)], web: true });
         q.send(Event::Step { step: crate::chat::activity::of_call("web_search", &json!({ "query": "sholes typewriter" })) });
         // The search came back: the line again, counted; the same counts again: nothing new.

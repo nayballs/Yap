@@ -485,6 +485,12 @@ pub(super) struct Built {
     /// ones the answer cites are its sources (`finish.rs`). `None`: no
     /// project searched in parts this turn.
     pub(super) project: Option<Arc<Cites>>,
+    /// **A research's helpers' pages** (chat/research/helpers.rs), numbered
+    /// 1… for the research: its lead's web side starts with them (the tool
+    /// loop's `web::Turn::with_found`, the plan's `Mapper::with_found`), and
+    /// their searches count on its line (`found_searches`). Empty: none.
+    pub(super) found: Vec<crate::chat::chats::Source>,
+    pub(super) found_searches: usize,
 }
 
 /// **A chat's own blocks** for a model with `room`: its project's
@@ -621,6 +627,8 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
         calendar_zone,
         project_chips,
         project,
+        found: Vec::new(),
+        found_searches: 0,
     }
 }
 

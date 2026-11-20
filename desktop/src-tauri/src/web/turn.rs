@@ -198,6 +198,9 @@ pub struct Turn {
     /// and clock — every search and read refused once its time or tokens
     /// are spent, and the refusals say to write the report.
     research: Option<crate::chat::research::Budget>,
+    /// **A research's lead, after its helpers** ([`Turn::with_found`]): the
+    /// pages they found are this turn's first sources, so it looked already.
+    found_before: bool,
 }
 
 impl Turn {
@@ -234,7 +237,25 @@ impl Turn {
             handoff: None,
             pages: Default::default(),
             research: None,
+            found_before: false,
         }
+    }
+
+    /// **A research's lead, after its helpers** (chat/research/helpers.rs):
+    /// the pages they found, numbered for the whole research (1…), are this
+    /// turn's first sources — the read ones marked read, so the report may
+    /// cite them, and `read_page` may open any of them. They don't count
+    /// against its own reads (they aren't in its context: their findings
+    /// are), and the turn has looked. Its own pages take the next numbers.
+    pub fn with_found(mut self, sources: &[Source]) -> Turn {
+        for s in sources {
+            let n = self.number(&s.title, &s.url);
+            if let Some(mine) = self.sources.iter_mut().find(|m| m.n == n) {
+                mine.opened |= s.opened;
+            }
+        }
+        self.found_before = !sources.is_empty();
+        self
     }
 
     /// **A research turn** (chat/research.rs): as far as its caps reach —
@@ -565,7 +586,7 @@ impl Turn {
     /// A search or a page read ran in this turn, whatever it found: an
     /// answer saying it searched isn't making it up.
     pub fn looked(&self) -> bool {
-        self.searches > 0 || self.reads > 0
+        self.searches > 0 || self.reads > 0 || self.found_before
     }
 
     /// A source's number: the one it has, or the next.
@@ -674,12 +695,12 @@ impl Turn {
         // A research's time or tokens spent, or its searches: the report now
         // (chat/research.rs).
         if let (Some(why), Some(b)) = (self.research_spent(), self.research) {
-            return failed(why.line(&b.caps), format!("Didn't search for \"{q}\": {}", why.chip(&b.caps)));
+            return failed(b.line(why), format!("Didn't search for \"{q}\": {}", why.chip(&b.caps)));
         }
         let most = self.reach.searches;
         if let (true, Some(b)) = (self.searches >= most, self.research) {
             let why = crate::chat::research::Spent::Searches;
-            return failed(why.line(&b.caps), format!("Didn't search for \"{q}\": {}", why.chip(&b.caps)));
+            return failed(b.line(why), format!("Didn't search for \"{q}\": {}", why.chip(&b.caps)));
         }
         if self.searches >= most {
             // A document's turn: write it now, from the pages it read — its
@@ -813,12 +834,12 @@ impl Turn {
         let offset = args["offset"].as_u64().or_else(|| args["offset"].as_str().and_then(|s| s.trim().parse().ok())).unwrap_or(0) as usize;
         // A research's time or tokens spent, or its reads: the report now.
         if let (Some(why), Some(b)) = (self.research_spent(), self.research) {
-            return failed(why.line(&b.caps), format!("Didn't read {shown}: {}", why.chip(&b.caps)));
+            return failed(b.line(why), format!("Didn't read {shown}: {}", why.chip(&b.caps)));
         }
         let most = self.reach.reads;
         if let (true, Some(b)) = (self.reads >= most, self.research) {
             let why = crate::chat::research::Spent::Reads;
-            return failed(why.line(&b.caps), format!("Didn't read {shown}: {}", why.chip(&b.caps)));
+            return failed(b.line(why), format!("Didn't read {shown}: {}", why.chip(&b.caps)));
         }
         if self.reads >= most {
             let then = if self.deep() {
@@ -1180,6 +1201,29 @@ mod tests {
         let e = r["error"].as_str().unwrap();
         assert!(e.contains("write the document from the pages you read") && e.contains("not confirmed, never guessed"), "{r}");
         assert!(!e.contains("filling in the rest"), "{r}");
+    }
+
+    /// **A research's lead after its helpers** (chat/research/helpers.rs).
+    #[test]
+    fn a_research_lead_starts_with_its_helpers_pages_numbered_as_theirs() {
+        use crate::chat::research::{Budget, Caps};
+        let found = [
+            Source { n: 1, title: "Potassium-40".into(), url: "https://example.org/k40".into(), opened: true, ..Default::default() },
+            Source { n: 2, title: "Results".into(), url: "https://example.org/results".into(), opened: false, ..Default::default() },
+        ];
+        let mut turn = Turn::new(settings(""), offline(), "Is this true? Research it", &[]).research(Budget::start(Caps::USUAL)).with_found(&found);
+        assert!(turn.looked(), "its helpers looked");
+        assert_eq!(turn.counts(), (0, 0), "their reads aren't the lead's own");
+        assert_eq!(turn.sources.iter().map(|s| (s.n, s.opened)).collect::<Vec<_>>(), [(1, true), (2, false)]);
+        // Any of them may be read; the lead's own pages take the next numbers.
+        assert!(turn.allowed("https://example.org/results"));
+        assert_eq!(turn.number("Dose", "https://example.org/dose"), 3);
+        assert_eq!(turn.number("Potassium-40", "https://example.org/k40#top"), 1);
+        // A plan lead's mapper too.
+        let m = crate::ai::claude_plan::map::Mapper::new().with_found(&found);
+        assert!(m.looked() && m.web_calls() == (0, 0));
+        assert_eq!(m.sources().iter().map(|s| (s.n, s.opened, s.url.as_str())).collect::<Vec<_>>(), [(1, true, "https://example.org/k40"), (2, false, "https://example.org/results")]);
+        assert_eq!(crate::ai::claude_plan::map::cite("Bananas hold it [1](https://example.org/k40).", m.sources()).0, "Bananas hold it [1].");
     }
 
     /// **A research turn** (chat/research.rs): its caps' searches, then "write

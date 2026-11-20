@@ -166,6 +166,18 @@ impl Mapper {
         self
     }
 
+    /// **A research's lead, after its helpers** (chat/research/helpers.rs):
+    /// the pages they found, numbered for the whole research (1…), are the
+    /// turn's first sources — a link to one in the report is a page read;
+    /// the turn's own take the next numbers. They don't count as its calls.
+    pub fn with_found(mut self, sources: &[Source]) -> Mapper {
+        for s in sources {
+            self.source(&s.title, &s.url, s.opened);
+        }
+        self.looked |= !sources.is_empty();
+        self
+    }
+
     /// The chips so far ("Searched the web: \"…\"").
     pub fn chips(&self) -> &[String] {
         &self.chips

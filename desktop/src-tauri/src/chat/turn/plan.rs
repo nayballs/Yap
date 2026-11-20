@@ -1106,9 +1106,10 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         }
 
         // (Its pages numbered after a big project's parts, with its tools' parts: chat/projects/sources.rs.)
-        let mut mapper = Mapper::new().numbered(built.project.as_ref().map(|c| c.numbers.clone()));
+        // (A research's lead: its helpers' pages first, chat/research/helpers.rs.)
+        let mut mapper = Mapper::new().numbered(built.project.as_ref().map(|c| c.numbers.clone())).with_found(&built.found);
         // (A research's words never stream into the thread: its report goes in a document.)
-        let quiet = watch.filter(|_| research.is_some()).map(|w| crate::chat::research::Quiet::new(w));
+        let quiet = watch.filter(|_| research.is_some()).map(|w| crate::chat::research::Quiet::after(w, built.found_searches, built.found.iter().filter(|s| s.opened).count()));
         let sink: Option<&dyn Sink> = match &quiet {
             Some(q) => Some(q),
             None => watch.map(|w| w as &dyn Sink),

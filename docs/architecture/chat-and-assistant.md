@@ -2006,9 +2006,11 @@ one side.
   ([below](#styles-2026-11-15)).
 - **`chat/research.rs`** (+ `chat/turn/research.rs`) — **Research** (16 Nov
   2026, the Claude app's Research mode): the composer's Research switch or a
-  plain "research …"; a plan to approve first, many searches and page reads
-  within hard caps, then a long report as a document beside the chat citing
-  only the pages read ([below](#research-2026-11-16)).
+  plain "research …"; a plan to approve first, then a helper for each part of
+  it searching at the same time (`chat/research/helpers.rs`, run by
+  `chat/turn/research/helpers.rs`), uncapped, then a long report as a
+  document beside the chat citing only the pages read
+  ([below](#research-2026-11-16)).
 - **`chat/auto_archive.rs`** — **Auto-archive** (15 Nov 2026, the Claude
   app's): chats not used in 7, 30 or 90 days moved to Archived by
   themselves, at start and once a day, never one at work; off by default
@@ -6962,6 +6964,77 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   it). The cap machinery stays (`spent`, `past`, `Spent::line`): a read
   past what the model holds is refused with "write the report now…", its
   chip "Stopped researching: the 33 pages the model holds".
+- **Helpers, at the same time** (20 Nov 2026, the maintainer: Research's
+  searching by helpers working at once, as the Claude app's; Anthropic's
+  write-up of its Research: a lead that "spawns subagents to explore
+  different aspects simultaneously", each with its own context, and writes
+  the report from what they find — `chat/research/helpers.rs`, run by
+  `chat/turn/research/helpers.rs`). Once the plan is approved, a helper for
+  each part (`helpers::AT_ONCE` 6 at a time, a plan has 7 parts at most),
+  then the lead — the loop above — writes the report from their findings.
+  - **When** (`helpers::wanted`): two parts or more, on a model that doesn't
+    run on this PC (one there answers one request at a time: the parts would
+    only queue; `e2e_research_helpers` turns them on for a test's stand-in
+    model), never in a project chat searched in parts (its files are the
+    lead's). Otherwise, or when no helper comes back with notes, the lead
+    researches it all as before.
+  - **No limit of their own** (the maintainer, 20 Nov 2026: the Claude app's
+    researchers have no budget): the research's caps and clock
+    (`Budget::for_helper`: no cap on searches, pages or tokens; on a key each
+    reads what its own context holds, so the research as a whole reads
+    several times what one loop could), `TIME` their shared backstop; the
+    lead gets the research's clock, or `LEAD_AT_LEAST` (10 minutes) from
+    when they're done if they left it less (`Budget::for_lead`). A helper's
+    "out" and "search first" words are its findings', not the report's
+    (`Budget::helper`: `line`, `search_first`, `write_now`).
+  - **A helper** (`helpers::system`, `helpers::brief`): the question, the
+    day, the whole plan and the person's note for context, its own part
+    ("research only yours"), the research's depth rules, and its findings
+    back as plain notes (about 500 words, every fact cited, what it couldn't
+    confirm). **On a key**: Yap's tool loop with the brief alone (no
+    history), its own web side (`run::web_turn`, `web::Turn::research`),
+    the research gate (only the web's tools and the notes' reads), the
+    question's screenshots with its first call as every call. **On your
+    Claude plan**: a Claude Code of its own (`helper_spec`: the chat's model
+    and effort, `--tools WebSearch,WebFetch` allowed under dontAsk, no MCP
+    server, none of the person's settings, `--no-session-persistence`, the
+    helper prompt in place of Claude Code's, in Yap's `claude/research`
+    folder), the brief and the screenshots sent; read through the same
+    `Mapper` (its chips and pages; its words after its last tool call are
+    its findings); past the research's time interrupted and asked for its
+    findings (`helpers::WRITE_NOW`); its usage counted as the research's.
+    Never the Task tool: Yap runs them, so it sees, counts and stops each.
+  - **Merged** (`helpers::merge`, pure): one numbering for every page they
+    found — the read ones first, a page two read one source —, each
+    helper's citations moved to it (a key helper's `[n]` by its own
+    numbers, one to a page it never read taken out; a plan helper's links
+    given the research's numbers); notes cut at 8,000 characters. The lead's
+    web side starts with those pages (`web::Turn::with_found`: read ones
+    marked read, any may be read again, not counted against its own reads;
+    `Mapper::with_found` on the plan), so the report cites them as pages the
+    research read, and its own pages take the next numbers.
+  - **The lead** (`research::instructions` with the findings): the plan, the
+    helpers' block (`helpers::lead_block`: how they worked, then
+    `<findings part="n" heading="…">` per part; one whose helper didn't
+    finish says why and is the lead's to research, with the pages it read),
+    then: write the report from them, searching and reading more only where
+    a part is thin, a helper didn't finish or the findings disagree on
+    something that matters, else write it now. On the plan it's the chat's
+    own session, so later questions in the chat know the findings.
+  - **Progress**: one line for them all (`helpers::Crew`: the latest step
+    any helper took, "4 parts at once" or "2 of 4 parts done", their
+    searches and distinct pages read so far); their words, chips and sources
+    never reach the page. Then the lead's line (`Quiet::after`: their
+    searches counted in). The chip: "Researched for 3 min with 4 helpers: 14
+    searches, 20 pages read"; the answer's chips start with the helpers',
+    a page two of them read one "Read …" chip (`helpers::chips_once`: the
+    Lab run below said "read 46 pages" under the answer, "34 pages read" in
+    the report, until it did). ■ Stop drops them all (their Claude Codes end).
+  - **On Opus on the plan in Yap Lab** (`research-screenshot`, 20 Nov 2026):
+    5 helpers, none failed, 3 min 56 s; the lead's report 41 s after — 4 min
+    37 s in all, 33 searches, 34 pages read, 24 cited (one loop that day:
+    11 searches, 14 pages in 2 min 14 s; the Claude app: 4 min, "309
+    sources").
 - **Progress**: the report's words never stream into the thread
   (`research::Quiet`, over the page's stream): the activity line says what's
   under way with the count so far ("Reading en.wikipedia.org/wiki/QWERTY ·
