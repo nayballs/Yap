@@ -136,6 +136,14 @@ pub fn new_turn(prefix: &str) -> String {
 /// `open_application`, the clipboard, `computer_batch`…) stay ordinary
 /// tools beside it.
 pub const TOOLSET: &str = "computer_toolset_20260801";
+
+/// **The steps a Chat turn may take once it uses an app** (the tool loop's
+/// limit is otherwise 20, `chat/tools.rs`): computer use is a step an
+/// action, and a real task (sorting a folder, a letter printed to PDF) takes
+/// far more than 20. The desktop app goes on until the task's done; here
+/// the person's Esc, ■ Stop and the model's context still end it. (A real
+/// run on 20 Nov 2026 stopped mid-task at 20.)
+pub const TURN_STEPS: usize = 100;
 /// The toolset's name on its calls and results.
 pub const TOOLSET_NAME: &str = "computer";
 /// The toolset's 17 members: the same actions, with the same fields, as
