@@ -227,6 +227,20 @@ pub fn offered(cfg: &crate::config::YapConfig, tools: bool, provider: &str, mode
     cfg.computer_use && tools && asked && !phone && may(provider, model)
 }
 
+/// **Switched off, and only that** (20 Nov 2026): a turn that would be
+/// offered computer use if "Let Yap's AI use apps on your PC" were on — the
+/// model is told [`OFF_LINE`], so it says where the switch is. Without it the
+/// maintainer's Code chat said computer use "only works through the Claude
+/// desktop app" (his own Claude Code skill's words) and typed into Notepad
+/// from PowerShell instead. Pure.
+pub fn switched_off(cfg: &crate::config::YapConfig, tools: bool, provider: &str, model: &str, asked: bool, phone: bool) -> bool {
+    !cfg.computer_use && tools && asked && !phone && may(provider, model)
+}
+
+/// **The line while the switch is off** ([`switched_off`]): where it is,
+/// and no clicking or typing in apps by another way meanwhile.
+pub const OFF_LINE: &str = "Computer use (seeing the user's apps and clicking and typing in them for them) is switched off in Yap. If they ask you to use, click or type in an app on their PC, say it's off and where to turn it on: Yap's Settings → Voice Assistant → \"Let Yap's AI use apps on your PC\" (it needs the two screen switches above it), then ask again in Yap's Chat. Don't send keystrokes, clicks or text to their apps from a script or a command instead.";
+
 /// Whether `name` is one of these tools, offered (`on`). Pure.
 pub fn offers(on: bool, name: &str) -> bool {
     on && NAMES.contains(&name)
@@ -645,6 +659,16 @@ pub(crate) mod tests {
         assert!(!in_chat(true, Some("routine"), false), "a routine's");
         assert!(!in_chat(true, Some("meetings"), true), "across the meetings");
         assert!(!offered(&on, true, plan, "opus", chat, true), "a phone's question");
+        // Switched off, and only that: the model is told where the switch is (20 Nov 2026).
+        let off = YapConfig::default();
+        assert!(switched_off(&off, true, plan, "opus", chat, false));
+        assert!(switched_off(&off, true, "anthropic", "claude-haiku-5-5", chat, false));
+        assert!(!switched_off(&on, true, plan, "opus", chat, false), "on: the tools, not the line");
+        assert!(!switched_off(&off, true, "openai", "gpt-5", chat, false), "a model that may not use apps: nothing to switch on");
+        assert!(!switched_off(&off, false, plan, "opus", chat, false), "a model without tools");
+        assert!(!switched_off(&off, true, plan, "opus", in_chat(true, Some("meetings"), true), false), "across the meetings");
+        assert!(!switched_off(&off, true, plan, "opus", chat, true), "a phone's question: the switch wouldn't help");
+        assert!(OFF_LINE.contains("Let Yap's AI use apps on your PC") && OFF_LINE.contains("Voice Assistant") && OFF_LINE.contains("from a script"), "{OFF_LINE}");
         assert_eq!(definitions(false), json!([]));
         let names: Vec<String> = definitions(true).as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap().to_string()).collect();
         assert_eq!(names, NAMES);

@@ -64,6 +64,10 @@ pub(super) struct Gates {
     /// in view); never a phone's, a routine's or one across the meetings.
     /// A plan chat's goes over Yap's run endpoint (`claude_live/computer.rs`).
     pub computer: bool,
+    /// **…all but the switch** (`computer::switched_off`): the turn would be
+    /// offered computer use with "Let Yap's AI use apps on your PC" on, so
+    /// the model is told where that switch is (`computer::OFF_LINE`).
+    pub computer_off: bool,
     /// The calendar (chat/tools/calendar.rs): a tool while one is connected
     /// (not across the meetings, whose passages are numbered on their own).
     pub calendar: bool,
@@ -164,6 +168,7 @@ impl Gates {
             screen: Gate::Off,
             act: false,
             computer: false,
+            computer_off: false,
             apps: false,
             agents: false,
             connectors: false,
@@ -199,6 +204,7 @@ impl Gates {
         };
         let act = pictures != Gate::Off && matches!(scope, None | Some("assistant")) && !meetings && crate::chat::pages::act::can_act(provider, model);
         let computer = crate::computer::offered(cfg, tools, provider, model, crate::computer::in_chat(chat_in_view, scope, meetings), cfg.computer_use && (here.phone)());
+        let computer_off = crate::computer::switched_off(cfg, tools, provider, model, crate::computer::in_chat(chat_in_view, scope, meetings), (here.phone)());
         let calendar = !meetings && (here.calendar)();
         let agents = tools && !meetings && (here.yap_code)();
         // (An evaluation's connectors scenario gives any model that calls
@@ -209,7 +215,7 @@ impl Gates {
         // (A new document's outline is shown first where a question could be asked: chat/cards/outline.rs.)
         let cards = crate::chat::cards::Cards::for_turn(tools, meetings, scope, chat_in_view, (here.phone)()).with_outline(cfg.chat_outline_review);
         let visuals = crate::chat::made::offered(tools, strong, scope, meetings, chat_in_view);
-        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, screen_takes, act, computer, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true, cards, visuals, project_files: false };
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, screen_takes, act, computer, computer_off, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true, cards, visuals, project_files: false };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();
         }
@@ -588,6 +594,23 @@ mod tests {
                 assert_eq!(g.tools, Gates::for_turn_on(&cfg, &ep, scope, meetings, in_view, &here).tools);
             }
         }
+    }
+
+    #[test]
+    fn computer_use_switched_off_is_marked_only_where_the_switch_would_give_it() {
+        // (20 Nov 2026: with the switch off, the model is told where it is.)
+        let ep = keyed("anthropic", "claude-opus-5-5", "https://api.anthropic.com/v1");
+        let off = YapConfig { assistant_screen: true, assistant_screen_cloud: true, ..Default::default() };
+        let on = YapConfig { computer_use: true, ..off.clone() };
+        let g = Gates::for_turn_on(&off, &ep, None, false, true, &here(&|| false, &|| false));
+        assert!(g.computer_off && !g.computer);
+        let g = Gates::for_turn_on(&on, &ep, None, false, true, &here(&|| false, &|| false));
+        assert!(g.computer && !g.computer_off);
+        let phone = Here { phone: &|| true, ..here(&|| false, &|| false) };
+        assert!(!Gates::for_turn_on(&off, &ep, None, false, true, &phone).computer_off, "a phone's question");
+        assert!(!Gates::for_turn_on(&off, &ep, Some("meetings"), true, false, &here(&|| false, &|| false)).computer_off, "across the meetings");
+        assert!(!Gates::for_turn_on(&off, &keyed("openai", "gpt-5", "https://api.openai.com/v1"), None, false, true, &here(&|| false, &|| false)).computer_off, "a model that may not use apps");
+        assert!(!Gates::for_turn_on(&off, &ep, None, false, true, &here(&|| false, &|| false)).unattended().computer_off, "a routine's");
     }
 
     /// A family's line in the system prompt, for some gates.

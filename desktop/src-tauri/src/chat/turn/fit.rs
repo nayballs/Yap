@@ -501,6 +501,7 @@ mod tests {
             screen_takes: Default::default(),
             act: false,
             computer: false,
+            computer_off: false,
             calendar: false,
             agents: true,
             connectors: false,
@@ -525,6 +526,7 @@ mod tests {
             screen: Gate::Look,
             act: true,
             computer: false,
+            computer_off: false,
             calendar: true,
             visuals: true,
             ..small_model()

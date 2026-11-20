@@ -439,6 +439,19 @@ fn a_code_chats_own_session_has_yaps_browser_acting_on_its_pages_and_the_screen_
     let by = ep.register(bypass).unwrap();
     let told = Client::of(&by).request("initialize", json!({ "protocolVersion": "2025-11-25" }))["result"]["instructions"].as_str().unwrap().to_string();
     assert!(told.contains("ask the user in the chat") && !told.contains("Yap shows the user a card"), "{told}");
+    // Computer use switched off, and only that (20 Nov 2026): told where the switch is, never with it on.
+    assert!(!told.contains("Let Yap's AI use apps on your PC"), "not marked off: {told}");
+    let mut off = RunSpec::new("garden-planner", Tools::Agent);
+    off.reads = true;
+    off.computer_off = true;
+    let told = Client::of(&ep.register(off).unwrap()).request("initialize", json!({ "protocolVersion": "2025-11-25" }))["result"]["instructions"].as_str().unwrap().to_string();
+    assert!(told.contains(crate::computer::OFF_LINE), "{told}");
+    let mut on = RunSpec::new("garden-planner", Tools::Agent);
+    on.reads = true;
+    on.computer_off = true;
+    on.eyes = super::eyes::Eyes { computer: true, ..Default::default() };
+    let told = Client::of(&ep.register(on).unwrap()).request("initialize", json!({ "protocolVersion": "2025-11-25" }))["result"]["instructions"].as_str().unwrap().to_string();
+    assert!(!told.contains(crate::computer::OFF_LINE), "the tools on: {told}");
     // The screen alone (the web off, picture files): the look, and picture files by a path.
     let mut screen = RunSpec::new("garden-planner", Tools::Agent);
     screen.reads = true;
