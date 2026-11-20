@@ -718,6 +718,24 @@ mod tests {
         })
     }
 
+    /// A turn using apps on the PC takes a step an action: past the loop's
+    /// 20 it goes on (`computer::TURN_STEPS`), and the model's own answer
+    /// comes back, never the "answer now" note. (A real run, 20 Nov 2026,
+    /// was cut off mid-task at 20.)
+    #[tokio::test]
+    async fn a_turn_using_apps_on_the_pc_goes_past_twenty_steps() {
+        let mut steps: Vec<Value> = (0..25).map(|_| calls(&[("wait", json!({ "duration": 0 }))])).collect();
+        steps.push(json!({ "role": "assistant", "content": "All done." }));
+        let fake = fake_server(steps, Value::Null);
+        let base = format!("{}/v1", fake.base);
+        let extra = Extra { computer: true, conversation: Some(4242), ..Default::default() };
+        let (reply, _) = run_tool_loop_with("You are helpful.", &[], "Sort my folder", &[], &base, "", "fake-chat", "custom", false, false, &|_| {}, None, FirstStep::Model, extra, None).await.expect("an answer");
+        assert_eq!(reply, "All done.");
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 26, "25 steps of actions, then the answer");
+        assert!(requests.iter().all(|r| r.1["messages"].as_array().unwrap().last().unwrap()["content"] != ANSWER_NOW_NOTE));
+    }
+
     #[tokio::test]
     async fn a_web_page_can_never_make_the_chat_act() {
         let exa = json!({ "results": [{

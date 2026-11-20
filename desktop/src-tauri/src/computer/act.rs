@@ -215,7 +215,8 @@ fn plan(name: &str, args: &Value, frame: Option<&super::frame::Frame>, cursor: O
             }
             let repeat = args["repeat"].as_f64().unwrap_or(1.0).clamp(1.0, 100.0) as u32;
             let enter = keys.last().is_some_and(|k| k == "return");
-            Ok(Plan { act: Act::Key { system, enter }, at: None, end: None, steps: input::key(&keys, repeat), text: String::new(), chip: summary_or(args, &format!("Pressed {combo}")) })
+            let delete = keys.last().is_some_and(|k| k == "delete" || k == "del");
+            Ok(Plan { act: Act::Key { system, enter, delete }, at: None, end: None, steps: input::key(&keys, repeat), text: String::new(), chip: summary_or(args, &format!("Pressed {combo}")) })
         }
         _ => Err((format!("{name} isn't one of Yap's input tools."), format!("Unknown tool: {name}"))),
     }
@@ -227,7 +228,8 @@ pub(super) fn target(w: Option<super::windows::Win>, apps: &[grants::Granted], d
     let app = (!w.own).then(|| apps.iter().find(|g| g.owns(&w)).map(|g| (g.name.clone(), g.tier))).flatten();
     let messaging = crate::pasting::app_kind::classify(Some(&w.exe), &w.class, "") == crate::pasting::app_kind::AppKind::Messaging;
     let elevated = app.is_some() && desk.elevated(&w);
-    Some(Target { yap: w.own, app, elevated, messaging })
+    let files = (!w.own) && apps.iter().any(|g| g.id == "Microsoft.Windows.Explorer" && g.owns(&w));
+    Some(Target { yap: w.own, app, elevated, messaging, files })
 }
 
 /// **One input call** for the chat `ctx` says.
@@ -386,9 +388,9 @@ mod tests {
         assert_eq!((drag.at, drag.end), (Some((4, 4)), Some((21, 21))));
         assert!(plan(DRAG, &json!({ "coordinate": [10, 10] }), Some(&frame), None).is_err(), "no start, no pointer");
         let k = plan(KEY, &json!({ "text": "alt+F4" }), Some(&frame), None).ok().unwrap();
-        assert_eq!(k.act, Act::Key { system: true, enter: false });
+        assert_eq!(k.act, Act::Key { system: true, enter: false, delete: false });
         let enter = plan(KEY, &json!({ "text": "ctrl+Return" }), Some(&frame), None).ok().unwrap();
-        assert_eq!(enter.act, Act::Key { system: false, enter: true });
+        assert_eq!(enter.act, Act::Key { system: false, enter: true, delete: false });
         assert!(plan(KEY, &json!({ "text": "" }), Some(&frame), None).is_err());
         assert!(plan(TYPE, &json!({ "text": "x".repeat(TYPE_MAX + 1) }), Some(&frame), None).is_err());
         assert_eq!(definitions().len(), NAMES.len());
