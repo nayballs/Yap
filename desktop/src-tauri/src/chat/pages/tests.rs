@@ -494,6 +494,32 @@ async fn typing_into_a_search_box_keys_hover_and_form_fields() {
     sim::install(None);
 }
 
+/// **Actions on a page: counted in Chat's own tool loop, never in a Claude Code session's turn** (21 Nov 2026:
+/// the maintainer's Code chat's Claude stopped at 30 partway through a long job on a site and asked him to say "go").
+#[tokio::test]
+async fn a_claude_code_turn_acts_on_pages_with_no_count() {
+    sim::install(Some(web()));
+    sim::with(|b| b.open("https://shop.example.com/"));
+    let log = Log::default();
+    let tab = json!({ "keys": "Tab" });
+    // Chat's own tool loop: 30 a turn, then told to answer.
+    let mut own = turn("Tab through the shop's page");
+    for i in 0..act::MAX_ACTS {
+        let k = call(&mut own, act::KEY, tab.clone(), &log).await.result;
+        assert_eq!(k["success"], true, "action {i}: {k}");
+    }
+    let stopped = call(&mut own, act::KEY, tab.clone(), &log).await.result;
+    assert_eq!(stopped["displayText"], format!("Didn't act on the page: {} actions a turn", act::MAX_ACTS), "{stopped}");
+    // A Claude Code session's turn: as many as the work takes.
+    let mut session = turn("Tab through the shop's page").uncapped();
+    for i in 0..act::MAX_ACTS * 3 {
+        let k = call(&mut session, act::KEY, tab.clone(), &log).await.result;
+        assert_eq!(k["success"], true, "action {i}: {k}");
+    }
+    assert_eq!(sim::with(|b| b.log.keys.len()).unwrap(), act::MAX_ACTS * 4, "every one pressed");
+    sim::install(None);
+}
+
 #[tokio::test]
 async fn tabs_are_listed_switched_and_closed() {
     sim::install(Some(web()));

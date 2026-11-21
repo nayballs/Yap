@@ -704,7 +704,8 @@ workspace, word for word, and no model of Chat's is asked.
     opens), the chat's earlier sources — as a plan chat's turn does
     (`chat/turn/plan.rs`), **with none of Chat's per-turn counts** (14 Nov
     2026, `web::Turn::uncapped`: no cap on shots, new tabs, picture looks or
-    pictures shown; before, twelve shots a turn stopped it). The runner tells it as Claude
+    pictures shown; before, twelve shots a turn stopped it; and since 21 Nov
+    2026 none on actions, where 30 a reply had stopped a long job partway). The runner tells it as Claude
     Code begins a call to Yap's tools or a web read of its own (its
     stream's `content_block_start`: `Follow::began`, the safety rule's
     order), and the pages its own `WebSearch` and `WebFetch` found
