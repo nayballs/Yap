@@ -562,7 +562,9 @@ impl Turn {
     /// Code chat's Claude stopped at "Yap only allows 12 screenshots per
     /// message": "let's please remove that limit… to unlimited"): none of the
     /// per-turn counts of the pages and pictures — 12 shots, 4 new tabs, 4
-    /// picture looks, 8 shown. Claude Code keeps its own context (it compacts
+    /// picture looks, 8 shown, and (21 Nov 2026, missed until his Code chat's
+    /// Claude stopped at it: "We should not cap anything") 30 actions on
+    /// pages. Claude Code keeps its own context (it compacts
     /// a long one) and runs its own loop; the counts are for Yap's own tool
     /// loop, which fits a small on-device model's context and pays a key per
     /// call. Every rule about what may open or be typed holds.

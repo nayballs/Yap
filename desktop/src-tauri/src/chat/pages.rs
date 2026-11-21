@@ -594,12 +594,13 @@ pub struct TurnPages {
     /// Shots and zooms taken this turn (`see::MAX_SHOTS`).
     pub shots: usize,
     /// **A Claude Code session's turn** (14 Nov 2026, `web::Turn::uncapped`):
-    /// none of the per-turn counts — the shots, the new tabs — apply.
+    /// none of the per-turn counts — the shots, the new tabs, the actions
+    /// (21 Nov) — apply.
     pub uncapped: bool,
     /// The links on the pages read or searched this turn (each one's
     /// address and words, `act::Link`): `browser_navigate` may open them.
     pub links: Vec<act::Link>,
-    /// Actions taken this turn (`act::MAX_ACTS`).
+    /// Actions taken this turn (`act::MAX_ACTS`, in Chat's own tool loop only).
     pub acts: usize,
     /// The latest `browser_screenshot`'s frame: `browser_click`'s x, y are
     /// in its pixels.

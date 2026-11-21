@@ -3156,7 +3156,8 @@ of sight. What they share is said once, in the line.
   a plan chat's turn, `chat/turn/plan.rs`, and a Code chat's own session,
   `agents::runner::beside_web`; the maintainer, after his Code chat's Claude
   stopped at twelve: "let's please remove that limit… to unlimited") — no
-  cap on shots, new tabs, picture looks or pictures shown; Claude Code keeps
+  cap on shots, new tabs, picture looks, pictures shown or (21 Nov 2026)
+  actions on pages; Claude Code keeps
   its own context. Every rule about what may open holds. A file on this PC (a `file:` address
   or a path) is never loaded: the model is told to show a picture with
   `show_picture` and its path, and that a local web page isn't opened
@@ -3452,7 +3453,10 @@ review (safely, for any user, in any language Yap speaks).
   changed or went. So is a switched tab's answer (the tab's
   title and address), and a new tab's note naming the tab it closed to
   make room (`act::closed_note`; any model's) — both the page's words (3 Nov
-  2026). 30 actions a turn. The line (1 Nov 2026,
+  2026). 30 actions a turn in Chat's own tool loop; **none counted in a Claude
+  Code session's turn** (21 Nov 2026, `web::Turn::uncapped`; the maintainer,
+  after his Code chat's Claude stopped at 30 partway through a long job on a
+  site and asked him to say "go": "We should not cap anything"). The line (1 Nov 2026,
   after a paid browse evaluation: Claude Haiku 5.5 and Opus 5.5 asked in the
   chat before buying, so the person was asked twice, and opened a search
   engine's results to find something on a site, which Yap can't read): to
