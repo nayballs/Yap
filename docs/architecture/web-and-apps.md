@@ -213,8 +213,11 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   **`Turn`**: only
   links the person gave (their messages, `links_in`), a search this turn
   returned (`allowed`) or an earlier answer's sources (an earlier search
-  found them; `with_earlier_sources`: "tell me more about the first one"); ≤ 3 searches and ≤ 3 reads a turn (a call past the
-  cap is answered "you've searched 3 times", the tool still offered) —
+  found them; `with_earlier_sources`: "tell me more about the first one"); no count of searches or reads a turn
+  (21 Nov 2026, the maintainer: "We should not cap anything"; before, 3 and 3,
+  a call past them answered "you've searched 3 times"): each result fits
+  what's left of the model's context, and the loop ends when that's full;
+  only a research keeps its own budget —
   **how far a turn looks is its `Reach`** (2026-10-31): a strong model's
   turn that writes a document (`Turn::may_go_deep`, `go_deep`: from
   `turn/run.rs` when the question asks for one, or from the loop at its first

@@ -233,7 +233,7 @@ pub mod old {
 /// What `browser_read` gives of a page's text, at most (characters).
 pub const READ_MAX: usize = 5000;
 /// **…in a Claude Code session's turn** (a plan chat's, a Code chat's own:
-/// `web::Turn::uncapped`; 14 Nov 2026 — Yap's Claude, asked what was hard on
+/// `web::Turn::session`; 14 Nov 2026 — Yap's Claude, asked what was hard on
 /// a long guide, said it paged through 5,000 characters at a time guessing
 /// which part held the section; Claude Code's own browser reads 50,000): its
 /// context is big and it compacts a long one.
@@ -242,7 +242,7 @@ pub const SESSION_READ_MAX: usize = 50_000;
 /// **How much of a page's text one read gives this turn** ([`READ_MAX`], or
 /// [`SESSION_READ_MAX`] in a Claude Code session's). Pure.
 pub fn read_max(turn: &crate::web::Turn) -> usize {
-    if turn.pages.uncapped {
+    if turn.pages.session {
         SESSION_READ_MAX
     } else {
         READ_MAX
@@ -250,8 +250,6 @@ pub fn read_max(turn: &crate::web::Turn) -> usize {
 }
 /// What `browser_read` gives of a page's links, at most.
 pub const LINKS_MAX: usize = 40;
-/// Pages a turn may open in new tabs.
-pub const MAX_PAGES: usize = 4;
 /// The steps a `browser_batch` may run.
 pub const MAX_BATCH: usize = 10;
 /// A section's words, at most (an older answer's).
@@ -591,16 +589,14 @@ pub struct TurnPages {
     pub shown: Vec<ShownPage>,
     /// Offered this turn (an older answer's; no model is offered it now).
     pub offers: Vec<BrowserOffer>,
-    /// Shots and zooms taken this turn (`see::MAX_SHOTS`).
-    pub shots: usize,
-    /// **A Claude Code session's turn** (14 Nov 2026, `web::Turn::uncapped`):
-    /// none of the per-turn counts — the shots, the new tabs, the actions
-    /// (21 Nov) — apply.
-    pub uncapped: bool,
+    /// **A Claude Code session's turn** (`web::Turn::session`): a read
+    /// gives [`SESSION_READ_MAX`]. (No turn counts its shots, new tabs or
+    /// actions since 21 Nov 2026; a session's never did since 14 Nov.)
+    pub session: bool,
     /// The links on the pages read or searched this turn (each one's
     /// address and words, `act::Link`): `browser_navigate` may open them.
     pub links: Vec<act::Link>,
-    /// Actions taken this turn (`act::MAX_ACTS`, in Chat's own tool loop only).
+    /// Actions taken this turn, in order (`act::rules::submits_typed`): never a limit.
     pub acts: usize,
     /// The latest `browser_screenshot`'s frame: `browser_click`'s x, y are
     /// in its pixels.
@@ -1006,9 +1002,6 @@ async fn open(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
     // Up already this turn: the one there is.
     if turn.pages.shown.iter().any(|p| crate::web::normal_url(&p.url) == key) {
         return ok(String::new());
-    }
-    if !turn.pages.uncapped && turn.pages.shown.len() >= MAX_PAGES {
-        return failed(format!("You've opened {MAX_PAGES} pages in new tabs this turn: use the tabs open, or answer the user now."), format!("Didn't bring up {shown}: {MAX_PAGES} pages a turn"));
     }
     // A link that would buy, pay, unsubscribe, confirm…: the person's first
     // (never one they gave in their own message: they asked for that page).

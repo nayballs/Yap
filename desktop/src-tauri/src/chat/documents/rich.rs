@@ -129,8 +129,9 @@ pub fn handles_rich(provider: &str, model: &str) -> bool {
 ///   (`tools::refused_after_web`: only apps, the clipboard and memory stay
 ///   off after it);
 /// - a turn that writes a document researches deeper (`web::Reach::deep`:
-///   up to 10 searches and as many page reads as the model's context
-///   holds), at the model's effort (`ai/effort.rs`);
+///   the provider's own search reading more, Claude's own fetch as many
+///   pages a step as its context holds; no count of searches or reads in
+///   any turn since 21 Nov 2026), at the model's effort (`ai/effort.rs`);
 /// - a new document is outlined before anything is looked up
 ///   (`web::Turn::outline_first`), its facts come from pages it read, and
 ///   its own knowledge only advises, marked so ([`INSTRUCTIONS`],

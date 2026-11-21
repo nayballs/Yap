@@ -23,6 +23,8 @@ impl Loop<'_> {
         }
         tracing::info!(tool = %name, success = %result["success"], "Chat tool call");
         crate::ai::eval::tool_called(name, ran_with, &result);
+        // The same call failing the same way again: the loop's stuck check.
+        self.note_failure(name, ran_with, &result);
         // What the model has now seen of a document (documents.rs): the
         // next question hears what the person changed since.
         crate::chat::documents::after_call(name, ran_with, &result);

@@ -1248,14 +1248,15 @@ impl Reader {
 /// web on (`turn.rs`; the context, never the system prompt: the prompt
 /// cache stays whole). **A new document** (`new_doc`): the outline first,
 /// before any search, so the panel opens at once (as Claude Docs does; Claude
-/// Opus 5.5 researched 1 min 44 s before its `create_document`). Then how far
-/// it may look this turn ([`crate::web::Reach`]), and **read what it quotes**
+/// Opus 5.5 researched 1 min 44 s before its `create_document`). Then as many
+/// searches and page reads as it takes (no count since 21 Nov 2026; before,
+/// up to 10 and what its context held), and **read what it quotes**
 /// (2026-10-31): Opus read one page in six searches, took a level table's
 /// facts from search snippets — about ten skills at levels they can't be had
 /// — and built on a guide for another build. A snippet isn't a source; the
 /// pages the facts come from are opened and cited; a guide for another build
 /// or version isn't one for this. Pure.
-pub fn research_note(reach: crate::web::Reach, reader: Reader, new_doc: bool) -> String {
+pub fn research_note(reader: Reader, new_doc: bool) -> String {
     let read = reader.tool();
     let (first, then) = if new_doc {
         (
@@ -1267,13 +1268,11 @@ pub fn research_note(reach: crate::web::Reach, reader: Reader, new_doc: bool) ->
     };
     if reader == Reader::Search {
         return format!(
-            "{first} — up to {} searches this turn. Your search reads the pages for you: search again, with exact words, until a result states each requirement, level, number and location, and cite it. Use only sources about exactly this (the same build or subject, game and version): a guide for another build or an older version isn't a source for this one. {then}",
-            reach.searches
+            "{first}, searching as many times as it takes. Your search reads the pages for you: search again, with exact words, until a result states each requirement, level, number and location, and cite it. Use only sources about exactly this (the same build or subject, game and version): a guide for another build or an older version isn't a source for this one. {then}"
         );
     }
     format!(
-        "{first} — up to {} searches and {} page reads this turn. A search result's snippet isn't a source: {read} the pages that requirements, levels, numbers and locations come from, and cite the pages you read. Use only pages about exactly this (the same build or subject, game and version): a guide for another build or an older version isn't a source for this one. {then}",
-        reach.searches, reach.reads
+        "{first}, with as many searches and page reads as it takes. A search result's snippet isn't a source: {read} the pages that requirements, levels, numbers and locations come from, and cite the pages you read. Use only pages about exactly this (the same build or subject, game and version): a guide for another build or an older version isn't a source for this one. {then}"
     )
 }
 
@@ -2475,9 +2474,10 @@ mod tests {
             assert!(!writes_document(q, &docs, false), "{q}");
         }
         assert!(!writes_document("What does this mean?", &[], true));
-        // How far it may look, said in the context.
-        let note = research_note(crate::web::Reach { searches: 10, reads: 8 }, Reader::ReadPage, false);
-        assert!(note.contains("up to 10 searches and 8 page reads"), "{note}");
+        // How far it may look, said in the context: as far as it takes (no count since 21 Nov 2026).
+        let note = research_note(Reader::ReadPage, false);
+        assert!(note.contains("with as many searches and page reads as it takes"), "{note}");
+        assert!(!note.contains("up to"), "{note}");
     }
 
     /// **A new document, or a change to one?** As `steer` tells them apart:
@@ -2509,16 +2509,15 @@ mod tests {
     /// table from snippets and a guide for another build.
     #[test]
     fn a_documents_research_outlines_first_and_reads_what_it_quotes() {
-        let reach = crate::web::Reach { searches: 10, reads: 4 };
-        let new = research_note(reach, Reader::WebFetch, true);
+        let new = research_note(Reader::WebFetch, true);
         assert!(new.starts_with("This is a new document: outline it first — create_document now, before any search"), "{new}");
-        assert!(new.contains("up to 10 searches and 4 page reads this turn"), "{new}");
+        assert!(new.contains("with as many searches and page reads as it takes"), "{new}");
         assert!(new.contains("A search result's snippet isn't a source: web_fetch the pages that requirements, levels, numbers and locations come from"), "{new}");
         assert!(new.contains("cite the pages you read"), "{new}");
         assert!(new.contains("a guide for another build or an older version isn't a source for this one"), "{new}");
         assert!(new.contains("Then write_section each"), "{new}");
         // A change to one: no outline, Yap's own page reader.
-        let change = research_note(reach, Reader::ReadPage, false);
+        let change = research_note(Reader::ReadPage, false);
         assert!(!change.contains("create_document"), "{change}");
         assert!(change.contains("read_page the pages that requirements"), "{change}");
         // A search before the outline: refused with what to do, no chip.

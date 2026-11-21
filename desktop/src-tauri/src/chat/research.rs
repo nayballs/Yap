@@ -63,9 +63,6 @@ pub const TIME: Duration = Duration::from_secs(45 * 60);
 /// After [`TIME`], how long the report may take before the loop asks for it
 /// with no tools at all.
 pub const GRACE: Duration = Duration::from_secs(3 * 60);
-/// The tool loop's steps for a research (every other turn: 20): its
-/// [`TIME`] is what ends it.
-pub const STEPS: usize = 400;
 
 /// **How far a research may go**: searches, page reads, time and tokens
 /// ([`UNCAPPED`] and `u64::MAX`: no limit).

@@ -119,10 +119,10 @@ impl ShownPicture {
 pub const CAPTION_MAX: usize = 120;
 /// Candidates a result lists, at most.
 pub const LISTED: usize = 5;
-/// Pictures a turn may look at (each a request's worth of tokens).
-pub const MAX_LOOKS: usize = 4;
-/// Pictures a turn may show.
-pub const MAX_SHOWN: usize = 8;
+// (No count of the pictures a turn looks at or shows since 21 Nov 2026 —
+// before, 4 and 8 — the maintainer: "We should not cap anything". Each
+// picture looked at must still fit what's left of the model's context:
+// `tools/agent/room.rs` `takes_picture`.)
 /// A page's shot's address as a candidate (`TurnPictures::add_shot`):
 /// `yap-shot:<chat-images id>`.
 pub const SHOT: &str = "yap-shot:";
@@ -426,14 +426,8 @@ impl std::fmt::Debug for Bytes {
 pub struct TurnPictures {
     candidates: Vec<Candidate>,
     fetched: HashMap<String, Result<Bytes, String>>,
-    looked: Vec<String>,
     /// Shown this turn, in order: the answer keeps them.
     pub shown: Vec<ShownPicture>,
-    /// **A Claude Code session's turn** (14 Nov 2026, `web::Turn::uncapped`):
-    /// none of the per-turn counts — the looks, the pictures shown — apply.
-    pub uncapped: bool,
-    /// `find_pictures` calls this turn.
-    pub finds: usize,
     /// **The turn's chat**, for a picture file on this PC ([`local`]): its
     /// conversation and the person's words in it.
     pub local: local::Context,
@@ -653,12 +647,6 @@ pub async fn show(turn: &mut crate::web::Turn, args: &Value) -> Run {
         let result = json!({ "success": true, "shown": true, "id": picture.id, "w": picture.w, "h": picture.h, "displayText": format!("Showed {} from {}", quoted(&caption), if picture.page.site.is_empty() { "the page".to_string() } else { picture.page.site.clone() }) });
         return Run { result, shown: Some(picture), look: None };
     }
-    if !turn.pictures.uncapped && turn.pictures.shown.iter().filter(|p| !p.in_steps()).count() >= MAX_SHOWN {
-        return Run {
-            result: failed(format!("You've shown {MAX_SHOWN} pictures this turn: answer the user now."), format!("Didn't show {}: {MAX_SHOWN} pictures a turn", quoted(&caption))),
-            ..Default::default()
-        };
-    }
     let shown_as = quoted(&caption);
     let bytes = match bytes_of(turn, &c.id, &c.image.url).await {
         Ok(b) => b,
@@ -721,15 +709,6 @@ pub async fn look(turn: &mut crate::web::Turn, args: &Value, provider: &str, bas
         return Run { result: failed(turn.pictures.unknown(&asked), "Didn't look at a picture: not one from this turn".into()), ..Default::default() };
     };
     let site = if c.page.site.is_empty() { crate::web::site_of(&c.image.url) } else { c.page.site.clone() };
-    if !turn.pictures.uncapped && !turn.pictures.looked.contains(&c.id) && turn.pictures.looked.len() >= MAX_LOOKS {
-        return Run {
-            result: failed(
-                format!("You've looked at {MAX_LOOKS} pictures this turn: show the best of them, or tell the user you couldn't find the right one."),
-                format!("Didn't look at a picture from {site}: {MAX_LOOKS} a turn"),
-            ),
-            ..Default::default()
-        };
-    }
     let bytes = match bytes_of(turn, &c.id, &c.image.url).await {
         Ok(b) => b,
         Err(e) => {
@@ -748,9 +727,6 @@ pub async fn look(turn: &mut crate::web::Turn, args: &Value, provider: &str, bas
             };
         }
     };
-    if !turn.pictures.looked.contains(&c.id) {
-        turn.pictures.looked.push(c.id.clone());
-    }
     // A picture from the web is web content (the safety rule).
     turn.mark_seen();
     tracing::info!(picture = %c.id, w = fitted.w, h = fitted.h, "Chat: the model looks at a picture");
@@ -822,12 +798,6 @@ async fn show_file(p: &mut TurnPictures, given: &str, args: &Value) -> Run {
         let result = json!({ "success": true, "shown": true, "id": s.id, "w": s.w, "h": s.h, "displayText": "" });
         return Run { result, ..Default::default() };
     }
-    if !p.uncapped && p.shown.iter().filter(|p| !p.in_steps()).count() >= MAX_SHOWN {
-        return Run {
-            result: failed(format!("You've shown {MAX_SHOWN} pictures this turn: answer the user now."), format!("Didn't show {shown_as}: {MAX_SHOWN} pictures a turn")),
-            ..Default::default()
-        };
-    }
     let image = match blocking(move || crate::snip::attach::keep(&bytes, "file")).await {
         Ok(i) => i,
         Err(e) => {
@@ -876,16 +846,6 @@ async fn look_file(p: &mut TurnPictures, given: &str, provider: &str, base_url: 
         Err(r) => return Run { result: failed(r.error, format!("Didn't look at {}: {}", quoted(&named), r.chip)), ..Default::default() },
     };
     let (file, folder, _) = local::names(&path);
-    let key = local::key(&path);
-    if !p.uncapped && !p.looked.contains(&key) && p.looked.len() >= MAX_LOOKS {
-        return Run {
-            result: failed(
-                format!("You've looked at {MAX_LOOKS} pictures this turn: show the best of them, or tell the user what you saw."),
-                format!("Didn't look at {}: {MAX_LOOKS} a turn", quoted(&file)),
-            ),
-            ..Default::default()
-        };
-    }
     let fitted = match fit(bytes, provider, base_url).await {
         Ok(f) => f,
         Err(e) => {
@@ -895,9 +855,6 @@ async fn look_file(p: &mut TurnPictures, given: &str, provider: &str, base_url: 
             };
         }
     };
-    if !p.looked.contains(&key) {
-        p.looked.push(key);
-    }
     // (Outside content from here: the caller marks its turn, `Run::look`.)
     tracing::info!(place = why.word(), w = fitted.w, h = fitted.h, "Chat: the model looks at a picture file on this PC");
     let text = format!(

@@ -19,7 +19,10 @@ use super::{
     DEEP_SEARCHES, MAX_READS, MAX_RESULTS, MAX_SEARCHES, PAGE_TOKENS,
 };
 
-/// **How far a turn may look**: its searches and page reads.
+/// **How deep a turn looks**: an ordinary turn's, or a document's deeper
+/// one (the provider's own search reading more, Claude's own fetch as many
+/// pages a step as `reads`), or a research's budget. Only a research counts
+/// its searches and reads against it (21 Nov 2026: no other turn does).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Reach {
     pub searches: usize,
@@ -27,7 +30,7 @@ pub struct Reach {
 }
 
 impl Reach {
-    /// Every turn's: [`MAX_SEARCHES`] and [`MAX_READS`].
+    /// Every turn's, until it writes a document.
     pub const USUAL: Reach = Reach { searches: MAX_SEARCHES, reads: MAX_READS };
 
     /// **A strong model writing a document** (`documents::rich::strong`):
@@ -170,7 +173,8 @@ pub struct Turn {
     /// Citation numbers given to other sources this turn (the calendar's
     /// meetings, `chat/tools/calendar.rs`): one numbering for the answer.
     reserved: usize,
-    /// How far this turn may look now ([`Reach::USUAL`] until it goes deep).
+    /// How deep this turn looks now ([`Reach::USUAL`] until it goes deep; a
+    /// research's budget).
     reach: Reach,
     /// How far it may look once it writes a document (a strong model's
     /// turn, [`Turn::may_go_deep`]); `None`: never further.
@@ -379,11 +383,6 @@ impl Turn {
         true
     }
 
-    /// The turn looks further than every turn ([`Turn::go_deep`]).
-    pub fn deep(&self) -> bool {
-        self.reach != Reach::USUAL
-    }
-
     /// **Claude's own web tools for Chat's request**, when it searches there
     /// (`native::NativeSearch::in_chat`, `llm::anthropic`): its web search
     /// and web fetch, deeper once the turn writes a document — none while a
@@ -489,6 +488,12 @@ impl Turn {
         self.reach
     }
 
+    /// The turn looks further than every turn ([`Turn::go_deep`]).
+    #[cfg(test)]
+    pub fn deep(&self) -> bool {
+        self.reach != Reach::USUAL
+    }
+
     /// A citation number for a source that isn't a web page (a meeting on
     /// the calendar): the next one, never a web source's.
     pub fn reserve_number(&mut self) -> usize {
@@ -554,26 +559,25 @@ impl Turn {
         Some(format!("None of these results gives a {p} price (in {s}). Search once more for the {p} price, like \"{retry}\", before you answer."))
     }
 
+    /// **A Claude Code session's turn** (a plan chat's, a Code chat's own):
+    /// a page read gives `pages::SESSION_READ_MAX` at once — its context is
+    /// big and it compacts a long one. Every rule about what may open or be
+    /// typed holds. (No turn counts its shots, new tabs, picture looks,
+    /// pictures shown, actions, searches or page reads since 21 Nov 2026 —
+    /// the maintainer, after a Code chat's Claude stopped at 30 actions and
+    /// asked him for "go": "We should not cap anything"; a session's counted
+    /// none since 14 Nov but the actions. Only a research keeps its budget,
+    /// and a turn's loop ends when the model's context is full:
+    /// `tools/agent.rs` `LoopEnd`.)
+    pub fn session(mut self) -> Turn {
+        self.pages.session = true;
+        self
+    }
+
     /// `read_page` may also open the sources of earlier answers in the
     /// conversation (found by an earlier search; their searches are replayed
     /// to the model with their addresses, `chats::history_messages`): "tell
     /// me more about the first one".
-    /// **A Claude Code session's turn** (14 Nov 2026; the maintainer, whose
-    /// Code chat's Claude stopped at "Yap only allows 12 screenshots per
-    /// message": "let's please remove that limit… to unlimited"): none of the
-    /// per-turn counts of the pages and pictures — 12 shots, 4 new tabs, 4
-    /// picture looks, 8 shown, and (21 Nov 2026, missed until his Code chat's
-    /// Claude stopped at it: "We should not cap anything") 30 actions on
-    /// pages. Claude Code keeps its own context (it compacts
-    /// a long one) and runs its own loop; the counts are for Yap's own tool
-    /// loop, which fits a small on-device model's context and pays a key per
-    /// call. Every rule about what may open or be typed holds.
-    pub fn uncapped(mut self) -> Turn {
-        self.pages.uncapped = true;
-        self.pictures.uncapped = true;
-        self
-    }
-
     pub fn with_earlier_sources<'a>(mut self, urls: impl IntoIterator<Item = &'a str>) -> Turn {
         self.linked.extend(urls.into_iter().map(str::to_string));
         self
@@ -704,17 +708,10 @@ impl Turn {
             let why = crate::chat::research::Spent::Searches;
             return failed(b.line(why), format!("Didn't search for \"{q}\": {}", why.chip(&b.caps)));
         }
-        if self.searches >= most {
-            // A document's turn: write it now, from the pages it read — its
-            // own knowledge for advice only, a fact no page gave said to be
-            // unconfirmed (as the documents rule says).
-            let then = if self.deep() {
-                "write the document from the pages you read: advice from your own knowledge is fine (marked as yours), but a requirement, level, number or location no page gave is written as not confirmed, never guessed"
-            } else {
-                "answer from what you found, and say what's missing"
-            };
-            return failed(format!("You've searched {most} times in this turn: {then}."), format!("Didn't search for \"{q}\": {most} searches a turn"));
-        }
+        // (Any other turn: no count of searches since 21 Nov 2026 — before,
+        // 3, or 10 writing a document — the maintainer: "We should not cap
+        // anything". What each brings is fitted to what's left of the
+        // model's context: `tools/agent/room.rs`.)
         self.searches += 1;
         match search(&self.settings, &self.endpoints, &query, &self.question).await {
             Err(e) => failed(e.clone(), format!("Couldn't search the web: {}", short(&e))),
@@ -843,14 +840,7 @@ impl Turn {
             let why = crate::chat::research::Spent::Reads;
             return failed(b.line(why), format!("Didn't read {shown}: {}", why.chip(&b.caps)));
         }
-        if self.reads >= most {
-            let then = if self.deep() {
-                "write the document from the pages you read (a fact none of them gave: not confirmed, never guessed)"
-            } else {
-                "answer from what you have"
-            };
-            return failed(format!("You've read {most} pages in this turn: {then}."), format!("Didn't read {shown}: {most} pages a turn"));
-        }
+        // (Any other turn: no count of page reads since 21 Nov 2026.)
         self.reads += 1;
         match read_page(&self.endpoints, &url).await {
             Err(e) => failed(e.clone(), format!("Couldn't read {shown}: {}", short(&e))),
@@ -912,11 +902,6 @@ impl Turn {
                 format!("Didn't look for pictures on {shown}: not a link from you or the search"),
             );
         }
-        let most = self.reach.reads;
-        if self.pictures.finds >= most {
-            return failed(format!("You've looked for pictures on {most} pages in this turn: use what you found."), format!("Didn't look for pictures on {shown}: {most} pages a turn"));
-        }
-        self.pictures.finds += 1;
         match read_page(&self.endpoints, &url).await {
             Err(e) => failed(e.clone(), format!("Couldn't look for pictures on {shown}: {}", short(&e))),
             Ok(page) => {
@@ -1178,31 +1163,24 @@ mod tests {
         assert_eq!(turn.reach().searches, DEEP_SEARCHES);
     }
 
+    /// **No count of searches or page reads a turn** (21 Nov 2026, the
+    /// maintainer: "We should not cap anything"; before, 3 a turn and 10 a
+    /// document's): an ordinary turn and a document's search and read as
+    /// often as they need.
     #[tokio::test]
-    async fn the_search_cap_follows_the_turns_reach() {
+    async fn a_turn_searches_and_reads_with_no_count() {
         let f = fake((500, Value::Null), json!({ "results": [{ "title": "Emberfall wiki", "url": "https://emberfall.example/levels", "highlights": ["Level 2: Ember Bolt."] }] }));
         let search = |n: usize| json!({ "query": format!("Emberfall levels part {n}") });
-        // Every turn: three.
-        let mut turn = Turn::new(settings("exa-key"), endpoints_of(&f), "What do I get at level 2?", &[]);
-        for n in 0..MAX_SEARCHES {
-            assert_eq!(turn.execute("web_search", &search(n)).await["success"], json!(true));
+        let plain = Turn::new(settings("exa-key"), endpoints_of(&f), "What do I get at level 2?", &[]);
+        let mut doc = Turn::new(settings("exa-key"), endpoints_of(&f), "Make me a level-by-level guide", &[]).may_go_deep(Reach::deep(None));
+        doc.go_deep();
+        for mut turn in [plain, doc] {
+            for n in 0..DEEP_SEARCHES * 3 {
+                let r = turn.execute("web_search", &search(n)).await;
+                assert_eq!(r["success"], json!(true), "search {n}: {r}");
+            }
+            assert_eq!(turn.counts().0, DEEP_SEARCHES * 3);
         }
-        let r = turn.execute("web_search", &search(9)).await;
-        assert_eq!(r["displayText"], json!("Didn't search for \"Emberfall levels part 9\": 3 searches a turn"));
-        assert!(r["error"].as_str().unwrap().contains("say what's missing"), "{r}");
-        // A strong model's document turn: ten, then "write it".
-        let mut turn = Turn::new(settings("exa-key"), endpoints_of(&f), "Make me a level-by-level guide", &[]).may_go_deep(Reach::deep(None));
-        turn.go_deep();
-        for n in 0..DEEP_SEARCHES {
-            assert_eq!(turn.execute("web_search", &search(n)).await["success"], json!(true), "search {n}");
-        }
-        let r = turn.execute("web_search", &search(99)).await;
-        assert_eq!(r["displayText"], json!("Didn't search for \"Emberfall levels part 99\": 10 searches a turn"));
-        // Write it from the pages read: its own knowledge for advice, a
-        // fact no page gave not confirmed — never "fill in the rest".
-        let e = r["error"].as_str().unwrap();
-        assert!(e.contains("write the document from the pages you read") && e.contains("not confirmed, never guessed"), "{r}");
-        assert!(!e.contains("filling in the rest"), "{r}");
     }
 
     /// **A research's lead after its helpers** (chat/research/helpers.rs).

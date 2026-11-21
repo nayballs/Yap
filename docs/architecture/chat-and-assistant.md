@@ -422,7 +422,20 @@ one side.
   apart, each ≤ 2,000 tokens (`cut` names what was shortened). Failures
   carry `error` (for the model) besides `displayText` (the chip).
   `run_tool_loop` drives the OpenAI tool-call protocol via
-  `llm::post_chat_message` for up to `MAX_TOOL_STEPS` (20) turns, takes
+  `llm::post_chat_message` until the model answers — **no count of steps,
+  or of anything a turn does** (21 Nov 2026, the maintainer: "We should not
+  cap anything"; before, 20 steps, 100 using apps, 400 a research, and per
+  turn 3 searches, 3 page reads, 4 new tabs, 12 shots, 30 actions on pages,
+  4 pictures looked at, 8 shown). The loop answers from what it has
+  (`ANSWER_NOW_NOTE`) only when it must (`agent.rs` `LoopEnd`): the model's
+  context has less than `ROOM_TO_GO_ON` (300 tokens: a result and the next
+  call) left after a step;
+  the same call failed the same way `STUCK_REPEATS` (3) times in a row (a
+  call that works the same way again — a `wait`, a shot of a page still
+  loading — is work, not a loop); a research past its time; the provider
+  rejecting the calls again. Every result and picture still fits what's
+  left of the context (`agent/room.rs`), ■ Stop and Esc end it, and a
+  research keeps its own budget. It takes
   arguments as a JSON string or an object (ids as numbers or strings), and
   hands every note a tool created or changed (`changed_note`; an edit that
   changed nothing doesn't count) to `on_change` as it happens — `chat_send`
@@ -2094,7 +2107,8 @@ for the same detailed level-by-level mage guide, wrote a complete guide in
 the Claude app and, in Yap, a table of "Level 1", "Endgame" and "Reference
 only" rows ("the levels in between aren't covered by a source I found"); asked
 for more detail, it said "That search only turned up forum threads… It
-didn't open any of them", "Didn't search for …: 3 searches a turn" and
+didn't open any of them", "Didn't search for …: 3 searches a turn" (no turn
+counts its searches since 21 Nov 2026) and
 "Since I've just been on the web, I can't edit the document this turn".
 Yap's own rules held it back. For **strong models only**
 (`documents::rich::strong`, one place: the rich tools' list — Claude, GPT-5,
@@ -2119,18 +2133,18 @@ for the on-device model and small ones, which make things up more readily:
   document — something to keep, a change or more depth on this chat's
   document, an option picked, a change to a selected passage
   (`documents::writes_document`; and any turn once it calls a document tool,
-  `Turn::go_deep` from the loop) — may make 10 searches (`DEEP_SEARCHES`) and
-  as many page reads as two-fifths of the model's request holds, 3 to 10
-  (`Reach::deep`, sized by `budget::budget`'s request: Claude Haiku 5.5, held
+  `Turn::go_deep` from the loop) — looks deeper: the provider's own search
+  reads more, and Claude's own fetch opens as many pages a step as
+  two-fifths of the model's request holds, 3 to 10. (Until 21 Nov 2026 that
+  reach was also a count: 10 searches and those reads a turn; no turn
+  counts them now.) (`Reach::deep`, sized by `budget::budget`'s request: Claude Haiku 5.5, held
   to its cheaper rate's 80K, gets 10); every result still fits what's left
   of the request (`agent::Room::fit`). Its context says so
-  (`documents::research_note`: "up to 10 searches and 10 page reads this
-  turn", and to read the pages its facts come from: below), and the cap's
-  refusal says to write the document from the pages it read, a fact none
-  gave said to be unconfirmed. A strong Claude's own web fetch puts up to
+  (`documents::research_note`: "with as many searches and page reads as it
+  takes", and to read the pages its facts come from: below). A strong Claude's own web fetch puts up to
   8,000 tokens of a page in the request, which Yap can't trim: its reads are
   sized by that (`Reach::deep_paged`, `FETCH_TOKENS`: Haiku 5.5's 80K holds
-  4, its fetch's `max_uses` 4). Every other turn keeps 3 and 3.
+  4, its fetch's `max_uses` 4 a step).
 - **Its own search, in its own turn.** A strong **Claude** on Anthropic
   (`llm::anthropic::speaks_messages`) speaks the **Messages API** for Chat's
   steps (`ai/llm/anthropic.rs`, see ai-models.md): Anthropic's **web search
@@ -3138,7 +3152,7 @@ of sight. What they share is said once, in the line.
   `chip` and shows them as pictures. A candidate of the turn too
   (`TurnPictures::add_shot`, `yap-shot:<id>`): `show_picture` of it shows it
   beside the chat as a picture of its own (pictures the model chooses to
-  show keep their behaviour). Twelve shots and zooms a turn; web content.
+  show keep their behaviour). No count of shots a turn (until 21 Nov 2026, twelve); each must fit what's left of the model's context; web content.
 - **`browser_batch { actions: [{tool, args}…] }`** (a model that acts or
   sees): up to ten browser tools
   in order in one call, each with its own rules (a card waits as usual),
@@ -3149,16 +3163,18 @@ of sight. What they share is said once, in the line.
   the Page tab has Open in <browser>, and one tool fewer helps a small
   model): an older answer's buttons still show (`BrowserOffers.svelte`,
   `ChatMessage.offers`), and the code stays for them.
-- **Which pages**: as above, public http(s) only (`web::check_url`); four
-  new tabs and twelve shots a turn in Chat's own tool loop (a key or the
-  model on this PC: its context and its cost per call). **A Claude Code
-  session has none of the per-turn counts** (14 Nov 2026, `web::Turn::uncapped`:
-  a plan chat's turn, `chat/turn/plan.rs`, and a Code chat's own session,
-  `agents::runner::beside_web`; the maintainer, after his Code chat's Claude
-  stopped at twelve: "let's please remove that limit… to unlimited") — no
-  cap on shots, new tabs, picture looks, pictures shown or (21 Nov 2026)
-  actions on pages; Claude Code keeps
-  its own context. Every rule about what may open holds. A file on this PC (a `file:` address
+- **Which pages**: as above, public http(s) only (`web::check_url`). **No
+  turn counts its new tabs, shots, picture looks, pictures shown or actions**
+  (21 Nov 2026, the maintainer: "We should not cap anything"; a Claude Code
+  session's turn counted none since 14 Nov — after his Code chat's Claude
+  stopped at twelve shots: "let's please remove that limit… to unlimited" —
+  but its actions, until #211). In Chat's own tool loop each result and
+  picture still fits what's left of the model's context, and the loop ends
+  when that's full (the tool loop above). A Claude Code session's turn
+  (`web::Turn::session`: a plan chat's, `chat/turn/plan.rs`, and a Code
+  chat's own session, `agents::runner::beside_web`) reads 50,000 characters
+  of a page at once (`pages::SESSION_READ_MAX`); Claude Code keeps its own
+  context. Every rule about what may open holds. A file on this PC (a `file:` address
   or a path) is never loaded: the model is told to show a picture with
   `show_picture` and its path, and that a local web page isn't opened
   (`pictures/local.rs` `not_a_page`, under `chat/pictures.rs` above). None is an action tool
@@ -3453,10 +3469,10 @@ review (safely, for any user, in any language Yap speaks).
   changed or went. So is a switched tab's answer (the tab's
   title and address), and a new tab's note naming the tab it closed to
   make room (`act::closed_note`; any model's) — both the page's words (3 Nov
-  2026). 30 actions a turn in Chat's own tool loop; **none counted in a Claude
-  Code session's turn** (21 Nov 2026, `web::Turn::uncapped`; the maintainer,
-  after his Code chat's Claude stopped at 30 partway through a long job on a
-  site and asked him to say "go": "We should not cap anything"). The line (1 Nov 2026,
+  2026). **No count of actions a turn** (21 Nov 2026: a Code chat's Claude
+  stopped at 30 partway through a long job on a site and asked the
+  maintainer to say "go"; he: "We should not cap anything"); each is still
+  checked as before. The line (1 Nov 2026,
   after a paid browse evaluation: Claude Haiku 5.5 and Opus 5.5 asked in the
   chat before buying, so the person was asked twice, and opened a search
   engine's results to find something on a site, which Yap can't read): to
@@ -6928,7 +6944,7 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   were offered there and then refused, while the plan's session could use
   them) (`research::allows`; anything else — an app, the clipboard, memory, a
   note, a document, an agent, a page click — refused with
-  `research::refusal`); `STEPS` (400) steps; a first step that answers before
+  `research::refusal`); no count of steps (until 21 Nov 2026, 400); a first step that answers before
   any search is asked once to search first (`SEARCH_FIRST`); past its time
   and `GRACE` the last call has no tools and says `WRITE_NOW`. **Your Claude
   plan** (`plan::answer` with a `Budget`): the conversation's warm Claude Code
@@ -6964,8 +6980,7 @@ citations"). Chat's side only (`chat/research.rs`, `chat/turn/research.rs`).
   every page read — your Claude plan's Claude Code keeps its own context, so
   none there; and `TIME`, **45 minutes** (+ `GRACE` 3 for the report), the
   longest Anthropic says its own Research takes, so a loop that never ends
-  is asked for its report. The tool loop's `STEPS` is 400 (its time ends
-  it). The cap machinery stays (`spent`, `past`, `Spent::line`): a read
+  is asked for its report (the loop has no count of steps). The cap machinery stays (`spent`, `past`, `Spent::line`): a read
   past what the model holds is refused with "write the report now…", its
   chip "Stopped researching: the 33 pages the model holds".
 - **Helpers, at the same time** (20 Nov 2026, the maintainer: Research's

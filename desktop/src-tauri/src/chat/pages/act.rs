@@ -81,12 +81,6 @@ pub const TOOL_NAMES: &[&str] = &[CLICK, TYPE, KEY, HOVER, DRAG, FORM_INPUT];
 /// draws in between, as it does for a person's).
 const DRAG_STEPS: u32 = 8;
 const DRAG_STEP: std::time::Duration = std::time::Duration::from_millis(30);
-/// Actions a turn of Chat's own tool loop may take. **A Claude Code
-/// session's turn has no count** (21 Nov 2026, `web::Turn::uncapped`; the
-/// maintainer, after his Code chat's Claude stopped partway through a long
-/// job on a site and asked him to say "go" for the rest: "We should not cap
-/// anything"): every action is still checked as before.
-pub const MAX_ACTS: usize = 30;
 /// A page read with its elements: its text cut here (the elements say the rest).
 pub const ELEMENTS_TEXT: usize = 2500;
 /// An action's answer: the new page's first words, at most.
@@ -188,9 +182,10 @@ pub async fn execute(turn: &mut crate::web::Turn, name: &str, args: &Value, ctx:
     if crate::chat::assistant::is_off() {
         return failed("Yap doesn't act on pages during a meeting or a call. Say so in a few words.".into(), "Didn't act on the page: a meeting or a call".into());
     }
-    if !turn.pages.uncapped && turn.pages.acts >= MAX_ACTS {
-        return failed(format!("You've taken {MAX_ACTS} actions this turn: answer the user now."), format!("Didn't act on the page: {MAX_ACTS} actions a turn"));
-    }
+    // No count of actions a turn (21 Nov 2026, the maintainer, after a Code
+    // chat's Claude stopped at 30 partway through a long job on a site and
+    // asked him to say "go": "We should not cap anything"); each one is
+    // still checked as before. The count orders them (`rules::submits_typed`).
     turn.pages.acts += 1;
     let result = match name {
         CLICK => click(turn, args, ctx).await,

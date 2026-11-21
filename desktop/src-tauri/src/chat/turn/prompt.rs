@@ -402,7 +402,7 @@ impl Prompt {
             } else {
                 crate::chat::documents::Reader::ReadPage
             };
-            self.context.push(crate::chat::documents::research_note(deep_reach, reader, outline_first));
+            self.context.push(crate::chat::documents::research_note(reader, outline_first));
         }
         deep_reach
     }

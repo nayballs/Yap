@@ -268,7 +268,9 @@ test('a new document’s outline opens before any search; a search asked for fir
   await expect(row.getByTestId('chat-sources-more')).toHaveCount(0);
 });
 
-test('a document’s turn may search more than three times; a plain question may not', async ({ main, fakeLlm }) => {
+// No count of searches in any turn (21 Nov 2026, the maintainer: "We should not cap anything"; before, a
+// plain question stopped at three).
+test('a document’s turn and a plain question both search as often as they need', async ({ main, fakeLlm }) => {
   const four = (topic) => ({ tools: [1, 2, 3, 4].map((n) => ({ name: 'web_search', args: { query: `Gale ${topic} part ${n}` } })) });
   fakeLlm.scriptChat([
     { tools: [{ name: 'create_document', args: { title: 'Gale in detail', summary: 'Gale, level by level.', sections: [{ key: 'Levels', intent: 'level by level' }] } }] },
@@ -281,15 +283,16 @@ test('a document’s turn may search more than three times; a plain question may
   await expect(lastAnswer(main)).toContainText('Here it is.', { timeout: 20_000 });
   await expect(chipsOfLast(main).filter({ hasText: 'Searched the web' })).toHaveCount(4);
   await expect(chipsOfLast(main).filter({ hasText: 'searches a turn' })).toHaveCount(0);
-  // The model was told how far it may look.
+  // The model was told to look as far as it takes.
   const asked = fakeLlm.requests.find((r) => r.user?.includes('detailed guide to Gale'));
-  expect(asked.user).toMatch(/up to 10 searches and \d+ page reads this turn/);
+  expect(asked.user).toContain('with as many searches and page reads as it takes');
+  expect(asked.user).not.toMatch(/up to \d+ searches/);
 
   fakeLlm.scriptChat([four('where'), { content: 'On the beach.' }]);
   await send(main, 'Where is Gale in BG3?');
   await expect(lastAnswer(main)).toContainText('On the beach.', { timeout: 20_000 });
-  await expect(chipsOfLast(main).filter({ hasText: 'Searched the web' })).toHaveCount(3);
-  await expect(chipsOfLast(main).filter({ hasText: '3 searches a turn' })).toHaveCount(1);
+  await expect(chipsOfLast(main).filter({ hasText: 'Searched the web' })).toHaveCount(4);
+  await expect(chipsOfLast(main).filter({ hasText: 'searches a turn' })).toHaveCount(0);
 });
 
 test('Claude searches and reads pages itself in Chat’s request, thinks at its effort for a document, and cites what it read', async ({ yap, main, fakeLlm, shot }) => {
@@ -403,11 +406,11 @@ test('Claude searches and reads pages itself in Chat’s request, thinks at its 
       { type: 'web_search_20260209', name: 'web_search', maxUses: 10 },
       { type: 'web_fetch_20260209', name: 'web_fetch', maxUses: expect.any(Number) },
     ]);
-    // Its page reads sized to what its request holds, and said so.
+    // Its page reads a step sized to what its request holds (no count of them a turn).
     const reads = two.serverTools[1].maxUses;
     expect(reads).toBeGreaterThanOrEqual(3);
     expect(reads).toBeLessThanOrEqual(10);
-    expect(one.user).toContain(`up to 10 searches and ${reads} page reads this turn`);
+    expect(one.user).toContain('with as many searches and page reads as it takes');
     expect(one.user).toContain('web_fetch the pages that requirements, levels, numbers and locations come from');
     expect(one.tools).not.toContain('web_search');
     expect(one.tools).not.toContain('read_page');

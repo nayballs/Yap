@@ -1,7 +1,10 @@
 //! The agent loop: the model asked, its tool calls run (the note tools
 //! here, the web's and the apps' through their modules), and asked
-//! again, ≤ `MAX_TOOL_STEPS`; a rejected call asked once more; a search
-//! that must come first; every step streamed to whoever watches.
+//! again until it answers — no count of steps (21 Nov 2026, the
+//! maintainer: "We should not cap anything"), only the model's context
+//! full or a call failing the same way again and again ([`LoopEnd`]); a
+//! rejected call asked once more; a search that must come first; every
+//! step streamed to whoever watches.
 //!
 //! Here: how a turn's loop starts and goes ([`tool_loop`]: the first
 //! messages, the tools, then step after step), what its steps share
@@ -30,11 +33,39 @@ pub use offer::offered_tools;
 use room::Room;
 use step::Step;
 
-use super::{Extra, MAX_TOOL_STEPS};
+use super::Extra;
 
 /// How many times a turn asks again after the provider rejected the
 /// model's tool call, before it answers without tools.
 const REJECTED_CALL_RETRIES: u32 = 1;
+
+/// **What a step needs of the model's context to be worth taking**
+/// (tokens): a result and the next step's call, as a picture must leave
+/// ([`room::LOOK_SPARE`]). With less left, the loop answers from what it
+/// has ([`LoopEnd::Full`]); with more, a step too big for it is told so
+/// (a result cut to fit, a picture not looked at) and the model goes on.
+const ROOM_TO_GO_ON: u64 = room::LOOK_SPARE;
+
+/// **The same call failing the same way this many times in a row**: the
+/// model is stuck, and the loop answers from what it has
+/// ([`LoopEnd::Stuck`]). Only failures count: a call that works the same
+/// way twice (a `wait`, a screenshot of a page still loading) is work.
+const STUCK_REPEATS: usize = 3;
+
+/// **Why a turn's loop stopped before the model answered** (21 Nov 2026:
+/// no count of steps any more — before, 20 a turn, 100 using apps on the
+/// PC, 400 a research). Each one, and the provider rejecting the model's
+/// calls again, ends in [`ANSWER_NOW_NOTE`]'s answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoopEnd {
+    /// The model's context has less than [`ROOM_TO_GO_ON`] left: a step
+    /// more couldn't read what it found.
+    Full,
+    /// The same call failed the same way [`STUCK_REPEATS`] times in a row.
+    Stuck,
+    /// A research past its time (chat/research.rs `TIME`).
+    ResearchTime,
+}
 
 /// What the model is told when the provider rejected its tool call (`why`:
 /// the provider's reason, and what the model sent).
@@ -44,8 +75,9 @@ fn rejected_call_note(why: &str) -> String {
     )
 }
 
-/// Said before the last call when tools won't do (rejected again, or out
-/// of steps): an answer now, from what the conversation has.
+/// Said before the last call when tools won't do (rejected again, the
+/// context full, stuck: [`LoopEnd`]): an answer now, from what the
+/// conversation has.
 const ANSWER_NOW_NOTE: &str = "(A note from Yap, not the user.) Don't call any tool now: answer the user from what you have, and say plainly if something couldn't be done.";
 
 /// How a turn's first step goes.
@@ -300,9 +332,11 @@ struct Loop<'a> {
     /// This turn, for computer use (`computer/watch.rs`: the person taking
     /// over stops the rest of the turn's input actions): unique per turn.
     computer_turn: String,
-    /// The turn used an app on the PC (computer use): it may take up to
-    /// `computer::TURN_STEPS` steps, one action each.
-    computer_used: bool,
+    /// The last call that failed (its name and arguments, and what it
+    /// said) and how many times in a row it has failed so (fold.rs:
+    /// [`STUCK_REPEATS`]).
+    failing: Option<(String, String)>,
+    failed_again: usize,
     /// Computer use through the API's own toolset (Claude on an Anthropic
     /// key, `computer.rs` `TOOLSET`): its members' pictures go in their
     /// own results.
@@ -361,8 +395,8 @@ impl Loop<'_> {
 /// The agent loop (their `useChatStreaming` re-invoke loop, every step
 /// streamed when someone watches — `live`):
 /// send messages + tools; while the model calls tools, execute them locally,
-/// append the results as `role:"tool"` messages, and re-invoke — up to
-/// MAX_TOOL_STEPS. Returns the final answer + the tools' displayTexts (the UI
+/// append the results as `role:"tool"` messages, and re-invoke — until it
+/// answers ([`LoopEnd`]: no count of steps). Returns the final answer + the tools' displayTexts (the UI
 /// shows them as activity chips). `on_change` hears of every note a tool
 /// created or changed, as it happens. `open_apps`: the app tools are offered
 /// too (`apps.rs`), acting on `question`, the person's own message. `web`:
@@ -510,7 +544,8 @@ async fn tool_loop(
         agent_seen: false,
         connector_seen: false,
         computer_turn: crate::computer::new_turn("loop"),
-        computer_used: false,
+        failing: None,
+        failed_again: 0,
         computer_toolset: crate::ai::llm::anthropic::speaks_messages(provider, model) && extra.computer,
         toolset_looks: Vec::new(),
         must_search: must_search_first,
@@ -525,21 +560,14 @@ async fn tool_loop(
     if let FirstStep::YapSearches(query) = &first {
         turn.search_for(query).await;
     }
-    // A research turn has more steps, and past its time the report with no
-    // tools (chat/research.rs).
-    let steps = if extra.research.is_some() { crate::chat::research::STEPS } else { MAX_TOOL_STEPS };
-    let mut taken = 0;
+    // No count of steps: the model goes on until it answers (LoopEnd).
+    let mut first = true;
     loop {
-        // A turn using apps on the PC takes a step an action (a click, a key, a look): it may go on longer.
-        let limit = if turn.computer_used { steps.max(crate::computer::TURN_STEPS) } else { steps };
-        if taken >= limit {
+        if let Some(end) = turn.ended(first, extra.research.is_some_and(|b| b.overdue())) {
+            tracing::info!(?end, "Chat: the loop answers from what it has");
             break;
         }
-        taken += 1;
-        if extra.research.is_some_and(|b| b.overdue()) {
-            tracing::info!("Chat: the research is past its time; the report now");
-            break;
-        }
+        first = false;
         match turn.step().await? {
             Step::Again => continue,
             Step::Answer(content) => return Ok((content, turn.tools_used)),
@@ -547,8 +575,46 @@ async fn tool_loop(
             Step::GiveUp => break,
         }
     }
-    // Out of steps, or the tool calls kept being rejected.
+    // The context full, stuck, a research's time, or the tool calls kept
+    // being rejected.
     turn.answer_now().await
+}
+
+impl Loop<'_> {
+    /// **Whether the loop stops before another step** ([`LoopEnd`]):
+    /// a research past its time; then, once a step has run (`first`: none
+    /// yet), the model's context too full to go on, or the same call
+    /// failing the same way again and again.
+    fn ended(&self, first: bool, research_overdue: bool) -> Option<LoopEnd> {
+        if research_overdue {
+            return Some(LoopEnd::ResearchTime);
+        }
+        if first {
+            return None;
+        }
+        if self.failed_again >= STUCK_REPEATS {
+            return Some(LoopEnd::Stuck);
+        }
+        self.room.left(&self.messages, &[]).is_some_and(|left| left < ROOM_TO_GO_ON).then_some(LoopEnd::Full)
+    }
+
+    /// **A call's result, for [`LoopEnd::Stuck`]**: a failure the same as
+    /// the last one (the same call, the same words) counts again; anything
+    /// else starts over.
+    fn note_failure(&mut self, name: &str, ran_with: &Value, result: &Value) {
+        if result["success"] != false {
+            self.failing = None;
+            self.failed_again = 0;
+            return;
+        }
+        let this = (format!("{name} {ran_with}"), result.to_string());
+        if self.failing.as_ref() == Some(&this) {
+            self.failed_again += 1;
+        } else {
+            self.failing = Some(this);
+            self.failed_again = 1;
+        }
+    }
 }
 
 /// The loop's first messages: the system prompt, the history, then the
@@ -718,13 +784,13 @@ mod tests {
         })
     }
 
-    /// A turn using apps on the PC takes a step an action: past the loop's
-    /// 20 it goes on (`computer::TURN_STEPS`), and the model's own answer
-    /// comes back, never the "answer now" note. (A real run, 20 Nov 2026,
-    /// was cut off mid-task at 20.)
+    /// **No count of steps** (21 Nov 2026, the maintainer: "We should not
+    /// cap anything"): a turn goes on past the old 20 (and the 100 a turn
+    /// using apps had), and the model's own answer comes back, never the
+    /// "answer now" note. (A real run, 20 Nov 2026, was cut off mid-task at 20.)
     #[tokio::test]
-    async fn a_turn_using_apps_on_the_pc_goes_past_twenty_steps() {
-        let mut steps: Vec<Value> = (0..25).map(|_| calls(&[("wait", json!({ "duration": 0 }))])).collect();
+    async fn a_turn_goes_on_until_the_model_answers() {
+        let mut steps: Vec<Value> = (0..150).map(|_| calls(&[("wait", json!({ "duration": 0 }))])).collect();
         steps.push(json!({ "role": "assistant", "content": "All done." }));
         let fake = fake_server(steps, Value::Null);
         let base = format!("{}/v1", fake.base);
@@ -732,8 +798,49 @@ mod tests {
         let (reply, _) = run_tool_loop_with("You are helpful.", &[], "Sort my folder", &[], &base, "", "fake-chat", "custom", false, false, &|_| {}, None, FirstStep::Model, extra, None).await.expect("an answer");
         assert_eq!(reply, "All done.");
         let requests = fake.requests.lock().unwrap().clone();
-        assert_eq!(requests.len(), 26, "25 steps of actions, then the answer");
+        assert_eq!(requests.len(), 151, "150 steps of actions, then the answer");
         assert!(requests.iter().all(|r| r.1["messages"].as_array().unwrap().last().unwrap()["content"] != ANSWER_NOW_NOTE));
+    }
+
+    /// **Stuck: the same call failing the same way three times in a row**
+    /// ends the loop with the "answer now" note; a call that works between
+    /// two failures starts the count over.
+    #[tokio::test]
+    async fn the_same_call_failing_again_and_again_answers_from_what_it_has() {
+        let click = || calls(&[("left_click", json!({ "coordinate": [10, 10] }))]);
+        let wait = || calls(&[("wait", json!({ "duration": 0 }))]);
+        // Fails, fails, works, fails, fails: never three in a row — the model's own answer.
+        let fake = fake_server(vec![click(), click(), wait(), click(), click(), json!({ "role": "assistant", "content": "Done." })], Value::Null);
+        let base = format!("{}/v1", fake.base);
+        let extra = Extra { computer: true, conversation: Some(4243), ..Default::default() };
+        let (reply, _) = run_tool_loop_with("You are helpful.", &[], "Click it", &[], &base, "", "fake-chat", "custom", false, false, &|_| {}, None, FirstStep::Model, extra, None).await.expect("an answer");
+        assert_eq!(reply, "Done.");
+        assert_eq!(fake.requests.lock().unwrap().len(), 6);
+        // Three in a row: answered from what it has.
+        let fake = fake_server(vec![click(), click(), click(), json!({ "role": "assistant", "content": "I couldn't click it." }), click()], Value::Null);
+        let base = format!("{}/v1", fake.base);
+        let extra = Extra { computer: true, conversation: Some(4244), ..Default::default() };
+        let (reply, _) = run_tool_loop_with("You are helpful.", &[], "Click it", &[], &base, "", "fake-chat", "custom", false, false, &|_| {}, None, FirstStep::Model, extra, None).await.expect("an answer");
+        assert_eq!(reply, "I couldn't click it.");
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 4, "three failed steps, then the answer");
+        assert_eq!(requests[3].1["messages"].as_array().unwrap().last().unwrap()["content"], ANSWER_NOW_NOTE);
+    }
+
+    /// **The model's context full**: once a step has run with less than
+    /// `ROOM_TO_GO_ON` left, the loop answers from what it has (the first
+    /// step always runs).
+    #[tokio::test]
+    async fn a_full_context_answers_from_what_it_has() {
+        let wait = || calls(&[("wait", json!({ "duration": 0 }))]);
+        let fake = fake_server(vec![wait(), json!({ "role": "assistant", "content": "Here's what I found." }), wait()], Value::Null);
+        let base = format!("{}/v1", fake.base);
+        let extra = Extra { computer: true, conversation: Some(4245), room: Some(1), ..Default::default() };
+        let (reply, _) = run_tool_loop_with("You are helpful.", &[], "Sort my folder", &[], &base, "", "fake-chat", "custom", false, false, &|_| {}, None, FirstStep::Model, extra, None).await.expect("an answer");
+        assert_eq!(reply, "Here's what I found.");
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 2, "one step, then the answer");
+        assert_eq!(requests[1].1["messages"].as_array().unwrap().last().unwrap()["content"], ANSWER_NOW_NOTE);
     }
 
     #[tokio::test]
@@ -1465,9 +1572,10 @@ mod tests {
         assert!(e.starts_with("HTTP 401"), "{e}");
     }
 
+    /// **No count of searches** (21 Nov 2026; until then a fourth was told
+    /// no): every search runs, and `web_search` is offered on every step.
     #[tokio::test]
-    async fn a_capped_web_tool_stays_offered() {
-        // Three searches, then a fourth the model still sees and is told no.
+    async fn every_search_runs_and_web_search_stays_offered() {
         let exa = json!({ "results": [{ "title": "Gale", "url": "https://bg3.wiki/wiki/Gale", "highlights": ["On the beach."] }] });
         let search = |q: &str| calls(&[("web_search", json!({ "query": q }))]);
         let fake = fake_server(
@@ -1501,7 +1609,8 @@ mod tests {
         .await
         .expect("an answer");
         assert_eq!(reply, "On the beach [1].");
-        assert_eq!(chips.last().unwrap(), "Didn't search for \"d\": 3 searches a turn");
+        assert_eq!(chips.iter().filter(|c| c.starts_with("Searched the web")).count(), 4, "{chips:?}");
+        assert!(!chips.iter().any(|c| c.contains("a turn")), "{chips:?}");
         let requests = fake.requests.lock().unwrap().clone();
         let chat: Vec<&Value> = requests.iter().filter(|(u, _)| u.ends_with("/chat/completions")).map(|(_, b)| b).collect();
         assert_eq!(chat.len(), 5);

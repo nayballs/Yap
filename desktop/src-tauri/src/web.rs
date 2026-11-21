@@ -54,11 +54,15 @@
 //! for a strong model (`documents::rich::strong`) only apps, the clipboard
 //! and memory. [`Turn::seen`] says when.
 //!
-//! **How far a turn looks** ([`Reach`]): 3 searches and 3 page reads; a
-//! strong model's turn that writes a document goes deeper (2026-10-31) —
-//! up to [`DEEP_SEARCHES`], as many page reads as a share of the model's
-//! request holds (up to [`DEEP_READS`]), and the provider's own search
-//! opening more pages and saying more (`native::NativeSearch::deep`).
+//! **How far a turn looks** ([`Reach`]): no turn counts its searches or
+//! page reads (21 Nov 2026, the maintainer: "We should not cap anything";
+//! before, 3 and 3, a document's 10 and what its context held) — each
+//! result fits what's left of the model's context, and Chat's loop ends
+//! when that's full; only a research keeps its own budget. A strong
+//! model's turn that writes a document goes deeper (2026-10-31): the
+//! provider's own search opening more pages and saying more
+//! (`native::NativeSearch::deep`), Claude's own fetch as many pages a step
+//! as a share of the model's request holds (up to [`DEEP_READS`]).
 //!
 //! **Test mode** (`e2e::active`) never touches the internet: the debug-only
 //! `YAP_EXA_URL` / `YAP_TAVILY_URL` replace the services' addresses and
@@ -109,12 +113,15 @@ pub const TOOL_NAMES: &[&str] = &["web_search", "read_page"];
 pub const MAX_RESULTS: usize = 5;
 /// A result's text, at most (≈ 200 tokens).
 const HIT_CHARS: usize = 700;
-/// Searches and page reads per turn: then the model answers from what it has.
+/// An ordinary turn's [`Reach`]: what tells it from a document's deeper one.
+/// (Until 21 Nov 2026 the searches and page reads a turn stopped at; no
+/// turn counts them now.)
 pub const MAX_SEARCHES: usize = 3;
 pub const MAX_READS: usize = 3;
-/// A strong model's turn that writes a document (`Reach::deep`): about the
-/// Claude app's research before a long piece — Claude Opus 5.5 hit the 3
-/// searches writing a level-by-level guide and left most levels out.
+/// A strong model's turn that writes a document (`Reach::deep`): the
+/// provider's own search reading more, Claude's own fetch up to this many
+/// pages a step (once also a turn's count: Claude Opus 5.5 hit 3 searches
+/// writing a level-by-level guide and left most levels out).
 pub const DEEP_SEARCHES: usize = 10;
 pub const DEEP_READS: usize = 10;
 /// One page of `read_page`.
