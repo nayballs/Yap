@@ -494,29 +494,23 @@ async fn typing_into_a_search_box_keys_hover_and_form_fields() {
     sim::install(None);
 }
 
-/// **Actions on a page: counted in Chat's own tool loop, never in a Claude Code session's turn** (21 Nov 2026:
-/// the maintainer's Code chat's Claude stopped at 30 partway through a long job on a site and asked him to say "go").
+/// **No count of actions on a page, in any turn** (21 Nov 2026: the maintainer's Code chat's Claude stopped at
+/// 30 partway through a long job on a site and asked him to say "go"; then "We should not cap anything").
 #[tokio::test]
-async fn a_claude_code_turn_acts_on_pages_with_no_count() {
+async fn a_turn_acts_on_pages_with_no_count() {
     sim::install(Some(web()));
     sim::with(|b| b.open("https://shop.example.com/"));
     let log = Log::default();
     let tab = json!({ "keys": "Tab" });
-    // Chat's own tool loop: 30 a turn, then told to answer.
-    let mut own = turn("Tab through the shop's page");
-    for i in 0..act::MAX_ACTS {
-        let k = call(&mut own, act::KEY, tab.clone(), &log).await.result;
-        assert_eq!(k["success"], true, "action {i}: {k}");
+    // Chat's own tool loop and a Claude Code session's turn alike: past the 30 that once stopped them. (Kept
+    // short: a test elsewhere that puts a call on for a moment would make any page action say "a call".)
+    for mut t in [turn("Tab through the shop's page"), turn("Tab through the shop's page").session()] {
+        for i in 0..31 {
+            let k = call(&mut t, act::KEY, tab.clone(), &log).await.result;
+            assert_eq!(k["success"], true, "action {i}: {k}");
+        }
     }
-    let stopped = call(&mut own, act::KEY, tab.clone(), &log).await.result;
-    assert_eq!(stopped["displayText"], format!("Didn't act on the page: {} actions a turn", act::MAX_ACTS), "{stopped}");
-    // A Claude Code session's turn: as many as the work takes.
-    let mut session = turn("Tab through the shop's page").uncapped();
-    for i in 0..act::MAX_ACTS * 3 {
-        let k = call(&mut session, act::KEY, tab.clone(), &log).await.result;
-        assert_eq!(k["success"], true, "action {i}: {k}");
-    }
-    assert_eq!(sim::with(|b| b.log.keys.len()).unwrap(), act::MAX_ACTS * 4, "every one pressed");
+    assert_eq!(sim::with(|b| b.log.keys.len()).unwrap(), 62, "every one pressed");
     sim::install(None);
 }
 
@@ -1163,8 +1157,8 @@ async fn a_headings_ref_reads_its_section_and_a_claude_code_session_reads_more_a
     // A whole read of a long page says how to read one part of it.
     let whole = plain(&mut turn("Read the guide"), READ, json!({})).await;
     assert!(whole["note"].as_str().unwrap().contains("browser_read with that ref"), "{whole}");
-    // A Claude Code session's turn (web::Turn::uncapped): the guide's 16,000 characters in one read.
-    let mut s = turn("Read me the whole hiking guide").uncapped();
+    // A Claude Code session's turn (web::Turn::session): the guide's 16,000 characters in one read.
+    let mut s = turn("Read me the whole hiking guide").session();
     let all = plain(&mut s, READ, json!({})).await;
     assert_eq!(all["data"]["more"], false, "{}", all["data"]["text"].as_str().unwrap().len());
     assert!(all["data"]["text"].as_str().unwrap().chars().count() > READ_MAX);

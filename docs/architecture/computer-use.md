@@ -526,12 +526,13 @@ three gaps:
 
 ## Driving the PC
 
-- **A turn's steps.** Chat's tool loop takes 20 steps a turn
-  (`chat/tools.rs` `MAX_TOOL_STEPS`). Once a turn has used an app, it may
-  take `computer::TURN_STEPS` (100), since computer use is a step an action
-  and a real task (sorting a folder, a letter printed to PDF) takes far more
-  than 20. The real-screen pass on 20 Nov 2026 found turns cut off mid-task.
-  Esc, ■ Stop and the model's context still end it.
+- **A turn's steps: no count** (21 Nov 2026, the maintainer: "We should
+  not cap anything"). Computer use is a step an action, and a real task
+  (sorting a folder, a letter printed to PDF) takes many; the real-screen
+  pass on 20 Nov 2026 found turns cut off at 20, then 100 was the limit.
+  Now the turn goes on until the model answers, or the loop must stop
+  (`chat/tools/agent.rs` `LoopEnd`: the model's context full, the same call
+  failing the same way three times in a row). Esc and ■ Stop end it.
 - **One chat at a time.** A chat holds the PC for 10 s after its last input
   action; another chat's actions are refused meanwhile.
 - **The indicator.**

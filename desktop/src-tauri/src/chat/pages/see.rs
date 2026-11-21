@@ -42,8 +42,6 @@ use super::{backend, blocking, clip, failed, number_of, on_search_page, ref_of, 
 use crate::chat::pictures::{Gate, Look, PageRef, ShownPicture};
 use crate::chat::stream::Event;
 
-/// Shots and zooms a turn may take.
-pub const MAX_SHOTS: usize = 12;
 /// The longest `browser_wait` waits (seconds).
 pub const WAIT_MAX: f64 = 10.0;
 /// Matches `browser_find` lists, at most.
@@ -882,9 +880,6 @@ async fn take(turn: &mut crate::web::Turn, t: &crate::chat::pages::view::OpenTab
     if super::search_page(&t.url) {
         return Err(failed("That's a search engine's results page: Yap doesn't take shots of those (the user reads it).".into(), format!("Didn't {doing} {shown}: a search engine's results")));
     }
-    if !turn.pages.uncapped && turn.pages.shots >= MAX_SHOTS {
-        return Err(failed(format!("You've taken {MAX_SHOTS} shots this turn: answer the user now."), format!("Didn't {doing} {shown}: {MAX_SHOTS} shots a turn")));
-    }
     // Once it has stopped scrolling: never a frame mid-scroll.
     let view = backend::still(&t.key).await.map_err(|e| failed(e.clone(), format!("Couldn't {doing} {shown}: {}", crate::web::short(&e))))?;
     let shot = if finer > 1.0 { backend::shot_at(&t.key, finer).await } else { backend::shot(&t.key).await.map(|png| (png, 1.0)) };
@@ -892,7 +887,6 @@ async fn take(turn: &mut crate::web::Turn, t: &crate::chat::pages::view::OpenTab
         tracing::info!("Chat: a page's shot wasn't taken");
         failed(format!("{e} Answer from browser_read instead."), format!("Couldn't {doing} {shown}: {}", crate::web::short(&e)))
     })?;
-    turn.pages.shots += 1;
     // What it shows is the page's: web content.
     turn.mark_seen();
     Ok(Taken { png, view, scale })

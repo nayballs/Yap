@@ -8,8 +8,8 @@
 //! the keyword scorer, not semantic — step 3): `search_notes`, `get_note`,
 //! `create_note`, `update_note`, `list_folders`, `copy_to_clipboard`.
 //! Executed locally over `notes.rs`/arboard; results are fed back as
-//! `role:"tool"` messages and the model is re-invoked, ≤ `MAX_TOOL_STEPS`
-//! (their 20).
+//! `role:"tool"` messages and the model is re-invoked until it answers (their
+//! 20 steps; Yap's no count since 21 Nov 2026: `agent.rs` `LoopEnd`).
 //!
 //! **Folders are Yap's own rule** (a deliberate change from OpenWhispr, whose
 //! `create_note`/`update_note` made any folder the model named — a chat test
@@ -103,7 +103,6 @@ pub use notes::{rag_notes, search_notes};
 #[cfg(debug_assertions)]
 pub use notes::{changed_note, definitions};
 
-const MAX_TOOL_STEPS: usize = 20;
 const MAX_CONTENT_LENGTH: usize = 500;
 const LOCAL_TOOL_MIN_PARAMS_B: f32 = 4.0;
 /// `get_note` gives at most this much of a note's content and of its summary
@@ -345,8 +344,7 @@ pub struct Extra<'a> {
     /// **A research turn** (chat/research.rs): its caps and clock. Only the
     /// web's tools and the notes' reads run (`research::allows`), Yap's
     /// `read_page` beside a provider's own search too (the report cites
-    /// only the pages read), more steps ([`crate::chat::research::STEPS`]),
-    /// and past its time the report with no tools.
+    /// only the pages read), and past its time the report with no tools.
     pub research: Option<crate::chat::research::Budget>,
 }
 
