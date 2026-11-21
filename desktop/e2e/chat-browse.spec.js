@@ -8,7 +8,8 @@
 //   Stop) while the turn goes;
 // - a click at a point of the latest screenshot (a strong model that reads
 //   images): the element under it, judged as a ref click is — a point on a
-//   password box refused;
+//   password box refused; on a page that scrolls in a box (a webmail's list),
+//   the shot the whole view and a field clicked where it shows in it;
 // - a batch of steps (find, scroll, screenshot, zoom, click) runs in order and
 //   stops at a card said no to;
 // - typing into a page's search box and pressing Enter needs no card;
@@ -37,7 +38,8 @@
 // `e2e_page_view_eval` / `e2e_page_views`. Fictional sites only.
 import { test as base, expect, expectStore, setConfig, openView } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL, BOARD_URL, SMOOTH_URL, PREFS_URL, DOCS_URL, WIDE_URL, WIDE_BOX, TASKS_URL, FRAMES_URL, TRAIL_URL } from './support/fake-web.js';
+import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL, BOARD_URL, INBOX_URL, INBOX_MARK, SMOOTH_URL, PREFS_URL, DOCS_URL, WIDE_URL, WIDE_BOX, TASKS_URL, FRAMES_URL, TRAIL_URL } from './support/fake-web.js';
+import { readDataUrl, pixel, near } from './support/png.js';
 
 const test = base.extend({
   fakeLlm: [
@@ -563,6 +565,65 @@ test('a click at a point of the screenshot: the element under it, judged as a re
   const refused = lastResult(calls[4]);
   expect(refused).toMatchObject({ success: false, displayText: "Didn't click ‘Password’: Yap never types a password", data: { refused: 'sensitive' } });
   expect(await inPage(yap, BOARD_URL, "document.activeElement ? document.activeElement.id : ''")).not.toBe('pw');
+});
+
+/**
+ * **Where a model sees colour `rgb`** in the latest picture it was sent: the centre of
+ * the box its pixels make, in the picture's own pixels (browser_click's x, y) —
+ * read off the picture itself, as a model reads it, never from the page.
+ */
+function seenAt(request, rgb) {
+  const url = request.messages
+    .filter((m) => Array.isArray(m.content))
+    .flatMap((m) => m.content.filter((p) => p.type === 'image_url'))
+    .at(-1)?.image_url?.url;
+  if (!url) return { x: 0, y: 0 };
+  const png = readDataUrl(url);
+  let [x0, y0, x1, y1] = [Infinity, Infinity, -1, -1];
+  for (let y = 0; y < png.height; y++) {
+    for (let x = 0; x < png.width; x++) {
+      if (!near(pixel(png, x, y), rgb, 40)) continue;
+      x0 = Math.min(x0, x);
+      y0 = Math.min(y0, y);
+      x1 = Math.max(x1, x);
+      y1 = Math.max(y1, y);
+    }
+  }
+  return x1 < 0 ? { x: 0, y: 0 } : { x: Math.round((x0 + x1) / 2), y: Math.round((y0 + y1) / 2) };
+}
+
+test('a page that scrolls in a box (a webmail): the shot is the whole view, and a click where a field shows in it lands on that field', async ({ yap, main, fakeLlm }) => {
+  // (21 Nov 2026, in a webmail beside a Code chat: its list scrolls in a box
+  // shorter than the view, Yap took the box's height for the view's, the shot
+  // of the whole view came out squeezed into it, and every click where a field
+  // showed landed a field higher — "Subject" for "Has the words".)
+  await setConfig(yap, main, seeingConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  const SAID = "The cursor is in Doesn't have.";
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: INBOX_URL } }] },
+    { tools: [{ name: 'browser_screenshot', args: {} }] },
+    // Where the coloured field shows in the picture.
+    { tools: [{ name: 'browser_click', args: (r) => seenAt(r, INBOX_MARK) }] },
+    { content: SAID },
+  ]);
+  await ask(main, `Put the cursor in the search panel's last box: ${INBOX_URL}`);
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 60_000 });
+  const calls = chatCalls(fakeLlm, from);
+  // The case at hand: the page itself doesn't scroll, its list does, in a box well short of the view.
+  const [pageScrolls, box, view] = await inPage(yap, INBOX_URL, "[document.scrollingElement.scrollHeight > window.innerHeight + 2, document.getElementById('list').clientHeight, window.innerHeight]");
+  expect(pageScrolls).toBe(false);
+  expect(box).toBeLessThan(view - 150);
+  const shot = lastResult(calls[2]);
+  expect(shot).toMatchObject({ success: true, displayText: 'Looked at the page · mail.example.com' });
+  // What scrolls is still told as the box (its height with how far it goes)…
+  expect(shot.data.scroll.h).toBe(box);
+  // …but the picture is the whole view at its CSS pixels, not squeezed into the box's height.
+  expect(shotSize(calls[3])).toEqual(await inPage(yap, INBOX_URL, '[window.innerWidth, window.innerHeight]'));
+  const clicked = lastResult(calls[3]);
+  expect(clicked).toMatchObject({ success: true, data: { at: { role: 'textbox' } } });
+  expect(clicked.data.changed).toMatch(/the focus moved into ‘Doesn't have’/);
+  expect(await inPage(yap, INBOX_URL, "document.getElementById('said').textContent")).toBe("Focused: Doesn't have");
 });
 
 /** The ref of the match named `name` in the turn's latest find (its match lines). */

@@ -57,7 +57,9 @@ fn round1(x: f64) -> f64 {
 }
 
 /// **Where a page is in view** (CSS pixels): its scroll, the view's size,
-/// the most it scrolls, the device's pixels per CSS pixel.
+/// the most it scrolls, the device's pixels per CSS pixel. `h` is the height
+/// of what scrolls (with `max`): on a page that scrolls inside a box (a
+/// webmail's list) the box's, shorter than the view; `vh` the view's own.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct View {
@@ -70,6 +72,22 @@ pub struct View {
     /// The most it scrolls sideways (0: no wider than the view).
     #[serde(rename = "mx")]
     pub max_x: i64,
+    /// The view's own height (0: not said, `h` stands in).
+    pub vh: i64,
+}
+
+impl View {
+    /// **The view's own height** (CSS pixels): what a shot shows top to
+    /// bottom, whatever box scrolls inside it (21 Nov 2026: in a webmail the
+    /// list's box was taken for the view, the shot squeezed into its height
+    /// and a click by a point landed a field higher than aimed). Pure.
+    pub fn view_h(&self) -> i64 {
+        if self.vh > 0 {
+            self.vh
+        } else {
+            self.h
+        }
+    }
 }
 
 /// [`View`] and the headings in view now (the page's words).
@@ -130,6 +148,21 @@ pub struct Frame {
 }
 
 impl Frame {
+    /// **The frame of a shot of page `key`** fitted to `w`×`h` pixels, of
+    /// the view `v` (its CSS width and its own height, never a box's that
+    /// scrolls inside it; the picture's size where the page didn't say). Pure.
+    pub fn of(key: &str, w: u32, h: u32, v: &View) -> Frame {
+        let vh = v.view_h();
+        Frame {
+            key: key.to_string(),
+            w,
+            h,
+            css_w: if v.w > 0 { v.w as f64 } else { f64::from(w) },
+            css_h: if vh > 0 { vh as f64 } else { f64::from(h) },
+            y: v.y,
+        }
+    }
+
     /// A point in the picture (`x`, `y`) as the view's CSS pixels; `None`
     /// off the picture. Pure.
     pub fn to_css(&self, x: f64, y: f64) -> Option<(f64, f64)> {
@@ -159,7 +192,7 @@ impl Frame {
                 format!(
                     "The page's view changed size since the latest screenshot (laid out {}×{} px now, {}×{} then: a width set for the tab, or the panel made narrower or wider): take browser_screenshot again, then {doing}.",
                     now.w,
-                    now.h,
+                    now.view_h(),
                     self.css_w.round(),
                     self.css_h.round()
                 ),
@@ -936,7 +969,8 @@ pub async fn screenshot(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>
     };
     let here = crate::ai::ai_model::runs_here(ctx.provider, ctx.base_url);
     let fit = crate::snip::images::fit_for(ctx.provider, here);
-    let (css_w, css_h) = (view.scroll.w.max(0) as u32, view.scroll.h.max(0) as u32);
+    // The whole view (never a box that scrolls inside it: the shot is all of it).
+    let (css_w, css_h) = (view.scroll.w.max(0) as u32, view.scroll.view_h().max(0) as u32);
     let made = blocking(move || {
         let (rgba, w, h) = crate::snip::images::decode_png(&png)?;
         // The model's copy: the view at its CSS pixels (browser_click's
@@ -959,14 +993,7 @@ pub async fn screenshot(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>
     let chip = format!("Looked at the page · {site}");
     let id = keep_shot(turn, ctx, &t, &image, png, &chip, "In view on");
     let v = view.scroll;
-    turn.pages.frame = Some(Frame {
-        key: t.key.clone(),
-        w: fitted.w,
-        h: fitted.h,
-        css_w: if v.w > 0 { v.w as f64 } else { fitted.w as f64 },
-        css_h: if v.h > 0 { v.h as f64 } else { fitted.h as f64 },
-        y: v.y,
-    });
+    turn.pages.frame = Some(Frame::of(&t.key, fitted.w, fitted.h, &v));
     tracing::info!(tab = t.tab, w = fitted.w, h = fitted.h, y = v.y, css_w = v.w, desktop = t.width.is_some(), "Chat: the model looks at a page beside the chat");
     let frame = format!("browser_click's x, y are in this picture's pixels: {}×{}, the page's view.", fitted.w, fitted.h);
     // The width it was laid out at (the layout its points are in), and how
@@ -1291,11 +1318,37 @@ mod tests {
     }
 
     #[test]
+    fn a_shot_of_a_page_that_scrolls_in_a_box_is_the_whole_views_height_not_the_boxs() {
+        // (21 Nov 2026, a webmail: its list scrolls in a 1039 px box of a 1286 px
+        // view. The box's height was taken for the view's: the shot of the whole
+        // view squeezed into 1039 px, and a field read at y 211 was clicked at
+        // y 211 of the page, a field higher than the one at 211 × 1286/1039.)
+        let v: View = serde_json::from_value(json!({ "x": 0, "y": 0, "w": 940, "h": 1039, "vh": 1286, "max": 361, "dpr": 1.0, "mx": 0 })).unwrap();
+        assert_eq!(v.view_h(), 1286);
+        let f = Frame::of("page:https://mail.example.com", 940, 1286, &v);
+        assert_eq!((f.css_w, f.css_h), (940.0, 1286.0));
+        assert_eq!(f.to_css(646.0, 211.0), Some((646.0, 211.0)));
+        // Fitted smaller for the provider: scaled back by the view's height, not the box's.
+        let small = Frame::of("page:https://mail.example.com", 470, 643, &v);
+        assert_eq!(small.to_css(323.0, 105.5), Some((646.0, 211.0)));
+        // A page that didn't say its view's height (an older script): the height there is.
+        let old: View = serde_json::from_value(json!({ "w": 900, "h": 700 })).unwrap();
+        assert_eq!(old.view_h(), 700);
+        assert_eq!(Frame::of("page:https://example.com", 900, 700, &old).css_h, 700.0);
+        // Nothing said at all: the picture's own size.
+        let none = Frame::of("page:https://example.com", 450, 500, &View::default());
+        assert_eq!((none.css_w, none.css_h), (450.0, 500.0));
+        // Its points hold while only the box changed (the list's chips row came up).
+        let shorter_box = View { h: 935, ..v };
+        assert_eq!(f.moved(&shorter_box, "click"), None);
+    }
+
+    #[test]
     fn a_shots_points_hold_only_while_the_view_is_as_it_was_and_a_width_is_read_as_sent() {
         // The panel's 460 px view shot, then laid out 1280 px wide: the same
         // pixels are another layout — refused, said why.
         let f = Frame { key: "page:https://docs.example.com".into(), w: 460, h: 800, css_w: 460.0, css_h: 800.0, y: 0 };
-        let view = |w: i64, h: i64, y: i64| View { x: 0, y, w, h, max: 2000, dpr: 1.0, max_x: 0 };
+        let view = |w: i64, h: i64, y: i64| View { x: 0, y, w, h, max: 2000, dpr: 1.0, max_x: 0, vh: h };
         assert_eq!(f.moved(&view(460, 800, 0), "click"), None);
         let (why, chip) = f.moved(&view(1280, 800, 0), "click").unwrap();
         assert!(why.contains("laid out 1280×800 px now, 460×800 then") && why.ends_with("then click."), "{why}");

@@ -1556,7 +1556,7 @@ impl<'a> Page<'a> {
             .collect();
         // Laid out at a desktop width: shown smaller, fewer device pixels a CSS pixel.
         let dpr = if self.tab.laid > 0 && self.tab.width.is_some() { (VIEW_W as f64 / self.tab.laid as f64).min(1.0) } else { 1.0 };
-        super::see::InView { scroll: super::see::View { x: 0, y, w: self.tab.laid, h: VIEW_H, max, dpr, max_x: 0 }, in_view }
+        super::see::InView { scroll: super::see::View { x: 0, y, w: self.tab.laid, h: VIEW_H, max, dpr, max_x: 0, vh: VIEW_H }, in_view }
     }
 
     /// The visible blocks of text, each with its ref.

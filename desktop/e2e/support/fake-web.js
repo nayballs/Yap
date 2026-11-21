@@ -271,6 +271,34 @@ PAGES['maps.example.com/board'] = `<!doctype html><html><head><title>Field map -
   <p id="picked">Picked: nothing</p>
 </main></body></html>`;
 
+// A mail page (made up) that scrolls inside a box, as a webmail's does (21 Nov
+// 2026: on one, Yap took the box's height for the view's, so a screenshot was the
+// whole view squeezed into the box's height and a click where a field showed in it
+// landed a field higher): a 200 px header, the list under it scrolling in its own
+// box to the bottom of the view (the page itself never scrolls), and a search panel
+// over them with a field every 50 px, each saying when it gets the focus — the last,
+// "Doesn't have", the one coloured [INBOX_MARK] (found in a shot by its colour, as a
+// model reads it). Laid out in pixels from the top: the tab's "Yap is using this
+// page" strip coming up at the first action moves none of it.
+export const INBOX_URL = 'https://mail.example.com/inbox';
+export const INBOX_FIELDS = ['From', 'To', 'Subject', 'Has the words', "Doesn't have"];
+export const INBOX_MARK = [224, 0, 224];
+PAGES['mail.example.com/inbox'] = `<!doctype html><html><head><title>Inbox - Example Mail</title>
+  <style>html,body{margin:0;height:100%;overflow:hidden;font:16px sans-serif}h1{margin:0;padding:16px}
+  header{position:absolute;top:0;left:0;right:0;height:200px;background:#234;color:#fff}
+  #list{position:absolute;top:200px;bottom:0;left:0;right:0;overflow-y:auto}#list p{margin:0;height:40px;border-bottom:1px solid #ccc}
+  #panel{position:absolute;top:70px;left:10%;width:80%;height:300px;z-index:2;background:#fff;border:1px solid #888}
+  #panel input{position:absolute;left:30%;width:60%;height:36px;box-sizing:border-box;margin:0;border:1px solid #888;background:#fff}
+  #panel input.mark{background:rgb(${INBOX_MARK.join(',')});border-color:rgb(${INBOX_MARK.join(',')})}#said{position:absolute;bottom:0;left:8px;margin:0 0 8px}</style></head><body>
+  <header><h1>Example Mail</h1></header>
+  <div id="list">${Array.from({ length: 80 }, (_, i) => `<p>Message ${i + 1}</p>`).join('')}</div>
+  <form id="panel" onsubmit="return false">${INBOX_FIELDS.map((f, i) => `<input style="top:${30 + i * 50}px" aria-label="${f.replace("'", '&#39;')}"${i === INBOX_FIELDS.length - 1 ? ' class="mark"' : ''}>`).join('')}<p id="said">Focused: nothing</p></form>
+  <script>
+    var said = document.getElementById('said');
+    document.querySelectorAll('#panel input').forEach(function (f) { f.addEventListener('focus', function () { said.textContent = 'Focused: ' + f.getAttribute('aria-label'); }); });
+  </script>
+</body></html>`;
+
 // A long article that scrolls smoothly (`scroll-behavior: smooth`, as many
 // sites do: Yap Lab's 8 Nov report found scrolls told from where they began
 // there): its language menu before the article (its links come last in a
