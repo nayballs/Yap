@@ -3105,7 +3105,14 @@ of sight. What they share is said once, in the line.
   person would see there; a hidden tab is laid out at that size all along,
   `put`'s `STAGE`). No page is loaded for it. The model's copy is the view at
   its CSS pixels (`browser_click`'s x, y are in its pixels, the result says
-  so: `frame`, `see::Frame`), fitted for the provider; the person's copy is
+  so: `frame`, `see::Frame::of`), fitted for the provider — **the whole
+  view's height** (`see::View::view_h`, the script's `vh`: `innerHeight`),
+  never the height of a box that scrolls inside it (21 Nov 2026: a webmail's
+  list scrolls in a box shorter than the view; its height, the scroll's `h`
+  told with `max`, was taken for the view's, the shot came out squeezed into
+  it and every click where a field showed landed a field higher; tested by
+  `chat-browse`'s webmail test, which clicks where a coloured field shows in
+  the picture the model got); the person's copy is
   kept at the device's pixels. A zoom: top, middle, bottom, left, right, the
   corners, or `x,y,w,h` (fractions, percentages, or the latest screenshot's
   pixels: `see::Region`; its description names them all, "middle
@@ -4005,7 +4012,7 @@ double-click, right-click, drag or reach into a frame).
   menu), `data-sim-sortable` (a list a drag reorders), `data-sim-drop` (a
   drop zone), same-origin frames inlined as their own elements
   (`sim-frame`, their ids and labels their own) and others left as frames.
-- Tested: `see`'s (`Frame::moved` by width only, `width_of`), `view`'s
+- Tested: `see`'s (`Frame::moved` by width only, `Frame::of` at the view's height and not a box's, `width_of`), `view`'s
   (`zoom_for`, `laid_out_width`), `rules`' (`drag_needs_ok` in every
   language, `did_words`, `right_click_words`, `foreign_words`, a frame that
   went), `act::tests` (a double, triple, right and middle click on the
