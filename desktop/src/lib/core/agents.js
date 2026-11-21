@@ -1215,22 +1215,26 @@ function clock(unixSecs) {
  * **A problem with Claude Code itself** (`problem`: `{kind, message,
  * resetsAt?}`) in plain words, and its one button: `{line, check, action}`
  * — `action` 'signIn' (Claude Code's own sign-in, in a terminal) or null;
- * `check` what to look at.
+ * `check` what to look at. `carryOn`: how the person carries it on where
+ * this is shown — the phone's Continue (the default), or the desktop's
+ * "ask Claude in the chat to carry on" (21 Nov 2026: its Agent tab has no
+ * Continue; the main chat steers it).
  */
-export function problemWords(problem) {
+export function problemWords(problem, { carryOn = 'press Continue' } = {}) {
   if (!problem?.kind) return null;
   const line = problem.message || '';
+  const Then = carryOn.charAt(0).toUpperCase() + carryOn.slice(1);
   switch (problem.kind) {
     case 'notSignedIn':
-      return { line: line || "Claude Code isn't signed in.", check: 'Sign in to Claude Code, then press Continue.', action: 'signIn' };
+      return { line: line || "Claude Code isn't signed in.", check: `Sign in to Claude Code, then ${carryOn}.`, action: 'signIn' };
     case 'rateLimited':
       return {
         line: line || "You've reached your Claude plan's limit.",
-        check: problem.resetsAt ? `It resets at ${clock(problem.resetsAt)}. Press Continue then.` : 'It resets in a few hours. Press Continue then.',
+        check: problem.resetsAt ? `It resets at ${clock(problem.resetsAt)}. ${Then} then.` : `It resets in a few hours. ${Then} then.`,
         action: null,
       };
     case 'billing':
-      return { line: line || "Claude couldn't bill this account.", check: 'Check your billing in your Claude account settings, then press Continue.', action: null };
+      return { line: line || "Claude couldn't bill this account.", check: `Check your billing in your Claude account settings, then ${carryOn}.`, action: null };
     case 'account':
       return { line: line || "This Claude account can't be used right now.", check: 'Check the account Claude Code is signed in with (claude auth status in a terminal).', action: null };
     case 'paysAnotherWay':

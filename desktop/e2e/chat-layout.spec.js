@@ -30,7 +30,7 @@ import path from 'node:path';
 import { test as base, expect, openView, setConfig, expectStore } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
-import { toSide } from './support/code-chats.js';
+import { toSide, stopFromPanel } from './support/code-chats.js';
 import { chatRoom, toggleList, splitKeyWidth, MIN_WIDTH, DEFAULT_WIDTH, THREAD_MIN, LIST_STAYS, LIST_WIDTH } from '../src/lib/views/chat/chatRoom.js';
 
 const HERE = path.join(RUNS, 'chat-layout-spec');
@@ -572,13 +572,13 @@ for (const where of ['plain', 'code']) {
       await main.keyboard.press('End');
       await expect.poll(async () => (await rect(slot(main))).w).toBe(MIN_WIDTH);
       const p = await rect(agentTab(main));
-      for (const name of ['Stop', 'Close the panel']) {
+      for (const name of ['Close the panel']) {
         const r = await rect(agentTab(main).getByRole('button', { name, exact: true }).first());
         expect(r.right, `${name} inside the Agent tab`).toBeLessThanOrEqual(p.right);
       }
       await shot(main, '12-agent-tab-at-its-least');
     }
-    await agentTab(main).getByRole('button', { name: 'Stop' }).click();
+    await stopFromPanel(main);
     await expect(main.getByTestId('chat-agent-status')).toHaveText('Stopped', { timeout: 20_000 });
     await agentTab(main).getByRole('button', { name: 'Close the panel' }).click();
     await expect(list(main)).toBeVisible();

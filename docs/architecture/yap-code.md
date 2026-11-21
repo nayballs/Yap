@@ -1957,7 +1957,7 @@ and each call runs the tool loop's own code and rules.
   Yap, a CronCreate job isn't waited for, and a dev server or watcher keeps
   the reply open until it's stopped. Before, Claude couldn't know Yap ended
   its process with each reply.
-- **A message for an agent** (`message_agent`, the tab's "Tell the agent…", a Code
+- **A message for an agent** (`message_agent`, the phone's "Tell the agent…", a Code
   chat's follow-up): a turn of its own ([Turns](#turns-one-agent-per-code-chat),
   `runner::follow_up`), its own process (`--resume`), checkpoint and report:
   while it works, queued as its next turn, never sent into the turn working;
@@ -2158,8 +2158,15 @@ Code chat's own session working on the person's words opens no tab by itself
 ([The chat itself is no agent](#a-code-chat-that-works-directly)).
 
 Two views: **the panel**, what it opens on, and **the timeline**, a row's
-Open (Back returns to the panel). The footer (Stop, Continue, Open in
-terminal, "Tell the agent…") is the same under both.
+Open (Back returns to the panel). Under both, only **Open in terminal** once
+it's done: **no Stop, Continue or "Tell the agent…" under the tab** (21 Nov
+2026, the maintainer: "this should be for the main chat window to do"). In a
+Code chat that works directly the main box and its ■ are the chat's own
+Claude's; for an agent Chat sent, Chat steers it (`message_agent`,
+`stop_agent`). A row's ⋯ Stop… (with its confirm) and a row opened on its
+own (`AgentTaskTab`) still stop one; a problem's line says to ask Claude in
+the chat to carry on (`problemWords`' `carryOn`; the phone, which keeps its
+Continue, says "press Continue").
 
 ### The panel
 
@@ -2508,9 +2515,9 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
 
 - **The header**: the folder and status, mode and model, how long it has run,
   its cost ([Paying](#paying-your-plan-or-a-key); "in all" once it has
-  turns), a problem with its one button (Sign in), and **Stop**,
-  **Continue**, **Open in terminal** and "Tell the agent…" (its next turn).
-  No Undo (16 Nov 2026, as the Claude app).
+  turns), a problem with its one button (Sign in), and **Open in terminal**
+  once it's done (no Stop, Continue or "Tell the agent…" since 21 Nov 2026:
+  the main chat steers it). No Undo (16 Nov 2026, as the Claude app).
 - **Its turns** (`AgentTurn.svelte`, `core/agents.js` `turnsOf`: each log event's
   `turn`; [Turns](#turns-one-agent-per-code-chat)): a section a turn, its
   request as its header with its status, time and cost; the newest open, the
@@ -3822,7 +3829,7 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 | `agent_rewind {conversation, index, files}` | Rewind: back to before the person's message `index` (one that started a turn of the chat's own); `files` puts back the files those turns changed: `{text, turns, restored, deleted, problems}`; refused while it works, or past a turn from before `endUuid` |
 | `agent_fork {conversation, index}` | Fork from here: a new Code chat up to and including that message's turn; its id |
 | `agent_queue {conversation}` | where that Code chat's own session is, for the message box's queue: `taking` (a call of its own out: a message goes now), `writing` (it waits) or `idle` |
-| `agent_message {id, text}` | the tab's "Tell the agent…": its next turn; while it works, handed to it now and read at its next step ("go ahead" after a plan carries it out, as a turn of its own) |
+| `agent_message {id, text}` | the phone's "Tell the agent…" (the desktop tab's until 21 Nov 2026): its next turn; while it works, handed to it now and read at its next step ("go ahead" after a plan carries it out, as a turn of its own) |
 | `agent_go_ahead {id, turn?}` | a report card's or an Agent panel row's Go ahead: a plan waiting (or set aside: Plan not used) carried out (Yap's go-ahead at the chat's Mode), once; `turn` an earlier turn's plan, as a turn of its own naming it; refused while it works or with no plan there |
 | `agent_move_to_finished {id, turn}` | a panel row's Move to finished: a turn whose record says it's at work but that nothing runs marked interrupted (its agent too), a waiting plan Plan not used; refused while the runner has the agent |
 | `agent_dismiss {id, turn, dismissed?}` | a panel row's Dismiss (`dismissed` true, the default) or Restore (false): hidden from the panel, kept in the log and History; a waiting plan dismissed waits no more |

@@ -23,12 +23,14 @@
   //   $0.04 on the API" / "API key · $0.04").
   // - A problem with Claude Code itself in plain words, with one button
   //   (Sign in, when it isn't signed in).
-  // - Stop (while it works), Continue (stopped, interrupted, failed), Open
-  //   in terminal (once it isn't running), and "Tell the agent…": the person's own words,
-  //   its next turn (`agent_message`) — while it works, handed to it now:
-  //   it reads it at its next step (agents/runner.rs `passes_now`). No Undo
-  //   (16 Nov 2026, as the Claude app): the person asks Claude to undo a
-  //   change, or rewinds to before their message (agents/rewind.rs).
+  // - Open in terminal (once it isn't running). No Stop, Continue or "Tell
+  //   the agent…" (21 Nov 2026, the maintainer: the main chat window steers it —
+  //   in a Code chat that works directly its own box and ■ are the agent's;
+  //   for an agent Chat sent, Chat itself: `message_agent`, `stop_agent`); a
+  //   row's ⋯ Stop… (AgentPanel.svelte) and a row opened on its own
+  //   (AgentTaskTab.svelte) still stop one. No Undo (16 Nov 2026, as the
+  //   Claude app): the person asks Claude to undo a change, or rewinds to
+  //   before their message (agents/rewind.rs).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick, untrack } from 'svelte';
@@ -64,7 +66,6 @@
   let gone = $state(false);
   let now = $state(Date.now() / 1000);
   let busy = $state('');
-  let message = $state('');
   // Each turn as the person left it: open or folded (n → bool).
   let folded = $state({});
   let bodyEl = $state(null);
@@ -92,7 +93,8 @@
     (t.status === 'queued' ? turns.some((o) => o.n !== t.n && (o.status === 'running' || o.status === 'asking')) : t.status === 'stopped' || t.status === 'interrupted');
   // The turn working now (or the newest): open unless folded.
   const current = $derived([...turns].reverse().find((t) => !waiting(t))?.n ?? turns.at(-1)?.n);
-  const problem = $derived(problemWords(shown?.problem));
+  // (No Continue here: the main chat carries it on.)
+  const problem = $derived(problemWords(shown?.problem, { carryOn: 'ask Claude in the chat to carry on' }));
   // How long it has worked: its turns added up (not the time between them).
   const ran = $derived(shown ? workedFor(shown, now) : '');
 
@@ -135,7 +137,6 @@
       loadedFor = id;
       agent = null;
       log = [];
-      message = '';
       folded = {};
       otherLogs = {};
       load(id);
@@ -311,16 +312,6 @@
     }
   }
 
-  async function stop() {
-    const r = await act('stop', 'agent_stop');
-    if (r && typeof r === 'object' && r.id) agent = { ...agent, ...r };
-  }
-
-  async function carryOn() {
-    const r = await act('continue', 'agent_continue');
-    if (r && typeof r === 'object' && r.id) agent = { ...agent, ...r };
-  }
-
   async function openTerminal() {
     await act('open', 'agent_open_terminal');
   }
@@ -329,15 +320,6 @@
   async function signIn() {
     await signInClaudePlan();
     if (claudePlan.failed) toast({ title: "Couldn't open Claude Code's sign-in", description: claudePlan.failed, variant: 'destructive' });
-  }
-
-  async function send() {
-    const text = message.trim();
-    if (!text || busy) return;
-    const r = await act('tell', 'agent_message', { text });
-    if (!r) return;
-    message = '';
-    if (typeof r === 'object' && r.id) agent = { ...agent, ...r };
   }
 
   const effortWord = (e) => EFFORT_LABELS[e] || e || '';
@@ -459,31 +441,16 @@
       {/if}
     </div>
 
-    <footer class="agentfoot">
-      <div class="jbuttons">
-        {#if live}
-          <button type="button" class="pill" onclick={stop} disabled={!!busy}>Stop</button>
-        {:else if shown.status === 'stopped' || shown.status === 'interrupted' || shown.status === 'failed'}
-          <button type="button" class="pill primary" onclick={carryOn} disabled={!!busy}>Continue</button>
-        {/if}
-        {#if !live && shown.session && shown.startedTs}
+    <!-- No Stop, Continue or "Tell the agent…" here (21 Nov 2026, the maintainer: the main chat window steers
+         it — its box and ■ in a Code chat that works directly, Chat itself for an agent it sent; a row's ⋯
+         Stop… stays). Only what isn't steering: its session opened in a terminal once it's done. -->
+    {#if !live && shown.session && shown.startedTs}
+      <footer class="agentfoot">
+        <div class="jbuttons">
           <button type="button" class="pill" onclick={openTerminal} disabled={!!busy} title="Its session in Windows Terminal, in its folder">Open in terminal</button>
-        {/if}
-      </div>
-      <form
-        class="tell"
-        onsubmit={(e) => {
-          e.preventDefault();
-          send();
-        }}
-      >
-        <input type="text" bind:value={message} placeholder={live ? 'Tell the agent (it reads it at its next step)…' : 'Tell the agent…'} aria-label="Tell the agent" maxlength="4000" autocomplete="off" />
-        <!-- Named apart from Chat's own Send (the message box's). -->
-        <button type="submit" class="tsend" disabled={!message.trim() || !!busy} aria-label="Tell the agent" title="Tell the agent (Enter)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
-        </button>
-      </form>
-    </footer>
+        </div>
+      </footer>
+    {/if}
   {/if}
 </section>
 
@@ -850,48 +817,8 @@
     opacity: 0.55;
     cursor: default;
   }
-  .pill:focus-visible,
-  .tell input:focus-visible,
-  .tsend:focus-visible {
+  .pill:focus-visible {
     outline: 2px solid var(--yap-focus-ring);
     outline-offset: 1px;
-  }
-  .tell {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .tell input {
-    flex: 1 1 auto;
-    min-width: 0;
-    height: 30px;
-    padding: 0 10px;
-    border: 1px solid var(--yap-paper-rule);
-    border-radius: 9px;
-    background: var(--yap-paper);
-    color: var(--yap-paper-ink);
-    font: inherit;
-    font-size: 12.5px;
-  }
-  .tsend {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
-    padding: 0;
-    border: 1px solid var(--yap-paper-rule);
-    border-radius: 9px;
-    background: var(--yap-paper-s1);
-    color: var(--yap-paper-ink);
-    cursor: pointer;
-  }
-  .tsend:disabled {
-    opacity: 0.45;
-    cursor: default;
-  }
-  .tsend svg {
-    width: 15px;
-    height: 15px;
   }
 </style>
