@@ -41,7 +41,7 @@ import path from 'node:path';
 import { test as base, expect, openView, openSettings, closeSettings, setConfig, inAnotherApp, settingsDialog } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
-import { toSide, newCodeChat, agentTimeline } from './support/code-chats.js';
+import { toSide, newCodeChat, agentTimeline, stopFromPanel } from './support/code-chats.js';
 import {
   statusWord,
   statusTone,
@@ -540,6 +540,8 @@ test('core/agents.js: status, cost by how it is paid, time, steps, pills, proble
   const limited = problemWords({ kind: 'rateLimited', message: "You've reached your Claude plan's limit.", resetsAt: 1_794_067_200 });
   expect(limited.action).toBeNull();
   expect(limited.check).toMatch(/^It resets at .+\. Press Continue then\.$/);
+  // The desktop's tab has no Continue (21 Nov 2026): it says to ask in the chat; the phone's has one.
+  expect(problemWords({ kind: 'notSignedIn', message: '' }, { carryOn: 'ask Claude in the chat to carry on' }).check).toBe('Sign in to Claude Code, then ask Claude in the chat to carry on.');
   expect(problemWords({ kind: 'billing', message: '' }).check).toContain('billing');
   expect(problemWords({ kind: 'paysAnotherWay', message: '' }).check).toContain('Settings → Yap Code');
   expect(problemWords(null)).toBeNull();
@@ -766,14 +768,16 @@ test('an agent: its tab opens at once and follows it, the pill, the report card,
   expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Final notes\n');
 });
 
-test('a slow agent: its live line, the running list, “1 agent working” on the bar, Stop and Continue', async ({ yap, main, fakeLlm, shot }) => {
+test('a slow agent: its live line, the running list, “1 agent working” on the bar, stopped from its row and carried on', async ({ yap, main, fakeLlm, shot }) => {
   const started = await startAgent(yap, main, fakeLlm, { lines: SLOW, name: 'slow', brief: 'Read notes.md slowly.', report: null });
   await expect(tab(main)).toBeVisible();
   await agentTimeline(main);
   await expect(main.getByTestId('chat-agent-now')).toHaveText('Reading notes.md', { timeout: 20_000 });
   await expect(main.getByTestId('chat-agent-status')).toHaveText('Running');
   await expect(main.getByTestId('chat-agent-elapsed')).toContainText('so far');
-  await expect(tab(main).getByRole('button', { name: 'Stop' })).toBeVisible();
+  // Nothing under the tab steers it (21 Nov 2026: the main chat does): no Stop, no box.
+  await expect(tab(main).getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+  await expect(tab(main).getByRole('textbox', { name: 'Tell the agent' })).toHaveCount(0);
   await expect(tab(main).getByRole('button', { name: 'Open in terminal' })).toHaveCount(0);
   await expect(main.getByTestId('chat-agent-cost')).toHaveText('Your Claude plan');
   await shot(main, '07-agent-tab-running');
@@ -812,21 +816,21 @@ test('a slow agent: its live line, the running list, “1 agent working” on th
   await expect(main.getByTestId('chat-side-switch')).toHaveAttribute('data-side', 'code');
   await expect.poll(() => main.evaluate(() => document.querySelector('.cbubble.user')?.textContent?.trim() ?? '')).toBe('Send an agent to garden-planner.');
 
-  // Stop: it stops, nothing reports it; the list and the bar let it go.
-  await tab(main).getByRole('button', { name: 'Stop' }).click();
+  // Stopped from its row's ⋯ (Stop…, then the confirm's Stop): it stops, nothing reports it; the list and the bar let it go.
+  await stopFromPanel(main);
   const stopped = await ended(yap, started.id);
   expect(stopped.status).toBe('stopped');
   await expect(main.getByTestId('chat-agent-status')).toHaveText('Stopped');
-  await expect(tab(main).getByRole('button', { name: 'Continue' })).toBeVisible();
+  await expect(tab(main).getByRole('button', { name: 'Continue' })).toHaveCount(0);
   await expect(tab(main).getByRole('button', { name: 'Open in terminal' })).toBeVisible();
   await expect.poll(async () => (await yap.invoke('bar_status')).agents).toBe(0);
   await expect(line).toHaveCount(0);
   await tab(main).getByRole('button', { name: 'Open in terminal' }).click();
 
-  // Continue: the same session carries on.
+  // Carried on (the phone's Continue, the command it comes to): the same session carries on.
   await script(yap, ECHO, 'echo');
   fakeLlm.scriptChat([{ plain: true, content: 'It carried on and finished.' }]);
-  await tab(main).getByRole('button', { name: 'Continue' }).click();
+  await yap.invoke('agent_continue', { id: started.id });
   const carried = await ended(yap, started.id);
   expect(carried).toMatchObject({ status: 'done', turns: 2, session: stopped.session });
   await expect(main.getByTestId('chat-agent-status')).toHaveText('Done');
@@ -836,21 +840,27 @@ test('a slow agent: its live line, the running list, “1 agent working” on th
   await messagesOf(yap, carried.conversation, 4);
 });
 
-test('Tell the agent…: the person’s words go to the agent, its next turn', async ({ yap, main, fakeLlm }) => {
+test('the main chat steers the agent: no box, Stop or Continue under its tab; the person’s words go to it through Chat, its next turn', async ({ yap, main, fakeLlm }) => {
   const started = await startAgent(yap, main, fakeLlm, { lines: ECHO, name: 'echo-tell', brief: 'Tidy notes.md.' });
   const agent = await ended(yap, started.id);
   await messagesOf(yap, agent.conversation, 4);
-  fakeLlm.scriptChat([{ plain: true, content: 'It also sorted the list.' }]);
-  const box = tab(main).getByRole('textbox', { name: 'Tell the agent' });
-  await box.fill('Also sort the list.');
-  await box.press('Enter');
-  await expect(box).toHaveValue('');
+  // (21 Nov 2026, the maintainer: the main chat window tells it what to do.)
+  await expect(tab(main).getByRole('textbox', { name: 'Tell the agent' })).toHaveCount(0);
+  await expect(tab(main).getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+  await expect(tab(main).getByRole('button', { name: 'Continue' })).toHaveCount(0);
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'message_agent', args: { text: 'Also sort the list.' } }] },
+    { content: 'Told it.' },
+    { plain: true, content: 'It also sorted the list.' },
+  ]);
+  await send(main, 'Also sort the list.');
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turns, { timeout: 20_000 }).toBe(2);
   const told = await ended(yap, agent.id);
   expect(told.text).toContain('Got: Also sort the list.');
   await agentTimeline(main, 2);
   await expect(main.getByTestId('chat-agent-text')).toContainText('Got: Also sort the list.');
-  await messagesOf(yap, agent.conversation, 6);
+  // (The person's words and Chat's reply, then the report.)
+  await messagesOf(yap, agent.conversation, 8);
 });
 
 // ---------------------------------------------------------------- read like Claude Code
@@ -922,12 +932,12 @@ test('an agent reads like Claude Code: its to-do list, what it says, commands by
   await main.getByTestId('chat-running-agent').click();
   await expect(tab(main)).toBeVisible();
 
-  // Stop, then Continue: its next turn finishes the list.
-  await tab(main).getByRole('button', { name: 'Stop' }).click();
+  // Stopped from its row, then carried on (the phone's Continue's command): its next turn finishes the list.
+  await stopFromPanel(main);
   expect((await ended(yap, started.id)).status).toBe('stopped');
   await script(yap, finishing, 'finishing');
   fakeLlm.scriptChat([{ plain: true, content: 'It added the watering schedule and wrote a planting guide.' }]);
-  await tab(main).getByRole('button', { name: 'Continue' }).click();
+  await yap.invoke('agent_continue', { id: started.id });
   const agent = await ended(yap, started.id);
   expect(agent.status).toBe('done');
   await expect(tab(main)).toHaveAttribute('data-status', 'done');
@@ -1099,10 +1109,10 @@ test('an agent Claude Code turned away: said plainly, with Sign in; the report c
   await expect(problem).toHaveAttribute('data-kind', 'notSignedIn');
   // Claude Code's problem in Rust's own words (claude_code/events.rs `Problem::message`).
   await expect(problem.locator('.pline')).toContainText("Claude Code isn't signed in");
-  await expect(problem.locator('.pcheck')).toHaveText('Sign in to Claude Code, then press Continue.');
+  await expect(problem.locator('.pcheck')).toHaveText('Sign in to Claude Code, then ask Claude in the chat to carry on.');
   await expect(problem.getByRole('button', { name: 'Sign in' })).toBeVisible();
   await problem.getByRole('button', { name: 'Sign in' }).click();
-  await expect(tab(main).getByRole('button', { name: 'Continue' })).toBeVisible();
+  await expect(tab(main).getByRole('button', { name: 'Continue' })).toHaveCount(0);
   await messagesOf(yap, agent.conversation, 4);
   await expect(thread(main).getByTestId('chat-agent-report').locator('.jtitle')).toHaveText("Agent didn't finish · garden-planner");
   await shot(main, '13-agent-problem');

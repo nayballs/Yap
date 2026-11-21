@@ -241,7 +241,7 @@
         onselect: () =>
           askConfirm({
             title: 'Stop the agent?',
-            body: `The agent in ${r.agent?.folder || 'this workspace'} stops where it is. Continue carries it on later.`,
+            body: `The agent in ${r.agent?.folder || 'this workspace'} stops where it is. Ask Claude in the chat to carry it on later.`,
             confirmLabel: 'Stop',
             busyLabel: 'Stopping…',
             returnFocus: rowEls[r.key] ?? null,

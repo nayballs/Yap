@@ -114,6 +114,21 @@ export async function agentTimeline(main, n = null) {
   await expect(main.getByTestId('chat-agent-back')).toBeVisible();
 }
 
+/**
+ * **Stop an agent from its tab** the way the tab has (21 Nov 2026: no Stop under it — the main chat
+ * steers): back to its turns if a turn is open, its running row's ⋯ → Stop…, then the confirm's Stop.
+ */
+export async function stopFromPanel(main) {
+  const back = main.getByTestId('chat-agent-back');
+  if (await back.count()) await back.click();
+  const row = main.getByTestId('chat-agent-panel').locator('[data-testid="chat-agent-row"][data-state="running"]').first();
+  await expect(row).toBeVisible();
+  await row.hover();
+  await row.getByTestId('chat-agent-row-menu').click();
+  await main.getByRole('menuitem', { name: 'Stop…' }).click();
+  await main.getByRole('alertdialog').getByRole('button', { name: 'Stop', exact: true }).click();
+}
+
 /** A new code chat in the workspace `name`: the Code side, "New code chat", its pick. */
 export async function newCodeChat(main, name) {
   await toSide(main, 'Code');
